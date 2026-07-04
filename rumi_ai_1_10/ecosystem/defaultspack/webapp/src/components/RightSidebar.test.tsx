@@ -116,6 +116,32 @@ test("right sidebar initially focuses the rail on tools", () => {
   assert.doesNotMatch(html, /title="Widget A"/);
 });
 
+test("right sidebar keeps starred tools accessible name when count is nonzero", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [
+        { id: "browser_companion", label: "Browser Companion", category: "tool" },
+      ],
+      settingsValues: {
+        sidebar: {
+          pinned_item_ids: [],
+          starred_item_ids: ["browser_companion"],
+          custom_tool_tags: {},
+          ui_placements: [],
+        },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /aria-label="Starred tools \(1\)"/);
+  assert.match(html, />1</);
+});
+
 test("right sidebar does not auto-open employees on initial render", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {
