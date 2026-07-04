@@ -5,7 +5,7 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import { composerCommandAllowedByVisibility, frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveFileSearchCommand, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -259,6 +259,57 @@ test("slash command parsing can be disabled by template feature flags", () => {
 
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("advanced slash command visibility follows the advanced commands toggle", () => {
+  const filesCommand: ComposerCommandItem = {
+    id: "files",
+    name: "files",
+    label: "Files",
+    description: "Search workspace files.",
+    category: "coding",
+    visibility: "advanced",
+    risk: "low",
+    modes: ["coding"],
+    args: [{ name: "query", type: "string", required: false }],
+    execution: { type: "frontend", action: "open_file_search" },
+  };
+  const chatCommand: ComposerCommandItem = {
+    ...filesCommand,
+    id: "chat",
+    name: "chat",
+    label: "Chat",
+    visibility: "default",
+    execution: { type: "frontend", action: "set_mode_chat" },
+  };
+  const hiddenCommand: ComposerCommandItem = {
+    ...filesCommand,
+    id: "commit",
+    name: "commit",
+    label: "Commit",
+    visibility: "hidden",
+  };
+
+  assert.equal(composerCommandAllowedByVisibility(filesCommand, false), false);
+  assert.equal(composerCommandAllowedByVisibility(filesCommand, true), true);
+  assert.equal(composerCommandAllowedByVisibility(chatCommand, false), true);
+  assert.equal(composerCommandAllowedByVisibility(hiddenCommand, true), false);
+});
+
+test("/files without a query leaves visible feedback and a searchable prompt", () => {
+  assert.deepEqual(resolveFileSearchCommand({}), {
+    input: "Find workspace files. Type a file name or path after /files, for example /files README.",
+    feedback: "Type a file name or path after /files, for example /files README.",
+    shouldClearInput: false,
+  });
+});
+
+test("/files with a query keeps the existing workspace file search prompt", () => {
+  assert.deepEqual(resolveFileSearchCommand({ query: "README" }), {
+    input: "Find workspace files matching README.",
+    feedback: null,
+    shouldClearInput: false,
+  });
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {

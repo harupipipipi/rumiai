@@ -2169,6 +2169,35 @@ export function resolvedFrontendCommandArgs(
     : frontendCommandArgs(parsedArgs, backendArgs);
 }
 
+export function composerCommandAllowedByVisibility(
+  command: ComposerCommandItem,
+  showAdvanced: boolean,
+): boolean {
+  return command.visibility !== "hidden" && (showAdvanced || command.visibility === "default");
+}
+
+export type FileSearchCommandResolution = {
+  input: string;
+  feedback: string | null;
+  shouldClearInput: false;
+};
+
+export function resolveFileSearchCommand(args: Record<string, unknown>): FileSearchCommandResolution {
+  const query = String(args.query ?? "").trim();
+  if (query) {
+    return {
+      input: `Find workspace files matching ${query}.`,
+      feedback: null,
+      shouldClearInput: false,
+    };
+  }
+  return {
+    input: "Find workspace files. Type a file name or path after /files, for example /files README.",
+    feedback: "Type a file name or path after /files, for example /files README.",
+    shouldClearInput: false,
+  };
+}
+
 type UltraYoloModeState = {
   yoloMode: boolean;
   ultraYoloMode: boolean;
@@ -2679,8 +2708,7 @@ function ChatApp() {
     const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
     const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
     return effectiveCommandCatalog
-      .filter((command) => command.visibility !== "hidden")
-      .filter((command) => showAdvanced || command.visibility === "default")
+      .filter((command) => composerCommandAllowedByVisibility(command, showAdvanced))
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
       .filter((command) => command.id !== "fast" || Boolean(fastCandidate))
       .filter((command) => command.id !== "price" || Boolean(priceLowCandidate || priceHighCandidate))
@@ -3915,10 +3943,13 @@ function ChatApp() {
         handleModeChange("coding");
         setInput("Run lint and formatting checks.");
         return;
-      case "open_file_search":
+      case "open_file_search": {
         handleModeChange("coding");
-        if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
-        return;
+        const resolution = resolveFileSearchCommand(args);
+        setInput(resolution.input);
+        if (resolution.feedback) setError(resolution.feedback);
+        return resolution.shouldClearInput;
+      }
       default:
         if (command.risk === "high") {
           setError(`/${command.name} は high risk command のため approval center 経由で実行してください。`);
@@ -3940,8 +3971,7 @@ function ChatApp() {
       setError(null);
       if (isRegisteredSlashCommand(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
-        return true;
+        return runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
       }
       const commandArgs = { ...parsed.args };
       if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
@@ -3994,11 +4024,12 @@ function ChatApp() {
 
       if (result.action || parsed.command.execution.type === "frontend") {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(
+        const shouldClearInput = runFrontendCommandAction(
           result.action ?? frontendAction,
           parsed.command,
           resolvedFrontendCommandArgs(parsed.command, parsed.args, result.args),
         );
+        if (shouldClearInput === false) return false;
       }
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
