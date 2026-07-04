@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -15,6 +17,26 @@ function agentMessage(patch: Partial<ChatUiMessage>): ChatUiMessage {
     ...patch,
   };
 }
+
+function appSource(): string {
+  return readFileSync(resolve(import.meta.dirname, "..", "App.tsx"), "utf8").replace(/\r\n/g, "\n");
+}
+
+test("chat browser approval card exposes deny and settles stale request-backed cards", () => {
+  const source = appSource();
+  const cardStart = source.indexOf("{visibleBrowserApproval && (");
+  const cardEnd = source.indexOf("{!visibleBrowserApproval && authorityApproval", cardStart);
+  const browserCardSource = source.slice(cardStart, cardEnd);
+
+  assert.match(source, /const denyBrowserAction = async \(\) => \{/);
+  assert.match(source, /await api\.denyCodingApproval\(currentApproval\.requestId, "Denied from chat approval card"\)/);
+  assert.match(source, /function browserApprovalSettlementKey\(approval: BrowserApproval\): string/);
+  assert.match(source, /const staleMessage = currentApproval\.requestId \? approvalStaleUiMessage\(approvalError\) : null/);
+  assert.match(source, /settleBrowserApproval\(currentApproval\)/);
+  assert.match(browserCardSource, /onClick=\{denyBrowserAction\}/);
+  assert.match(browserCardSource, /aria-label="browser\/computer の承認を拒否"/);
+  assert.match(browserCardSource, /拒否 \(2\)[\s\S]*許可 \(3\)/);
+});
 
 test("returns a fresh browser computer approval request", () => {
   const approval = pendingBrowserApproval([
