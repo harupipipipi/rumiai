@@ -20,6 +20,22 @@ Policy:
 
 Core may include local file, terminal, git, local model provider interface, memory, project, compact, artifacts, safety, permission, and audit. External search, Reddit, browser network, GitHub API, SaaS integrations, and cloud schedules stay optional.
 
+## Cloudflare provider boundary
+
+Cloudflare account connection is optional and does not weaken local-first
+startup. A missing Cloudflare SDK, token, or account id must render as provider
+status, not as startup failure. Dry-run runner plans are side-effect free.
+Cloudflare deploy/update/delete operations are write-like cloud mutations and
+must require both provider capability resolution and an explicit local approval
+context. The runtime must not trust request-body flags such as `approved`.
+
+Cloudflare runner provisioning uses Rumi-owned names, normally a `rumi-*`
+prefix, and stores only non-secret resource metadata. Teardown is constrained to
+stored resources or resources matching that prefix. API tokens, OAuth tokens,
+Worker secret values, callback bearer values, and Cloudflare error payloads are
+redacted before they enter UI payloads, metadata, audit records, docs examples,
+or test snapshots.
+
 ## Runtime defaults
 
 - The guaranteed startup model is `stub/default`.

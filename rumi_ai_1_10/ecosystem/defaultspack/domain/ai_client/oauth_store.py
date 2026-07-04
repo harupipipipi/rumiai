@@ -105,6 +105,8 @@ _PROVIDER_OAUTH_ENV_ALIASES = {
     ],
     ("cloudflare", "ACCOUNT_ID"): ["RUMI_CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID"],
     ("cloudflare", "ZONE_ID"): ["RUMI_CLOUDFLARE_ZONE_ID", "CLOUDFLARE_ZONE_ID"],
+    ("cloudflare", "RUNNER_PREFIX"): ["RUMI_CLOUDFLARE_RUNNER_PREFIX"],
+    ("cloudflare", "RUNNER_ENV"): ["RUMI_CLOUDFLARE_RUNNER_ENV"],
 }
 
 _OAUTH_CLIENT_MATERIAL_TYPE = "oauth2_client_config"
@@ -1286,6 +1288,134 @@ def get_provider_access_token(provider_id: str, *, pack_root: Path | None = None
         return access_token or None
 
 
+def cloudflare_runner_provisioning_action(
+    action: str,
+    *,
+    approved_capabilities: list[str] | None = None,
+    pack_root: Path | None = None,
+) -> dict[str, Any]:
+    action = str(action or "status").strip().lower()
+    if action not in {"status", "plan", "dry_run", "deploy", "delete"}:
+        return {"success": False, "provider_id": "cloudflare", "error": "unsupported cloudflare provisioning action"}
+    metadata = _cloudflare_provisioning_metadata(pack_root=pack_root)
+    token = get_provider_access_token("cloudflare", pack_root=pack_root)
+    spec = _cloudflare_runner_spec(metadata)
+    capabilities = list(metadata.get("capabilities") or [])
+    if action in {"deploy", "delete", "status"} and not token:
+        return {
+            "success": False,
+            "provider_id": "cloudflare",
+            "status": "missing_token",
+            "provisioning": _cloudflare_runner_status_payload(
+                metadata=metadata,
+                sdk_status={},
+                connection_status="connected" if provider_has_oauth_connection("cloudflare", pack_root=pack_root) else "missing_self_host_config",
+            ),
+        }
+    try:
+        from domain.cloudflare.provisioning import CloudflareRunnerProvisioner
+
+        provisioner = CloudflareRunnerProvisioner(
+            api_token=token,
+            capabilities=capabilities,
+            approved_capabilities=approved_capabilities or [],
+        )
+        if action in {"plan", "dry_run"}:
+            result = provisioner.deploy(spec, dry_run=True)
+        elif action == "deploy":
+            result = provisioner.deploy(spec, dry_run=False)
+        elif action == "delete":
+            result = provisioner.delete(spec)
+        else:
+            result = provisioner.status(spec)
+    except Exception as exc:
+        result = {"success": False, "status": "error", "last_error": _scrub_text(str(exc), token or "")}
+    if action == "deploy" and result.get("success"):
+        _write_cloudflare_provisioning_result(result, pack_root=pack_root)
+    elif action == "delete" and result.get("success"):
+        _write_cloudflare_provisioning_result({"status": "ready", "resources": {}, "last_error": ""}, pack_root=pack_root)
+    return {"success": bool(result.get("success")), "provider_id": "cloudflare", "provisioning": result, **result}
+
+
+def _cloudflare_runner_status_payload(
+    *,
+    metadata: dict[str, Any],
+    sdk_status: dict[str, Any],
+    connection_status: str,
+) -> dict[str, Any]:
+    try:
+        from domain.cloudflare.provisioning import CloudflareRunnerProvisioner
+
+        spec = _cloudflare_runner_spec(metadata)
+        plan = CloudflareRunnerProvisioner(capabilities=list(metadata.get("capabilities") or [])).plan(spec)
+    except Exception as exc:
+        plan = {"success": False, "status": "error", "resources": {}, "last_error": _scrub_text(str(exc), "")}
+    saved = dict(metadata.get("cloudflare_provisioning") or {})
+    status = str(saved.get("status") or plan.get("status") or "ready")
+    if sdk_status.get("status") == "sdk_missing":
+        status = "sdk_missing"
+    elif connection_status != "connected":
+        status = "missing_token"
+    elif not metadata.get("account_id"):
+        status = "missing_account_id"
+    elif "cloudflare.runner.deploy" not in set(metadata.get("capabilities") or []) and status not in {"deployed", "degraded"}:
+        status = "insufficient_capabilities"
+    return {
+        **plan,
+        **saved,
+        "status": status,
+        "sdk_status": sdk_status.get("status", ""),
+        "resources": dict(saved.get("resources") or plan.get("resources") or {}),
+        "last_deployed_at": str(saved.get("last_deployed_at") or ""),
+        "last_error": _scrub_text(str(saved.get("last_error") or plan.get("last_error") or ""), ""),
+    }
+
+
+def _cloudflare_provisioning_metadata(*, pack_root: Path | None = None) -> dict[str, Any]:
+    metadata = _provider_metadata("cloudflare", pack_root=pack_root)
+    metadata = {**_provider_context_from_env("cloudflare", pack_root=pack_root), **metadata}
+    env_requested_capabilities = _requested_capabilities_from_env("cloudflare", pack_root=pack_root)
+    if env_requested_capabilities and not metadata.get("requested_capabilities"):
+        metadata["requested_capabilities"] = env_requested_capabilities
+    resolved = _resolve_connection_capabilities("cloudflare", {**metadata, "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE}, pack_root=pack_root)
+    metadata["capabilities"] = list(metadata.get("capabilities") or resolved.get("capabilities") or [])
+    return metadata
+
+
+def _cloudflare_runner_spec(metadata: dict[str, Any]):
+    from domain.cloudflare.provisioning import CloudflareRunnerSpec
+
+    provisioning = dict(metadata.get("cloudflare_provisioning") or {})
+    spec_metadata = {
+        **metadata,
+        "resources": dict(provisioning.get("resources") or {}),
+        "runner_prefix": str(provisioning.get("runner_prefix") or metadata.get("runner_prefix") or ""),
+        "runner_env": str(provisioning.get("runner_env") or metadata.get("runner_env") or ""),
+    }
+    return CloudflareRunnerSpec.from_metadata(
+        spec_metadata,
+        installation_id=str(metadata.get("connection_id") or "local"),
+        env={name: os.environ.get(name, "") for name in ("RUMI_CLOUDFLARE_RUNNER_PREFIX", "RUMI_CLOUDFLARE_RUNNER_ENV")},
+    )
+
+
+def _write_cloudflare_provisioning_result(result: dict[str, Any], *, pack_root: Path | None = None) -> None:
+    metadata = _provider_metadata("cloudflare", pack_root=pack_root)
+    existing = dict(metadata.get("cloudflare_provisioning") or {})
+    metadata["cloudflare_provisioning"] = {
+        **existing,
+        "status": str(result.get("status") or existing.get("status") or "ready"),
+        "resources": dict(result.get("resources") or {}),
+        "last_deployed_at": str(result.get("last_deployed_at") or existing.get("last_deployed_at") or ""),
+        "last_error": _scrub_text(str(result.get("last_error") or ""), ""),
+    }
+    _write_provider_metadata("cloudflare", metadata, pack_root=pack_root)
+
+
+def _scrub_text(message: str, secret: str) -> str:
+    return str(message or "").replace(secret, "[redacted]") if secret else str(message or "")
+
+
 def _provider_config_hint(provider_id: str, connection_status: str, *, client_configured: bool = False) -> str:
     if provider_id == "google":
         return "Import or paste a Google OAuth desktop client JSON to enable Google AI or Workspace browser login."
@@ -1445,6 +1575,14 @@ def provider_oauth_status(
                 "blockers": cloudflare_environment.get("blockers") or [],
                 "constraints": cloudflare_environment.get("constraints") or {},
             }
+        )
+    if provider_id == "cloudflare":
+        provisioning.update(
+            _cloudflare_runner_status_payload(
+                metadata=metadata,
+                sdk_status=cloudflare_sdk,
+                connection_status=connection_status,
+            )
         )
     return {
         "supported": supported,
