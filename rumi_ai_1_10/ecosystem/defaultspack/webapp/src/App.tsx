@@ -1653,6 +1653,29 @@ function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   return `${label} は再実行が必要です`;
 }
 
+function browserApprovalSettlementKey(approval: BrowserApproval): string {
+  const requestId = approval.requestId?.trim();
+  if (requestId) return `request:${requestId}`;
+  return [
+    "local",
+    approval.toolCallId ?? "",
+    approval.toolName,
+    approval.action,
+    JSON.stringify(approval.payload),
+  ].join(":");
+}
+
+function approvalStaleUiMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const looksStale = /\bHTTP\s+(403|404|409)\b/i.test(message)
+    || /approval.*(expired|not found|not pending|already|denied)/i.test(message)
+    || /(expired|stale).*approval/i.test(message)
+    || /承認.*(期限|期限切れ|拒否|処理済み|見つかりません)/.test(message);
+  return looksStale
+    ? "この承認リクエストは期限切れか、すでに処理済みです。新しい承認カードが届くまで操作できません。"
+    : null;
+}
+
 function hasAgentServiceProfile(catalog: UICatalog | null, profileId: string): boolean {
   const profiles = catalog?.agent_service?.profiles ?? [];
   return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === profileId);
@@ -2407,6 +2430,7 @@ function ChatApp() {
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
+  const [settledBrowserApprovalKeys, setSettledBrowserApprovalKeys] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
   const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
@@ -2436,6 +2460,7 @@ function ChatApp() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
@@ -2647,10 +2672,15 @@ function ChatApp() {
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
-  const browserApproval = pendingBrowserApproval(messages);
+  const rawBrowserApproval = pendingBrowserApproval(messages);
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
+  const settledBrowserApprovalKeySet = useMemo(() => new Set(settledBrowserApprovalKeys), [settledBrowserApprovalKeys]);
+  const rawBrowserApprovalKey = rawBrowserApproval ? browserApprovalSettlementKey(rawBrowserApproval) : "";
+  const browserApproval = rawBrowserApproval && !settledBrowserApprovalKeySet.has(rawBrowserApprovalKey)
+    ? rawBrowserApproval
+    : null;
   const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
     : null;
@@ -4453,14 +4483,29 @@ function ChatApp() {
     }
   };
 
+  const settleBrowserApproval = (approval: BrowserApproval) => {
+    const settlementKey = browserApprovalSettlementKey(approval);
+    setSettledBrowserApprovalKeys((keys) => (
+      keys.includes(settlementKey) ? keys : [...keys, settlementKey].slice(-50)
+    ));
+    if (approval.requestId) {
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(approval.requestId ?? "")
+          ? ids
+          : [...ids, approval.requestId ?? ""].filter(Boolean).slice(-50)
+      ));
+    }
+  };
+
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
     if (!activeConversationId) return;
+    const currentApproval = browserApproval;
     setError(null);
     setIsGenerating(true);
     const approvalToolIds = selectedToolIds.length
       ? selectedToolIds
-      : [browserApproval.toolName].filter(Boolean);
+      : [currentApproval.toolName].filter(Boolean);
     rememberPendingRequest({
       conversationId: activeConversationId,
       startedAt: Date.now(),
@@ -4469,18 +4514,14 @@ function ChatApp() {
     });
     try {
       const approvalWorkspace = workspaceContextFromConversation(activeConversation);
-      let approvalToken = browserApproval.token ?? "";
-      if (browserApproval.requestId) {
-        const decision = await api.approveCodingApproval(browserApproval.requestId);
+      let approvalToken = currentApproval.token ?? "";
+      if (currentApproval.requestId) {
+        const decision = await api.approveCodingApproval(currentApproval.requestId);
         if (!decision.approved) {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
-        setSettledRuntimeApprovalIds((ids) => (
-          ids.includes(browserApproval.requestId ?? "")
-            ? ids
-            : [...ids, browserApproval.requestId ?? ""].filter(Boolean).slice(-50)
-        ));
+        settleBrowserApproval(currentApproval);
       }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
@@ -4502,15 +4543,15 @@ function ChatApp() {
             workspace_root: approvalWorkspace.workspaceRoot,
           } : {}),
           approval_followup: {
-            action: browserApproval.action,
-            operation: browserApproval.action,
+            action: currentApproval.action,
+            operation: currentApproval.action,
             approval_token: approvalToken,
-            payload: browserApproval.payload,
-            request_id: browserApproval.requestId,
-            tool_call_id: browserApproval.toolCallId,
-            tool_name: browserApproval.toolName,
+            payload: currentApproval.payload,
+            request_id: currentApproval.requestId,
+            tool_call_id: currentApproval.toolCallId,
+            tool_name: currentApproval.toolName,
           },
-          runtime_content: browserApprovalRuntimeContent(browserApproval, approvalToken),
+          runtime_content: browserApprovalRuntimeContent(currentApproval, approvalToken),
           selected_tools: approvalToolIds,
         },
       });
@@ -4520,9 +4561,44 @@ function ChatApp() {
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
       forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+      const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
+      if (staleMessage) {
+        settleBrowserApproval(currentApproval);
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+      }
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const denyBrowserAction = async () => {
+    if (!browserApproval) return;
+    const currentApproval = browserApproval;
+    const actionKey = browserApprovalSettlementKey(currentApproval);
+    if (activeBrowserApprovalActionRef.current === actionKey) return;
+    activeBrowserApprovalActionRef.current = actionKey;
+    setError(null);
+    try {
+      if (currentApproval.requestId) {
+        await api.denyCodingApproval(currentApproval.requestId, "Denied from chat approval card");
+      }
+      settleBrowserApproval(currentApproval);
+      if (activeConversationId) {
+        await loadConversation(activeConversationId, false);
+        await refreshConversations(activeConversationId);
+      }
+    } catch (approvalError) {
+      const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
+      if (staleMessage) {
+        settleBrowserApproval(currentApproval);
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer 承認の拒否に失敗しました。");
+      }
+    } finally {
+      activeBrowserApprovalActionRef.current = null;
     }
   };
 
@@ -4587,7 +4663,15 @@ function ChatApp() {
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
       forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
+      const staleMessage = approvalStaleUiMessage(approvalError);
+      if (staleMessage) {
+        setSettledRuntimeApprovalIds((ids) => (
+          ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
+        ));
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
+      }
     } finally {
       activeRuntimeApprovalActionRef.current = null;
       setIsGenerating(false);
@@ -5927,13 +6011,24 @@ function ChatApp() {
                           </pre>
                         </details>
                       </div>
-                      <button
-                        type="button"
-                        onClick={approveBrowserAction}
-                        className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
-                      >
-                        許可 (2)
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={denyBrowserAction}
+                          aria-label="browser/computer の承認を拒否"
+                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
+                        >
+                          拒否 (2)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={approveBrowserAction}
+                          aria-label="browser/computer の承認を許可"
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可 (3)
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -5977,6 +6072,7 @@ function ChatApp() {
                             void denyCodingAction();
                           }}
                           onClick={denyCodingAction}
+                          aria-label="runtime 操作の承認を拒否"
                           className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
                         >
                           拒否 (2)
@@ -5988,6 +6084,7 @@ function ChatApp() {
                             void approveCodingAction();
                           }}
                           onClick={approveCodingAction}
+                          aria-label="runtime 操作の承認を許可"
                           className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                         >
                           許可 (3)
