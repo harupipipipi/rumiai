@@ -355,6 +355,32 @@ function sidebarItemMatchesSearch(item: SidebarItem, tags: string[], query: stri
   return terms.every((term) => haystack.includes(term));
 }
 
+export function toolManagerBaseItemsForNameSearch(
+  items: SidebarItem[],
+  searchFilteredItems: SidebarItem[],
+  searchQuery: string,
+): SidebarItem[] {
+  const sourceItems = searchQuery.trim() ? searchFilteredItems : items;
+  return sortedToolUiItems(sourceItems.filter((item) => item.category === "tool"));
+}
+
+export function shouldShowToolManagerEmptyState({
+  toolCount,
+  sidebarSearchQuery,
+  toolManagerSearchQuery,
+  activeTagFilter,
+  showStarredOnly,
+}: {
+  toolCount: number;
+  sidebarSearchQuery: string;
+  toolManagerSearchQuery: string;
+  activeTagFilter: string | null;
+  showStarredOnly: boolean;
+}): boolean {
+  if (toolCount > 0) return false;
+  return Boolean(sidebarSearchQuery.trim() || toolManagerSearchQuery.trim() || activeTagFilter || showStarredOnly);
+}
+
 function baseTagsForItem(item: SidebarItem): string[] {
   const tags = [...(item.tags ?? [])].map((tag) => normalizeTag(String(tag))).filter(Boolean);
   const risk = normalizeTag(String(item.risk ?? ""));
@@ -1266,8 +1292,8 @@ export function RightSidebar({
   }, [searchFilteredItems]);
   const allToolItems = useMemo(() => sortedToolUiItems(searchFilteredItems.filter((item) => item.category === "tool")), [searchFilteredItems]);
   const toolManagerBaseItems = useMemo(
-    () => sortedToolUiItems(items.filter((item) => item.category === "tool")),
-    [items],
+    () => toolManagerBaseItemsForNameSearch(items, searchFilteredItems, searchQuery),
+    [items, searchFilteredItems, searchQuery],
   );
   const toolManagerSearchItems = useMemo(
     () => toolManagerBaseItems.filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], toolManagerSearchQuery)),
@@ -1277,6 +1303,13 @@ export function RightSidebar({
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
   ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
+  const showToolManagerEmptyState = shouldShowToolManagerEmptyState({
+    toolCount: toolManagerItems.length,
+    sidebarSearchQuery: searchQuery,
+    toolManagerSearchQuery,
+    activeTagFilter,
+    showStarredOnly,
+  });
   const serviceCards = useMemo(() => toolServiceCards(toolManagerItems).slice(0, 10), [toolManagerItems]);
   const conversationServiceTargets = useMemo(() => new Set(
     targetList(conversationToolPreferences.include)
@@ -1893,12 +1926,14 @@ export function RightSidebar({
                               <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">今回のおすすめ</p>
                               <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">自動選定、承認待ち、利用不可の状態をまとめます。</p>
                             </div>
-                            <ToolManagerWidget
-                              tools={toolManagerBaseItems}
-                              disabledToolIds={disabledToolIds}
-                              hiddenToolIds={hiddenToolIds}
-                              filterEntries={toolFilterEntries}
-                            />
+                            {!showToolManagerEmptyState && (
+                              <ToolManagerWidget
+                                tools={toolManagerBaseItems}
+                                disabledToolIds={disabledToolIds}
+                                hiddenToolIds={hiddenToolIds}
+                                filterEntries={toolFilterEntries}
+                              />
+                            )}
                             <div ref={toolManagerSearchRef} className="relative">
                               <label className="relative block">
                                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -1971,6 +2006,18 @@ export function RightSidebar({
                                 </div>
                               )}
                             </div>
+                            {showToolManagerEmptyState ? (
+                              <div data-testid="tool-manager-empty-state" className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 px-3 py-6 text-center">
+                                <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 text-zinc-500">
+                                  <Search size={16} />
+                                </div>
+                                <p className="mt-3 text-[12px] font-medium text-zinc-200">一致する機能がありません。</p>
+                                <p className="mt-1 text-[10px] leading-4 text-zinc-500">
+                                  名前検索やフィルタを変更すると候補が表示されます。
+                                </p>
+                              </div>
+                            ) : (
+                              <>
                             {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
                               <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -2269,6 +2316,8 @@ export function RightSidebar({
                     );
                   })}
                 </div>
+                              </>
+                            )}
               </div>
             )}
           </div>
