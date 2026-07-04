@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -28,6 +30,62 @@ def test_fallback_http_block_invocation_routes_through_function_bridge():
     mocked.assert_called_once()
     assert mocked.call_args.args[0] == "defaultspack:ai_models"
     assert mocked.call_args.kwargs["timeout_seconds"] is None
+
+
+def test_safe_get_ui_catalog_bypasses_function_bridge():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        side_effect=AssertionError("bootstrap catalog GET must not wait on the function bridge"),
+    ) as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"app": {"id": "defaultspack"}}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.ui.catalog",
+            {"_actual_method": "GET"},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"app": {"id": "defaultspack"}}}
+    invoke.assert_not_called()
+    legacy.assert_called_once()
+
+
+def test_safe_get_bootstrap_timeout_returns_error_while_health_stays_green():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    def _stuck_block(*_args, **_kwargs):
+        time.sleep(5)
+        return {"status": "ok", "data": {}}
+
+    started_at = time.perf_counter()
+    with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SAFE_GET_TIMEOUT_SECONDS": "0.1"}), patch(
+        "transport.http.invoke_block",
+        side_effect=_stuck_block,
+    ):
+        result = server._invoke_fallback_block(
+            "blocks.ui.catalog",
+            {"_actual_method": "GET"},
+            {},
+            {},
+        )
+        health = server._handle_health({}, {})
+    elapsed = time.perf_counter() - started_at
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "BOOTSTRAP_API_TIMEOUT"
+    assert elapsed < 1.0
+    assert health["status"] == "ok"
+    assert health["data"]["status"] == "healthy"
 
 
 def test_root_shell_chunk_compat_route_serves_static_asset():
