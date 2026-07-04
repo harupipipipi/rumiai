@@ -1429,6 +1429,7 @@ export function ComposerRenderer({
   composerInput = null,
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
+  branchPickerRequestId = 0,
   yoloMode = false,
   modelStatusIndicators = [],
   voiceInputEnabled = true,
@@ -1497,6 +1498,7 @@ export function ComposerRenderer({
   const [selectedAtMentionIndex, setSelectedAtMentionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(() => branchPickerRequestId > 0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -1507,6 +1509,7 @@ export function ComposerRenderer({
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
+  const lastBranchPickerRequestIdRef = useRef(branchPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
   const compactSelectedProfileName = compactProfileName(profileName);
@@ -1651,7 +1654,14 @@ export function ComposerRenderer({
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
-  const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
+  const branchOptions = useMemo(() => {
+    const branches = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
+    return [...new Set(branches.map((branch) => branch.trim()).filter(Boolean))];
+  }, [codingContext?.branch, codingContext?.branches]);
+  const switchableBranchOptions = useMemo(() => {
+    const currentBranch = codingContext?.branch ?? "";
+    return branchOptions.filter((branch) => branch !== currentBranch);
+  }, [branchOptions, codingContext?.branch]);
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
   const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
@@ -1818,6 +1828,15 @@ export function ComposerRenderer({
     setModelDropdownOpen(true);
     window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [modelPickerRequestId]);
+
+  useEffect(() => {
+    if (branchPickerRequestId === lastBranchPickerRequestIdRef.current) return;
+    lastBranchPickerRequestIdRef.current = branchPickerRequestId;
+    if (branchPickerRequestId <= 0) return;
+    setMenuOpen(false);
+    setBranchPickerOpen(true);
+    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+  }, [branchPickerRequestId]);
 
   useEffect(() => {
     if (!suppressPopovers) return;
@@ -3075,6 +3094,48 @@ export function ComposerRenderer({
                   <span className="font-mono">{codingContext.branch ?? "no git"}</span>
                 )}
               </span>
+              {branchPickerOpen && (
+                <div className="flex min-w-[220px] max-w-full flex-col gap-2 rounded-2xl border border-zinc-700/60 bg-zinc-950/95 p-3 text-xs text-zinc-300 shadow-2xl shadow-black/30">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-zinc-100">Switch branch</div>
+                      <div className="mt-0.5 text-[11px] text-zinc-500">
+                        {codingContext.branch ? `Current: ${codingContext.branch}` : "No current git branch detected."}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setBranchPickerOpen(false)}
+                      className="rounded-full p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                      aria-label="Close branch picker"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  {switchableBranchOptions.length > 0 ? (
+                    <div className="flex max-h-36 flex-col gap-1 overflow-auto">
+                      {switchableBranchOptions.map((branch) => (
+                        <button
+                          key={branch}
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => {
+                            setBranchPickerOpen(false);
+                            onCodingBranchSwitch?.(branch, false);
+                          }}
+                          className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-left font-mono text-[11px] text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {branch}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-amber-100">
+                      No other branches are available here. Type <span className="font-mono">/branch your-branch-name</span> to create or switch to a branch.
+                    </div>
+                  )}
+                </div>
+              )}
               <span className="inline-flex items-center gap-1">
                 <FileText size={11} />
                 <select

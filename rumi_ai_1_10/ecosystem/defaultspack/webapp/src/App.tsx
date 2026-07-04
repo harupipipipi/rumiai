@@ -2381,6 +2381,7 @@ function ChatApp() {
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
+  const [branchPickerRequestId, setBranchPickerRequestId] = useState(0);
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -4010,7 +4011,11 @@ function ChatApp() {
         return;
       case "open_branch_picker":
         handleModeChange("coding");
-        if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
+        if (args.name) {
+          setInput(`Create or switch to branch ${String(args.name)}.`);
+        } else {
+          setBranchPickerRequestId((requestId) => requestId + 1);
+        }
         return;
       case "prepare_test_run":
         handleModeChange("coding");
@@ -5553,6 +5558,7 @@ function ChatApp() {
       composerInput={composerInputMetadata}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
+      branchPickerRequestId={branchPickerRequestId}
       yoloMode={yoloMode || ultraYoloMode}
       modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}

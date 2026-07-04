@@ -425,6 +425,87 @@ test("composer suppresses slash command suggestions when template disables slash
   assert.doesNotMatch(html, /Write a context handoff file/);
 });
 
+test("composer shows branch picker when requested by slash command", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      mode: "coding",
+      codingContext: {
+        rootFolder: "/repo",
+        directory: ".",
+        files: [],
+        entries: [],
+        git: null,
+        branch: "soon",
+        branches: ["soon", "codex/example", "soon", "feature/demo"],
+      },
+      branchPickerRequestId: 1,
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onCodingBranchSwitch: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Switch branch/);
+  assert.match(html, /Current: soon/);
+  assert.match(html, /codex\/example/);
+  assert.match(html, /feature\/demo/);
+});
+
+test("composer shows actionable branch feedback when no alternate branch exists", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      mode: "coding",
+      codingContext: {
+        rootFolder: "/repo",
+        directory: ".",
+        files: [],
+        entries: [],
+        git: null,
+        branch: "soon",
+        branches: ["soon"],
+      },
+      branchPickerRequestId: 1,
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /No other branches are available here/);
+  assert.match(html, /\/branch your-branch-name/);
+});
+
 test("composer input template metadata changes safe input copy without replacing the component", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {

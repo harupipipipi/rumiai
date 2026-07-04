@@ -166,6 +166,7 @@ export type ComposerRendererProps = {
   composerInput?: TemplateComposerInput | null;
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
+  branchPickerRequestId?: number;
   yoloMode?: boolean;
   modelStatusIndicators?: ComposerModelStatusIndicator[];
   voiceInputEnabled?: boolean;
