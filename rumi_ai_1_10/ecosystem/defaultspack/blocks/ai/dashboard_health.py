@@ -122,12 +122,19 @@ def _env_status(name: str) -> str:
     return "configured" if str(os.environ.get(name) or "").strip() else "missing"
 
 
+def _safe_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(str(value or "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _gateway_health() -> dict[str, Any]:
     return {
         "local_url": _safe_text(os.environ.get("RUMI_DEFAULTSPACK_LOCAL_URL") or os.environ.get("RUMI_DEFAULTSPACK_BASE_URL") or "http://127.0.0.1"),
         "tunnel_url": _env_status("RUMI_TUNNEL_URL"),
         "webhook_url": _env_status("RUMI_WEBHOOK_URL"),
-        "active_devices": int(os.environ.get("RUMI_ACTIVE_DEVICE_COUNT") or "0"),
+        "active_devices": _safe_int(os.environ.get("RUMI_ACTIVE_DEVICE_COUNT")),
         "token_expires_at": _safe_text(os.environ.get("RUMI_GATEWAY_TOKEN_EXPIRES_AT") or ""),
     }
 
@@ -141,6 +148,13 @@ def _authority_requests() -> list[dict[str, Any]]:
         return []
     requests = result.get("requests") if isinstance(result, dict) else []
     return [item for item in requests if isinstance(item, dict)]
+
+
+def _approval_summary(item: dict[str, Any]) -> str:
+    permission_id = _safe_text(item.get("permission_id"), max_length=96) or "approval"
+    status = _safe_text(item.get("status"), max_length=24) or "unknown"
+    risk_level = _safe_text(item.get("risk_level"), max_length=24) or "unknown"
+    return f"{permission_id}: {status} / {risk_level}"
 
 
 def _approval_health() -> dict[str, Any]:
@@ -166,7 +180,7 @@ def _approval_health() -> dict[str, Any]:
             "risk_level": _safe_text(item.get("risk_level"), max_length=24),
             "created_at": _safe_text(item.get("created_at"), max_length=40),
             "expires_at": _safe_text(item.get("expires_at"), max_length=40),
-            "summary": _safe_text(item.get("display_summary") or item.get("reason"), max_length=120),
+            "summary": _approval_summary(item),
         }
         for item in requests[:5]
     ]

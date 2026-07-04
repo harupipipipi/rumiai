@@ -28,7 +28,8 @@ def test_dashboard_health_redacts_provider_and_gateway_secrets(monkeypatch):
                 "permission_id": "tool.execute",
                 "risk_level": "high",
                 "resource": {"path": "/tmp/private", "replayed": True},
-                "reason": "Needs approval",
+                "display_summary": "Run /tmp/private with sk-should-not-leak",
+                "reason": "Needs approval for /tmp/private using sk-should-not-leak",
                 "created_at": "2026-07-05T00:00:00Z",
             }
         ],
@@ -63,6 +64,7 @@ def test_dashboard_health_redacts_provider_and_gateway_secrets(monkeypatch):
     assert payload["approval"]["pending"] == 1
     assert payload["approval"]["risky"] == 1
     assert payload["approval"]["replayed"] == 1
+    assert payload["approval"]["recent"][0]["summary"] == "tool.execute: pending / high"
     assert payload["gateway"]["tunnel_url"] == "configured"
     assert "sk-should-not-leak" not in serialized
     assert "secret-tunnel" not in serialized
