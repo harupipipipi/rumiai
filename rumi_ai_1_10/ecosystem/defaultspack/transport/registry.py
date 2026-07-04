@@ -71,6 +71,7 @@ _ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES = {
     "blocks.integrations.line",
     "blocks.integrations.slack",
     "blocks.ui.catalog",
+    "blocks.ui.provider_health",
 }
 
 
@@ -2178,6 +2179,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
     HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
     HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("GET", "/api/ui/provider-health", block_module="blocks.ui.provider_health"),
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
