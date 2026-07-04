@@ -44,6 +44,7 @@ import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToke
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
+import { chatIdFromLocation, isPendingInLocation, loadConversationForRefresh, replaceChatIdInUrl, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -2037,36 +2038,6 @@ function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
     }));
 }
 
-function chatIdFromLocation(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("chat") || null;
-}
-
-function isPendingInLocation(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("pending") === "1";
-}
-
-function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
-  const url = new URL(window.location.href);
-  url.pathname = window.location.pathname === "/coding" ? "/coding" : "/chat";
-  if (conversationId) {
-    url.searchParams.set("chat", conversationId);
-  } else {
-    url.searchParams.delete("chat");
-  }
-  if (pending === true) {
-    url.searchParams.set("pending", "1");
-  } else if (pending === false || !conversationId) {
-    url.searchParams.delete("pending");
-  }
-  const next = `${url.pathname}${url.search}${url.hash}`;
-  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (next !== current) {
-    window.history.pushState({ conversationId }, "", next);
-  }
-}
-
 function commandNames(command: ComposerCommandItem): string[] {
   return [command.id, command.name, ...(command.aliases ?? [])]
     .map((value) => value.trim().toLowerCase())
@@ -3105,31 +3076,33 @@ function ChatApp() {
       if (updateUrl) replaceChatIdInUrl(null, false);
       return;
     }
-    const conversation = await api.getConversation(conversationId);
-    setActiveConversationId(conversationId);
+    let conversation = await api.getConversation(conversationId);
+    const supersededTargetId = resolveSupersededConversationRedirect(conversation, conversationId);
+    if (supersededTargetId) {
+      conversation = await api.getConversation(supersededTargetId);
+    }
+    const activeId = conversation.id || supersededTargetId || conversationId;
+    setActiveConversationId(activeId);
     setActiveConversation(conversation);
-    if (updateUrl) replaceChatIdInUrl(conversationId);
-    void refreshPreview(conversationId);
+    if (supersededTargetId) {
+      replaceChatIdInUrl(activeId, false, { historyMode: "replace" });
+    } else if (updateUrl) {
+      replaceChatIdInUrl(activeId);
+    }
+    void refreshPreview(activeId);
   }
 
   async function refreshConversations(preferredId?: string | null) {
     const result = await api.listConversations();
     setConversations(result.conversations);
 
-    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
-    if (!targetId) {
-      setActiveConversationId(null);
-      setActiveConversation(null);
-      void refreshPreview(null);
-      return;
-    }
-
-    if (!result.conversations.some((conversation) => conversation.id === targetId)) {
-      await loadConversation(result.conversations[0]?.id ?? null);
-      return;
-    }
-
-    await loadConversation(targetId);
+    await loadConversationForRefresh({
+      preferredId,
+      activeConversationId,
+      locationChatId: chatIdFromLocation(),
+      listedConversations: result.conversations,
+      loadConversation,
+    });
   }
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
