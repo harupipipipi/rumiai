@@ -60,6 +60,7 @@ import { loadConversationForRefresh, resolveSupersededConversationRedirect } fro
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
+import { conversationSlashActionIntent } from "./lib/conversationSlashActions";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
@@ -1522,6 +1523,36 @@ function optimisticAssistantMessage(conversationId: string, model: string): Chat
     tool_logs: [],
     model,
   };
+}
+
+function downloadConversationExport(title: string, format: string, result: unknown) {
+  if (typeof document === "undefined") return;
+  const record = isRecord(result) ? result : {};
+  const content = typeof record.content === "string" ? record.content : JSON.stringify(result, null, 2);
+  const mimeType = typeof record.mime_type === "string" ? record.mime_type : "text/plain;charset=utf-8";
+  const extension = exportExtension(format);
+  const filename = `${safeExportFilename(title || "conversation")}.${extension}`;
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportExtension(format: string): string {
+  const normalized = format.trim().toLowerCase();
+  if (normalized === "json") return "json";
+  if (normalized === "html") return "html";
+  if (normalized === "txt" || normalized === "text") return "txt";
+  return "md";
+}
+
+function safeExportFilename(value: string): string {
+  return value.trim().replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "conversation";
 }
 
 function mergeChatActivityEvents(base: ChatActivityEvent[] | null | undefined, extra: ChatActivityEvent[] | null | undefined): ChatActivityEvent[] {
@@ -3860,6 +3891,39 @@ function ChatApp() {
     command: ComposerCommandItem,
     args: Record<string, unknown>,
   ) => {
+    const conversationAction = conversationSlashActionIntent(action, args, { hasActiveConversation: Boolean(activeConversationId) });
+    if (conversationAction) {
+      switch (conversationAction.kind) {
+        case "open_history":
+          setIsHistoryMinimized(false);
+          setError("History を開きました。");
+          return;
+        case "export_conversation":
+          void api.exportConversation(activeConversationId || "", conversationAction.format)
+            .then((result) => {
+              downloadConversationExport(activeChatTitle, conversationAction.format, result);
+              setError(`/${command.name} で現在の会話を ${conversationAction.format} としてエクスポートしました。`);
+            })
+            .catch((exportError) => {
+              setError(exportError instanceof Error ? exportError.message : "会話のエクスポートに失敗しました。");
+            });
+          return;
+        case "rename_conversation":
+          void api.updateConversation(activeConversationId || "", { title: conversationAction.title })
+            .then((conversation) => {
+              setActiveConversation(conversation);
+              void refreshConversations(conversation.id);
+              setError(`会話名を "${conversationAction.title}" に変更しました。`);
+            })
+            .catch((renameError) => {
+              setError(renameError instanceof Error ? renameError.message : "会話名の変更に失敗しました。");
+            });
+          return;
+        case "feedback":
+          setError(conversationAction.message);
+          return;
+      }
+    }
     switch (action) {
       case "open_model_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();

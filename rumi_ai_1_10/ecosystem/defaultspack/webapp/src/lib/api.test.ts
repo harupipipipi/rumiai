@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { conversationSlashActionIntent } from "./conversationSlashActions";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import {
@@ -283,6 +284,40 @@ test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean("0", true), false);
   assert.equal(parseCommandBoolean("off", true), false);
   assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("conversation slash command dispatcher resolves visible actions", () => {
+  assert.deepEqual(
+    conversationSlashActionIntent("open_history", {}, { hasActiveConversation: false }),
+    { kind: "open_history" },
+  );
+  assert.deepEqual(
+    conversationSlashActionIntent("export_conversation", {}, { hasActiveConversation: true }),
+    { kind: "export_conversation", format: "markdown" },
+  );
+  assert.deepEqual(
+    conversationSlashActionIntent("rename_conversation", { title: " QA Canvas Slash " }, { hasActiveConversation: true }),
+    { kind: "rename_conversation", title: "QA Canvas Slash" },
+  );
+});
+
+test("conversation slash command dispatcher returns clear feedback for unavailable paths", () => {
+  assert.deepEqual(
+    conversationSlashActionIntent("rename_conversation", {}, { hasActiveConversation: true }),
+    { kind: "feedback", message: "/rename の後に新しい会話名を指定してください。" },
+  );
+  assert.deepEqual(
+    conversationSlashActionIntent("export_conversation", {}, { hasActiveConversation: false }),
+    { kind: "feedback", message: "エクスポートする会話がありません。" },
+  );
+  assert.equal(
+    conversationSlashActionIntent("fork_conversation", {}, { hasActiveConversation: true })?.kind,
+    "feedback",
+  );
+  assert.equal(
+    conversationSlashActionIntent("resume_conversation", {}, { hasActiveConversation: true })?.kind,
+    "feedback",
+  );
 });
 
 test("slash command parsing supports multi-word aliases without treating them as args", () => {
