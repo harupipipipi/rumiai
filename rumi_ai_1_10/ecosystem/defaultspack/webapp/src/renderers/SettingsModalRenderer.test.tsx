@@ -379,6 +379,68 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
   assert.match(html, />Save</);
 });
 
+test("SettingsModalRenderer shows env-backed API rows as read-only", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "apis",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "apis",
+          label: "APIs",
+          fields: [
+            {
+              id: "api_keys",
+              label: "API Keys",
+              type: "api_keys",
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "opencode-zen",
+              label: "OpenCode Zen",
+              configured: true,
+              apis: [
+                {
+                  api_id: "environment",
+                  name: "Environment",
+                  provider_id: "opencode-zen",
+                  key: "OPENCODE_ZEN_API_KEY",
+                  label: "opencode-zen:environment:***",
+                  configured: true,
+                  readonly: true,
+                  source: "env",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Environment/);
+  assert.match(html, /opencode-zen/);
+  assert.match(html, /environment/);
+  assert.match(html, /\*\*\*/);
+  assert.match(html, /read-only/);
+  assert.doesNotMatch(html, /title="Actions"/);
+});
+
 test("CredentialTransferModal hides cleartext QR import surface by default", () => {
   const html = renderToStaticMarkup(
     createElement(CredentialTransferModal, {

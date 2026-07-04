@@ -92,6 +92,26 @@ class TestDefaultspackCustomProviderRegistry(unittest.TestCase):
         self.assertTrue(google["builtin"])
         self.assertEqual(google["kind"], "llm")
 
+    def test_provider_key_status_surfaces_env_backed_opencode_zen_key(self):
+        from domain.ai_client.api_key_store import provider_key_status
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {
+                "RUMI_DEFAULTSPACK_SECRETS_DIR": tmpdir,
+                "OPENCODE_ZEN_API_KEY": "zen-secret",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                rows = provider_key_status()
+
+        opencode = next(row for row in rows if row["provider_id"] == "opencode-zen")
+        self.assertTrue(opencode["configured"])
+        self.assertEqual(len(opencode["apis"]), 1)
+        api = opencode["apis"][0]
+        self.assertTrue(api["readonly"])
+        self.assertEqual(api["source"], "env")
+        self.assertEqual(api["api_id"], "environment")
+        self.assertEqual(api["provider_id"], "opencode-zen")
+
 
 if __name__ == "__main__":
     unittest.main()

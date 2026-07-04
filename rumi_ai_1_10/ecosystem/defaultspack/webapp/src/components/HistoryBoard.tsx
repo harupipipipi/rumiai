@@ -166,6 +166,37 @@ function chatGroupId(chat: ChatItem): string {
   return String(metadata.group_id ?? metadata.groupId ?? "").trim();
 }
 
+async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the textarea fallback for in-app browsers that expose but deny Clipboard API.
+  }
+
+  if (typeof document !== "undefined" && document.body) {
+    const textarea = document.createElement("textarea");
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    activeElement?.focus({ preventScroll: true });
+    if (copied) {
+      return;
+    }
+  }
+}
+
 type ClientPoint = { x: number; y: number };
 
 function clientPointFromEvent(event: Event | null | undefined): ClientPoint | null {
@@ -765,6 +796,9 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
           isStarred={chat.isStarred}
           onTogglePinned={onTogglePinned ? () => onTogglePinned(chat) : undefined}
           onToggleStarred={onToggleStarred ? () => onToggleStarred(chat) : undefined}
+          onCopyConversationId={() => {
+            void copyTextToClipboard(chat.id);
+          }}
         />
       </div>
       {expanded && (

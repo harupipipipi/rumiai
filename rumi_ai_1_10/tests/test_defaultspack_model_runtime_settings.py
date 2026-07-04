@@ -144,6 +144,52 @@ def test_model_runtime_settings_materializes_builtin_rumi_against_available_prov
     assert rumi_profile["supports_thinking"] is True
 
 
+def test_model_runtime_settings_prefers_configured_preferred_model_for_rumi_base(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    settings = service.update_settings({"preferred_model": "google/gemini-2.5-flash"})
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            display_name="MiMo 2.5 Pro",
+            provider_id="xiaomi",
+            model_id="mimo-v2.5-pro",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+        _profile(
+            "google/gemini-2.5-flash",
+            display_name="Gemini 2.5 Flash",
+            provider_id="google",
+            model_id="gemini-2.5-flash",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+    ]
+
+    assert service._runtime_rumi_base_model(settings) == "google/gemini-2.5-flash"
+
+
+def test_model_runtime_settings_falls_back_to_candidate_order_for_rumi_base(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    settings = service.update_settings({"preferred_model": "stub/default"})
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            display_name="MiMo 2.5 Pro",
+            provider_id="xiaomi",
+            model_id="mimo-v2.5-pro",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+        _profile(
+            "google/gemini-2.5-flash",
+            display_name="Gemini 2.5 Flash",
+            provider_id="google",
+            model_id="gemini-2.5-flash",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+    ]
+
+    assert service._runtime_rumi_base_model(settings) == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+
+
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
 

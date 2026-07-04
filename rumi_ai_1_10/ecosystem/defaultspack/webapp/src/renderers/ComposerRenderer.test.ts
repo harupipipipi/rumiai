@@ -59,10 +59,12 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
       category: "tool",
       description: "Read a workspace file.",
       tags: ["coding", "file"],
+      ui: { group_title: "Workspace Browser" },
     },
   ];
 
   assert.deepEqual(filterComposerToolMentions(tools, "workspace").map((tool) => tool.id), ["coding_file_read"]);
+  assert.deepEqual(filterComposerToolMentions(tools, "browser").map((tool) => tool.id), ["coding_file_read"]);
   assert.deepEqual(toolMentionIdsFromText("Use @web_search then @Read_File.", tools), ["web_search", "coding_file_read"]);
   assert.deepEqual(composerToolMentionWidget(tools[0]), {
     id: "web_search",

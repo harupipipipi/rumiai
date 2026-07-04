@@ -104,7 +104,9 @@ export function BuiltinSlashCommandsRenderer({ sectionId, field, value, onChange
     emitDrafts(next);
   };
   const addDraft = () => {
-    setDrafts(appendEmptySlashCommandDraft(drafts, nextRowId()));
+    const next = appendEmptySlashCommandDraft(drafts, nextRowId());
+    setDrafts(next);
+    emitDrafts(next);
   };
   const addYolo = () => {
     const hasYolo = drafts.some((draft) => normalizeRegisteredSlashCommandName(draft.name) === "yolo");
