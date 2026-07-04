@@ -8,6 +8,8 @@ const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
 type ApiMockOptions = {
+  conversationPatch?: (conversation: ReturnType<typeof smokeConversation>) => ReturnType<typeof smokeConversation>;
+  onApprovalApprove?: (payload: Record<string, unknown>) => void;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
 };
@@ -458,7 +460,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
-    const conversation = smokeConversation();
+    const conversation = options.conversationPatch?.(smokeConversation()) ?? smokeConversation();
 
     if (path === "/api/health") {
       return fulfill(route, { status: "ok", pack: "defaultspack", ts: "2026-05-20T00:00:00Z" });
@@ -679,6 +681,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onApprovalApprove?.(payload);
       return fulfill(route, {
         request_id: payload.approval_request_id,
         approved: true,
@@ -1259,6 +1262,63 @@ test("tool timeline shows streamed activity details", async ({ page }) => {
   await expect(timeline).toContainText("ファイル");
   await expect(timeline).toContainText("src");
   await expect(timeline).toContainText("Listed 2 files");
+});
+
+test("expired tool approval card is visibly disabled before approve", async ({ page }) => {
+  let approvePostCount = 0;
+  const expiredApproval = {
+    tool_name: "browser_companion",
+    action: "session",
+    operation: "tool.browser_companion",
+    payload: { action: "session" },
+    requires_approval: true,
+    approval_request_id: "apr_browser_expired",
+    approval_expires_in_seconds: 1,
+    timestamp: "2026-05-20T08:05:40Z",
+    risk_level: "high",
+    display_summary: "browser_companion: session",
+  };
+  await openDefaultspack(page, "/chat", {
+    conversationPatch: (conversation) => ({
+      ...conversation,
+      messages: [
+        conversation.messages[0],
+        {
+          ...conversation.messages[1],
+          id: "m-expired-approval",
+          content: [{ type: "text", text: "" }],
+          raw_text: "",
+          metadata: {
+            ...conversation.messages[1].metadata,
+            pending_approval: expiredApproval,
+          },
+          events: [
+            {
+              type: "approval_requested",
+              phase: "approval_requested",
+              data: expiredApproval,
+              message: "Approval required",
+              tool_name: expiredApproval.tool_name,
+              tool_call_id: "call-browser-expired",
+              requires_approval: true,
+              timestamp: expiredApproval.timestamp,
+            },
+          ],
+          tool_logs: [],
+        },
+      ],
+    }),
+    onApprovalApprove: () => {
+      approvePostCount += 1;
+    },
+  });
+
+  await expect(page.getByLabel("期限切れの承認カード")).toBeVisible();
+  await expect(page.getByText("tool.browser_companion は期限切れです")).toBeVisible();
+  await expect(page.getByText("承認の期限が切れました。もう一度リクエストしてください。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "期限切れ" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /許可/ })).toHaveCount(0);
+  expect(approvePostCount).toBe(0);
 });
 
 test("mocked coding cockpit renders MCP server state", async ({ page }) => {
