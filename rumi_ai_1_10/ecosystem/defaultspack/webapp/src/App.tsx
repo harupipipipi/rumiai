@@ -2179,6 +2179,14 @@ type ParsedSlashCommandInput = {
   raw: string;
 };
 
+export const FILE_SEARCH_QUERY_REQUIRED_MESSAGE = "検索キーワードを入力してください。例: /files README";
+
+export function fileSearchPromptForQuery(query: unknown): string | null {
+  const trimmed = String(query ?? "").trim();
+  if (!trimmed) return null;
+  return `Find workspace files matching ${trimmed}.`;
+}
+
 export function parseSlashCommandInput(
   input: string,
   commands: ComposerCommandItem[],
@@ -4022,7 +4030,14 @@ function ChatApp() {
         return;
       case "open_file_search":
         handleModeChange("coding");
-        if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
+        {
+          const prompt = fileSearchPromptForQuery(args.query);
+          if (prompt) {
+            setInput(prompt);
+          } else {
+            setError(FILE_SEARCH_QUERY_REQUIRED_MESSAGE);
+          }
+        }
         return;
       default:
         if (command.risk === "high") {
@@ -4046,6 +4061,9 @@ function ChatApp() {
       if (isRegisteredSlashCommand(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
+        if (frontendAction === "open_file_search" && fileSearchPromptForQuery(parsed.args.query)) {
+          return false;
+        }
         return true;
       }
       const commandArgs = { ...parsed.args };
