@@ -390,8 +390,12 @@ class ChatStore:
                 msg["parent_id"] = conv["current_node_id"]
             if "children_ids" not in msg:
                 msg["children_ids"] = []
-            if "sequence_number" not in msg or msg["sequence_number"] is None:
-                msg["sequence_number"] = len(conv["messages"]) + 1
+            messages = conv.get("messages")
+            if not isinstance(messages, list):
+                messages = []
+                conv["messages"] = messages
+            self._normalize_message_sequence_numbers(messages)
+            msg["sequence_number"] = len(messages) + 1
             if "created_at" not in msg or msg["created_at"] is None:
                 msg["created_at"] = _now_ms()
             if "raw_text" not in msg or msg["raw_text"] is None:
@@ -844,6 +848,34 @@ class ChatStore:
             conversation.get("title") or "New Conversation",
             conversation.get("id") or conversation_id,
         )
+        ChatStore._normalize_message_sequence_numbers(conversation.get("messages", []))
+
+    @staticmethod
+    def _coerce_positive_int(value):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    @staticmethod
+    def _normalize_message_sequence_numbers(messages):
+        if not isinstance(messages, list):
+            return False
+        needs_repair = False
+        for index, message in enumerate(messages, start=1):
+            if not isinstance(message, dict):
+                continue
+            sequence = ChatStore._coerce_positive_int(message.get("sequence_number"))
+            if sequence != index or message.get("sequence_number") != index:
+                needs_repair = True
+                break
+        if not needs_repair:
+            return False
+        for index, message in enumerate(messages, start=1):
+            if isinstance(message, dict):
+                message["sequence_number"] = index
+        return True
 
     @staticmethod
     def _set_metadata_icon(metadata, title, conversation_id):

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import errno
 import json
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -158,4 +160,85 @@ def test_chat_store_load_replaces_persisted_icon_svg(tmp_path, monkeypatch):
     assert conversation["metadata"]["workspace_label"] == "Local"
     assert conversation["metadata"]["icon_svg"] != payload
     assert "onload" not in conversation["metadata"]["icon_svg"].lower()
+    ChatStore._instance = None
+
+
+def test_chat_store_concurrent_stale_sequence_appends_allocate_tail_numbers(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    user_message = store.add_message(
+        conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "kickoff"}]},
+    )
+    stale_sequence = int(user_message["sequence_number"]) + 1
+    start = threading.Event()
+
+    def append_assistant(index):
+        start.wait(timeout=5)
+        return store.add_message(
+            conversation["id"],
+            {
+                "role": "assistant",
+                "parent_id": user_message["id"],
+                "sequence_number": stale_sequence,
+                "content": [{"type": "text", "text": f"reply {index}"}],
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(append_assistant, index) for index in (1, 2)]
+        start.set()
+        results = [future.result(timeout=5) for future in futures]
+
+    stored = store.get_conversation(conversation["id"])
+    sequences = [message["sequence_number"] for message in stored["messages"]]
+
+    assert sorted(message["sequence_number"] for message in results) == [2, 3]
+    assert sequences == [1, 2, 3]
+    assert len(set(sequences)) == len(sequences)
+    ChatStore._instance = None
+
+
+def test_chat_store_load_repairs_duplicate_and_out_of_order_sequences_in_append_order(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": 0,
+                "conversations": {
+                    "conv-1": {
+                        "id": "conv-1",
+                        "title": "Recovered Conversation",
+                        "created_at": 0,
+                        "updated_at": 0,
+                        "model": "stub/default",
+                        "messages": [
+                            {"id": "m1", "role": "user", "content": "one", "sequence_number": 1},
+                            {"id": "m2", "role": "assistant", "content": "two", "sequence_number": 3},
+                            {"id": "m3", "role": "user", "content": "three", "sequence_number": 3},
+                            {"id": "m4", "role": "assistant", "content": "four", "sequence_number": 2},
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    conversation = ChatStore().get_conversation("conv-1")
+
+    assert [message["id"] for message in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
+    assert [message["sequence_number"] for message in conversation["messages"]] == [1, 2, 3, 4]
     ChatStore._instance = None
