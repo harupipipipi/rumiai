@@ -807,7 +807,8 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
 
     assert ensured.ok is True
     assert started.state == "ready"
-    assert "BROWSER_URL=https://example.com" in start_script
+    assert "BROWSER_URL_ORIGINAL=https://example.com" in start_script
+    assert 'BROWSER_URL="$(python3 - "$BROWSER_URL_ORIGINAL" "$RUMI_HOST_LOOPBACK_ALIAS"' in start_script
     assert "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'" in start_script
     assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
     assert "run_detached()" in start_script
@@ -815,6 +816,33 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "/etc/machine-id" in start_script
     assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
     assert "starter-browser.log" in start_script
+
+
+def test_managed_ubuntu_desktop_browser_url_starter_rewrites_host_loopback(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(network_mode="host_shared", network_approval_required=False),
+            startup={"starter": "browser_url", "browser_url": "http://127.0.0.1:8766/chat?chat=qa-loop"},
+        )
+    )
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL_ORIGINAL=" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "BROWSER_URL_ORIGINAL='http://127.0.0.1:8766/chat?chat=qa-loop'" in start_script
+    assert "host.lima.internal host.docker.internal" in start_script
+    assert "/etc/resolv.conf" in start_script
+    assert "host in {'127.0.0.1', 'localhost'}" in start_script
+    assert "netloc = f'{host_alias}:{parsed.port}'" in start_script
+    assert "BROWSER_URL=http://127.0.0.1:8766/chat" not in start_script
+    assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
 
 
 def test_managed_ubuntu_desktop_browser_starter_opens_browser_without_url(monkeypatch) -> None:
