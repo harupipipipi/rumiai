@@ -116,22 +116,36 @@ def test_mobile_manifest_route_handler_smoke(monkeypatch):
 
 
 def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp_path):
+    from blocks.p2p.pairing_start import run as pairing_start_run
     from blocks.mobile.pairing import run
     from domain.p2p.device_store import DeviceStore
-    from domain.p2p.pairing import PairingManager
 
     store_path = str(tmp_path)
-    session = PairingManager(tmp_path).start_pairing(
-        capabilities=["chat.read", "chat.write"],
+    started = pairing_start_run(
+        {
+            "store_path": store_path,
+            "capabilities": ["chat.read", "chat.write"],
+        },
+        None,
     )
+    assert started["status"] == "ok"
+    start_pairing = started["data"]["pairing"]
+    pairing_id = start_pairing["pairing_id"]
+    pairing_code = start_pairing["code"]
+    pickup_secret = start_pairing["token_pickup_secret"]
+    assert start_pairing["pairing_code"] == pairing_code
+    assert start_pairing["pickup_secret"] == pickup_secret
+    assert pairing_code
+    assert pickup_secret
+
     private_key, public_key = _x25519_keypair()
 
     claim = run(
         {
             "action": "claim",
             "store_path": store_path,
-            "pairing_id": session.pairing_id,
-            "code": session.code,
+            "pairing_id": pairing_id,
+            "code": pairing_code,
             "device_id": "mobile-1",
             "device_label": "Phone",
             "public_key": "pk-mobile",
@@ -142,12 +156,14 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
     )
     assert claim["status"] == "ok"
     assert set(claim["data"]["pairing"]) == {"pairing_id", "status", "expires_at"}
+    assert "code" not in json.dumps(claim["data"], sort_keys=True)
+    assert "pickup_secret" not in json.dumps(claim["data"], sort_keys=True)
 
     review = run(
         {
             "action": "review",
             "store_path": store_path,
-            "pairing_id": session.pairing_id,
+            "pairing_id": pairing_id,
         },
         None,
     )
@@ -157,7 +173,7 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
         {
             "action": "approve",
             "store_path": store_path,
-            "pairing_id": session.pairing_id,
+            "pairing_id": pairing_id,
             "claim_hash": review["data"]["claim_hash"],
             "scopes": review["data"]["claim"]["requested_scopes"],
         },
@@ -172,20 +188,23 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
         {
             "action": "status",
             "store_path": store_path,
-            "pairing_id": session.pairing_id,
+            "pairing_id": pairing_id,
         },
         None,
     )
     assert status["status"] == "ok"
     assert "token_delivery_envelope" not in status["data"]
-    assert "code" not in json.dumps(status["data"], sort_keys=True)
+    public_status = json.dumps(status["data"], sort_keys=True)
+    assert "code" not in public_status
+    assert "pickup_secret" not in public_status
+    assert pickup_secret not in public_status
 
     pickup = run(
         {
             "action": "pickup_token_delivery",
             "store_path": store_path,
-            "pairing_id": session.pairing_id,
-            "pickup_secret": session.token_pickup_secret,
+            "pairing_id": pairing_id,
+            "pickup_secret": pickup_secret,
             "device_id": "mobile-1",
         },
         None,
@@ -196,7 +215,7 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
     delivery = _decrypt_delivery_envelope(
         private_key,
         pickup["data"]["token_delivery_envelope"],
-        pairing_id=session.pairing_id,
+        pairing_id=pairing_id,
         device_id="mobile-1",
     )
     assert delivery["device_token"].startswith("dtk_")
