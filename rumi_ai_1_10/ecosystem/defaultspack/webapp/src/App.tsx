@@ -6328,7 +6328,7 @@ export default function App() {
   if (pathname === "/adaptive" || pathname === "/operating-profile") {
     return <AdaptiveRuntimePage />;
   }
-  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat" || pathname === "/calendar") {
     return <ChatApp />;
   }
   return <ChatApp />;
