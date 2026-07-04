@@ -3244,6 +3244,9 @@ export function SettingsModalRenderer({
   );
   const visiblePrimaryFields = primaryFields.filter(fieldFilter);
   const visibleAdvancedFields = advancedFields.filter(fieldFilter);
+  const primaryFieldCountForSection = (section: ControlCenterSection): number => (
+    section.fields.filter((field) => !field.advanced).length
+  );
   const updatePinnedPlacements = (
     updater: (current: ReturnType<typeof normalizePinnedPlacements>) => ReturnType<typeof normalizePinnedPlacements>,
   ) => {
@@ -4056,7 +4059,7 @@ export function SettingsModalRenderer({
               </div>
             </div>
             <div className="grid flex-1 min-h-0 md:grid-cols-[220px_minmax(0,1fr)_260px]">
-              <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
+              <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r md:overflow-y-auto">
                 <label className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
                   <Search size={14} />
                   <input
@@ -4076,9 +4079,31 @@ export function SettingsModalRenderer({
                     </button>
                   )}
                 </label>
-                <div className="flex gap-2 md:flex-col">
+                {visibleSections.length > 0 && (
+                  <label className="mb-3 block md:hidden">
+                    <span className="sr-only">Settings category</span>
+                    <select
+                      aria-label="Settings category"
+                      value={activeSection?.id ?? ""}
+                      onChange={(event) => setActiveSectionId(event.target.value as ControlCenterSection["id"])}
+                      className="h-10 w-full min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs font-medium text-zinc-100 outline-none focus:border-zinc-600"
+                    >
+                      {visibleSections.map((section) => (
+                        <option key={section.id} value={section.id}>
+                          {section.label} - {t(locale, "settings.controls", { count: primaryFieldCountForSection(section) })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {visibleSections.length === 0 && (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-4 text-xs text-zinc-500 md:hidden">
+                    {t(locale, "settings.noSections")}
+                  </div>
+                )}
+                <div className="hidden gap-2 md:flex md:flex-col">
                   {visibleSections.map((section) => {
-                    const primaryFieldCount = section.fields.filter((field) => !field.advanced).length;
+                    const primaryFieldCount = primaryFieldCountForSection(section);
                     return (
                       <button
                         key={section.id}

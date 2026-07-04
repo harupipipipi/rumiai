@@ -790,6 +790,54 @@ test("operations company model allowlist renders as an addable selection list", 
   assert.doesNotMatch(html, /<textarea[^>]*>stub\/default/);
 });
 
+test("SettingsModalRenderer uses a mobile category selector instead of an offscreen horizontal rail", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "operations_company",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "operations_company",
+          label: "Operations Company",
+          fields: [
+            {
+              id: "approval_policy",
+              label: "Approval Policy",
+              type: "select",
+              options: [{ value: "ask", label: "Ask before actions" }],
+              default: "ask",
+            },
+          ],
+        },
+      ],
+      settingsValues: {
+        operations_company: {
+          approval_policy: "ask",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /<nav class="[^"]*md:overflow-y-auto[^"]*"/);
+  assert.doesNotMatch(html, /<nav class="[^"]*overflow-x-auto/);
+  assert.match(html, /<label class="mb-3 block md:hidden"><span class="sr-only">Settings category<\/span><select/);
+  assert.match(html, /aria-label="Settings category"/);
+  assert.match(html, /Tools &amp; MCP - 1 controls/);
+  assert.match(html, /Operations Company/);
+  assert.match(html, /<div class="hidden gap-2 md:flex md:flex-col">/);
+});
+
 test("settings system info renders viewer version and macOS permissions", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
