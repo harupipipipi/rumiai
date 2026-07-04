@@ -2072,9 +2072,11 @@ def run(input_data, context):
             "approval_requested",
             "ai_retry_scheduled",
             "task_failed",
+            "cancelled",
         }
         engine_context = dict(context or {}) if isinstance(context, dict) else {}
         engine_context.setdefault("run_source", "blocks.chat.send")
+        cancelled_reason = ""
         for event in ChatRunEngine().stream(input_data, engine_context, stream_mode=use_stream_adapter):
             if not isinstance(event, dict):
                 continue
@@ -2097,6 +2099,9 @@ def run(input_data, context):
                 if isinstance(err, dict):
                     return error(str(err.get("message") or "AI request failed"), str(err.get("code") or "INTERNAL_ERROR"))
                 return error("AI request failed", "INTERNAL_ERROR")
+            elif event_type == "cancelled":
+                data = event.get("data") if isinstance(event.get("data"), dict) else {}
+                cancelled_reason = str(data.get("reason") or event.get("reason") or "cancelled")
     except ValueError as exc:
         message = str(exc)
         code = "NOT_FOUND" if "not found" in message.lower() else "INVALID_INPUT"
@@ -2106,4 +2111,6 @@ def run(input_data, context):
 
     if final_message is not None:
         return ok(final_message)
+    if cancelled_reason:
+        return error("Chat run cancelled: " + cancelled_reason, "CANCELLED")
     return error("Chat run ended without final message", "INTERNAL_ERROR")
