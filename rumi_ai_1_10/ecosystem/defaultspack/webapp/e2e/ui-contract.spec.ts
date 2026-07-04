@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -441,6 +441,31 @@ async function fulfillStreamEvents(route: Route, events: Record<string, unknown>
   });
 }
 
+async function expectMentionMenuClearOfComposer(page: Page, composer: Locator, mentions: Locator) {
+  const [mentionBox, composerBox] = await Promise.all([mentions.boundingBox(), composer.boundingBox()]);
+  const viewport = page.viewportSize();
+  if (!mentionBox || !composerBox || !viewport) {
+    throw new Error("Expected composer mention menu, composer, and viewport boxes to be measurable");
+  }
+
+  expect(mentionBox.width).toBeGreaterThan(0);
+  expect(mentionBox.height).toBeGreaterThan(0);
+  expect(mentionBox.x).toBeGreaterThanOrEqual(0);
+  expect(mentionBox.y).toBeGreaterThanOrEqual(0);
+  expect(mentionBox.x + mentionBox.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(mentionBox.y + mentionBox.height).toBeLessThanOrEqual(viewport.height + 1);
+
+  const verticalOverlap = Math.max(
+    0,
+    Math.min(mentionBox.y + mentionBox.height, composerBox.y + composerBox.height) - Math.max(mentionBox.y, composerBox.y),
+  );
+  expect(verticalOverlap).toBe(0);
+
+  const opensAbove = mentionBox.y + mentionBox.height <= composerBox.y - 4;
+  const opensBelow = mentionBox.y >= composerBox.y + composerBox.height + 4;
+  expect(opensAbove || opensBelow).toBe(true);
+}
+
 async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions = {}) {
   await page.addInitScript(() => {
     localStorage.clear();
@@ -863,6 +888,7 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Web Search");
   await expect(mentions).toContainText("web_search");
+  await expectMentionMenuClearOfComposer(page, composer, mentions);
 
   await composer.press("Enter");
   await expect(composer).toHaveValue("Use @web_search ");

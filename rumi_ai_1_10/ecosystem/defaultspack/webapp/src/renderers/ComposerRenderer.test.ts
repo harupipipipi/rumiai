@@ -281,6 +281,18 @@ test("mention popup flips below the composer input when there is no safe room ab
   );
 });
 
+test("mention popup shrinks to stay inside very small viewports", () => {
+  assert.deepEqual(
+    atMentionPopupStyleForAnchor({ left: 20, right: 220, top: 24, bottom: 50 }, 240, 112),
+    {
+      left: 8,
+      top: 58,
+      width: 224,
+      maxHeight: 46,
+    },
+  );
+});
+
 test("model dropdown search supports @provider filters", () => {
   const profiles = [
     {

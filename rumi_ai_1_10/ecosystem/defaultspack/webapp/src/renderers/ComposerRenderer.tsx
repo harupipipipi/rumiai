@@ -1161,7 +1161,7 @@ function AtMentionMenu({
       }
     : undefined;
 
-  return (
+  const menu = (
     <>
       <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
@@ -1169,7 +1169,7 @@ function AtMentionMenu({
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
         style={style}
-        className="fixed rumi-layer-modal flex w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="fixed rumi-layer-modal flex w-[min(440px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -1216,6 +1216,7 @@ function AtMentionMenu({
       </div>
     </>
   );
+  return typeof document === "undefined" ? menu : createPortal(menu, document.body);
 }
 
 export function filterAtMentionFiles(files: string[], query: string): string[] {
@@ -1352,10 +1353,7 @@ export function modelCandidatePopupStyleForAnchor(
 }
 
 function atMentionMenuHeightForSpace(availableSpace: number, preferredMaxHeight: number): number {
-  return Math.max(
-    AT_MENTION_POPOVER_MIN_HEIGHT,
-    Math.min(preferredMaxHeight, Math.max(0, availableSpace)),
-  );
+  return Math.min(preferredMaxHeight, Math.max(0, availableSpace));
 }
 
 export function atMentionPopupStyleForAnchor(
@@ -1368,10 +1366,7 @@ export function atMentionPopupStyleForAnchor(
   if (!anchorRect || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
 
   const viewportMargin = AT_MENTION_POPOVER_VIEWPORT_MARGIN;
-  const width = Math.min(
-    preferredWidth,
-    Math.max(260, viewportWidth - viewportMargin * 2),
-  );
+  const width = Math.min(preferredWidth, Math.max(0, viewportWidth - viewportMargin * 2));
   const left = Math.max(
     viewportMargin,
     Math.min(anchorRect.left, viewportWidth - width - viewportMargin),
@@ -1765,7 +1760,33 @@ export function ComposerRenderer({
 
   const updateAtMentionPopoverAnchor = useCallback(() => {
     if (typeof window === "undefined") return;
-    const anchorRect = textareaRef.current?.getBoundingClientRect() ?? null;
+    const textarea = textareaRef.current;
+    const textareaRect = textarea?.getBoundingClientRect() ?? null;
+    const surfaceRects = [
+      textarea?.form?.getBoundingClientRect(),
+      textarea?.closest<HTMLElement>(".rumi-composer-shell")?.getBoundingClientRect(),
+      textarea?.closest<HTMLElement>(".rumi-composer-main-panel")?.getBoundingClientRect(),
+    ].filter((rect): rect is DOMRect => Boolean(rect));
+    const surfaceTop = surfaceRects.length > 0
+      ? Math.min(...surfaceRects.map((rect) => rect.top))
+      : textareaRect?.top;
+    const surfaceBottom = surfaceRects.length > 0
+      ? Math.max(...surfaceRects.map((rect) => rect.bottom))
+      : textareaRect?.bottom;
+    const lineHeight = textarea
+      ? Number.parseFloat(window.getComputedStyle(textarea).lineHeight)
+      : 0;
+    const activeLineClearance = Number.isFinite(lineHeight)
+      ? Math.max(0, Math.min(40, lineHeight + AT_MENTION_POPOVER_GAP))
+      : 0;
+    const anchorRect = textareaRect && surfaceTop !== undefined && surfaceBottom !== undefined
+      ? {
+          left: textareaRect.left,
+          right: textareaRect.right,
+          top: Math.min(textareaRect.top - activeLineClearance, surfaceTop),
+          bottom: Math.max(textareaRect.bottom, surfaceBottom),
+        }
+      : textareaRect;
     setAtMentionPopoverStyle(atMentionPopupStyleForAnchor(anchorRect, window.innerWidth, window.innerHeight));
   }, []);
 
@@ -2726,7 +2747,7 @@ export function ComposerRenderer({
             )
           )}
 
-          {atMentionOpen && (
+          {atMentionOpen && atMentionPopoverStyle && (
             <AtMentionMenu
               candidates={atMentionCandidates}
               activeIndex={selectedAtMentionIndex}
