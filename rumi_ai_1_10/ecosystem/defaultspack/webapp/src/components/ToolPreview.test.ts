@@ -6,7 +6,10 @@ import {
   buildToolPreviewDisplayItems,
   buildToolPreviewTimelineItems,
   hasCanvasItems,
+  hardenedHtmlPreviewDocument,
   isCanvasPreviewItemRenderable,
+  safePreviewHref,
+  safePreviewImageUrl,
   WEB_PREVIEW_IFRAME_SANDBOX,
   type ToolPreviewItem,
 } from "./ToolPreview";
@@ -71,9 +74,8 @@ test("tool preview timeline is chronological regardless of display ordering", ()
   assert.deepEqual(buildToolPreviewTimelineItems(displayItems).map((item) => item.id), ["second", "first"]);
 });
 
-test("web preview iframe sandbox keeps same-origin content isolated", () => {
-  assert.match(WEB_PREVIEW_IFRAME_SANDBOX, /allow-scripts/);
-  assert.doesNotMatch(WEB_PREVIEW_IFRAME_SANDBOX, /allow-same-origin/);
+test("web preview iframe sandbox disables active capabilities", () => {
+  assert.equal(WEB_PREVIEW_IFRAME_SANDBOX, "");
 });
 
 test("tool preview artifacts map to reusable foreground dialog items", () => {
@@ -90,4 +92,29 @@ test("tool preview artifacts map to reusable foreground dialog items", () => {
   assert.equal(image.href, undefined);
   assert.equal(file.kind, "file");
   assert.equal(file.title, "a.txt");
+});
+
+
+test("tool preview URL policy blocks external and active-content destinations", () => {
+  const base = "https://rumi.example/chat";
+  assert.equal(safePreviewHref("/artifact/1", base), "https://rumi.example/artifact/1");
+  assert.equal(safePreviewHref("https://attacker.example/track", base), undefined);
+  assert.equal(safePreviewHref("javascript:alert(1)", base), undefined);
+  assert.equal(safePreviewHref("file:///tmp/secret", base), undefined);
+});
+
+test("tool preview image policy permits raster data only and rejects SVG", () => {
+  assert.equal(safePreviewImageUrl("data:image/png;base64,abc", "https://rumi.example/"), "data:image/png;base64,abc");
+  assert.equal(safePreviewImageUrl("data:image/svg+xml;base64,PHN2Zz4=", "https://rumi.example/"), undefined);
+  assert.equal(safePreviewImageUrl("https://attacker.example/pixel.gif", "https://rumi.example/"), undefined);
+});
+
+test("HTML preview document has a fail-closed CSP and no injected base URL", () => {
+  const document = hardenedHtmlPreviewDocument("<script>fetch('https://attacker.example')</script><form action='https://attacker.example'><button>go</button></form>");
+  assert.match(document, /Content-Security-Policy/);
+  assert.match(document, /default-src 'none'/);
+  assert.match(document, /connect-src 'none'/);
+  assert.match(document, /form-action 'none'/);
+  assert.match(document, /base-uri 'none'/);
+  assert.doesNotMatch(document, /<base\s/i);
 });
