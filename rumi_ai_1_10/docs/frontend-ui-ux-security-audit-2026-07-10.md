@@ -73,6 +73,7 @@ The following issues should be treated as release blockers until their enforceme
 - #998 — make closing a pairing review explicitly cancel, reject, or keep pending.
 - #999 — do not silently persist terminal commands and output in `localStorage`.
 - #1000 — provide an explicit enter/exit contract for remote-desktop keyboard capture.
+- #1001 — stop delivering desktop access keys in URL query parameters.
 - #1002 — make desktop lifecycle confirmations single-submit and outcome-aware.
 - #1003 — protect unsaved Prompt Studio drafts across context changes.
 - #1004 — give Prompt Studio fields, filters, tabs, status, and version actions complete semantics.
