@@ -7,16 +7,25 @@
 
 ## Purpose
 
-This document turns the frontend audit into a reviewable engineering baseline. It records the concrete issue backlog, the release-blocking boundaries, and the small fail-closed mitigations included in this change.
+This document turns the repository-wide frontend audit into a reviewable engineering baseline. It records the concrete issue backlog, release-blocking boundaries, deduplication decisions, and the small fail-closed mitigations included in this change.
 
-It is intentionally not a claim that a static review can prove the entire product defect-free. A UI surface is considered complete only after the relevant issue acceptance criteria, automated checks, keyboard/screen-reader checks, narrow/zoom checks, and adversarial runtime tests pass.
+It is intentionally not a claim that static review can prove the entire product defect-free. A surface is complete only after the relevant issue acceptance criteria, automated checks, keyboard/screen-reader checks, narrow/zoom checks, native-device checks, and adversarial runtime tests pass.
+
+## Coverage status
+
+The code-first audit reached its static saturation point against the maintained source available on 2026-07-10:
+
+- every concrete source-level finding identified in the inspected surfaces has a dedicated issue or is explicitly deduplicated into an existing issue;
+- the initial audit set (`#899–#969`), deep code-path set (`#970–#1012`), residual surface issues, and latest saturation pass are coordinated through tracker #1069;
+- number gaps can be pull requests or unrelated repository activity and are not assumed to be audit issues;
+- remaining evidence is runtime/device/browser/assistive-technology validation, not an assertion that further defects are impossible.
 
 ## Method
 
 The review inspected frontend source and shared UI primitives across:
 
 - Rumi Viewer;
-- defaultspack chat, composer, activity preview, Right Sidebar, Company, Subagent Team, Kanban, Prompt Studio, Desktops, Host Permissions, pairing, approvals, and Ambient surfaces;
+- defaultspack chat, composer, activity preview, Right Sidebar, Company, Subagent Team, Kanban, Prompt Studio, Coding Cockpit, Desktops, Host Permissions, pairing, approvals, Settings, extensions, and Ambient surfaces;
 - Search Home;
 - standalone Setup;
 - Browser Companion;
@@ -24,7 +33,7 @@ The review inspected frontend source and shared UI primitives across:
 
 The review classified findings by user consequence rather than by cosmetic severity:
 
-- **P0:** authorization, credential, navigation, execution, privacy, or trust boundary can be bypassed or materially misrepresented;
+- **P0:** authorization, credential, navigation, execution, identity, privacy, or trust boundary can be bypassed or materially misrepresented;
 - **P1:** data loss, wrong-resource mutation, inaccessible core workflow, ambiguous destructive action, or high-impact recovery failure;
 - **P2:** incomplete semantics, target size, localization, layout, discoverability, or non-blocking UX debt.
 
@@ -45,8 +54,13 @@ The following issues should be treated as release blockers until their enforceme
 | #1050 | Scanned API QR data can persist and activate an attacker-controlled provider endpoint. |
 | #1052 | Legacy mobile PC QR imports carry reusable bearer credentials. |
 | #1058 | Tool Preview auto-fetches untrusted URLs and executes untrusted HTML with scripts/forms/popups enabled. |
+| #1071 | `rumi_local_auth` could be appended to external or malformed URLs. |
+| #1078 | Self-declared renderer trust can execute extension JavaScript in the full application origin and blank the shell on failure. |
+| #1089 | A temporary secure-storage read failure can silently create a new mobile device signing identity. |
 
 ## Audit issue index
+
+The authoritative complete index is tracker #1069. The sections below record the deep and residual source findings carried by this baseline; the initial visual/UI set remains linked from the tracker.
 
 ### Rumi Viewer
 
@@ -133,6 +147,25 @@ The following issues should be treated as release blockers until their enforceme
 - #1043 — do not present hard-coded UI Precision scenarios as measured model comparisons.
 - #1047 — detect/review secrets and sensitive files before attachment dispatch.
 
+### Latest static-saturation pass
+
+- #1071 — never append `rumi_local_auth` credentials to external or malformed URLs.
+- #1072 — do not persist or broadcast full Ambient AI answers as browser-global state.
+- #1073 — make Coding diff/checkpoint refresh real and restore reviewable/outcome-bound.
+- #1074 — stop swallowing mobile secure-storage failures across credentials/settings/knowledge.
+- #1076 — validate and save Mobile Settings as one atomic, recoverable transaction.
+- #1078 — replace self-declared trusted renderers with verified isolation and per-region fallback.
+- #1079 — redact and bound global client diagnostics before reporting errors.
+- #1080 — treat HTML placement manifests as untrusted active content.
+- #1081 — make Coding Cockpit and Rumi Review one coherent keyboard/screen-reader workspace.
+- #1082 — bind every Rumi Review mutation to an explicit review revision.
+- #1083 — treat client approval-settlement events/return parameters as untrusted hints.
+- #1085 — validate OAuth destinations and review credential imports before connection changes.
+- #1086 — consolidate duplicated model pickers into one complete async combobox contract.
+- #1087 — make Composer voice input explicit, reviewable, locale-aware, and recoverable.
+- #1088 — make mobile pairing, pickup, ACK, cancellation, and unpair one lifecycle.
+- #1089 — never rotate/lose the mobile signing identity because storage was temporarily unreadable.
+
 ## Immediate mitigations in this change
 
 ### Browser approval-token transport
@@ -145,7 +178,19 @@ The following issues should be treated as release blockers until their enforceme
 - removes legacy local-storage values during migration;
 - retains only the minimum same-origin compatibility path while #1006 remains open.
 
-This is an emergency containment, not the complete #1006 design. The final architecture still needs a request-bound, short-lived, authenticated channel that carries no reusable approval credential in a URL.
+This is emergency containment, not the complete #1006 design. The final architecture still needs a request-bound, short-lived, authenticated channel that carries no reusable approval credential in a URL.
+
+### Defaultspack local-auth URL containment
+
+`defaultspackLocalAuth.ts` now:
+
+- parses and validates the destination before adding any credential;
+- accepts only same-origin HTTP(S) destinations;
+- rejects protocol-relative, cross-origin, non-HTTP(S), embedded-credential, control-character, and malformed destinations;
+- removes the parse-failure fallback that concatenated `rumi_local_auth` to arbitrary strings;
+- remains fail-closed outside a browser by accepting only unambiguous root-relative paths.
+
+This prevents the concrete external/malformed exfiltration path but does not close #1071. The reusable credential still needs to leave URLs and Web Storage entirely in favor of a one-time, audience-bound authenticated exchange.
 
 ### Attachment Markdown boundary
 
@@ -162,22 +207,23 @@ This prevents delimiter breakout but does not solve prompt injection or secret e
 The dedicated `UI Security Guardrails` workflow fails when:
 
 - approval tokens are read from or written to persistent `localStorage`;
-- tokenized URLs can return arbitrary absolute destinations;
-- parse failures append approval tokens to unvalidated strings;
+- approval/local-auth tokenized URLs can return arbitrary absolute destinations;
+- parse failures append credentials to unvalidated strings;
+- local-auth destination policy loses protocol, origin, userinfo, or HTTP(S) checks;
 - attachment snippets regress to a fixed Markdown fence;
 - attachment filenames lose normalization.
 
-Focused Node tests cover external destination rejection, return-target filtering, and non-colliding attachment fences.
+Focused Node tests cover external/protocol-relative/non-HTTP(S)/userinfo/malformed destination rejection, same-origin compatibility, return-target filtering, credential non-leakage, and non-colliding attachment fences.
 
 ## Required remediation sequence
 
-1. **Contain P0 credential and execution paths:** #1005, #1006, #1050, #1052, #1058, #994, #1001.
-2. **Unify approval semantics and enforcement:** #977, #1010, #1026, #1029, #1034.
-3. **Stop data loss and wrong-resource writes:** #970, #973, #985, #991, #993, #1003, #1012.
-4. **Adopt shared modal/menu/combobox/status primitives:** #975, #976, #980, #981, #982, #983.
-5. **Complete keyboard/screen-reader task models:** #972, #986, #1000, #1028, #1031, #1041, #1054, #1057.
-6. **Harden content/navigation/artifact presentation:** #988, #1007, #1008, #1009, #1047, #1058.
-7. **Run visual and localization validation:** 200% zoom, large text, narrow viewport, forced colors/high contrast, reduced motion, long localization, RTL readiness, and touch targets.
+1. **Contain P0 credential, identity, and execution paths:** #1005, #1006, #1050, #1052, #1058, #1071, #1078, #1089, #994, #1001.
+2. **Unify approval semantics and enforcement:** #977, #1010, #1026, #1029, #1034, #1083.
+3. **Stop data loss, wrong-resource writes, and silent persistence:** #970, #973, #985, #991, #993, #1003, #1012, #1073, #1074, #1076, #1082, #1088.
+4. **Adopt shared modal/menu/combobox/status primitives:** #975, #976, #980, #981, #982, #983, #1086.
+5. **Complete keyboard/screen-reader task models:** #972, #986, #1000, #1028, #1031, #1041, #1054, #1057, #1081, #1087.
+6. **Harden content/navigation/artifact/extension presentation:** #988, #1007, #1008, #1009, #1047, #1058, #1078, #1079, #1080, #1085.
+7. **Run visual and localization validation:** 200%/400% zoom, large text, narrow viewport/height, forced colors/high contrast, reduced motion, long localization, RTL readiness, touch targets, native WebViews, and supported browsers/OS versions.
 
 ## Verification
 
@@ -185,16 +231,13 @@ From `rumi_ai_1_10/ecosystem/defaultspack/webapp`:
 
 ```bash
 node scripts/check-ui-security-guardrails.mjs
-npx tsx --test src/lib/authorityApprovalBrowserToken.test.ts src/lib/attachments.test.ts
+npx tsx --test \
+  src/lib/authorityApprovalBrowserToken.test.ts \
+  src/lib/defaultspackLocalAuth.test.ts \
+  src/lib/attachments.test.ts
 npm test
 npm run lint
 npm run build
-```
-
-The focused tests added by this change are:
-
-```bash
-npx tsx --test   src/lib/authorityApprovalBrowserToken.test.ts   src/lib/attachments.test.ts
 ```
 
 ## Completion criteria
@@ -208,4 +251,5 @@ A finding is not complete merely because an issue exists. It is complete only wh
 - drafts survive failure and context changes;
 - the full task is keyboard, screen-reader, touch, zoom, and localization operable;
 - automated tests cover success, failure, stale response, duplicate action, and adversarial input;
-- the issue acceptance checklist is demonstrably satisfied.
+- native/browser/device behavior has runtime evidence where static source cannot prove it;
+- the corresponding issue acceptance checklist is demonstrably satisfied.
