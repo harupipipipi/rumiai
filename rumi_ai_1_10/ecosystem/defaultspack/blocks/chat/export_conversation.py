@@ -12,11 +12,16 @@ def run(input_data, context):
     conversation_id = input_data.get("conversation_id")
     if not conversation_id:
         return error("conversation_id is required", "INVALID_INPUT")
-    fmt = input_data.get("format", "markdown")
+    fmt = str(input_data.get("format", "markdown")).strip().lower()
     if fmt not in ("markdown", "json"):
         return error("format must be 'markdown' or 'json'", "INVALID_INPUT")
     content = store.export_conversation(conversation_id, fmt=fmt)
     if content is None:
         return error("Conversation not found", "NOT_FOUND")
     audit = record_share_event("export", target_id=conversation_id, mode=str(fmt))
-    return ok({"content": content, "format": fmt, "audit": audit})
+    return ok({
+        "conversation_id": conversation_id,
+        "format": fmt,
+        "content": content,
+        "audit": audit,
+    })
