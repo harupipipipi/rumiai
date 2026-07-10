@@ -60,6 +60,17 @@
     "active_query": "mcp:server_tool"
   },
   {
+    "name": "supplementary-plane letter",
+    "text": "先𐐀 @𐐀tool",
+    "tokens": ["𐐀tool"],
+    "token_spans": [[3, 9]],
+    "cursor_utf16": 11,
+    "cursor_codepoint": 9,
+    "active_start_utf16": 4,
+    "active_start_codepoint": 3,
+    "active_query": "𐐀tool"
+  },
+  {
     "name": "email address",
     "text": "mail@example.com",
     "tokens": [],

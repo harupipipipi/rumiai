@@ -941,6 +941,107 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(general["keyboard_button_navigation"])
         self.assertIn("keyboard_button_navigation", field_ids)
 
+    def test_keyboard_navigation_migrates_legacy_default_once(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        fixture_path = Path(__file__).parent / "fixtures" / (
+            "frontend_settings_keyboard_navigation_legacy.json"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fixture_path, settings_path)
+            registry = FrontendRegistry(pack_root=pack_root)
+
+            first = registry.get_settings(lightweight=True)["values"]
+            persisted_after_first_read = settings_path.read_text(encoding="utf-8")
+            second = registry.get_settings(lightweight=True)["values"]
+            persisted_after_second_read = settings_path.read_text(encoding="utf-8")
+
+        self.assertTrue(first["general"]["keyboard_button_navigation"])
+        self.assertEqual(first["general"]["settings_version"], 2)
+        self.assertEqual(
+            first["general"]["keyboard_button_navigation_source"],
+            "legacy_default_migrated",
+        )
+        self.assertEqual(first["general"]["composer_placeholder"], "既存のプレースホルダー")
+        self.assertEqual(first["general"]["language"], "en")
+        self.assertEqual(first["general"]["legacy_custom_flag"], "keep-me")
+        self.assertTrue(first["preview"]["auto_open"])
+        self.assertEqual(first["preview"]["max_items"], 7)
+        self.assertEqual(second, first)
+        self.assertEqual(persisted_after_second_read, persisted_after_first_read)
+
+    def test_keyboard_navigation_explicit_false_is_preserved_and_marked(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            registry = FrontendRegistry(pack_root=pack_root)
+            migrated = registry.update_settings(
+                {"general": {"keyboard_button_navigation": False}}
+            )
+            reloaded = registry.get_settings(lightweight=True)["values"]
+
+        self.assertFalse(migrated["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            migrated["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+        self.assertFalse(reloaded["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            reloaded["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+
+    def test_keyboard_navigation_future_version_false_is_not_migrated(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "general": {
+                            "settings_version": 99,
+                            "keyboard_button_navigation": False,
+                            "keyboard_button_navigation_source": "user",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registry = FrontendRegistry(pack_root=pack_root)
+            values = registry.get_settings(lightweight=True)["values"]
+            updated = registry.update_settings(
+                {
+                    "general": {
+                        "keyboard_button_navigation": False,
+                        "language": "en",
+                    }
+                }
+            )
+
+        self.assertEqual(values["general"]["settings_version"], 99)
+        self.assertFalse(values["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            values["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+        self.assertEqual(updated["general"]["settings_version"], 99)
+        self.assertFalse(updated["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            updated["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+
     def test_settings_api_keys_expose_google_browser_oauth_status(self):
         from domain.ai_client.oauth_store import (
             save_provider_oauth_client_config,

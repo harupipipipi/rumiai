@@ -58,7 +58,7 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerMentionMetadataFromWidgets, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, normalizeComposerMentionMetadata, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerMentionMetadataFromWidgets, composerMentionToolIdsFromWidgets, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, normalizeComposerMentionMetadata, publicComposerWidgetMetadata, reconcileComposerSemanticDraft, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget, withComposerMentionSelectionOwnership } from "./lib/composerWidgets";
 import { toolGroupFor } from "./lib/toolUi";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
@@ -156,6 +156,13 @@ function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
     if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
   }
   return [...new Set(ids)];
+}
+
+function semanticAttachmentPaths(files: AttachedFile[]): string[] {
+  return files.flatMap((file) => {
+    if (file.sourcePath) return [file.sourcePath];
+    return file.source === "workspace" && file.name ? [file.name] : [];
+  });
 }
 
 function parseConversationToolPreferences(metadata: unknown): ConversationToolPreferences {
@@ -2639,6 +2646,26 @@ function ChatApp() {
     setSelectedToolIds: setStoredSelectedToolIds,
     conversationPreferences: activeConversationToolPreferences,
   });
+  useEffect(() => {
+    if (isGenerating) return;
+    const reconciled = reconcileComposerSemanticDraft({
+      droppedWidgets,
+      selectedToolIds,
+      text: input,
+    });
+    if (
+      reconciled.droppedWidgets.length !== droppedWidgets.length
+      || reconciled.droppedWidgets.some((widget, index) => widget !== droppedWidgets[index])
+    ) {
+      setDroppedWidgets(reconciled.droppedWidgets);
+    }
+    if (
+      reconciled.selectedToolIds.length !== selectedToolIds.length
+      || reconciled.selectedToolIds.some((toolId, index) => toolId !== selectedToolIds[index])
+    ) {
+      setStoredSelectedToolIds(reconciled.selectedToolIds);
+    }
+  }, [droppedWidgets, input, isGenerating, selectedToolIds, setStoredSelectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
@@ -4340,24 +4367,35 @@ function ChatApp() {
   };
 
   const handleFileRemove = (fileId: string) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    const remainingFiles = attachedFiles.filter((file) => file.id !== fileId);
+    const reconciled = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPaths(remainingFiles),
+      droppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds,
+      text: input,
+    });
+    setAttachedFiles(remainingFiles);
+    setDroppedWidgets(reconciled.droppedWidgets);
+    setStoredSelectedToolIds(reconciled.selectedToolIds);
   };
 
   const handleDropWidget = (widget: DroppedWidget) => {
+    const ownedWidget = withComposerMentionSelectionOwnership(widget, selectedToolIds);
     setDroppedWidgets((prev) => {
-      if (prev.some((w) => w.id === widget.id)) return prev;
-      return [...prev, { ...widget, enabled: widget.enabled ?? true }];
+      if (prev.some((w) => w.id === ownedWidget.id)) return prev;
+      return [...prev, { ...ownedWidget, enabled: ownedWidget.enabled ?? true }];
     });
-    if ((widget.widgetKind === "tool_toggle" || widget.type === "tool") && widget.enabled !== false) {
-      const toolId = widget.sourceItemId || widget.id;
+    if ((ownedWidget.widgetKind === "tool_toggle" || ownedWidget.type === "tool") && ownedWidget.enabled !== false) {
+      const toolId = ownedWidget.sourceItemId || ownedWidget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
         toolSelectionController.setTurnMode("manual");
         setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
-    if (widget.type === "service" && widget.metadata?.source === "composer_at_mention") {
-      const serviceId = widget.sourceItemId || widget.id.replace(/^mention-service:/, "");
+    if (ownedWidget.type === "service" && ownedWidget.metadata?.source === "composer_at_mention") {
+      const serviceId = ownedWidget.sourceItemId || ownedWidget.id.replace(/^mention-service:/, "");
       const serviceToolIds = composerExtensions
         .filter((item) => !item.disabled && toolGroupFor(item).id === serviceId)
         .map((item) => item.id);
@@ -4935,7 +4973,7 @@ function ChatApp() {
     event?.preventDefault();
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
-    const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
+    const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
     if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
     const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
@@ -4949,10 +4987,24 @@ function ChatApp() {
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
     const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
+    const selectionToolIdsForReconciliation = override?.toolSelectionRequest
+      ? toolIdsFromSelectionRequest(override.toolSelectionRequest)
+      : selectedToolIds;
+    const reconciledDraft = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPaths(submittedAttachments),
+      droppedWidgets: requestedDroppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds: selectionToolIdsForReconciliation,
+      text: userText,
+    });
+    const droppedWidgetsForSubmit = reconciledDraft.droppedWidgets;
+    const selectedToolIdsForSubmit = reconciledDraft.selectedToolIds;
+    const semanticMentionToolIds = new Set(composerMentionToolIdsFromWidgets(requestedDroppedWidgets));
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions)
+      .filter((toolId) => !semanticMentionToolIds.has(toolId));
     const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
-      toolIds: selectedToolIds,
+      toolIds: selectedToolIdsForSubmit,
       mentionedToolIds,
     });
     if (!override?.skipReview && toolSelectionRequest.mode === "review") {
@@ -4987,7 +5039,7 @@ function ChatApp() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const requestedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
+    const requestedToolIds = [...new Set([...selectedToolIdsForSubmit, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
     const submittedToolIds = toolSelectionRequest.mode === "none" ? [] : requestedToolIds;
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
@@ -5413,7 +5465,14 @@ function ChatApp() {
           ...(submittedMentions.length ? { mentions: submittedMentions } : {}),
           dropped_widgets: submittedDroppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
-            .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
+            .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({
+              id,
+              type,
+              label,
+              widgetKind,
+              sourceItemId,
+              metadata: publicComposerWidgetMetadata(metadata),
+            })),
         },
       }, {
         onEvent: updateStreamingActivity,

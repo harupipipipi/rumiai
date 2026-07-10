@@ -690,7 +690,12 @@ function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: stri
       {icon}
       <span className="truncate">{file.name}</span>
       {onRemove && (
-        <button type="button" onClick={() => onRemove(file.id)} className="ml-0.5 text-zinc-500 hover:text-zinc-200 flex-shrink-0">
+        <button
+          type="button"
+          aria-label={`${file.name} を削除`}
+          onClick={() => onRemove(file.id)}
+          className="ml-0.5 text-zinc-500 hover:text-zinc-200 flex-shrink-0"
+        >
           <X size={10} />
         </button>
       )}
@@ -718,6 +723,7 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
       {onRemove && (
         <button
           type="button"
+          aria-label={`${file.name} を削除`}
           onClick={() => onRemove(file.id)}
           className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-zinc-400 opacity-0 transition-opacity hover:text-zinc-100 group-hover/file:opacity-100"
           title="削除"

@@ -40,6 +40,12 @@ from transport.registry import (
 )
 
 
+_GENERAL_SETTINGS_VERSION = 2
+_KEYBOARD_NAVIGATION_SOURCE_DEFAULT = "default"
+_KEYBOARD_NAVIGATION_SOURCE_LEGACY_MIGRATION = "legacy_default_migrated"
+_KEYBOARD_NAVIGATION_SOURCE_USER = "user"
+
+
 class FrontendRegistry:
     """Registry for frontend catalog, settings, and chat preview metadata."""
 
@@ -152,6 +158,7 @@ class FrontendRegistry:
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
         current = self._read_settings()
         sanitized_patch = self._sanitize_settings_patch(patch or {})
+        self._mark_explicit_keyboard_navigation_change(current, sanitized_patch)
         merged = self._deep_merge(current, sanitized_patch)
         merged = self._refresh_derived_settings(merged)
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2604,9 +2611,54 @@ class FrontendRegistry:
                 saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 saved = {}
+            saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
+            if migrated:
+                self._settings_path.write_text(
+                    json.dumps(saved, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)
+
+    def _migrate_legacy_keyboard_navigation(
+        self,
+        saved: Any,
+    ) -> tuple[dict[str, Any], bool]:
+        """Upgrade the old persisted default without rewriting later user choices."""
+
+        if not isinstance(saved, dict):
+            return {}, False
+        normalized = deepcopy(saved)
+        general = normalized.get("general")
+        if not isinstance(general, dict):
+            general = {}
+            normalized["general"] = general
+        try:
+            settings_version = int(general.get("settings_version") or 1)
+        except (TypeError, ValueError):
+            settings_version = 1
+        if settings_version >= _GENERAL_SETTINGS_VERSION:
+            return normalized, False
+
+        source = str(general.get("keyboard_button_navigation_source") or "").strip()
+        legacy_value = general.get("keyboard_button_navigation")
+        if (
+            source != _KEYBOARD_NAVIGATION_SOURCE_USER
+            and legacy_value is not None
+            and not self._setting_bool(legacy_value, False)
+        ):
+            general["keyboard_button_navigation"] = True
+            general["keyboard_button_navigation_source"] = (
+                _KEYBOARD_NAVIGATION_SOURCE_LEGACY_MIGRATION
+            )
+        else:
+            general.setdefault(
+                "keyboard_button_navigation_source",
+                _KEYBOARD_NAVIGATION_SOURCE_DEFAULT,
+            )
+        general["settings_version"] = _GENERAL_SETTINGS_VERSION
+        return normalized, True
 
     def _settings_with_legacy_tool_version(self, saved: Any) -> dict[str, Any]:
         if not isinstance(saved, dict):
@@ -2620,9 +2672,13 @@ class FrontendRegistry:
     def _default_settings(self) -> dict[str, Any]:
         return {
             "general": {
+                "settings_version": _GENERAL_SETTINGS_VERSION,
                 "composer_placeholder": "メッセージを入力...",
                 "show_activity_in_messages": True,
                 "keyboard_button_navigation": True,
+                "keyboard_button_navigation_source": (
+                    _KEYBOARD_NAVIGATION_SOURCE_DEFAULT
+                ),
                 "spotlight_shortcut_enabled": True,
                 "spotlight_shortcut": "Ctrl+K",
                 "spotlight_shortcut_text_input": True,
@@ -3127,6 +3183,10 @@ class FrontendRegistry:
 
     def _sanitize_settings_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
         sanitized = deepcopy(patch)
+        general = sanitized.get("general")
+        if isinstance(general, dict):
+            general.pop("settings_version", None)
+            general.pop("keyboard_button_navigation_source", None)
         apis = sanitized.get("apis")
         if isinstance(apis, dict):
             legacy_model_routes = apis.pop("model_api_routes", None)
@@ -3194,6 +3254,43 @@ class FrontendRegistry:
             ).sanitize_models_patch(models)
         return sanitized
 
+    def _mark_explicit_keyboard_navigation_change(
+        self,
+        current: dict[str, Any],
+        patch: dict[str, Any],
+    ) -> None:
+        general_patch = patch.get("general")
+        if not isinstance(general_patch, dict):
+            return
+        current_general = current.get("general")
+        try:
+            current_version = int(
+                current_general.get("settings_version")
+                if isinstance(current_general, dict)
+                else _GENERAL_SETTINGS_VERSION
+            )
+        except (TypeError, ValueError):
+            current_version = _GENERAL_SETTINGS_VERSION
+        general_patch["settings_version"] = max(
+            _GENERAL_SETTINGS_VERSION,
+            current_version,
+        )
+        if "keyboard_button_navigation" not in general_patch:
+            return
+        current_value = (
+            current_general.get("keyboard_button_navigation")
+            if isinstance(current_general, dict)
+            else True
+        )
+        next_value = self._setting_bool(
+            general_patch.get("keyboard_button_navigation"),
+            True,
+        )
+        if next_value != self._setting_bool(current_value, True):
+            general_patch["keyboard_button_navigation_source"] = (
+                _KEYBOARD_NAVIGATION_SOURCE_USER
+            )
+
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
         debug = refreshed.setdefault("debug", {})
@@ -3208,6 +3305,33 @@ class FrontendRegistry:
             refreshed["general"] = general
         language = str(general.get("language") or "ja").strip().lower()
         general["language"] = language if language in {"ja", "en", "auto"} else "ja"
+        try:
+            general_settings_version = int(
+                general.get("settings_version") or _GENERAL_SETTINGS_VERSION
+            )
+        except (TypeError, ValueError):
+            general_settings_version = _GENERAL_SETTINGS_VERSION
+        general["settings_version"] = max(
+            _GENERAL_SETTINGS_VERSION,
+            general_settings_version,
+        )
+        general["keyboard_button_navigation"] = self._setting_bool(
+            general.get("keyboard_button_navigation"),
+            True,
+        )
+        keyboard_navigation_source = str(
+            general.get("keyboard_button_navigation_source") or ""
+        ).strip()
+        general["keyboard_button_navigation_source"] = (
+            keyboard_navigation_source
+            if keyboard_navigation_source
+            in {
+                _KEYBOARD_NAVIGATION_SOURCE_DEFAULT,
+                _KEYBOARD_NAVIGATION_SOURCE_LEGACY_MIGRATION,
+                _KEYBOARD_NAVIGATION_SOURCE_USER,
+            }
+            else _KEYBOARD_NAVIGATION_SOURCE_DEFAULT
+        )
         general["spotlight_shortcut_enabled"] = self._setting_bool(
             general.get("spotlight_shortcut_enabled"),
             True,

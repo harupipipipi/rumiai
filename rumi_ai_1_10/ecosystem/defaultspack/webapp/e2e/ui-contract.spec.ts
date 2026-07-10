@@ -8,6 +8,7 @@ const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
 type ApiMockOptions = {
+  initialSettingsValues?: Record<string, Record<string, unknown>>;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
 };
@@ -238,6 +239,21 @@ const sidebarItems = [
     },
   },
   {
+    id: "𐐀tool",
+    label: "𐐀tool",
+    category: "tool",
+    description: "Supplementary-plane Unicode tool.",
+    tags: ["unicode"],
+    risk: "low",
+    ui: {
+      group_id: "research",
+      group_label: "Research",
+      widget_kind: "tool_toggle",
+      drop_capabilities: ["composer.toggle_chip"],
+      composer_label: "𐐀tool",
+    },
+  },
+  {
     id: "scheduler",
     label: "Scheduler",
     category: "tool",
@@ -455,7 +471,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     sessionStorage.clear();
   });
 
-  let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
+  let currentSettingsValues: Record<string, Record<string, unknown>> = JSON.parse(JSON.stringify({
+    ...settingsValues,
+    ...(options.initialSettingsValues ?? {}),
+    general: {
+      ...settingsValues.general,
+      ...(options.initialSettingsValues?.general ?? {}),
+    },
+  }));
   let conversationToolPreferences: Record<string, unknown> = {};
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
@@ -492,7 +515,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/ui/settings" && method === "PUT") {
-      const payload = request.postDataJSON() as { values?: typeof settingsValues };
+      const payload = request.postDataJSON() as {
+        values?: Record<string, Record<string, unknown>>;
+      };
       currentSettingsValues = JSON.parse(JSON.stringify(payload.values ?? currentSettingsValues));
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
@@ -996,6 +1021,135 @@ test("composer at mention selects tools skills and services with semantic metada
       }),
     }),
   ]);
+});
+
+test("composer removes semantic tool state after an escaped edit", async ({ page }) => {
+  const escapedRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => escapedRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @web");
+  await composer.press("Enter");
+  await composer.fill("Use \\@Web Search");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => escapedRequests.length).toBe(1);
+
+  const escapedRequest = escapedRequests[0];
+  expect(escapedRequest.tools).toBeUndefined();
+  const escapedSelection = (escapedRequest.params as Record<string, unknown>)
+    .tool_selection as Record<string, unknown>;
+  expect(escapedSelection).toMatchObject({ mode: "manual", include: [] });
+  const escapedMetadata = (escapedRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(escapedMetadata.mentions).toBeUndefined();
+  expect(escapedMetadata.selected_tools).toBeUndefined();
+  expect(escapedMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer removes semantic tool state after its chip is toggled off", async ({ page }) => {
+  const chipRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => chipRequests.push(payload),
+  });
+  const chipComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await chipComposer.fill("Use @web");
+  await chipComposer.press("Enter");
+  await page.locator('.rumi-composer-frame button[title="Search the web."]').click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => chipRequests.length).toBe(1);
+  const chipRequest = chipRequests[0];
+  expect(chipRequest.tools).toBeUndefined();
+  const chipMetadata = (chipRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(chipMetadata.mentions).toBeUndefined();
+  expect(chipMetadata.selected_tools).toBeUndefined();
+  expect(chipMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer reconciles removed service tools before submit", async ({ page }) => {
+  const serviceRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => serviceRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @gith");
+  await page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" }).click();
+  await page.getByRole("button", { name: "GitHub Issues の今回指定を解除" }).click();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => serviceRequests.length).toBe(1);
+  const serviceRequest = serviceRequests[0];
+  expect(serviceRequest.tools).toBeUndefined();
+  const serviceMetadata = (serviceRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(serviceMetadata.mentions).toBeUndefined();
+  expect(serviceMetadata.selected_tools).toBeUndefined();
+  expect(serviceMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer removes file mention metadata when its attachment is removed", async ({ page }) => {
+  const fileRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => fileRequests.push(payload),
+  });
+  const fileComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await fileComposer.fill("/coding");
+  await fileComposer.press("Enter");
+  await fileComposer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toBeVisible();
+  await page.getByRole("button", { name: "README.md を削除" }).click();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => fileRequests.length).toBe(1);
+  const fileMessage = fileRequests[0].message as Record<string, unknown>;
+  expect(fileMessage.attachments).toBeUndefined();
+  const fileMetadata = fileMessage.metadata as Record<string, unknown>;
+  expect(fileMetadata.mentions).toBeUndefined();
+  expect(fileMetadata.attachments).toEqual([]);
+  expect(fileMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer supplementary-plane mention keeps textarea and parser indices aligned", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("先𐐀 @𐐀");
+  await expect(page.getByRole("option", { name: /@𐐀tool/i })).toBeVisible();
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("先𐐀 @𐐀tool ");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  expect(streamRequests[0].tools).toEqual(["𐐀tool"]);
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "𐐀tool", kind: "tool", label: "𐐀tool", syntax: "@𐐀tool" },
+  ]);
+});
+
+test("migrated keyboard navigation marker keeps composer controls reachable", async ({ page }) => {
+  await openDefaultspack(page, "/chat", {
+    initialSettingsValues: {
+      general: {
+        settings_version: 2,
+        keyboard_button_navigation: true,
+        keyboard_button_navigation_source: "legacy_default_migrated",
+        composer_placeholder: "Migrated placeholder",
+      },
+    },
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.focus();
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
 });
 
 test("composer mention keyboard and ARIA contracts stay predictable at Unicode and empty boundaries", async ({ page }) => {
