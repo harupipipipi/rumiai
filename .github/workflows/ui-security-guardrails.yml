@@ -8,12 +8,13 @@ on:
   push:
     branches:
       - soon
+      - audit/ui-ux-security-guardrails-20260710
     paths:
       - "rumi_ai_1_10/ecosystem/defaultspack/webapp/**"
       - ".github/workflows/ui-security-guardrails.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   guardrails:
@@ -33,3 +34,34 @@ jobs:
         run: node scripts/check-ui-security-guardrails.mjs
       - name: Run focused security tests
         run: npx tsx --test src/lib/authorityApprovalBrowserToken.test.ts src/lib/attachments.test.ts
+
+  sync-vendored-bundle:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/ui-ux-security-guardrails-20260710'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - run: npm ci
+      - name: Build vendored defaultspack UI
+        run: npm run build
+      - name: Commit generated bundle when changed
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rumi_ai_1_10/ecosystem/defaultspack/ui
+          if git diff --cached --quiet; then
+            echo "Vendored UI already synchronized."
+          else
+            git commit -m "build: sync defaultspack frontend bundle"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
