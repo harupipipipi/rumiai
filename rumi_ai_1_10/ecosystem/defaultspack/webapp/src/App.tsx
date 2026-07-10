@@ -67,7 +67,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
-import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
+import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -2258,6 +2258,31 @@ export function parseCommandBoolean(value: unknown, fallback: boolean): boolean 
   return Boolean(value);
 }
 
+export function frontendModeForCommandAction(action: string, currentMode: AppMode): AppMode | null {
+  switch (action) {
+    case "set_mode_coding":
+      return currentMode === "coding" ? "agent" : "coding";
+    case "set_mode_chat":
+      return "chat";
+    case "set_mode_agent":
+      return "agent";
+    default:
+      return null;
+  }
+}
+
+export function frontendModeForPathname(pathname: string): AppMode | null {
+  const normalized = (pathname || "/").replace(/\/+$/, "") || "/";
+  if (normalized === "/coding") return "coding";
+  if (normalized === "/chat") return "chat";
+  if (normalized === "/agent") return "agent";
+  return null;
+}
+
+export function shouldRunFrontendCommandLocally(command: ComposerCommandItem | undefined): boolean {
+  return command?.execution.type === "frontend";
+}
+
 export function frontendCommandArgs(
   parsedArgs: Record<string, unknown>,
   backendArgs: unknown,
@@ -2422,12 +2447,6 @@ function ChatApp() {
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (mode === "chat") {
-      setMode("agent");
-    }
-  }, [mode, setMode]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -3007,8 +3026,9 @@ function ChatApp() {
   }, [mode, loadCodingContext, loadCodingWorkspaces]);
 
   useEffect(() => {
-    if (window.location.pathname !== "/coding") return;
-    setMode("coding");
+    const routeMode = frontendModeForPathname(window.location.pathname);
+    if (!routeMode) return;
+    setMode(routeMode);
   }, [setMode]);
 
   useEffect(() => {
@@ -3329,6 +3349,7 @@ function ChatApp() {
     const handlePopState = () => {
       setError(null);
       const routeKind = workspaceKindForPathname(window.location.pathname) ?? "chat";
+      const routeMode = frontendModeForPathname(window.location.pathname) ?? (routeKind === "coding" ? "coding" : "agent");
       if (routeKind !== "chat") {
         const routeTabId = `workspace-tab-route-${routeKind}`;
         setWorkspaceTabs((current) => (
@@ -3337,10 +3358,10 @@ function ChatApp() {
             : [...current, createWorkspaceTab(routeKind, { id: routeTabId })]
         ));
         setActiveWorkspaceTabId(routeTabId);
-        setMode(routeKind === "coding" ? "coding" : "agent");
+        setMode(routeMode);
       } else {
         setActiveWorkspaceTabId(DEFAULT_WORKSPACE_TAB_ID);
-        setMode("agent");
+        setMode(routeMode);
       }
       void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
@@ -3963,14 +3984,12 @@ function ChatApp() {
         }
         return;
       case "set_mode_coding":
-        handleModeChange(mode === "coding" ? "agent" : "coding");
-        return;
       case "set_mode_chat":
-        handleModeChange("agent");
+      case "set_mode_agent": {
+        const nextMode = frontendModeForCommandAction(action, mode);
+        if (nextMode) handleModeChange(nextMode);
         return;
-      case "set_mode_agent":
-        handleModeChange("agent");
-        return;
+      }
       case "toggle_yolo":
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
         return;
@@ -4073,7 +4092,7 @@ function ChatApp() {
     }
     try {
       setError(null);
-      if (isRegisteredSlashCommand(parsed.command)) {
+      if (shouldRunFrontendCommandLocally(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
         return true;
@@ -6264,7 +6283,13 @@ export default function App() {
   if (pathname === "/adaptive" || pathname === "/operating-profile") {
     return <AdaptiveRuntimePage />;
   }
-  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat" || pathname === "/calendar") {
+  if (
+    pathname === "/defaultspack" ||
+    pathname === "/pack/defaultspack" ||
+    pathname === "/chat" ||
+    pathname === "/agent" ||
+    pathname === "/calendar"
+  ) {
     return <ChatApp />;
   }
   return <ChatApp />;

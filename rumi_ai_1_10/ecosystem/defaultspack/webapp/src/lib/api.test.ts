@@ -10,6 +10,8 @@ import {
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
   frontendCommandArgs,
+  frontendModeForCommandAction,
+  frontendModeForPathname,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
   parseSlashCommandInput,
@@ -18,6 +20,7 @@ import {
   resolveMimoVisionModel,
   resolveUltraYoloModeState,
   resolvedFrontendCommandArgs,
+  shouldRunFrontendCommandLocally,
 } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -323,6 +326,83 @@ test("slash command parsing can be disabled by template feature flags", () => {
 
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("chat slash command resolves to distinct chat mode instead of agent mode", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "chat",
+      name: "chat",
+      label: "Chat Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_chat" },
+    },
+    {
+      id: "agent",
+      name: "agent",
+      label: "Agent Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_agent" },
+    },
+    {
+      id: "coding",
+      name: "coding",
+      label: "Coding Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_coding" },
+    },
+  ];
+
+  const chat = parseSlashCommandInput("/chat", commands);
+  const agent = parseSlashCommandInput("/agent", commands);
+  const coding = parseSlashCommandInput("/coding", commands);
+  const actionFor = (command: ComposerCommandItem | undefined): string => (
+    command?.execution.type === "frontend" ? command.execution.action : ""
+  );
+
+  assert.equal(frontendModeForCommandAction(actionFor(chat?.command), "agent"), "chat");
+  assert.equal(frontendModeForCommandAction(actionFor(agent?.command), "chat"), "agent");
+  assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "chat"), "coding");
+  assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "coding"), "agent");
+});
+
+test("direct chat agent and coding routes resolve distinct frontend modes", () => {
+  assert.equal(frontendModeForPathname("/chat"), "chat");
+  assert.equal(frontendModeForPathname("/chat/"), "chat");
+  assert.equal(frontendModeForPathname("/agent"), "agent");
+  assert.equal(frontendModeForPathname("/agent/"), "agent");
+  assert.equal(frontendModeForPathname("/coding"), "coding");
+  assert.equal(frontendModeForPathname("/defaultspack"), null);
+});
+
+test("built-in frontend slash commands run locally instead of falling through to backend execution", () => {
+  const builtInAgentCommand: ComposerCommandItem = {
+    id: "agent",
+    name: "agent",
+    label: "Agent Mode",
+    category: "mode",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "frontend", action: "set_mode_agent" },
+  };
+  const backendCommand: ComposerCommandItem = {
+    id: "context_txt",
+    name: "context-txt",
+    label: "Context TXT",
+    category: "tools",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+  };
+
+  assert.equal(shouldRunFrontendCommandLocally(builtInAgentCommand), true);
+  assert.equal(shouldRunFrontendCommandLocally(backendCommand), false);
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {

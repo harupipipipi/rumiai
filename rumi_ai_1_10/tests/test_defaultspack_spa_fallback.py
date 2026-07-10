@@ -6,13 +6,14 @@ from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 def test_direct_spa_route_serves_shell_after_route_miss() -> None:
     server = DefaultsHttpServer(None)
 
-    handler, path_params, source, path_inject, pattern = server._match_route("GET", "/desktops")
+    for path in ("/agent", "/desktops"):
+        handler, path_params, source, path_inject, pattern = server._match_route("GET", path)
 
-    assert handler == server._handle_static
-    assert path_params == {}
-    assert source == "fallback"
-    assert path_inject == {}
-    assert pattern == ""
+        assert handler == server._handle_static
+        assert path_params == {}
+        assert source == "fallback"
+        assert path_inject == {}
+        assert pattern == ""
 
 
 def test_api_desktops_remains_api_route() -> None:

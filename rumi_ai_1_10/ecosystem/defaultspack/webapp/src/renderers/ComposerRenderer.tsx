@@ -194,6 +194,10 @@ function looksLikeInternalComposerCopy(value: string): boolean {
   return /template-composed composer|context txt materialization|slash commands, mentions, files|context text|会話をtxt化/i.test(value);
 }
 
+function looksLikeGenericComposerPlaceholder(value: string): boolean {
+  return value.trim() === "メッセージを入力...";
+}
+
 export function composerPlaceholderCopy({
   isSteerMode,
   mode,
@@ -206,10 +210,12 @@ export function composerPlaceholderCopy({
   templatePlaceholder?: string;
 }): string {
   if (isSteerMode) return "追加の指示を入力";
-  const templateCopy = templateComposerText(templatePlaceholder);
-  if (templateCopy && !looksLikeInternalComposerCopy(templateCopy)) return templateCopy;
   if (mode === "coding") return "変更したい内容を入力...";
   if (mode === "agent") return "タスクを入力...";
+  const templateCopy = templateComposerText(templatePlaceholder);
+  if (templateCopy && !looksLikeInternalComposerCopy(templateCopy) && !looksLikeGenericComposerPlaceholder(templateCopy)) {
+    return templateCopy;
+  }
   return placeholder || "メッセージを入力...";
 }
 

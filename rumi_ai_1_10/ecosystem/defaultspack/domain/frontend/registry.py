@@ -103,7 +103,7 @@ class FrontendRegistry:
             },
             "settings": {
                 "sections": settings_sections,
-                "values": self._read_settings(),
+                "values": self._read_settings(lightweight=lightweight),
             },
             "chat_rendering": {
                 "renderers": chat_renderers,
@@ -146,7 +146,7 @@ class FrontendRegistry:
                 template_catalog.get("settings_sections", []),
                 hydrate_dynamic=not lightweight,
             ),
-            "values": self._read_settings(),
+            "values": self._read_settings(lightweight=lightweight),
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
@@ -2597,7 +2597,7 @@ class FrontendRegistry:
             deduped[value] = item
         return [deduped[value] for value in order]
 
-    def _read_settings(self) -> dict[str, Any]:
+    def _read_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
         values = self._default_settings()
         if self._settings_path.exists():
             try:
@@ -2606,6 +2606,8 @@ class FrontendRegistry:
                 saved = {}
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
+        if lightweight:
+            return values
         return self._refresh_derived_settings(values)
 
     def _settings_with_legacy_tool_version(self, saved: Any) -> dict[str, Any]:
