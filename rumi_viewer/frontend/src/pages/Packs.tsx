@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -7,6 +7,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 import { AlertTriangle, Search, Package, Loader2, ShieldCheck } from 'lucide-react';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
@@ -37,7 +38,10 @@ export function Packs() {
   const isLoading = useAppStore(state => state.isLoading);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
+  const addToast = useAppStore(state => state.addToast);
   const [search, setSearch] = useState('');
+  const pendingPackIdsRef = useRef(new Set<string>());
+  const [pendingPackIds, setPendingPackIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     loadPacks();
@@ -55,6 +59,23 @@ export function Packs() {
   }
 
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
+
+  const handleToggle = async (pack: Pack) => {
+    if (pendingPackIdsRef.current.has(pack.id)) return;
+
+    pendingPackIdsRef.current.add(pack.id);
+    setPendingPackIds(new Set(pendingPackIdsRef.current));
+    const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
+    try {
+      await runConfirmedMutation(
+        () => togglePack(pack.id),
+        () => addToast(t(key, { name: pack.name }), 'success'),
+      );
+    } finally {
+      pendingPackIdsRef.current.delete(pack.id);
+      setPendingPackIds(new Set(pendingPackIdsRef.current));
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto page-enter">
@@ -123,7 +144,9 @@ export function Packs() {
                   <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={pack.enabled}
-                      onCheckedChange={() => togglePack(pack.id)}
+                      disabled={pendingPackIds.has(pack.id)}
+                      onCheckedChange={() => { void handleToggle(pack); }}
+                      aria-busy={pendingPackIds.has(pack.id)}
                       aria-label={`Toggle ${pack.name}`}
                     />
                   </div>
