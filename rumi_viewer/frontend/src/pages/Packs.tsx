@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -39,9 +39,8 @@ export function Packs() {
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
+  const pendingPackIds = useAppStore(state => state.pendingPackIds);
   const [search, setSearch] = useState('');
-  const pendingPackIdsRef = useRef(new Set<string>());
-  const [pendingPackIds, setPendingPackIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     loadPacks();
@@ -61,20 +60,13 @@ export function Packs() {
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleToggle = async (pack: Pack) => {
-    if (pendingPackIdsRef.current.has(pack.id)) return;
+    if (pendingPackIds.includes(pack.id)) return;
 
-    pendingPackIdsRef.current.add(pack.id);
-    setPendingPackIds(new Set(pendingPackIdsRef.current));
     const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
-    try {
-      await runConfirmedMutation(
-        () => togglePack(pack.id),
-        () => addToast(t(key, { name: pack.name }), 'success'),
-      );
-    } finally {
-      pendingPackIdsRef.current.delete(pack.id);
-      setPendingPackIds(new Set(pendingPackIdsRef.current));
-    }
+    await runConfirmedMutation(
+      () => togglePack(pack.id),
+      () => addToast(t(key, { name: pack.name }), 'success'),
+    );
   };
 
   return (
@@ -144,9 +136,9 @@ export function Packs() {
                   <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={pack.enabled}
-                      disabled={pendingPackIds.has(pack.id)}
+                      disabled={pendingPackIds.includes(pack.id)}
                       onCheckedChange={() => { void handleToggle(pack); }}
-                      aria-busy={pendingPackIds.has(pack.id)}
+                      aria-busy={pendingPackIds.includes(pack.id)}
                       aria-label={`Toggle ${pack.name}`}
                     />
                   </div>

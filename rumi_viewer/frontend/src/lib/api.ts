@@ -298,10 +298,12 @@ async function ensurePanelSessionForRequest(path: string, method: string): Promi
  * - Parses {success, data, error} envelope
  * - Throws on success===false or non-ok HTTP status
  * - Returns unwrapped `data`
+ * - Allows confirmation reads to bypass, without disabling, normal GET dedupe
  */
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
+  policy: {dedupeGet?: boolean} = {},
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
   const method = (options.method || 'GET').toUpperCase();
@@ -372,7 +374,7 @@ export async function apiFetch<T>(
     return envelope.data as T;
   };
 
-  if (method === 'GET') {
+  if (method === 'GET' && policy.dedupeGet !== false) {
     const cacheKey = `${method}:${url}`;
     const existing = inflightGetRequests.get(cacheKey) as Promise<T> | undefined;
     if (existing) {
@@ -400,8 +402,12 @@ export function fetchDashboard(): Promise<ApiDashboard> {
 // Packs
 // ============================================================
 
-export function fetchPacks(): Promise<PacksResponseData> {
-  return apiFetch<PacksResponseData>('/api/panel/packs');
+export function fetchPacks(options: {fresh?: boolean} = {}): Promise<PacksResponseData> {
+  return apiFetch<PacksResponseData>(
+    '/api/panel/packs',
+    {},
+    {dedupeGet: !options.fresh},
+  );
 }
 
 export function enablePack(id: string): Promise<PackToggleResponseData> {

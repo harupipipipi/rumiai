@@ -32,7 +32,6 @@ import {
   SelectionMode,
 } from '@xyflow/react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '@/src/components/flow/CustomNodes';
 import { nodesToYaml, yamlToNodes } from '@/src/lib/flowUtils';

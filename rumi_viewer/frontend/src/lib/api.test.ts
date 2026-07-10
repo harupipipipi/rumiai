@@ -354,6 +354,42 @@ test('apiFetch deduplicates concurrent GET requests for the same URL', async () 
   assert.deepEqual(second, {ok: true});
 });
 
+test('apiFetch can bypass an older deduplicated GET for a fresh confirmation read', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?v=42');
+
+  let requestCount = 0;
+  let resolveStale!: (response: Response) => void;
+  const staleResponse = new Promise<Response>((resolve) => {
+    resolveStale = resolve;
+  });
+  fetchHandler = async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return staleResponse;
+    }
+    return new Response(
+      JSON.stringify({data: {version: 'fresh'}, success: true}),
+      {headers: {'Content-Type': 'application/json'}, status: 200},
+    );
+  };
+
+  const staleRequest = apiFetch<{version: string}>('/api/panel/packs');
+  const freshResult = await apiFetch<{version: string}>(
+    '/api/panel/packs',
+    {},
+    {dedupeGet: false},
+  );
+
+  assert.equal(requestCount, 2);
+  assert.deepEqual(freshResult, {version: 'fresh'});
+
+  resolveStale(new Response(
+    JSON.stringify({data: {version: 'stale'}, success: true}),
+    {headers: {'Content-Type': 'application/json'}, status: 200},
+  ));
+  assert.deepEqual(await staleRequest, {version: 'stale'});
+});
+
 test('apiFetch recovers an expired panel session through the desktop shell and retries once', async () => {
   installBrowser('http://127.0.0.1:8765/panel/packs?v=42');
 

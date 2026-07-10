@@ -190,6 +190,7 @@ interface AppState {
   refreshRuntimeHealth: () => Promise<void>;
 
   packs: Pack[];
+  pendingPackIds: string[];
   loadPacks: () => Promise<void>;
   togglePack: (id: string) => Promise<MutationResult>;
 
@@ -273,6 +274,7 @@ function transformUpdateInfo(update: {
 // Keep that whole transaction serial so a later write cannot share an older
 // in-flight GET through apiFetch's read deduplication.
 let packMutationQueue: Promise<void> = Promise.resolve();
+let packReadGeneration = 0;
 
 function enqueuePackMutation(
   mutation: () => Promise<MutationResult>,
@@ -365,41 +367,69 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ============================================================
 
   packs: [],
+  pendingPackIds: [],
 
   loadPacks: async () => {
+    const readGeneration = packReadGeneration;
     set({ isLoading: true, apiError: null });
     try {
       const data = await fetchPacks();
+      if (readGeneration !== packReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       set({ packs: transformPacks(data.packs), isLoading: false });
     } catch (e) {
+      if (readGeneration !== packReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       const msg = e instanceof Error ? e.message : 'Failed to load packs';
       set({ apiError: msg, isLoading: false });
       get().addToast(msg, 'error');
     }
   },
 
-  togglePack: (id) => enqueuePackMutation(async () => {
-    const pack = get().packs.find((candidate) => candidate.id === id);
+  togglePack: (id) => {
+    const state = get();
+    if (state.pendingPackIds.includes(id)) {
+      return Promise.resolve({ok: false, error: 'Pack update already in progress'});
+    }
+    const pack = state.packs.find((candidate) => candidate.id === id);
     if (!pack) {
       const error = 'Pack not found';
       get().addToast(error, 'error');
-      return { ok: false, error };
+      return Promise.resolve({ok: false, error});
     }
-    try {
-      if (pack.enabled) {
-        await apiDisablePack(id);
-      } else {
-        await apiEnablePack(id);
+
+    const targetEnabled = !pack.enabled;
+    packReadGeneration += 1;
+    set((current) => ({
+      pendingPackIds: current.pendingPackIds.concat(id),
+    }));
+
+    return enqueuePackMutation(async () => {
+      try {
+        if (targetEnabled) {
+          await apiEnablePack(id);
+        } else {
+          await apiDisablePack(id);
+        }
+        const data = await fetchPacks({fresh: true});
+        set({ packs: transformPacks(data.packs) });
+        return { ok: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
+        get().addToast(msg, 'error');
+        return { ok: false, error: msg };
+      } finally {
+        packReadGeneration += 1;
+        set((current) => ({
+          pendingPackIds: current.pendingPackIds.filter((packId) => packId !== id),
+        }));
       }
-      const data = await fetchPacks();
-      set({ packs: transformPacks(data.packs) });
-      return { ok: true };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
-      get().addToast(msg, 'error');
-      return { ok: false, error: msg };
-    }
-  }),
+    });
+  },
 
   // ============================================================
   // Flows

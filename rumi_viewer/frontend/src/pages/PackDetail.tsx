@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -19,9 +19,10 @@ export function PackDetail() {
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
-  const [isToggling, setIsToggling] = useState(false);
+  const pendingPackIds = useAppStore(state => state.pendingPackIds);
 
   const pack = packs.find(p => p.id === id);
+  const isToggling = Boolean(id && pendingPackIds.includes(id));
 
   useEffect(() => {
     if (packs.length === 0) loadPacks();
@@ -49,15 +50,10 @@ export function PackDetail() {
   const handleToggle = async () => {
     if (isToggling) return;
     const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
-    setIsToggling(true);
-    try {
-      await runConfirmedMutation(
-        () => togglePack(pack.id),
-        () => addToast(t(key, { name: pack.name }), 'success'),
-      );
-    } finally {
-      setIsToggling(false);
-    }
+    await runConfirmedMutation(
+      () => togglePack(pack.id),
+      () => addToast(t(key, { name: pack.name }), 'success'),
+    );
   };
 
   return (

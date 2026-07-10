@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
-import {MemoryRouter} from 'react-router-dom';
+import {MemoryRouter, Route, Routes} from 'react-router-dom';
 import {JSDOM} from 'jsdom';
 
 import type {Pack, Toast} from '@/src/store';
 import {useAppStore} from '@/src/store';
+import {PackDetail} from './PackDetail';
 import {Packs} from './Packs';
 
 interface Deferred<T> {
@@ -68,6 +69,7 @@ function apiPack(pack: Pack, enabled: boolean) {
 
 const refreshedDisabledPack = apiPack(originalPack, false);
 
+const storeLoadPacks = useAppStore.getState().loadPacks;
 const storeTogglePack = useAppStore.getState().togglePack;
 let feedback: Array<Pick<Toast, 'message' | 'type'>> = [];
 let container: HTMLDivElement | null = null;
@@ -96,6 +98,30 @@ async function renderPacks(): Promise<void> {
     );
     await settlePromises();
   });
+}
+
+async function renderPackDetail(): Promise<void> {
+  assert.ok(root);
+  await act(async () => {
+    root?.render(
+      <MemoryRouter initialEntries={[`/packs/${originalPack.id}`]}>
+        <Routes>
+          <Route path="/packs/:id" element={<PackDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await settlePromises();
+  });
+}
+
+async function replacePacksWithPackDetail(): Promise<void> {
+  assert.ok(container);
+  assert.ok(root);
+  await act(async () => {
+    root?.unmount();
+  });
+  root = createRoot(container);
+  await renderPackDetail();
 }
 
 function packSwitch(name = originalPack.name): HTMLButtonElement {
@@ -154,6 +180,7 @@ beforeEach(() => {
     isLoading: false,
     loadPacks: async () => {},
     packs: [{...originalPack}],
+    pendingPackIds: [],
     profile: {...useAppStore.getState().profile, language: 'en'},
     toasts: [],
     togglePack: storeTogglePack,
@@ -399,4 +426,168 @@ test('Packs serializes different pack mutations through separate fresh refreshes
     {message: 'Defaults Pack disabled', type: 'success'},
     {message: 'Community Pack disabled', type: 'success'},
   ]);
+});
+
+test('Packs confirms against a fresh post-write GET and ignores the late mount response', async () => {
+  const staleMountRead = deferred<Response>();
+  const freshMutationRead = deferred<Response>();
+  const requests: string[] = [];
+  let getCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'POST') {
+        return Promise.resolve(successfulResponse({
+          pack_id: originalPack.id,
+          enabled: false,
+        }));
+      }
+      getCalls += 1;
+      return getCalls === 1 ? staleMountRead.promise : freshMutationRead.promise;
+    },
+    writable: true,
+  });
+  useAppStore.setState({loadPacks: storeLoadPacks});
+
+  await renderPacks();
+  assert.deepEqual(requests, ['GET /api/panel/packs']);
+
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [
+    'GET /api/panel/packs',
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+  ]);
+  assert.equal(packSwitch().disabled, true);
+
+  await act(async () => {
+    freshMutationRead.resolve(successfulResponse({
+      packs: [apiPack(originalPack, false)],
+      count: 1,
+    }));
+    await settlePromises();
+  });
+  assert.equal(packSwitch().getAttribute('aria-checked'), 'false');
+  assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse({
+      packs: [apiPack(originalPack, true)],
+      count: 1,
+    }));
+    await settlePromises();
+  });
+
+  assert.equal(packSwitch().getAttribute('aria-checked'), 'false');
+  assert.equal(useAppStore.getState().packs[0]?.enabled, false);
+  assert.equal(useAppStore.getState().isLoading, false);
+  assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
+});
+
+test('Pack pending state survives remount into PackDetail and blocks the inverse toggle', async () => {
+  const post = deferred<Response>();
+  const refresh = deferred<Response>();
+  const requests: string[] = [];
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      return method === 'POST' ? post.promise : refresh.promise;
+    },
+    writable: true,
+  });
+
+  await renderPacks();
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+  assert.deepEqual(useAppStore.getState().pendingPackIds, [originalPack.id]);
+  assert.deepEqual(requests, [`POST /api/panel/packs/${originalPack.id}/disable`]);
+
+  await replacePacksWithPackDetail();
+  assert.equal(packSwitch().disabled, true);
+  assert.equal(packSwitch().getAttribute('aria-busy'), 'true');
+
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [`POST /api/panel/packs/${originalPack.id}/disable`]);
+  assert.deepEqual(
+    await useAppStore.getState().togglePack(originalPack.id),
+    {ok: false, error: 'Pack update already in progress'},
+  );
+
+  await act(async () => {
+    post.resolve(successfulResponse({pack_id: originalPack.id, enabled: false}));
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+  ]);
+  assert.equal(packSwitch().disabled, true);
+
+  await act(async () => {
+    refresh.resolve(successfulResponse({
+      packs: [apiPack(originalPack, false)],
+      count: 1,
+    }));
+    await settlePromises();
+  });
+
+  assert.equal(packSwitch().disabled, false);
+  assert.equal(packSwitch().getAttribute('aria-busy'), 'false');
+  assert.equal(packSwitch().getAttribute('aria-checked'), 'false');
+  assert.deepEqual(useAppStore.getState().pendingPackIds, []);
+  assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
+});
+
+test('PackDetail keeps confirmed state and emits one error after a rejected write', async () => {
+  const post = deferred<Response>();
+  let postCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      assert.equal(init?.method, 'POST');
+      postCalls += 1;
+      return post.promise;
+    },
+    writable: true,
+  });
+
+  await renderPackDetail();
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+  assert.equal(postCalls, 1);
+  assert.equal(packSwitch().disabled, true);
+  assert.equal(packSwitch().getAttribute('aria-busy'), 'true');
+
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+  assert.equal(postCalls, 1);
+
+  await act(async () => {
+    post.reject(new Error('detail toggle rejected'));
+    await settlePromises();
+  });
+
+  assert.equal(packSwitch().disabled, false);
+  assert.equal(packSwitch().getAttribute('aria-busy'), 'false');
+  assert.equal(packSwitch().getAttribute('aria-checked'), 'true');
+  assert.equal(useAppStore.getState().packs[0]?.enabled, true);
+  assert.deepEqual(feedback, [{message: 'detail toggle rejected', type: 'error'}]);
 });
