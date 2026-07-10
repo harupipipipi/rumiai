@@ -193,6 +193,23 @@ def test_lmstudio_manifest_uses_native_entrypoint_and_has_no_placeholder():
     assert payload["adapter"] == "python_entrypoint"
     assert payload["entrypoint"].endswith("lmstudio_provider:LMStudioProvider")
     assert payload["credential_required"] is False
+    assert payload["default_base_url"] == "local://lmstudio"
+    assert payload["config"]["inference_base_url_default"] == "http://127.0.0.1:1234/v1"
     assert payload["config"]["model_list_path"] == "/api/v1/models"
     assert "default_model" not in payload
     assert not (manifest_path.parent / "models" / "local-model.json").exists()
+
+
+def test_lmstudio_component_overrides_legacy_default_and_registers_runtime():
+    from domain.ai_client.providers import detect_available_providers, get_provider_catalog_map
+    from domain.components.registry import get_domain_component_registry
+
+    get_domain_component_registry(force_reload=True)
+    catalog = get_provider_catalog_map()
+    entry = catalog["lmstudio"]
+
+    assert entry["kind"] == "local"
+    assert entry["default_model"] == ""
+    assert entry["availability"]["configuration_source"] == "builtin_local_provider"
+    assert entry["availability"]["supports_invoke"] is True
+    assert isinstance(detect_available_providers()["lmstudio"], LMStudioProvider)
