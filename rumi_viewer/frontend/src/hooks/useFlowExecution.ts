@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { useMountedRef } from './useMountedRef';
 import type { FlowExecutionResult, StepExecutionResult } from '@/src/lib/types';
@@ -12,6 +12,8 @@ export interface FlowExecutionState {
   isExecuting: boolean;
   executionResult: FlowExecutionResult | null;
   execute: () => Promise<FlowExecutionResult | null>;
+  isExecutingNow: () => boolean;
+  cancel: () => void;
   clearResult: () => void;
 }
 
@@ -24,76 +26,106 @@ export function useFlowExecution(
   const [executionResult, setExecutionResult] = useState<FlowExecutionResult | null>(null);
   const mountedRef = useMountedRef();
   const isExecutingRef = useRef(false);
+  const executionGenerationRef = useRef(0);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   nodesRef.current = nodes;
   edgesRef.current = edges;
 
+  const cancel = useCallback((): void => {
+    executionGenerationRef.current += 1;
+    isExecutingRef.current = false;
+    if (mountedRef.current) {
+      setIsExecuting(false);
+    }
+  }, [mountedRef]);
+
+  useEffect(() => () => {
+    executionGenerationRef.current += 1;
+    isExecutingRef.current = false;
+  }, []);
+
   const execute = useCallback(async (): Promise<FlowExecutionResult | null> => {
     // Guard against double execution (C-2)
     if (isExecutingRef.current) return null;
     isExecutingRef.current = true;
+    const executionGeneration = executionGenerationRef.current + 1;
+    executionGenerationRef.current = executionGeneration;
     setIsExecuting(true);
 
-    // Set all nodes to pending
-    setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, executionStatus: 'pending' } })));
+    const isCurrentExecution = (): boolean => (
+      mountedRef.current
+      && executionGenerationRef.current === executionGeneration
+    );
 
-    const currentNodes = nodesRef.current;
-    const steps = buildExecutionPlan(currentNodes, edgesRef.current).filter((node) => node.data.type !== 'reroute');
-    const results: StepExecutionResult[] = [];
+    try {
+      // Set all nodes to pending
+      setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, executionStatus: 'pending' } })));
 
-    // Run trigger
-    if (mountedRef.current) {
-      setNodes(nds => nds.map(n => n.type === 'trigger' ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
-    }
-    await delay(500);
-    if (!mountedRef.current) { isExecutingRef.current = false; return null; }
-    setNodes(nds => nds.map(n => n.type === 'trigger' ? { ...n, data: { ...n.data, executionStatus: 'success' } } : n));
+      const currentNodes = nodesRef.current;
+      const steps = buildExecutionPlan(currentNodes, edgesRef.current)
+        .filter((node) => node.data.type !== 'reroute');
+      const results: StepExecutionResult[] = [];
 
-    // Run steps
-    for (let i = 0; i < steps.length; i++) {
-      if (!mountedRef.current) { isExecutingRef.current = false; return null; }
+      // Run trigger
+      if (isCurrentExecution()) {
+        setNodes(nds => nds.map(n => n.type === 'trigger' ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
+      }
+      await delay(500);
+      if (!isCurrentExecution()) return null;
+      setNodes(nds => nds.map(n => n.type === 'trigger' ? { ...n, data: { ...n.data, executionStatus: 'success' } } : n));
 
-      const step = steps[i];
-      setNodes(nds => nds.map(n => n.id === step.id ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
+      // Run steps
+      for (let i = 0; i < steps.length; i++) {
+        if (!isCurrentExecution()) return null;
 
-      await delay(800);
-      if (!mountedRef.current) { isExecutingRef.current = false; return null; }
+        const step = steps[i];
+        setNodes(nds => nds.map(n => n.id === step.id ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
 
-      const isSuccess = Math.random() > 0.1;
-      setNodes(nds => nds.map(n => n.id === step.id ? { ...n, data: { ...n.data, executionStatus: isSuccess ? 'success' : 'error' } } : n));
+        await delay(800);
+        if (!isCurrentExecution()) return null;
 
-      results.push({
-        name: (step.data.title as string) || (step.data.id as string) || `step_${i}`,
-        status: isSuccess ? 'success' : 'error',
-        duration: `${(Math.random() * 1 + 0.1).toFixed(1)}s`,
-      });
+        const isSuccess = Math.random() > 0.1;
+        setNodes(nds => nds.map(n => n.id === step.id ? { ...n, data: { ...n.data, executionStatus: isSuccess ? 'success' : 'error' } } : n));
 
-      if (!isSuccess) break;
-    }
+        results.push({
+          name: (step.data.title as string) || (step.data.id as string) || `step_${i}`,
+          status: isSuccess ? 'success' : 'error',
+          duration: `${(Math.random() * 1 + 0.1).toFixed(1)}s`,
+        });
 
-    // Run end node
-    if (mountedRef.current && results.every(r => r.status === 'success')) {
-      setNodes(nds => nds.map(n => n.type === 'end' ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
-      await delay(300);
-      if (mountedRef.current) {
-        setNodes(nds => nds.map(n => n.type === 'end' ? { ...n, data: { ...n.data, executionStatus: 'success' } } : n));
+        if (!isSuccess) break;
+      }
+
+      // Run end node
+      if (isCurrentExecution() && results.every(r => r.status === 'success')) {
+        setNodes(nds => nds.map(n => n.type === 'end' ? { ...n, data: { ...n.data, executionStatus: 'running' } } : n));
+        await delay(300);
+        if (isCurrentExecution()) {
+          setNodes(nds => nds.map(n => n.type === 'end' ? { ...n, data: { ...n.data, executionStatus: 'success' } } : n));
+        }
+      }
+
+      if (!isCurrentExecution()) return null;
+      const result: FlowExecutionResult = {
+        status: results.every(r => r.status === 'success') ? 'success' : 'error',
+        duration: '1.2s',
+        steps: results,
+      };
+
+      setExecutionResult(result);
+      return result;
+    } finally {
+      if (executionGenerationRef.current === executionGeneration) {
+        isExecutingRef.current = false;
+        if (mountedRef.current) {
+          setIsExecuting(false);
+        }
       }
     }
-
-    const result: FlowExecutionResult = {
-      status: results.every(r => r.status === 'success') ? 'success' : 'error',
-      duration: '1.2s',
-      steps: results,
-    };
-
-    if (mountedRef.current) {
-      setIsExecuting(false);
-      setExecutionResult(result);
-    }
-    isExecutingRef.current = false;
-    return result;
   }, [mountedRef, setNodes]);
+
+  const isExecutingNow = useCallback((): boolean => isExecutingRef.current, []);
 
   const clearResult = useCallback(() => {
     setExecutionResult(null);
@@ -103,6 +135,8 @@ export function useFlowExecution(
     isExecuting,
     executionResult,
     execute,
+    isExecutingNow,
+    cancel,
     clearResult,
   };
 }

@@ -3,10 +3,12 @@ import {afterEach, beforeEach, test} from 'node:test';
 import {act, StrictMode, useEffect, useRef, useState, type ReactNode} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
+import type {Node} from '@xyflow/react';
 
 import type {Flow, Profile, Toast} from '@/src/store';
 import {useAppStore} from '@/src/store';
 import {fetchFlowDetail} from '@/src/lib/api';
+import {useFlowExecution} from '@/src/hooks/useFlowExecution';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -159,6 +161,23 @@ function apiProfile(profile: Profile) {
     occupation: profile.job,
     username: profile.username,
   };
+}
+
+function ExecutionCancellationHarness() {
+  const [nodes, setNodes] = useState<Node[]>([
+    {id: 'trigger', type: 'trigger', position: {x: 0, y: 0}, data: {}},
+    {id: 'end', type: 'end', position: {x: 100, y: 0}, data: {}},
+  ]);
+  const execution = useFlowExecution(nodes, [], setNodes);
+  return (
+    <>
+      <button type="button" onClick={() => { void execution.execute(); }}>Harness Execute</button>
+      <button type="button" onClick={execution.cancel}>Harness Cancel</button>
+      <output data-testid="harness-execution-state">
+        {execution.isExecuting ? 'executing' : 'idle'}
+      </output>
+    </>
+  );
 }
 
 beforeEach(async () => {
@@ -1057,6 +1076,11 @@ test('Flows locks every editing surface while an update is pending and restores 
 
 test('Flows blocks save and delete while execution is pending and restores them afterward', async () => {
   const requests: string[] = [];
+  const secondFlow: Flow = {
+    id: 'same-tick-selection',
+    name: 'same-tick-selection.flow.yaml',
+    content: 'flow_id: same-tick-selection\nsteps: []\n',
+  };
   let submittedContent = existingFlow.content;
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
@@ -1079,16 +1103,17 @@ test('Flows blocks save and delete while execution is pending and restores them 
         }));
       }
       if (path === '/api/panel/flows') {
-        return Promise.resolve(successfulResponse(flowList([existingFlow])));
+        return Promise.resolve(successfulResponse(flowList([existingFlow, secondFlow])));
       }
+      const requestedFlow = path.endsWith(`/${secondFlow.id}`) ? secondFlow : existingFlow;
       return Promise.resolve(successfulResponse(apiFlowDetail(
-        existingFlow,
-        submittedContent,
+        requestedFlow,
+        requestedFlow.id === existingFlow.id ? submittedContent : requestedFlow.content,
       )));
     },
     writable: true,
   });
-  useAppStore.setState({flows: [{...existingFlow}]});
+  useAppStore.setState({flows: [{...existingFlow}, {...secondFlow}]});
 
   await renderPage(
     <>
@@ -1097,14 +1122,55 @@ test('Flows blocks save and delete while execution is pending and restores them 
     </>,
   );
 
+  await openFlowLibrary();
+  const executeButton = buttonByText('Execute');
+  const saveButton = buttonByText('Save');
+  const deleteButton = buttonByText('Delete');
+  const newFlowButton = buttonByText('New Flow');
+  const secondFlowButton = buttonByText(secondFlow.name);
+  const flowPane = container?.querySelector<HTMLElement>('.react-flow__pane');
+  assert.ok(flowPane);
+
   await act(async () => {
-    click(buttonByText('Execute'));
+    // All of these events are dispatched before React can commit isExecuting.
+    // The synchronous guard must reject every action after the first Execute.
+    click(executeButton);
+    click(saveButton);
+    click(deleteButton);
+    click(newFlowButton);
+    click(secondFlowButton);
+    click(executeButton);
+    assert.ok(dom);
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      bubbles: true,
+      key: 'F7',
+    }));
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      bubbles: true,
+      ctrlKey: true,
+      key: 'f',
+    }));
+    flowPane.dispatchEvent(new dom.window.MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 40,
+      clientY: 40,
+    }));
     await settlePromises();
   });
 
   assert.equal(buttonByText('Save').disabled, true);
   assert.equal(buttonByText('Delete').disabled, true);
+  assert.equal(buttonByText('New Flow').disabled, true);
+  assert.equal(buttonByText(secondFlow.name).disabled, true);
+  assert.equal(container?.querySelector('h2')?.textContent, existingFlow.name);
+  assert.equal(
+    container?.querySelector('input[placeholder="Search nodes..."]'),
+    null,
+  );
   assert.equal(useAppStore.getState().dialog, null);
+  assert.equal(requests.some((request) => request.startsWith('PUT ')), false);
+  assert.equal(requests.some((request) => request.startsWith('DELETE ')), false);
 
   await act(async () => {
     click(buttonByText('Save'));
@@ -1141,6 +1207,105 @@ test('Flows blocks save and delete while execution is pending and restores them 
     {message: 'Flow execution complete', type: 'success'},
     {message: 'Flow saved', type: 'success'},
   ]);
+});
+
+test('Flows restores every interaction after an execution error result', async () => {
+  const failingFlow: Flow = {
+    id: 'failing-execution',
+    name: 'failing-execution.flow.yaml',
+    content: [
+      'flow_id: failing-execution',
+      'steps:',
+      '  - id: emit',
+      '    type: action',
+      '',
+    ].join('\n'),
+  };
+  const requests: string[] = [];
+  const originalRandom = Math.random;
+  Math.random = () => 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'PUT') {
+        return Promise.resolve(successfulResponse({
+          filename: failingFlow.name,
+          flow_id: failingFlow.id,
+          updated: true,
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([failingFlow])));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(failingFlow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...failingFlow}]});
+
+  try {
+    await renderPage(<FlowsPage />);
+    await act(async () => {
+      click(buttonByText('Execute'));
+      await settlePromises();
+    });
+    assert.equal(buttonByText('Save').disabled, true);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      await settlePromises();
+    });
+
+    assert.equal(buttonByText('Save').disabled, false);
+    assert.equal(buttonByText('Delete').disabled, false);
+    assert.equal(buttonByText('Execute').disabled, false);
+    assert.deepEqual(feedback, [
+      {message: 'Flow execution complete', type: 'error'},
+    ]);
+
+    await act(async () => {
+      click(buttonByText('Save'));
+      await settlePromises();
+    });
+    assert.equal(requests.filter((request) => request.startsWith('PUT ')).length, 1);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('Flow execution cancellation releases the atomic guard for a later execution', async () => {
+  await renderPage(<ExecutionCancellationHarness />);
+
+  await act(async () => {
+    click(buttonByText('Harness Execute'));
+    click(buttonByText('Harness Cancel'));
+    await settlePromises();
+  });
+  assert.equal(
+    container?.querySelector('[data-testid="harness-execution-state"]')?.textContent,
+    'idle',
+  );
+
+  await act(async () => {
+    click(buttonByText('Harness Execute'));
+    await settlePromises();
+  });
+  assert.equal(
+    container?.querySelector('[data-testid="harness-execution-state"]')?.textContent,
+    'executing',
+  );
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await settlePromises();
+  });
+  assert.equal(
+    container?.querySelector('[data-testid="harness-execution-state"]')?.textContent,
+    'idle',
+  );
 });
 
 test('Flows create completion preserves a newer user selection', async () => {
