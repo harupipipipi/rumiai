@@ -224,6 +224,33 @@ function MessageMarkdown({ text }: { text: string }) {
     : <ReactMarkdown remarkPlugins={markdownPlugins}>{text}</ReactMarkdown>;
 }
 
+function MessageMentionBadges({
+  mentions,
+}: {
+  mentions: NonNullable<NonNullable<ChatMessagesRendererProps["messages"][number]["metadata"]>["mentions"]>;
+}) {
+  if (mentions.length === 0) return null;
+  return (
+    <div
+      aria-label="このメッセージで指定されたメンション"
+      className="mb-2 flex flex-wrap gap-1.5"
+      data-testid="message-mention-badges"
+    >
+      {mentions.map((mention) => (
+        <span
+          key={`${mention.kind}:${mention.id}`}
+          data-testid="message-mention-badge"
+          data-mention-kind={mention.kind}
+          className="inline-flex min-h-6 max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-sky-400/25 bg-sky-400/10 px-2 text-[11px] font-medium text-sky-100"
+          title={`@${mention.label} · ${mention.kind}`}
+        >
+          @{mention.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function imageSizeLabel(size: BrowserScreenshot["image_size"]): string {
   const width = Number(size?.width ?? 0);
   const height = Number(size?.height ?? 0);
@@ -1433,6 +1460,10 @@ export function ChatMessagesRenderer({
                             {message.metadata.thinkingTranscript}
                           </pre>
                         </details>
+                      )}
+
+                      {message.role === "user" && message.metadata?.mentions && (
+                        <MessageMentionBadges mentions={message.metadata.mentions} />
                       )}
 
                       <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 leading-relaxed">

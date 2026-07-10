@@ -86,6 +86,39 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_persists_semantic_mention_metadata(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conversation = store.create_conversation(model="stub/default")
+    mentions = [
+        {
+            "id": "web_search",
+            "kind": "tool",
+            "label": "Web Search",
+            "syntax": "@Web Search",
+        }
+    ]
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "content": "Use @Web Search",
+                "metadata": {"mentions": mentions},
+            },
+        },
+        {},
+    )
+
+    assert prepared.user_message["metadata"]["mentions"] == mentions
+    reloaded = store.get_conversation(conversation["id"])
+    assert reloaded is not None
+    assert reloaded["messages"][-1]["metadata"]["mentions"] == mentions
+    ChatStore._instance = None
+
+
 def test_tool_selection_rejects_raw_tool_definition_dict():
     from domain.chat.run_request import validate_chat_run_input
 

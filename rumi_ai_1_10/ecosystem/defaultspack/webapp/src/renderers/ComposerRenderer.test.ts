@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
   atMentionMenuKeyAction,
+  AtMentionMenu,
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
@@ -79,7 +80,10 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
     metadata: {
       source: "composer_at_mention",
       mention: {
-        syntax: "@web_search",
+        id: "web_search",
+        kind: "tool",
+        label: "Web Search",
+        syntax: "@Web Search",
         tool_id: "web_search",
       },
       tool: {
@@ -123,6 +127,7 @@ test("composer mention filters retain known tools and files while typing", () =>
   assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
   assert.deepEqual(filterComposerToolMentions(tools, "calculator").map((tool) => tool.id), ["calculator"]);
   assert.deepEqual(filterComposerToolMentions(tools, "browser").map((tool) => tool.id), ["browser_computer"]);
+  assert.deepEqual(filterComposerToolMentions([{ ...tools[0], disabled: true }], "web"), []);
   assert.deepEqual(filterAtMentionFiles(["src/App.tsx", "README.md"], "README"), ["README.md"]);
 });
 
@@ -138,21 +143,37 @@ test("composer mention Enter selects candidates and does not submit raw unmatche
     index: 1,
   });
   assert.deepEqual(atMentionMenuKeyAction("Enter", false, 0, 0), {
-    handled: true,
-    type: "block",
+    handled: false,
   });
   assert.deepEqual(atMentionMenuKeyAction("Tab", false, 0, 0), {
-    handled: true,
-    type: "block",
+    handled: false,
   });
   assert.deepEqual(atMentionMenuKeyAction("Escape", false, 0, 0), {
     handled: true,
     type: "close",
   });
-  assert.deepEqual(insertAtMentionText("Use @web", 8, "web_search"), {
-    value: "Use @web_search ",
+  assert.deepEqual(insertAtMentionText("Use @web", 8, "Web Search"), {
+    value: "Use @Web Search ",
     cursor: 16,
   });
+  assert.deepEqual(atMentionMenuKeyAction("Enter", true, 0, 2), { handled: false });
+  assert.deepEqual(atMentionMenuKeyAction("Tab", true, 0, 2), { handled: false });
+});
+
+test("empty mention listbox is visible and announced", () => {
+  const html = renderToStaticMarkup(createElement(AtMentionMenu, {
+    candidates: [],
+    activeIndex: 0,
+    onActiveIndexChange: () => undefined,
+    onSelect: () => undefined,
+    onClose: () => undefined,
+  }));
+
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /一致する候補はありません/);
+  assert.doesNotMatch(html, /role="option"/);
 });
 
 test("model candidate menu keyboard helpers cycle and select", () => {

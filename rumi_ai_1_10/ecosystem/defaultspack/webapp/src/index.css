@@ -1028,9 +1028,14 @@ body,
   text-shadow: none !important;
 }
 
-#root :is(input, textarea, select, button):focus,
-#root :is(input, textarea, select, button):focus-visible {
+#root :is(input, textarea, select, button):focus {
   outline: none !important;
+  box-shadow: none !important;
+}
+
+#root :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid rgb(56 189 248 / 85%) !important;
+  outline-offset: 2px !important;
   box-shadow: none !important;
 }
 

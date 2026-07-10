@@ -809,8 +809,8 @@ class FrontendRegistry:
                         "id": "keyboard_button_navigation",
                         "label": "Keyboard Button Navigation",
                         "type": "toggle",
-                        "default": False,
-                        "help": "Tab/Enterでcomposerや右サイドバーのボタンへ移動・実行できるようにします。Offでもslash候補のTab選択は使えます。",
+                        "default": True,
+                        "help": "Tab/Shift+Tabでcomposerや右サイドバーの操作へ移動できます。アクセシビリティのため既定で有効です。",
                     },
                     {
                         "id": "spotlight_shortcut_enabled",
@@ -2638,7 +2638,7 @@ class FrontendRegistry:
             "general": {
                 "composer_placeholder": "メッセージを入力...",
                 "show_activity_in_messages": True,
-                "keyboard_button_navigation": False,
+                "keyboard_button_navigation": True,
                 "spotlight_shortcut_enabled": True,
                 "spotlight_shortcut": "Ctrl+K",
                 "spotlight_shortcut_text_input": True,

@@ -922,7 +922,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["computer_use_haze"]["edge_width"], 40)
         self.assertEqual(values["computer_use_haze"]["animation_speed"], 1)
 
-    def test_keyboard_button_navigation_defaults_off(self):
+    def test_keyboard_button_navigation_defaults_on(self):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -938,7 +938,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             if section["id"] == "general"
             for field in section["fields"]
         }
-        self.assertFalse(general["keyboard_button_navigation"])
+        self.assertTrue(general["keyboard_button_navigation"])
         self.assertIn("keyboard_button_navigation", field_ids)
 
     def test_settings_api_keys_expose_google_browser_oauth_status(self):

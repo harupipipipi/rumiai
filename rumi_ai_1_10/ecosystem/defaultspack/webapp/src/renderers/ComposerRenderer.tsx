@@ -43,8 +43,9 @@ import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
 import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
-import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+import { composerFileMentionWidget, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
+import { activeMentionAtCursor } from "../lib/mentionContract";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
 export { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
@@ -111,16 +112,17 @@ type SpeechRecognitionLike = {
 };
 
 const COMPOSER_CHROME_WIDTHS = {
-  icon: { basis: "2rem", min: "2rem", max: "2rem" },
+  icon: { basis: "2.75rem", min: "2.75rem", max: "2.75rem" },
   mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
   badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
   thinking: { basis: "5.25rem", min: "5.25rem", max: "5.25rem", shrink: 0 },
   status: { basis: "auto", min: "2.5rem", shrink: 0 },
-  send: { basis: "2rem", min: "2rem", max: "2rem" },
-  sendLarge: { basis: "2.25rem", min: "2.25rem", max: "2.25rem" },
+  send: { basis: "2.75rem", min: "2.75rem", max: "2.75rem" },
+  sendLarge: { basis: "2.75rem", min: "2.75rem", max: "2.75rem" },
 } satisfies Record<string, ComposerChromeWidth>;
 
-const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-[36px] min-w-0 items-center rounded-[1rem] border border-zinc-700/40 bg-zinc-800/40 px-2.5";
+const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-11 min-w-0 items-center rounded-[1rem] border border-zinc-700/40 bg-zinc-800/40 px-2.5";
+const AT_MENTION_LISTBOX_ID = "composer-at-mention-listbox";
 const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
 const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
 const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
@@ -399,11 +401,11 @@ function ModelStatusIndicatorButton({
         title={indicator.description}
         aria-expanded={open}
         onClick={onToggle}
-        className={`relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-sm transition-transform hover:scale-[1.04] ${tone.icon}`}
+        className={`relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg transition-transform hover:scale-[1.04] ${tone.icon}`}
       >
         <span
           aria-hidden="true"
-          className="block h-full w-full"
+          className="block h-[18px] w-[18px]"
           dangerouslySetInnerHTML={{ __html: inlineSvgMarkup(indicator.svgMarkup) }}
         />
       </button>
@@ -1128,10 +1130,11 @@ function ModeSelector({
 
 type ComposerAtMentionCandidate =
   | { kind: "tool"; id: string; label: string; description?: string; item: ComposerExtensionItem }
+  | { kind: "service"; id: string; label: string; description?: string; service: ToolGroup }
   | { kind: "skill"; id: string; label: string; description?: string; skill: ComposerSkillItem }
   | { kind: "file"; id: string; label: string; description?: string; file: string };
 
-function AtMentionMenu({
+export function AtMentionMenu({
   candidates,
   activeIndex,
   onActiveIndexChange,
@@ -1146,12 +1149,11 @@ function AtMentionMenu({
   onClose: () => void;
   style?: CSSProperties;
 }) {
-  if (candidates.length === 0) return null;
-
   return (
     <>
-      <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <button type="button" tabIndex={-1} aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
+        id={AT_MENTION_LISTBOX_ID}
         role="listbox"
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
@@ -1166,17 +1168,29 @@ function AtMentionMenu({
           <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
         <div className="max-h-56 overflow-y-auto py-1">
+          {candidates.length === 0 && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="composer-at-mention-empty"
+              className="px-3 py-4 text-sm leading-relaxed text-zinc-400"
+            >
+              一致する候補はありません。Enterで本文を送信、Tabで次の操作へ移動できます。
+            </div>
+          )}
           {candidates.map((candidate, index) => {
-            const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
+            const Icon = candidate.kind === "tool" || candidate.kind === "service" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
             return (
             <button
               key={candidate.id}
+              id={`composer-at-mention-option-${index}`}
               type="button"
               role="option"
               aria-selected={index === activeIndex}
+              tabIndex={-1}
               onMouseEnter={() => onActiveIndexChange(index)}
               onClick={() => onSelect(candidate)}
-              className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+              className={`flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
                 index === activeIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
               }`}
             >
@@ -1190,6 +1204,8 @@ function AtMentionMenu({
               <span className={`flex-shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${
                 candidate.kind === "tool"
                   ? "border-emerald-500/25 text-emerald-300"
+                  : candidate.kind === "service"
+                    ? "border-cyan-500/25 text-cyan-300"
                   : candidate.kind === "skill"
                     ? "border-violet-500/25 text-violet-300"
                     : "border-sky-500/25 text-sky-300"
@@ -1211,14 +1227,13 @@ export function filterAtMentionFiles(files: string[], query: string): string[] {
   return files.filter((file) => file.toLowerCase().includes(q)).slice(0, 20);
 }
 
-export function insertAtMentionText(input: string, cursorPos: number, file: string): { value: string; cursor: number } {
-  const textBeforeCursor = input.slice(0, cursorPos);
-  const atIndex = textBeforeCursor.lastIndexOf("@");
-  const insertAt = atIndex >= 0 ? atIndex : cursorPos;
+export function insertAtMentionText(input: string, cursorPos: number, label: string): { value: string; cursor: number } {
+  const activeMention = activeMentionAtCursor(input, cursorPos);
+  const insertAt = activeMention?.start ?? cursorPos;
   const before = input.slice(0, insertAt);
   const after = input.slice(cursorPos);
-  const value = `${before}@${file} ${after}`;
-  return { value, cursor: insertAt + file.length + 2 };
+  const value = `${before}@${label} ${after}`;
+  return { value, cursor: insertAt + label.length + 2 };
 }
 
 export type ModelCandidateMenuKeyAction =
@@ -1231,8 +1246,7 @@ export type AtMentionMenuKeyAction =
   | { handled: false }
   | { handled: true; type: "move"; nextIndex: number }
   | { handled: true; type: "select"; index: number }
-  | { handled: true; type: "close" }
-  | { handled: true; type: "block" };
+  | { handled: true; type: "close" };
 
 export function nextModelCandidateIndex(currentIndex: number, candidateCount: number, direction: 1 | -1): number {
   if (candidateCount <= 0) return 0;
@@ -1265,16 +1279,15 @@ export function modelCandidateMenuKeyAction(
 
 export function atMentionMenuKeyAction(
   key: string,
-  _shiftKey: boolean,
+  shiftKey: boolean,
   currentIndex: number,
   candidateCount: number,
 ): AtMentionMenuKeyAction {
   if (key === "Escape") return { handled: true, type: "close" };
-  if (key === "Tab" || key === "Enter") {
-    if (candidateCount <= 0) return { handled: true, type: "block" };
+  if (candidateCount <= 0) return { handled: false };
+  if ((key === "Tab" && !shiftKey) || (key === "Enter" && !shiftKey)) {
     return { handled: true, type: "select", index: Math.min(Math.max(currentIndex, 0), candidateCount - 1) };
   }
-  if (candidateCount <= 0) return { handled: false };
   if (key === "ArrowDown" || key === "ArrowUp") {
     const direction = key === "ArrowUp" ? -1 : 1;
     return {
@@ -1443,7 +1456,7 @@ export function ComposerRenderer({
   actionApprovalMode = "ask",
   toolSelectionTargets = [],
   toolSelectionReview = null,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
   steerStatus = null,
   steerBusy = false,
   steerQueuedCount = 0,
@@ -1494,6 +1507,7 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
+  const [atMentionStart, setAtMentionStart] = useState<number | null>(null);
   const [selectedAtMentionIndex, setSelectedAtMentionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
@@ -1675,6 +1689,23 @@ export function ComposerRenderer({
         skill,
       };
     });
+    const normalizedServiceQuery = atMentionQuery.trim().toLowerCase();
+    const serviceCandidates = toolGroups
+      .filter((service) => service.items.some((item) => !item.disabled))
+      .filter((service) => (
+        !normalizedServiceQuery
+        || `${service.id} ${service.label} ${service.description}`
+          .toLowerCase()
+          .includes(normalizedServiceQuery)
+      ))
+      .slice(0, 8)
+      .map((service) => ({
+        kind: "service" as const,
+        id: `service:${service.id}`,
+        label: service.label,
+        description: service.description,
+        service,
+      }));
     const fileCandidates = mode === "coding"
       ? filterAtMentionFiles(codingContext?.files ?? [], atMentionQuery).slice(0, 8).map((file) => ({
           kind: "file" as const,
@@ -1684,8 +1715,8 @@ export function ComposerRenderer({
           file,
         }))
       : [];
-	    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
-	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
+	    return [...toolCandidates, ...skillCandidates, ...serviceCandidates, ...fileCandidates];
+	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolGroups, toolItems]);
 
 	  const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
@@ -1920,23 +1951,24 @@ export function ComposerRenderer({
       if (!textarea || suppressPopovers || !templateAllowsAtMentions) {
         setAtMentionOpen(false);
         setAtMentionQuery("");
+        setAtMentionStart(null);
         return;
       }
       const cursorPos = textarea.selectionStart ?? value.length;
-      const textBeforeCursor = value.slice(0, cursorPos);
-      const atMatch = textBeforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
-      const hasMentionTargets = toolItems.length > 0 || skillExtensions.length > 0 || (mode === "coding" && Boolean(codingContext?.files?.length));
+      const activeMention = activeMentionAtCursor(value, cursorPos);
 
-      if (atMatch && !isSteerMode && hasMentionTargets) {
+      if (activeMention && !isSteerMode) {
         setAtMentionOpen(true);
-        setAtMentionQuery(atMatch[1]);
+        setAtMentionQuery(activeMention.query);
+        setAtMentionStart(activeMention.start);
         updateComposerPopoverAnchor();
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
+        setAtMentionStart(null);
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerPopoverAnchor],
+    [isSteerMode, suppressPopovers, templateAllowsAtMentions, updateComposerPopoverAnchor],
   );
 
   useEffect(() => {
@@ -1960,22 +1992,38 @@ export function ComposerRenderer({
       const textarea = textareaRef.current;
       if (!textarea) return;
 
-      const cursorPos = textarea.selectionStart;
-	      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
-	      const next = insertAtMentionText(input, cursorPos, mentionText);
+      const cursorPos = atMentionStart === null
+        ? textarea.selectionStart
+        : atMentionStart + atMentionQuery.length + 1;
+      const next = insertAtMentionText(input, cursorPos, candidate.label);
+	      if (candidate.kind === "tool") {
+	        onDropWidget?.(composerToolMentionWidget(candidate.item));
+	      } else if (candidate.kind === "skill") {
+	        onDropWidget?.(composerSkillMentionWidget(candidate.skill));
+	      } else if (candidate.kind === "service") {
+	        onDropWidget?.(composerServiceMentionWidget({
+	          id: candidate.service.id,
+	          label: candidate.service.label,
+	          description: candidate.service.description,
+	          toolIds: candidate.service.items.map((item) => item.id),
+	        }));
+	      } else {
+	        onDropWidget?.(composerFileMentionWidget(candidate.file));
+	      }
 	      onInputChange(next.value);
 	      if (candidate.kind === "file" && mode === "coding") {
 	        onAtFileAttach?.(candidate.file);
 	      }
       setAtMentionOpen(false);
       setAtMentionQuery("");
+      setAtMentionStart(null);
 
       setTimeout(() => {
         textarea.setSelectionRange(next.cursor, next.cursor);
         textarea.focus();
       }, 0);
     },
-	    [input, mode, onAtFileAttach, onInputChange],
+	    [atMentionQuery.length, atMentionStart, input, mode, onAtFileAttach, onDropWidget, onInputChange],
 	  );
 
   const attachFiles = useCallback(async (files: FileList | null) => {
@@ -2191,11 +2239,6 @@ export function ComposerRenderer({
         }
       }
 
-      if (event.key === "Tab" && !keyboardButtonNavigation) {
-        event.preventDefault();
-        return;
-      }
-
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         handleSubmitWithApiKeyGuard(event);
@@ -2211,7 +2254,6 @@ export function ComposerRenderer({
       matchedCommands,
       modelCommandCandidates,
       onModelCommandCandidatesClose,
-      keyboardButtonNavigation,
       selectedAtMentionIndex,
       selectedCommandIndex,
       selectedModelCandidateIndex,
@@ -2237,6 +2279,7 @@ export function ComposerRenderer({
         <button
           type="button"
           tabIndex={chromeButtonTabIndex}
+          aria-label="ファイルを添付"
           disabled={isGenerating || !templateAllowsFileAttachments}
           title="ファイル添付（複数選択可）"
           onClick={() => fileInputRef.current?.click()}
@@ -2244,7 +2287,7 @@ export function ComposerRenderer({
             isNewConversation
               ? "text-zinc-200 hover:bg-zinc-800/60 hover:text-white"
               : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-          } ${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
+          } h-11 w-11 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
         >
           <WarmActionIcon kind="attach" size="md" />
         </button>
@@ -2262,10 +2305,11 @@ export function ComposerRenderer({
 	        <button
 	          type="button"
 	          tabIndex={chromeButtonTabIndex}
+	          aria-label={isVoiceListening ? "音声入力を停止" : "音声入力を開始"}
 	          disabled={isGenerating || !voiceInputEnabled || !templateAllowsVoiceInput}
 	          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
 	          onClick={toggleVoiceInput}
-	          className={`${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
+	          className={`h-11 w-11 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
 	            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
 	          }`}
 	        >
@@ -2285,6 +2329,7 @@ export function ComposerRenderer({
           <button
             type="button"
             tabIndex={chromeButtonTabIndex}
+            aria-label={`モード: ${currentModeMeta.label}`}
             disabled={isGenerating}
             title={`モード: ${currentModeMeta.label}`}
             onClick={() => setModeSelectorOpen((v) => !v)}
@@ -2406,13 +2451,14 @@ export function ComposerRenderer({
           >
             <div className="h-full w-full rounded-full bg-zinc-800" />
           </div>
-          <div className="relative min-w-0 max-w-full flex-1">
+          <div className="relative h-full min-w-0 max-w-full flex-1">
             <button
               type="button"
               tabIndex={chromeButtonTabIndex}
+              aria-label={`モデル: ${profileName}`}
               disabled={isGenerating}
               onClick={() => setModelDropdownOpen((v) => !v)}
-              className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
+              className="flex h-full w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
               <span className="min-w-0 flex-1 truncate" title={profileName}>モデル: {compactSelectedProfileName}</span>
               <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
@@ -2450,7 +2496,7 @@ export function ComposerRenderer({
             onChange={(event) => onThinkingLevelChange(event.target.value)}
             disabled={isGenerating}
             tabIndex={chromeButtonTabIndex}
-            className="w-full cursor-pointer appearance-none bg-transparent text-right text-[11px] font-medium text-zinc-300 outline-none transition-colors hover:text-zinc-100 disabled:opacity-50"
+            className="h-full w-full cursor-pointer appearance-none bg-transparent text-right text-[11px] font-medium text-zinc-300 outline-none transition-colors hover:text-zinc-100 disabled:opacity-50"
             aria-label="Thinking level"
             title="Thinking level"
           >
@@ -2499,13 +2545,12 @@ export function ComposerRenderer({
         <button
           type="button"
           tabIndex={chromeButtonTabIndex}
+          aria-label={isGenerating ? (input.trim() ? "追加指示を送る" : "生成を停止") : "メッセージを送信"}
           disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
           onPointerDown={handleSendButtonPointerDown}
           onClick={handleSendButtonClick}
 	          title={isGenerating ? (input.trim() ? "追加指示を送る" : "停止") : "送信"}
-	          className={`rumi-send-button ${
-	            isNewConversation ? "h-7 w-7" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
-	          } flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
+          className={`rumi-send-button h-11 w-11 flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
             isGenerating
               ? "bg-zinc-200 text-black hover:bg-white shadow-sm transition-colors"
               : "bg-transparent p-0 hover:opacity-90"
@@ -2878,7 +2923,7 @@ export function ComposerRenderer({
           {isNewConversation ? (
             <div className="grid gap-1.5">
               <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
-                <div className="rumi-composer-editor-row grid min-h-[32px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-end gap-x-3">
+                <div className="rumi-composer-editor-row grid min-h-11 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-end gap-x-3">
                   <div className="flex items-center justify-center self-end">
                     {newConversationInlineLeadingWidgets.map((widget) => (
                       <ComposerChromeWidget key={widget.id} widget={widget} />
@@ -2896,6 +2941,12 @@ export function ComposerRenderer({
                         handleInputChange(event.currentTarget.value);
                       }}
                       placeholder={effectiveComposerPlaceholder}
+                      aria-label="Rumiにメッセージを送信"
+                      aria-autocomplete="list"
+                      aria-controls={AT_MENTION_LISTBOX_ID}
+                      aria-activedescendant={atMentionOpen && atMentionCandidates.length > 0 ? `composer-at-mention-option-${selectedAtMentionIndex}` : undefined}
+                      aria-expanded={atMentionOpen}
+                      role="combobox"
                       className="rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[150px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] text-zinc-100 caret-zinc-100 outline-none placeholder:text-zinc-500/70"
                       onKeyDownCapture={(event) => {
                         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -2940,6 +2991,12 @@ export function ComposerRenderer({
               data-template-composer-input={templateComposerInputId || undefined}
               onChange={(event) => handleInputChange(event.target.value)}
               placeholder={effectiveComposerPlaceholder}
+              aria-label="Rumiにメッセージを送信"
+              aria-autocomplete="list"
+              aria-controls={AT_MENTION_LISTBOX_ID}
+              aria-activedescendant={atMentionOpen && atMentionCandidates.length > 0 ? `composer-at-mention-option-${selectedAtMentionIndex}` : undefined}
+              aria-expanded={atMentionOpen}
+              role="combobox"
               className="rumi-composer-textarea min-h-[34px] w-full max-h-[130px] select-text resize-none border-none bg-transparent px-5 pb-0 pt-3 text-[15px] text-zinc-100 outline-none max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px]"
               onKeyDownCapture={(event) => {
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
