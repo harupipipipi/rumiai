@@ -18,6 +18,7 @@ from blocks.chat.send import (
     _append_assistant_tool_use_message,
     _append_tool_result_message,
     _bounded_compact_tool_result,
+    _clip_error_text,
     _compact_tool_log_value,
     _empty_response_message,
     _is_retryable_ai_error,
@@ -2557,12 +2558,19 @@ class ChatRunEngine:
         if not self._gateway.supports_stream(prepared.model):
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
 
-        thought_filter = _InlineThoughtFilter()
-        accumulator = ToolCallAccumulator()
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         attempts = _ai_retry_attempts(prepared.params)
+        completed_thought_filter: _InlineThoughtFilter | None = None
+        completed_accumulator: ToolCallAccumulator | None = None
         for attempt_index in range(attempts):
+            thought_filter = _InlineThoughtFilter()
+            accumulator = ToolCallAccumulator()
+            attempt_text_start = len(self._text_parts)
+            attempt_thinking_start = len(self._thinking_transcript_parts)
+            attempt_started_calls: dict[str, str] = {}
+            finish_reason = "stop"
+            usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             try:
                 self._current_stream = self._gateway.stream(
                     {
@@ -2605,6 +2613,7 @@ class ChatRunEngine:
                         tool_name = str(chunk.get("name") or chunk.get("tool_name") or "").strip()
                         if chunk_type == "tool_call_start" and call_id and call_id not in self._started_tool_call_ids:
                             self._started_tool_call_ids.add(call_id)
+                            attempt_started_calls[call_id] = tool_name
                             display_payload = _tool_display_payload(tool_name or "tool", {}, status="running")
                             event = self._emit(
                                 "tool_call_started",
@@ -2637,18 +2646,29 @@ class ChatRunEngine:
                     elif chunk_type == "stream_end":
                         finish_reason = str(chunk.get("finish_reason") or "stop")
                         usage = chunk.get("usage", usage) if isinstance(chunk.get("usage"), dict) else usage
+                completed_thought_filter = thought_filter
+                completed_accumulator = accumulator
                 break
             except AuthorityApprovalRequired:
                 raise
             except Exception as exc:
                 self._raise_if_cancelled()
                 message_text = "AI request failed: " + str(exc)
+                safe_message_text = _clip_error_text(message_text, 1200)
+                attempt_visible_text = "".join(self._text_parts[attempt_text_start:])
                 can_retry = (
-                    not "".join(self._text_parts).strip()
+                    not attempt_visible_text.strip()
                     and attempt_index < attempts - 1
                     and _is_retryable_ai_error(message_text)
                 )
+                for event in self._discard_stream_attempt_tool_calls(
+                    attempt_started_calls,
+                    draft,
+                ):
+                    yield event
                 if can_retry:
+                    del self._text_parts[attempt_text_start:]
+                    del self._thinking_transcript_parts[attempt_thinking_start:]
                     delay = _ai_retry_delay(prepared.params, attempt_index)
                     yield self._emit(
                         "ai_retry_scheduled",
@@ -2656,24 +2676,65 @@ class ChatRunEngine:
                             "attempt": attempt_index + 1,
                             "max_attempts": attempts,
                             "delay_seconds": delay,
-                            "error": message_text,
+                            "error": safe_message_text,
                         },
                         message="APIエラーのため少し待って再送信します",
                         phase="ai_retry_scheduled",
                     )
                     self._sync_draft(draft, thinking_state="running", force=True)
-                    if delay > 0:
-                        time.sleep(delay)
+                    self._wait_for_retry_delay(delay)
                     continue
+                if attempt_visible_text.strip():
+                    safe_error = _clip_error_text(exc, 1200)
+                    task_failed_event = self._emit(
+                        "task_failed",
+                        data={
+                            "error": safe_error,
+                            "terminal": True,
+                            "partial_response_preserved": True,
+                        },
+                        message="応答が途中で中断しました",
+                        phase="task_failed",
+                        error=safe_error,
+                        terminal=True,
+                        partial_response_preserved=True,
+                    )
+                    yield task_failed_event
+                    return (
+                        {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "".join(self._text_parts),
+                                }
+                            ],
+                            "finish_reason": "error",
+                            "usage": usage,
+                            "metadata": {
+                                "interrupted": True,
+                                "interruption_reason": "provider_stream_error",
+                                "provider_error": {
+                                    "type": exc.__class__.__name__,
+                                    "raw_message": safe_error,
+                                    "retryable": _is_retryable_ai_error(message_text),
+                                    "attempt": attempt_index + 1,
+                                    "max_attempts": attempts,
+                                },
+                            },
+                        },
+                        [],
+                    )
                 if self._tool_logs:
-                    response = _ai_error_after_tool_use_response(message_text)
+                    response = _ai_error_after_tool_use_response(safe_message_text)
                     response["tool_logs"] = list(self._tool_logs)
                     response["events"] = list(self._activity_events)
                     return response, []
-                raise RuntimeError(message_text)
+                raise RuntimeError(safe_message_text)
             finally:
                 self._current_stream = None
 
+        thought_filter = completed_thought_filter or _InlineThoughtFilter()
+        accumulator = completed_accumulator or ToolCallAccumulator()
         trailing_text = thought_filter.finish()
         thinking_text = thought_filter.pending_thinking_delta()
         if thinking_text:
@@ -2718,6 +2779,51 @@ class ChatRunEngine:
         if not tool_uses:
             tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
         return response, tool_uses
+
+    def _discard_stream_attempt_tool_calls(
+        self,
+        started_calls: dict[str, str],
+        draft: _AssistantDraft | None,
+    ) -> Iterator[dict[str, Any]]:
+        for call_id, tool_name in started_calls.items():
+            summary = "provider 応答の中断により未実行の tool 入力を破棄しました"
+            display_payload = _tool_display_payload(
+                tool_name or "tool",
+                {},
+                status="failed",
+                summary=summary,
+            )
+            yield self._emit(
+                "tool_call_completed",
+                data={
+                    "tool_name": tool_name,
+                    "tool_call_id": call_id,
+                    "is_error": True,
+                    "executed": False,
+                    "provider_attempt_discarded": True,
+                    "result_summary": summary,
+                    "summary": summary,
+                    **display_payload,
+                },
+                message=display_payload["display_text"],
+                phase="tool_call_completed",
+                tool_name=tool_name,
+                tool_call_id=call_id,
+                is_error=True,
+                executed=False,
+                provider_attempt_discarded=True,
+            )
+            self._started_tool_call_ids.discard(call_id)
+            self._sync_draft(draft, force=True)
+
+    def _wait_for_retry_delay(self, delay: float) -> None:
+        deadline = time.monotonic() + max(0.0, float(delay or 0.0))
+        while True:
+            self._raise_if_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            self._cancel_event.wait(min(0.1, remaining))
 
     def _model_turn_via_complete(
         self,

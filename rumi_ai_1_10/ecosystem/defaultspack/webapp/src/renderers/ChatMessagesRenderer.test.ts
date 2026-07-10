@@ -222,6 +222,34 @@ test("empty response warning only appears for finalized agent messages without a
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
 });
 
+test("interrupted assistant keeps partial content and shows an incomplete-state notice", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      rawText: "valuable partial answer",
+      content: [{ type: "text", text: "valuable partial answer" }],
+      metadata: {
+        thinkingLabel: "failed",
+        interrupted: true,
+        interruptionReason: "provider_stream_error",
+      },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /valuable partial answer/);
+  assert.match(html, /応答は途中で中断されました/);
+  assert.match(html, /role="status"/);
+});
+
 test("authority approval followup is hidden while waiting response remains passive", () => {
   assert.equal(AUTHORITY_FOLLOWUP_TEXT, "Internal authority resume.");
   assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);

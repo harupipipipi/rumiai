@@ -1411,6 +1411,16 @@ export function ChatMessagesRenderer({
                             : <MessageMarkdown text={messageDisplayText(message, message.rawText)} />}
                       </div>
 
+                      {message.role === "agent" && message.metadata?.interrupted && (
+                        <div
+                          className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
+                          role="status"
+                        >
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                          <span>応答は途中で中断されました。表示内容は中断前までに届いたものです。</span>
+                        </div>
+                      )}
+
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
 
                       {inlinePendingMessageId === message.id && (
