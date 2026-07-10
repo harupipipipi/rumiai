@@ -177,8 +177,26 @@ def test_lmstudio_explicit_load_and_unload_use_native_endpoints_only():
     ]
 
 
-def test_lmstudio_manifest_uses_native_entrypoint_and_has_no_placeholder():
-    manifest_path = (
+def test_lmstudio_component_owns_runtime_discovery_and_has_no_placeholder():
+    component_manifest_path = (
+        DEFAULTSPACK_ROOT
+        / "domain"
+        / "providers"
+        / "lmstudio"
+        / "manifest.json"
+    )
+    payload = json.loads(component_manifest_path.read_text(encoding="utf-8"))
+    provider_manifest = payload["provider_manifest"]
+
+    assert provider_manifest["adapter"] == "python_entrypoint"
+    assert provider_manifest["entrypoint"].endswith("lmstudio_provider:LMStudioProvider")
+    assert provider_manifest["credential_required"] is False
+    assert provider_manifest["default_base_url"] == "local://lmstudio"
+    assert provider_manifest["config"]["inference_base_url_default"] == "http://127.0.0.1:1234/v1"
+    assert provider_manifest["config"]["model_list_path"] == "/api/v1/models"
+    assert "default_model" not in provider_manifest
+
+    catalog_provider_dir = (
         ROOT
         / "ecosystem"
         / "rumi_model_catalog_pack"
@@ -186,18 +204,9 @@ def test_lmstudio_manifest_uses_native_entrypoint_and_has_no_placeholder():
         / "llm"
         / "providers"
         / "lmstudio"
-        / "manifest.json"
     )
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert payload["adapter"] == "python_entrypoint"
-    assert payload["entrypoint"].endswith("lmstudio_provider:LMStudioProvider")
-    assert payload["credential_required"] is False
-    assert payload["default_base_url"] == "local://lmstudio"
-    assert payload["config"]["inference_base_url_default"] == "http://127.0.0.1:1234/v1"
-    assert payload["config"]["model_list_path"] == "/api/v1/models"
-    assert "default_model" not in payload
-    assert not (manifest_path.parent / "models" / "local-model.json").exists()
+    assert not (catalog_provider_dir / "manifest.json").exists()
+    assert not (catalog_provider_dir / "models" / "local-model.json").exists()
 
 
 def test_lmstudio_component_overrides_legacy_default_and_registers_runtime():
