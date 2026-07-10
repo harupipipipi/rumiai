@@ -204,6 +204,48 @@ test("empty mention listbox is visible and announced", () => {
   assert.doesNotMatch(html, /role="option"/);
 });
 
+test("selected references render inline while explicit drops keep the widget row", () => {
+  const baseProps = {
+    input: "Use @web_search then review",
+    placeholder: "Message Rumi...",
+    isGenerating: false,
+    selectedProfile: {
+      profile_id: "stub/default",
+      display_name: "Stub Default",
+      provider_id: "stub",
+      model_id: "default",
+    },
+    favoriteProfiles: [],
+    inlineExtensions: [{ id: "web_search", label: "Web Search", category: "tool" }],
+    belowExtensions: [],
+    thinkingLevel: null,
+    contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+    onModelProfileSelect: () => undefined,
+    onThinkingLevelChange: () => undefined,
+  };
+  const referenceHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    entityReferences: [{ kind: "tool", id: "web_search", syntax: "@web_search" }],
+  }));
+
+  assert.match(referenceHtml, /data-composer-inline-reference="tool:web_search"/);
+  assert.match(referenceHtml, />Web Search</);
+  assert.match(referenceHtml, /text-sky-200/);
+  assert.match(referenceHtml, /text-transparent caret-transparent/);
+  assert.doesNotMatch(referenceHtml, /metadata=|composer_at_mention/);
+
+  const droppedHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    entityReferences: [],
+    droppedWidgets: [{ id: "web_search", type: "tool", label: "Web Search", enabled: true }],
+    selectedToolIds: ["web_search"],
+  }));
+  assert.doesNotMatch(droppedHtml, /data-composer-inline-reference/);
+  assert.match(droppedHtml, /border-emerald-600\/50[^>]*>[\s\S]*Web Search/);
+});
+
 test("model candidate menu keyboard helpers cycle and select", () => {
   assert.equal(nextModelCandidateIndex(0, 3, 1), 1);
   assert.equal(nextModelCandidateIndex(2, 3, 1), 0);
