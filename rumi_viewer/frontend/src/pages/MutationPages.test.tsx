@@ -4,7 +4,7 @@ import {act, type ReactNode} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 
-import type {Profile, Toast} from '@/src/store';
+import type {Flow, Profile, Toast} from '@/src/store';
 import {useAppStore} from '@/src/store';
 
 interface Deferred<T> {
@@ -31,12 +31,29 @@ const originalProfile: Profile = {
   connected: true,
 };
 
+const existingFlow: Flow = {
+  id: 'existing-flow',
+  name: 'existing-flow.flow.yaml',
+  content: [
+    'flow_id: existing-flow',
+    'name: existing-flow.flow.yaml',
+    'base_pack: defaultspack',
+    'steps: []',
+    '',
+  ].join('\n'),
+};
+
 const storeAddFlow = useAppStore.getState().addFlow;
+const storeDeleteFlow = useAppStore.getState().deleteFlow;
+const storeLoadFlows = useAppStore.getState().loadFlows;
+const storeLoadProfile = useAppStore.getState().loadProfile;
+const storeUpdateFlow = useAppStore.getState().updateFlow;
 const storeUpdateProfile = useAppStore.getState().updateProfile;
 let createRoot: typeof import('react-dom/client')['createRoot'];
 let container: HTMLDivElement | null = null;
 let dom: JSDOM | null = null;
 let feedback: Array<Pick<Toast, 'message' | 'type'>> = [];
+let DialogContainerPage: typeof import('@/src/components/ui/DialogContainer')['DialogContainer'];
 let FlowsPage: typeof import('./Flows')['Flows'];
 let root: Root | null = null;
 let SettingsPage: typeof import('./Settings')['Settings'];
@@ -68,6 +85,23 @@ function buttonByText(text: string): HTMLButtonElement {
   return button;
 }
 
+function buttonsByText(text: string): HTMLButtonElement[] {
+  return Array.from(container?.querySelectorAll('button') ?? [])
+    .filter((candidate) => candidate.textContent?.trim() === text);
+}
+
+async function openFlowLibrary(): Promise<void> {
+  if (buttonsByText('New Flow').length > 0) return;
+  const opener = container?.querySelector<HTMLButtonElement>(
+    'button[title="Open flow list"]',
+  );
+  assert.ok(opener, 'Missing flow library opener');
+  await act(async () => {
+    click(opener);
+    await settlePromises();
+  });
+}
+
 function click(element: HTMLElement): void {
   assert.ok(dom);
   element.dispatchEvent(new dom.window.MouseEvent('click', {
@@ -92,6 +126,38 @@ function successfulResponse(data: unknown): Response {
     headers: {'Content-Type': 'application/json'},
     status: 200,
   });
+}
+
+function apiFlow(flow: Flow) {
+  return {
+    flow_id: flow.id,
+    name: flow.name,
+    pack_id: 'defaultspack',
+    filename: flow.name,
+  };
+}
+
+function apiFlowDetail(flow: Flow, content = flow.content) {
+  return {
+    ...apiFlow(flow),
+    yaml_content: content,
+  };
+}
+
+function flowList(flows: Flow[]) {
+  return {
+    count: flows.length,
+    flows: flows.map(apiFlow),
+  };
+}
+
+function apiProfile(profile: Profile) {
+  return {
+    icon: profile.avatar,
+    language: profile.language,
+    occupation: profile.job,
+    username: profile.username,
+  };
 }
 
 beforeEach(async () => {
@@ -149,6 +215,7 @@ beforeEach(async () => {
   });
 
   ({createRoot} = await import('react-dom/client'));
+  ({DialogContainer: DialogContainerPage} = await import('@/src/components/ui/DialogContainer'));
   ({Flows: FlowsPage} = await import('./Flows'));
   ({Settings: SettingsPage} = await import('./Settings'));
 
@@ -161,13 +228,15 @@ beforeEach(async () => {
     addToast: (message, type) => feedback.push({message, type}),
     apiError: null,
     dialog: null,
+    deleteFlow: storeDeleteFlow,
     flows: [],
     isLoading: false,
-    loadFlows: async () => {},
-    loadProfile: async () => {},
+    loadFlows: storeLoadFlows,
+    loadProfile: storeLoadProfile,
     loadVersion: async () => {},
     profile: {...originalProfile},
     toasts: [],
+    updateFlow: storeUpdateFlow,
     updateProfile: storeUpdateProfile,
   });
 });
@@ -184,75 +253,82 @@ afterEach(async () => {
   root = null;
 });
 
-test('Flows keeps a rejected create draft and blocks rapid duplicate saves', async () => {
-  const createRequest = deferred<Response>();
-  let createCalls = 0;
-  Object.defineProperty(globalThis, 'fetch', {
-    configurable: true,
-    value: (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      if (init?.method !== 'POST') {
-        return Promise.reject(new Error(`Unexpected request: ${init?.method ?? 'GET'}`));
-      }
-      createCalls += 1;
-      return createRequest.promise;
-    },
-    writable: true,
-  });
-
-  await renderPage(<FlowsPage />);
-  await act(async () => {
-    click(buttonByText('New Flow'));
-    await settlePromises();
-  });
-  const nameInput = container?.querySelector<HTMLInputElement>(
-    'input[placeholder^="Flow name"]',
-  );
-  assert.ok(nameInput);
-  await act(async () => {
-    changeInput(nameInput, 'recoverable-draft');
-    await settlePromises();
-  });
-
-  await act(async () => {
-    click(buttonByText('Save'));
-    await settlePromises();
-  });
-  assert.equal(createCalls, 1);
-  assert.equal(buttonByText('Save').disabled, true);
-  assert.equal(buttonByText('Save').getAttribute('aria-busy'), 'true');
-
-  await act(async () => {
-    click(buttonByText('Save'));
-    await settlePromises();
-  });
-  assert.equal(createCalls, 1);
-
-  await act(async () => {
-    createRequest.reject(new Error('create rejected'));
-    await settlePromises();
-  });
-
-  const retainedInput = container?.querySelector<HTMLInputElement>(
-    'input[placeholder^="Flow name"]',
-  );
-  assert.ok(retainedInput);
-  assert.equal(retainedInput.value, 'recoverable-draft');
-  assert.equal(buttonByText('Save').disabled, false);
-  assert.equal(buttonByText('Save').getAttribute('aria-busy'), null);
-  assert.deepEqual(useAppStore.getState().flows, []);
-  assert.deepEqual(feedback, [{message: 'create rejected', type: 'error'}]);
-});
-
-test('Settings stays pending through refresh rejection and retains the edited profile', async () => {
-  const updateRequest = deferred<Response>();
-  const refreshRequest = deferred<Response>();
+test('Settings uses a fresh profile confirmation and ignores its late mount read', async () => {
+  const staleMountRead = deferred<Response>();
+  const freshRead = deferred<Response>();
+  const editedProfile = {...originalProfile, username: 'Edited user'};
   const requests: string[] = [];
+  let getCalls = 0;
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const method = init?.method ?? 'GET';
       requests.push(`${method} ${String(input)}`);
-      return method === 'PUT' ? updateRequest.promise : refreshRequest.promise;
+      if (method === 'PUT') {
+        return Promise.resolve(successfulResponse({
+          profile: apiProfile(editedProfile),
+          updated: true,
+        }));
+      }
+      getCalls += 1;
+      return getCalls === 1 ? staleMountRead.promise : freshRead.promise;
+    },
+    writable: true,
+  });
+
+  await renderPage(<SettingsPage />);
+  assert.deepEqual(requests, ['GET /api/panel/settings/profile']);
+  const usernameInput = Array.from(container?.querySelectorAll('input') ?? [])
+    .find((input) => input.value === originalProfile.username);
+  assert.ok(usernameInput);
+  await act(async () => {
+    changeInput(usernameInput, editedProfile.username);
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, [
+    'GET /api/panel/settings/profile',
+    'PUT /api/panel/settings/profile',
+    'GET /api/panel/settings/profile',
+  ]);
+  assert.equal(buttonByText('Save').disabled, true);
+  assert.equal(buttonByText('Save').getAttribute('aria-busy'), 'true');
+
+  await act(async () => {
+    freshRead.resolve(successfulResponse({profile: apiProfile(editedProfile)}));
+    await settlePromises();
+  });
+  assert.equal(useAppStore.getState().profile.username, editedProfile.username);
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === editedProfile.username));
+  assert.deepEqual(feedback, [{message: 'Settings saved', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+    await settlePromises();
+  });
+  assert.equal(useAppStore.getState().profile.username, editedProfile.username);
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === editedProfile.username));
+  assert.deepEqual(feedback, [{message: 'Settings saved', type: 'success'}]);
+});
+
+test('Settings keeps edited data when fresh profile state does not confirm the update', async () => {
+  const staleMountRead = deferred<Response>();
+  const freshRead = deferred<Response>();
+  const requests: string[] = [];
+  let getCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      requests.push(`${method} ${String(input)}`);
+      if (method === 'PUT') {
+        return Promise.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+      }
+      getCalls += 1;
+      return getCalls === 1 ? staleMountRead.promise : freshRead.promise;
     },
     writable: true,
   });
@@ -262,44 +338,291 @@ test('Settings stays pending through refresh rejection and retains the edited pr
     .find((input) => input.value === originalProfile.username);
   assert.ok(usernameInput);
   await act(async () => {
-    changeInput(usernameInput, 'Edited user');
-    await settlePromises();
-  });
-
-  await act(async () => {
+    changeInput(usernameInput, 'Recoverable edit');
     click(buttonByText('Save'));
     await settlePromises();
   });
-  assert.deepEqual(requests, ['PUT /api/panel/settings/profile']);
   assert.equal(buttonByText('Save').disabled, true);
-  assert.equal(buttonByText('Save').getAttribute('aria-busy'), 'true');
-
-  await act(async () => {
-    click(buttonByText('Save'));
-    await settlePromises();
-  });
-  assert.deepEqual(requests, ['PUT /api/panel/settings/profile']);
-
-  await act(async () => {
-    updateRequest.resolve(successfulResponse({profile: {}}));
-    await settlePromises();
-  });
   assert.deepEqual(requests, [
+    'GET /api/panel/settings/profile',
     'PUT /api/panel/settings/profile',
     'GET /api/panel/settings/profile',
   ]);
-  assert.equal(buttonByText('Save').disabled, true);
 
   await act(async () => {
-    refreshRequest.reject(new Error('profile refresh rejected'));
+    freshRead.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+    await settlePromises();
+  });
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === 'Recoverable edit'));
+  assert.equal(buttonByText('Save').disabled, false);
+  assert.equal(useAppStore.getState().profile.username, originalProfile.username);
+  assert.deepEqual(feedback, [{message: 'Profile update was not confirmed', type: 'error'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+    await settlePromises();
+  });
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === 'Recoverable edit'));
+  assert.deepEqual(feedback, [{message: 'Profile update was not confirmed', type: 'error'}]);
+});
+
+test('Flows create uses a fresh list and ignores the late mount list', async () => {
+  const staleMountRead = deferred<Response>();
+  const createdFlow: Flow = {
+    id: 'confirmed-draft',
+    name: 'confirmed-draft.flow.yaml',
+    content: '',
+  };
+  const requests: string[] = [];
+  let createdContent = '';
+  let listCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'POST') {
+        createdContent = JSON.parse(String(init?.body)).yaml_content as string;
+        return Promise.resolve(successfulResponse({
+          created: true,
+          filename: createdFlow.name,
+          flow_id: createdFlow.id,
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        listCalls += 1;
+        return listCalls === 1
+          ? staleMountRead.promise
+          : Promise.resolve(successfulResponse(flowList([existingFlow, createdFlow])));
+      }
+      if (path.endsWith(`/${createdFlow.id}`)) {
+        return Promise.resolve(successfulResponse(apiFlowDetail(createdFlow, createdContent)));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText('New Flow'));
+    await settlePromises();
+  });
+  const nameInput = container?.querySelector<HTMLInputElement>(
+    'input[placeholder^="Flow name"]',
+  );
+  assert.ok(nameInput);
+  await act(async () => {
+    changeInput(nameInput, 'confirmed-draft');
+    await settlePromises();
+  });
+  await act(async () => {
+    click(buttonByText('Save'));
     await settlePromises();
   });
 
-  const retainedUsername = Array.from(container?.querySelectorAll('input') ?? [])
-    .find((input) => input.value === 'Edited user');
-  assert.ok(retainedUsername);
-  assert.equal(buttonByText('Save').disabled, false);
-  assert.equal(buttonByText('Save').getAttribute('aria-busy'), null);
-  assert.equal(useAppStore.getState().profile.username, originalProfile.username);
-  assert.deepEqual(feedback, [{message: 'profile refresh rejected', type: 'error'}]);
+  assert.deepEqual(requests.slice(0, 5), [
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${existingFlow.id}`,
+    'POST /api/panel/flows',
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${createdFlow.id}`,
+  ]);
+  assert.equal(useAppStore.getState().flows.some((flow) => flow.id === createdFlow.id), true);
+  assert.equal(container?.querySelector('input[placeholder^="Flow name"]'), null);
+  assert.deepEqual(feedback, [{message: 'Flow created', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse(flowList([existingFlow])));
+    await settlePromises();
+  });
+  assert.equal(useAppStore.getState().flows.some((flow) => flow.id === createdFlow.id), true);
+  assert.deepEqual(feedback, [{message: 'Flow created', type: 'success'}]);
+});
+
+test('Flows create retains its draft when the fresh list lacks the created flow', async () => {
+  const staleMountRead = deferred<Response>();
+  let listCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      if (method === 'POST') {
+        return Promise.resolve(successfulResponse({
+          created: true,
+          filename: 'unconfirmed.flow.yaml',
+          flow_id: 'unconfirmed',
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        listCalls += 1;
+        return listCalls === 1
+          ? staleMountRead.promise
+          : Promise.resolve(successfulResponse(flowList([existingFlow])));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText('New Flow'));
+    await settlePromises();
+  });
+  const nameInput = container?.querySelector<HTMLInputElement>(
+    'input[placeholder^="Flow name"]',
+  );
+  assert.ok(nameInput);
+  await act(async () => {
+    changeInput(nameInput, 'unconfirmed');
+    await settlePromises();
+  });
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+
+  const retainedInput = container?.querySelector<HTMLInputElement>(
+    'input[placeholder^="Flow name"]',
+  );
+  assert.ok(retainedInput);
+  assert.equal(retainedInput.value, 'unconfirmed');
+  assert.equal(useAppStore.getState().flows.some((flow) => flow.id === 'unconfirmed'), false);
+  assert.deepEqual(feedback, [{message: 'Flow creation was not confirmed', type: 'error'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse(flowList([existingFlow])));
+    await settlePromises();
+  });
+  assert.equal(retainedInput.value, 'unconfirmed');
+  assert.deepEqual(feedback, [{message: 'Flow creation was not confirmed', type: 'error'}]);
+});
+
+test('Flows update confirms fresh list and detail before success', async () => {
+  const staleMountRead = deferred<Response>();
+  const requests: string[] = [];
+  let detailCalls = 0;
+  let listCalls = 0;
+  let updatedContent = '';
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'PUT') {
+        updatedContent = JSON.parse(String(init?.body)).yaml_content as string;
+        return Promise.resolve(successfulResponse({
+          filename: existingFlow.name,
+          flow_id: existingFlow.id,
+          updated: true,
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        listCalls += 1;
+        return listCalls === 1
+          ? staleMountRead.promise
+          : Promise.resolve(successfulResponse(flowList([existingFlow])));
+      }
+      detailCalls += 1;
+      return Promise.resolve(successfulResponse(apiFlowDetail(
+        existingFlow,
+        detailCalls === 1 ? existingFlow.content : updatedContent,
+      )));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, [
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${existingFlow.id}`,
+    `PUT /api/panel/flows/${existingFlow.id}`,
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${existingFlow.id}`,
+  ]);
+  assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse(flowList([
+      {...existingFlow, id: 'stale-flow', name: 'stale-flow.flow.yaml'},
+    ])));
+    await settlePromises();
+  });
+  assert.deepEqual(useAppStore.getState().flows.map((flow) => flow.id), [existingFlow.id]);
+  assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
+});
+
+test('Flows delete confirms fresh absence and ignores the late mount list', async () => {
+  const staleMountRead = deferred<Response>();
+  const requests: string[] = [];
+  let listCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'DELETE') {
+        return Promise.resolve(successfulResponse({deleted: true, flow_id: existingFlow.id}));
+      }
+      if (path === '/api/panel/flows') {
+        listCalls += 1;
+        return listCalls === 1
+          ? staleMountRead.promise
+          : Promise.resolve(successfulResponse(flowList([])));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(
+    <>
+      <FlowsPage />
+      <DialogContainerPage />
+    </>,
+  );
+  await act(async () => {
+    click(buttonByText('Delete'));
+    await settlePromises();
+  });
+  const deleteButtons = buttonsByText('Delete');
+  assert.equal(deleteButtons.length, 2);
+  await act(async () => {
+    click(deleteButtons[1]);
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, [
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${existingFlow.id}`,
+    `DELETE /api/panel/flows/${existingFlow.id}`,
+    'GET /api/panel/flows',
+  ]);
+  assert.deepEqual(useAppStore.getState().flows, []);
+  assert.deepEqual(feedback, [{message: 'Flow deleted', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse(flowList([existingFlow])));
+    await settlePromises();
+  });
+  assert.deepEqual(useAppStore.getState().flows, []);
+  assert.deepEqual(feedback, [{message: 'Flow deleted', type: 'success'}]);
 });

@@ -657,13 +657,22 @@ export function clearStartupProfileNodeOverride(id: string, portKey: string): Pr
 // Flows
 // ============================================================
 
-export function fetchFlows(): Promise<FlowsResponseData> {
-  return apiFetch<FlowsResponseData>('/api/panel/flows');
+export function fetchFlows(options: {fresh?: boolean} = {}): Promise<FlowsResponseData> {
+  return apiFetch<FlowsResponseData>(
+    '/api/panel/flows',
+    {},
+    {dedupeGet: !options.fresh},
+  );
 }
 
-export function fetchFlowDetail(id: string): Promise<ApiFlowDetail> {
+export function fetchFlowDetail(
+  id: string,
+  options: {fresh?: boolean} = {},
+): Promise<ApiFlowDetail> {
   return apiFetch<ApiFlowDetail>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
+    {},
+    {dedupeGet: !options.fresh},
   );
 }
 
@@ -700,8 +709,12 @@ export function deleteFlow(id: string): Promise<FlowDeleteResponseData> {
 // Settings
 // ============================================================
 
-export function fetchProfile(): Promise<ProfileResponseData> {
-  return apiFetch<ProfileResponseData>('/api/panel/settings/profile');
+export function fetchProfile(options: {fresh?: boolean} = {}): Promise<ProfileResponseData> {
+  return apiFetch<ProfileResponseData>(
+    '/api/panel/settings/profile',
+    {},
+    {dedupeGet: !options.fresh},
+  );
 }
 
 export function updateProfile(

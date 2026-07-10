@@ -4,6 +4,7 @@ import {
   fetchDashboard,
   fetchPacks,
   fetchFlows,
+  fetchFlowDetail,
   fetchProfile,
   fetchVersion,
   enablePack as apiEnablePack,
@@ -275,6 +276,8 @@ function transformUpdateInfo(update: {
 // in-flight GET through apiFetch's read deduplication.
 let packMutationQueue: Promise<void> = Promise.resolve();
 let packReadGeneration = 0;
+let flowReadGeneration = 0;
+let profileReadGeneration = 0;
 
 function enqueuePackMutation(
   mutation: () => Promise<MutationResult>,
@@ -438,11 +441,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   flows: [],
 
   loadFlows: async () => {
+    const readGeneration = flowReadGeneration;
     set({ isLoading: true, apiError: null });
     try {
       const data = await fetchFlows();
+      if (readGeneration !== flowReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       set({ flows: transformFlows(data.flows), isLoading: false });
     } catch (e) {
+      if (readGeneration !== flowReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       const msg = e instanceof Error ? e.message : 'Failed to load flows';
       set({ apiError: msg, isLoading: false });
       get().addToast(msg, 'error');
@@ -450,45 +462,73 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addFlow: async (flow) => {
+    flowReadGeneration += 1;
     try {
       await apiCreateFlow({
         flow_id: flow.id,
         yaml_content: flow.content,
         filename: flow.name,
       });
-      const data = await fetchFlows();
-      set({ flows: transformFlows(data.flows) });
+      const data = await fetchFlows({fresh: true});
+      const confirmedFlows = transformFlows(data.flows);
+      if (!confirmedFlows.some((candidate) => candidate.id === flow.id)) {
+        throw new Error('Flow creation was not confirmed');
+      }
+      set({ flows: confirmedFlows });
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create flow';
       get().addToast(msg, 'error');
       return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
   updateFlow: async (id, content) => {
+    flowReadGeneration += 1;
     try {
       await apiUpdateFlow(id, { yaml_content: content });
-      const data = await fetchFlows();
-      set({ flows: transformFlows(data.flows) });
+      const [data, detail] = await Promise.all([
+        fetchFlows({fresh: true}),
+        fetchFlowDetail(id, {fresh: true}),
+      ]);
+      const confirmedFlows = transformFlows(data.flows);
+      if (
+        !confirmedFlows.some((candidate) => candidate.id === id)
+        || detail.flow_id !== id
+        || detail.yaml_content !== content
+      ) {
+        throw new Error('Flow update was not confirmed');
+      }
+      set({ flows: confirmedFlows });
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update flow';
       get().addToast(msg, 'error');
       return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
   deleteFlow: async (id) => {
+    flowReadGeneration += 1;
     try {
       await apiDeleteFlow(id);
-      const data = await fetchFlows();
-      set({ flows: transformFlows(data.flows) });
+      const data = await fetchFlows({fresh: true});
+      const confirmedFlows = transformFlows(data.flows);
+      if (confirmedFlows.some((candidate) => candidate.id === id)) {
+        throw new Error('Flow deletion was not confirmed');
+      }
+      set({ flows: confirmedFlows });
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete flow';
       get().addToast(msg, 'error');
       return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
@@ -537,10 +577,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   profile: defaultProfile,
 
   loadProfile: async () => {
+    const readGeneration = profileReadGeneration;
     try {
       const data = await fetchProfile();
+      if (readGeneration !== profileReadGeneration) return;
       set({ profile: transformProfile(data.profile) });
     } catch (e) {
+      if (readGeneration !== profileReadGeneration) return;
       // Profile not found (404) is expected for new users
       const msg = e instanceof Error ? e.message : '';
       if (!msg.includes('Profile not found')) {
@@ -550,22 +593,41 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateProfile: async (profileUpdate) => {
+    profileReadGeneration += 1;
     try {
       const current = get().profile;
-      const payload: Record<string, unknown> = {
+      const expected: Profile = {
+        avatar: profileUpdate.avatar ?? current.avatar,
         username: profileUpdate.username ?? current.username,
         language: profileUpdate.language ?? current.language,
-        icon: profileUpdate.avatar ?? current.avatar,
-        occupation: profileUpdate.job ?? current.job,
+        job: profileUpdate.job ?? current.job,
+        connected: current.connected,
+      };
+      const payload: Record<string, unknown> = {
+        username: expected.username,
+        language: expected.language,
+        icon: expected.avatar,
+        occupation: expected.job,
       };
       await apiUpdateProfile(payload);
-      const data = await fetchProfile();
-      set({ profile: transformProfile(data.profile) });
+      const data = await fetchProfile({fresh: true});
+      const confirmed = transformProfile(data.profile);
+      if (
+        confirmed.avatar !== expected.avatar
+        || confirmed.username !== expected.username
+        || confirmed.language !== expected.language
+        || confirmed.job !== expected.job
+      ) {
+        throw new Error('Profile update was not confirmed');
+      }
+      set({ profile: confirmed });
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update profile';
       get().addToast(msg, 'error');
       return { ok: false, error: msg };
+    } finally {
+      profileReadGeneration += 1;
     }
   },
 
