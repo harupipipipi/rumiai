@@ -1,4 +1,4 @@
-import { api, type AuthorityRequest } from "./api";
+import type { AuthorityRequest } from "./api";
 
 const AUTHORITY_APPROVAL_CHANNEL = "rumi-authority-approval";
 const AUTHORITY_APPROVAL_MESSAGE_TYPE = "rumi-authority-approval-settlement-hint";
@@ -142,6 +142,11 @@ function authorityApprovalHintMessage(event: AuthorityApprovalSettlement): Autho
   };
 }
 
+async function fetchAuthorityRequest(requestId: string): Promise<AuthorityRequest> {
+  const { api } = await import("./api");
+  return api.getAuthorityRequest(requestId);
+}
+
 export async function verifyAuthorityApprovalHint(
   rawHint: unknown,
   options: VerifyAuthorityApprovalHintOptions = {},
@@ -161,8 +166,8 @@ export async function verifyAuthorityApprovalHint(
 
   let request: AuthorityRequest;
   try {
-    const fetchRequest = options.fetchRequest ?? api.getAuthorityRequest;
-    request = await fetchRequest(hint.requestId);
+    const requestFetcher = options.fetchRequest ?? fetchAuthorityRequest;
+    request = await requestFetcher(hint.requestId);
   } catch {
     return { kind: "ignored", reason: "lookup_failed" };
   }
