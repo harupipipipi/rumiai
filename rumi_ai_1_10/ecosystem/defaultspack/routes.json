@@ -253,6 +253,18 @@
       "description": "Read a local share link"
     },
     {
+      "method": "POST",
+      "path": "/api/share/{token}/import",
+      "flow_id": "transport_direct",
+      "description": "Import a shared conversation as a new local conversation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations/import",
+      "flow_id": "transport_direct",
+      "description": "Import a conversation share bundle or history.json"
+    },
+    {
       "method": "DELETE",
       "path": "/api/share/{token}",
       "flow_id": "transport_direct",

@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
@@ -20,6 +22,49 @@ import {
   resolvedFrontendCommandArgs,
 } from "../App";
 import { shouldAutoCompactHistory } from "../App";
+import { ImportedConversationNotice, shareImportDestination, shareTokenFromPath } from "../pages/ConversationShareLanding";
+
+test("shareTokenFromPath accepts only a single landing path segment", () => {
+  assert.equal(shareTokenFromPath("/share/local-token_123"), "local-token_123");
+  assert.equal(shareTokenFromPath("/share/tunnel-token/"), "tunnel-token");
+  assert.equal(shareTokenFromPath("/share/one/extra"), "");
+  assert.equal(shareTokenFromPath("/api/share/token"), "");
+});
+
+test("conversation share helpers navigate to a fresh chat and render provenance", () => {
+  assert.equal(shareImportDestination("new/id"), "/chat?chat=new%2Fid");
+  const html = renderToStaticMarkup(createElement(ImportedConversationNotice, { onDismiss: () => undefined }));
+  assert.match(html, /Shared conversation imported/);
+  assert.match(html, /files, attachments, tool outputs, local paths, or credentials may be unavailable/);
+  assert.match(html, /Dismiss import notice/);
+});
+
+test("conversation share API reads and imports through token-scoped endpoints", async () => {
+  const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({
+      url: String(input),
+      method: String(init?.method ?? "GET"),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    const data = requests.length === 1
+      ? { token: "share-token", target_type: "conversation", content: { kind: "rumi.defaultspack.conversation_share" } }
+      : { conversation_id: "fresh-local-id", conversation: { id: "fresh-local-id", messages: [] } };
+    return new Response(JSON.stringify({ status: "ok", data }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await api.getShare("share/token");
+    const imported = await api.importShare("share/token", "https://share.example/share/token");
+    assert.equal(imported.conversation_id, "fresh-local-id");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(requests, [
+    { url: "/api/share/share%2Ftoken", method: "GET", body: undefined },
+    { url: "/api/share/share%2Ftoken/import", method: "POST", body: { source_url: "https://share.example/share/token" } },
+  ]);
+});
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
   "Thank you for granting",

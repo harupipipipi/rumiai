@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Hand, Loader2 } from "lucide-react";
+import { Cloud, Copy, Download, Hand, Link, Loader2, X } from "lucide-react";
 
 import {
   CompanyWorkspacePanel,
@@ -39,6 +39,7 @@ import {
 } from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
+import { ConversationShareLanding, ImportedConversationNotice } from "./pages/ConversationShareLanding";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -2417,6 +2418,11 @@ function ChatApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCreatedUrl, setShareCreatedUrl] = useState<string | null>(null);
+  const [shareDialogError, setShareDialogError] = useState<string | null>(null);
+  const [provenanceDismissedFor, setProvenanceDismissedFor] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
@@ -2471,6 +2477,15 @@ function ChatApp() {
       setMode("agent");
     }
   }, [mode, setMode]);
+
+  useEffect(() => {
+    if (!shareDialogOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setShareDialogOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [shareDialogOpen]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -4891,17 +4906,21 @@ function ChatApp() {
       let result: unknown;
       if (action.id === "conversation.export") {
         if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
-        result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
+        const exported = await api.exportConversation(activeConversationId, "json");
+        const blob = new Blob([exported.content], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "history.json";
+        anchor.click();
+        URL.revokeObjectURL(url);
+        result = { exported: true, format: "json" };
       } else if (action.id === "conversation.share") {
         if (!activeConversationId) throw new Error("共有する会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "markdown");
-        result = await api.createShare({
-          target_type: "conversation",
-          target_id: activeConversationId,
-          title: activeChatTitle,
-          content: exported.content,
-          visibility: "local",
-        });
+        setShareCreatedUrl(null);
+        setShareDialogError(null);
+        setShareDialogOpen(true);
+        result = { dialog_opened: true };
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -4972,6 +4991,25 @@ function ChatApp() {
       void navigator.clipboard?.writeText(text).catch(() => undefined);
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "サイドバー操作に失敗しました。");
+    }
+  };
+
+  const createConversationShare = async (visibility: "local" | "tunnel") => {
+    if (!activeConversationId) return;
+    setShareBusy(true);
+    setShareDialogError(null);
+    try {
+      const created = await api.createShare({
+        target_type: "conversation",
+        target_id: activeConversationId,
+        title: activeChatTitle,
+        visibility,
+      });
+      setShareCreatedUrl(String(created.share_url || ""));
+    } catch (reason) {
+      setShareDialogError(reason instanceof Error ? reason.message : "共有リンクを作成できませんでした。");
+    } finally {
+      setShareBusy(false);
     }
   };
 
@@ -5904,6 +5942,10 @@ function ChatApp() {
               </div>
             )}
 
+            {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
+              <ImportedConversationNotice onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
+            )}
+
             {isDesktopsWorkspace ? (
               <DesktopMonitorWorkspace />
             ) : isKanbanMode ? (
@@ -6192,6 +6234,27 @@ function ChatApp() {
       )}
 
       <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
+      {shareDialogOpen && (
+        <LayerPortal layer="globalOverlay">
+          <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShareDialogOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="share-dialog-title" className="w-full max-w-lg border border-zinc-700 bg-zinc-950 p-5 shadow-2xl">
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="share-dialog-title" className="text-lg font-semibold text-zinc-100">Share conversation</h2>
+                <button autoFocus type="button" title="Close" aria-label="Close share dialog" onClick={() => setShareDialogOpen(false)} className="inline-flex h-8 w-8 items-center justify-center text-zinc-400 hover:bg-zinc-900 hover:text-white"><X size={17} /></button>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">The transcript is redacted before sharing. Attachments and executable permissions are never included.</p>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("local")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Link size={18} className="mt-0.5 text-emerald-300" /><span><strong className="block text-sm text-zinc-100">Local share link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Private to this defaultspack host.</span></span></button>
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
+              </div>
+              {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
+              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
+              {shareCreatedUrl && <div className="mt-4 border border-emerald-500/25 bg-emerald-500/10 p-3"><p className="break-all text-sm text-emerald-100">{shareCreatedUrl}</p><button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="mt-3 inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button></div>}
+              <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
+            </section>
+          </div>
+        </LayerPortal>
+      )}
     </div>
     </RendererBoundary>
   );
@@ -6263,6 +6326,9 @@ export default function App() {
   }
   if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
     return <UiPrecisionComparator />;
+  }
+  if (pathname.startsWith("/share/")) {
+    return <ConversationShareLanding />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
