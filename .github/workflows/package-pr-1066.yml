@@ -1,0 +1,140 @@
+name: Package PR 1066
+
+on:
+  push:
+    branches:
+      - tmp/pr-1066-package-20260710
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout final PR head
+        uses: actions/checkout@v4
+        with:
+          ref: audit/ui-ux-security-guardrails-20260710
+          fetch-depth: 0
+
+      - name: Build exact PR bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin soon:refs/remotes/origin/soon --depth=1
+
+          PR_HEAD="$(git rev-parse HEAD)"
+          PR_BASE="$(git rev-parse origin/soon)"
+          BUNDLE_ROOT="${RUNNER_TEMP}/rumiai-pr-1066"
+          CHANGED_ROOT="${BUNDLE_ROOT}/changed-files"
+          rm -rf "${BUNDLE_ROOT}" "${RUNNER_TEMP}/rumiai-pr-1066.zip"
+          mkdir -p "${CHANGED_ROOT}"
+
+          mapfile -t CHANGED_FILES < <(git diff --name-only --diff-filter=ACMR "origin/soon...HEAD")
+          if [ "${#CHANGED_FILES[@]}" -ne 8 ]; then
+            printf 'Expected 8 changed files, found %s\n' "${#CHANGED_FILES[@]}" >&2
+            printf '%s\n' "${CHANGED_FILES[@]}" >&2
+            exit 1
+          fi
+
+          for path in "${CHANGED_FILES[@]}"; do
+            mkdir -p "${CHANGED_ROOT}/$(dirname "${path}")"
+            cp -- "${path}" "${CHANGED_ROOT}/${path}"
+          done
+
+          git diff --binary --full-index "origin/soon...HEAD" > "${BUNDLE_ROOT}/PR-1066.patch"
+          git diff --stat "origin/soon...HEAD" > "${BUNDLE_ROOT}/PR-1066.stat"
+          printf '%s\n' "${CHANGED_FILES[@]}" > "${BUNDLE_ROOT}/CHANGED-FILES.txt"
+
+          cat > "${BUNDLE_ROOT}/VALIDATION.txt" <<EOF
+          PR: https://github.com/harupipipi/rumiai/pull/1066
+          Base branch: soon
+          Base SHA: ${PR_BASE}
+          Head branch: audit/ui-ux-security-guardrails-20260710
+          Head SHA: ${PR_HEAD}
+
+          Validation performed before packaging:
+          - UI Security Guardrails GitHub Actions workflow: success
+          - Dev Health Check: success
+          - defaultspack frontend tests: success
+          - defaultspack typecheck/lint: success
+          - defaultspack production build: success
+          - vendored frontend bundle synchronization check: success
+          - focused security tests: 8 passed, 0 failed
+          - static UI security guardrail scanner: success
+
+          Notes:
+          - The PR is a focused containment and audit baseline, not closure of all 58 audit issues.
+          - #1006 and #1047 remain open for the complete architectural remediation.
+          EOF
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "rumiai-pr-1066"
+          changed = (root / "CHANGED-FILES.txt").read_text(encoding="utf-8").splitlines()
+          metadata = {
+              "repository": "harupipipipi/rumiai",
+              "pull_request": 1066,
+              "pull_request_url": "https://github.com/harupipipipi/rumiai/pull/1066",
+              "title": "[security][UI audit] Contain approval-token leaks and harden attachment boundaries",
+              "base_branch": "soon",
+              "base_sha": os.popen("git rev-parse origin/soon").read().strip(),
+              "head_branch": "audit/ui-ux-security-guardrails-20260710",
+              "head_sha": os.popen("git rev-parse HEAD").read().strip(),
+              "changed_file_count": len(changed),
+              "changed_files": changed,
+              "audit_issues_created": 58,
+              "related_existing_issues_indexed": [1025, 1026, 1027],
+              "partial_mitigation_issues": [1006, 1047],
+          }
+          (root / "PR-METADATA.json").write_text(
+              json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          cat > "${BUNDLE_ROOT}/MANIFEST.md" <<EOF
+          # PR #1066 ZIP Manifest
+
+          This archive is generated from the exact GitHub branch state for PR #1066.
+
+          - Repository: \`harupipipipi/rumiai\`
+          - Base: \`soon\` at \`${PR_BASE}\`
+          - Head: \`audit/ui-ux-security-guardrails-20260710\` at \`${PR_HEAD}\`
+          - Changed files: 8
+          - Audit issues created: 58
+          - PR URL: https://github.com/harupipipipi/rumiai/pull/1066
+
+          ## Contents
+
+          - \`changed-files/\` — exact final contents of all eight changed files, including the synchronized vendored \`ui/shell-app.js\`.
+          - \`PR-1066.patch\` — full binary-safe Git diff from \`soon\` to the PR head.
+          - \`PR-1066.stat\` — diff statistics.
+          - \`CHANGED-FILES.txt\` — changed-path inventory.
+          - \`PR-METADATA.json\` — machine-readable PR metadata.
+          - \`VALIDATION.txt\` — validation and CI summary.
+          - \`SHA256SUMS\` — checksums for every other file in this archive.
+          EOF
+
+          (
+            cd "${BUNDLE_ROOT}"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+          )
+          (
+            cd "${RUNNER_TEMP}"
+            zip -q -r rumiai-pr-1066.zip rumiai-pr-1066
+          )
+
+      - name: Upload exact PR ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: rumiai-pr-1066
+          path: ${{ runner.temp }}/rumiai-pr-1066.zip
+          retention-days: 1
+          if-no-files-found: error
