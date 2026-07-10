@@ -177,6 +177,7 @@ export type ComposerRendererProps = {
   codingWorkspaces?: CodingWorkspaceRecord[];
   selectedCodingWorkspaceId?: string | null;
   attachedFiles?: AttachedFile[];
+  pendingMentionAttachmentPaths?: string[];
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   actionApprovalMode?: ActionApprovalMode;
@@ -211,6 +212,7 @@ export type ComposerRendererProps = {
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
+  onPendingMentionAttachmentRemove?: (path: string) => void;
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;

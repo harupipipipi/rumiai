@@ -8,6 +8,7 @@ const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
 type ApiMockOptions = {
+  beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
   initialSettingsValues?: Record<string, Record<string, unknown>>;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
@@ -700,6 +701,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/files/read" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      await options.beforeWorkspaceFileReadResponse?.(payload);
       return fulfill(route, {
         path: String(payload.path ?? "README.md"),
         content: "# Fixture\n",
@@ -1132,6 +1134,132 @@ test("composer supplementary-plane mention keeps textarea and parser indices ali
   expect(metadata.mentions).toEqual([
     { id: "𐐀tool", kind: "tool", label: "𐐀tool", syntax: "@𐐀tool" },
   ]);
+});
+
+test("composer keeps a no-space mention disabled after its chip is toggled off", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  expect(streamRequests[0].tools).toBeUndefined();
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toBeUndefined();
+  expect(metadata.selected_tools).toBeUndefined();
+  expect(metadata.dropped_widgets).toEqual([]);
+});
+
+test("editing and reselecting a dismissed no-space mention restores it", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await composer.fill("Use again @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  expect(streamRequests[0].tools).toEqual(["𐐀tool"]);
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "𐐀tool", kind: "tool", label: "𐐀tool", syntax: "@𐐀tool" },
+  ]);
+});
+
+test("workspace mention waits for its attachment before submit", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+
+  const pendingSend = page.getByRole("button", { name: "ファイルを読み込み中" });
+  await expect(pendingSend).toBeDisabled();
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" }).first()).toBeVisible();
+  await composer.press("Enter");
+  expect(streamRequests).toHaveLength(0);
+
+  releaseRead();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toBeVisible();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toEqual([
+    expect.objectContaining({ name: "README.md", sourcePath: "README.md" }),
+  ]);
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "README.md", kind: "file", label: "README.md", syntax: "@README.md" },
+  ]);
+});
+
+test("cancelling a pending workspace mention discards its late result", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await page.getByRole("button", { name: "README.md の読み込みを取り消す" }).click();
+
+  releaseRead();
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toBeUndefined();
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toBeUndefined();
+  expect(metadata.attachments).toEqual([]);
+});
+
+test("starting a new draft discards a pending workspace mention result", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await page.getByTitle("New Chat").first().click();
+  await expect(page.locator(".rumi-new-chat-stage")).toBeVisible();
+
+  releaseRead();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" })).toHaveCount(0);
 });
 
 test("migrated keyboard navigation marker keeps composer controls reachable", async ({ page }) => {

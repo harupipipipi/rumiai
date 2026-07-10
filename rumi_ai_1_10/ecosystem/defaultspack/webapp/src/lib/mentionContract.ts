@@ -90,7 +90,15 @@ export function hasUnescapedMentionSyntax(text: string, syntax: string): boolean
   for (let offset = text.indexOf(syntax); offset >= 0; offset = text.indexOf(syntax, offset + 1)) {
     const codePointIndex = utf16OffsetToCodePointIndex(text, offset);
     if (codePointIndexToUtf16Offset(text, codePointIndex) !== offset) continue;
-    if (isMentionStart(text, codePointIndex)) return true;
+    if (!isMentionStart(text, codePointIndex)) continue;
+    const followingCharacters = [...text.slice(offset + syntax.length)];
+    const nextCharacter = followingCharacters[0] ?? "";
+    if (!nextCharacter) return true;
+    if (nextCharacter === ".") {
+      if (!isMentionTokenChar(followingCharacters[1] ?? "")) return true;
+      continue;
+    }
+    if (!isMentionTokenChar(nextCharacter)) return true;
   }
   return false;
 }

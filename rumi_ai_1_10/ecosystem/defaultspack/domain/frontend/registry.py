@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib
 import json
+import os
 import re
+import tempfile
 import threading
 import time
 from copy import deepcopy
@@ -161,11 +164,7 @@ class FrontendRegistry:
         self._mark_explicit_keyboard_navigation_change(current, sanitized_patch)
         merged = self._deep_merge(current, sanitized_patch)
         merged = self._refresh_derived_settings(merged)
-        self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self._settings_path.write_text(
-            json.dumps(merged, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._write_settings_atomically(merged)
         return merged
 
     def build_conversation_preview(self, conversation_id: str) -> dict[str, Any]:
@@ -2608,18 +2607,78 @@ class FrontendRegistry:
         values = self._default_settings()
         if self._settings_path.exists():
             try:
-                saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                saved = {}
+                raw_settings = self._settings_path.read_bytes()
+                saved = json.loads(raw_settings.decode("utf-8"))
+            except OSError:
+                return self._refresh_derived_settings(values)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._backup_corrupt_settings(raw_settings)
+                return self._refresh_derived_settings(values)
             saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
             if migrated:
-                self._settings_path.write_text(
-                    json.dumps(saved, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                self._write_settings_atomically(saved)
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)
+
+    def _backup_corrupt_settings(self, content: bytes) -> None:
+        """Preserve unreadable settings without changing the original file."""
+
+        digest = hashlib.sha256(content).hexdigest()[:12]
+        backup_path = self._settings_path.with_name(
+            f"{self._settings_path.name}.corrupt-{digest}.bak"
+        )
+        if backup_path.exists():
+            return
+        mode = self._settings_file_mode(self._settings_path)
+        self._atomic_write_bytes(backup_path, content, mode=mode)
+
+    def _write_settings_atomically(self, values: dict[str, Any]) -> None:
+        """Durably replace settings while preserving existing file permissions."""
+
+        content = json.dumps(values, ensure_ascii=False, indent=2).encode("utf-8")
+        mode = self._settings_file_mode(self._settings_path)
+        self._atomic_write_bytes(self._settings_path, content, mode=mode)
+
+    @staticmethod
+    def _settings_file_mode(path: Path) -> int:
+        """Return the current settings mode, or a private default for new files."""
+
+        try:
+            return path.stat().st_mode & 0o777
+        except OSError:
+            return 0o600
+
+    @staticmethod
+    def _atomic_write_bytes(path: Path, content: bytes, *, mode: int) -> None:
+        """Write bytes through a same-directory temporary file and atomic replace."""
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            os.fchmod(file_descriptor, mode)
+            with os.fdopen(file_descriptor, "wb") as temporary_file:
+                temporary_file.write(content)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.replace(temporary_path, path)
+            directory_descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        except Exception:
+            try:
+                os.close(file_descriptor)
+            except OSError:
+                pass
+            temporary_path.unlink(missing_ok=True)
+            raise
 
     def _migrate_legacy_keyboard_navigation(
         self,
