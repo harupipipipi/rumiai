@@ -46,6 +46,7 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
+import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
@@ -2303,6 +2304,7 @@ function ChatApp() {
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
+  const [composerEntityReferences, setComposerEntityReferences] = useState<ComposerEntityReference[]>([]);
   const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
@@ -3341,6 +3343,7 @@ function ChatApp() {
     setIsGenerating(false);
     setAttachedFiles([]);
     setDroppedWidgets([]);
+    setComposerEntityReferences([]);
     replaceChatIdInUrl(null, false);
   };
 
@@ -3822,6 +3825,7 @@ function ChatApp() {
         setInput("");
         setAttachedFiles([]);
         setDroppedWidgets([]);
+        setComposerEntityReferences([]);
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -4737,8 +4741,10 @@ function ChatApp() {
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
     const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
-    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const explicitToolReferenceIds = composerEntityReferences.filter((reference) => reference.kind === "tool").map((reference) => reference.id);
+    const explicitSkillReferenceIds = composerEntityReferences.filter((reference) => reference.kind === "skill").map((reference) => reference.id);
+    const mentionedToolIds = [...new Set([...explicitToolReferenceIds, ...toolMentionIdsFromText(userText, composerExtensions)])];
+    const mentionedSkillIdsFromText = [...new Set([...explicitSkillReferenceIds, ...skillMentionIdsFromText(userText, composerSkills)])];
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
       toolIds: selectedToolIds,
       mentionedToolIds,
@@ -4772,6 +4778,7 @@ function ChatApp() {
       setIsNewChatLaunching(true);
     }
     setInput("");
+    setComposerEntityReferences([]);
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
@@ -5453,6 +5460,7 @@ function ChatApp() {
       selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
       droppedWidgets={activeDroppedWidgets}
+      entityReferences={composerEntityReferences}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
@@ -5488,6 +5496,7 @@ function ChatApp() {
       onAtFileAttach={handleAtFileAttach}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
+      onEntityReferencesChange={setComposerEntityReferences}
       onWidgetAction={handleWidgetAction}
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}

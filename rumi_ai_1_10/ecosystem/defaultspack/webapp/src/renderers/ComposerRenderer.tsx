@@ -44,6 +44,7 @@ import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+import { COMPOSER_REFERENCE_MIME, insertComposerReferencePaste, mergeComposerReferences, restoreComposerReferences, serializeComposerReferences, type ComposerEntityReference } from "../lib/composerReferences";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
@@ -1409,6 +1410,7 @@ export function ComposerRenderer({
   selectedCodingWorkspaceId = null,
   attachedFiles = [],
   droppedWidgets = [],
+  entityReferences = [],
   selectedToolIds = [],
   actionApprovalMode = "ask",
   toolSelectionTargets = [],
@@ -1444,6 +1446,7 @@ export function ComposerRenderer({
   onAtFileAttach,
   onFileRemove,
   onDropWidget,
+  onEntityReferencesChange,
   onWidgetAction,
   onWidgetToggle,
   onCodingBranchSwitch,
@@ -1916,13 +1919,14 @@ export function ComposerRenderer({
   const handleInputChange = useCallback(
     (value: string) => {
       onInputChange(value);
+      onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [], value));
       updateAtMentionStateFromInput(value);
 
       if (!templateAllowsSlashCommands || !value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, templateAllowsSlashCommands, updateAtMentionStateFromInput],
+    [entityReferences, onEntityReferencesChange, onInputChange, templateAllowsSlashCommands, updateAtMentionStateFromInput],
   );
 
   const handleAtMentionSelect = useCallback(
@@ -1934,6 +1938,12 @@ export function ComposerRenderer({
 	      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
 	      const next = insertAtMentionText(input, cursorPos, mentionText);
 	      onInputChange(next.value);
+	      const reference: ComposerEntityReference = {
+	        kind: candidate.kind,
+	        id: candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file,
+	        syntax: `@${mentionText}`,
+	      };
+	      onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
 	      if (candidate.kind === "file" && mode === "coding") {
 	        onAtFileAttach?.(candidate.file);
 	      }
@@ -1945,8 +1955,41 @@ export function ComposerRenderer({
         textarea.focus();
       }, 0);
     },
-	    [input, mode, onAtFileAttach, onInputChange],
+	    [entityReferences, input, mode, onAtFileAttach, onEntityReferencesChange, onInputChange],
 	  );
+
+  const handleCopy = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const textarea = event.currentTarget;
+    const selectedText = input.slice(textarea.selectionStart, textarea.selectionEnd);
+    const serialized = serializeComposerReferences(selectedText, entityReferences);
+    if (!serialized) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", selectedText);
+    event.clipboardData.setData(COMPOSER_REFERENCE_MIME, serialized);
+  }, [entityReferences, input]);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const raw = event.clipboardData.getData(COMPOSER_REFERENCE_MIME);
+    if (!raw) return;
+    const restored = restoreComposerReferences(raw, {
+      tools: toolItems,
+      skills: skillExtensions,
+      files: mode === "coding" ? codingContext?.files ?? [] : [],
+    });
+    if (!restored) return;
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    const next = insertComposerReferencePaste(input, textarea.selectionStart, textarea.selectionEnd, restored);
+    onInputChange(next.value);
+    onEntityReferencesChange?.(mergeComposerReferences(entityReferences, next.references, next.value));
+    for (const reference of next.references) {
+      if (reference.kind === "file" && mode === "coding") onAtFileAttach?.(reference.id);
+    }
+    setTimeout(() => {
+      textarea.setSelectionRange(next.cursor, next.cursor);
+      textarea.focus();
+    }, 0);
+  }, [codingContext?.files, entityReferences, input, mode, onAtFileAttach, onEntityReferencesChange, onInputChange, skillExtensions, toolItems]);
 
   const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -2872,6 +2915,8 @@ export function ComposerRenderer({
                         }
                       }}
                       onKeyDown={handleKeyDown}
+                      onCopy={handleCopy}
+                      onPaste={handlePaste}
                     />
                   </div>
                   <div className="flex items-center justify-end gap-2 self-end">
@@ -2916,6 +2961,8 @@ export function ComposerRenderer({
                 }
               }}
               onKeyDown={handleKeyDown}
+              onCopy={handleCopy}
+              onPaste={handlePaste}
             />
           )}
 

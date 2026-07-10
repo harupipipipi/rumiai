@@ -10,6 +10,7 @@ import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStat
 import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
 import type { ActionApprovalMode } from "../features/tools/ActionApprovalControl";
 import type { PendingToolReview, ToolSelectionChip } from "../features/tools/types";
+import type { ComposerEntityReference } from "../lib/composerReferences";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -175,6 +176,7 @@ export type ComposerRendererProps = {
   selectedCodingWorkspaceId?: string | null;
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
+  entityReferences?: ComposerEntityReference[];
   selectedToolIds?: string[];
   actionApprovalMode?: ActionApprovalMode;
   toolSelectionTargets?: ToolSelectionChip[];
@@ -210,6 +212,7 @@ export type ComposerRendererProps = {
   onAtFileAttach?: (path: string) => void;
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
+  onEntityReferencesChange?: (references: ComposerEntityReference[]) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;
   onWidgetToggle?: (widgetId: string) => void;
   onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
