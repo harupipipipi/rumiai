@@ -1,0 +1,321 @@
+name: Apply issue 1058 fix
+
+on:
+  push:
+    branches:
+      - fix/1058-harden-tool-preview-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[auto-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1058-harden-tool-preview-boundary
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - name: Harden Tool Preview URL and HTML boundaries
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('rumi_ai_1_10/ecosystem/defaultspack/webapp')
+          page = root / 'src/components/ToolPreview.tsx'
+          text = page.read_text(encoding='utf-8')
+
+          text = text.replace(
+              "export const WEB_PREVIEW_IFRAME_SANDBOX = 'allow-forms allow-modals allow-popups allow-scripts';",
+              "export const WEB_PREVIEW_IFRAME_SANDBOX = '';",
+              1,
+          )
+
+          url_helpers = re.compile(
+              r"function safeHref\(url: string \| undefined\): string \| undefined \{[\s\S]*?\n\}\n\nfunction localPreviewUrl\(url: string \| undefined\): boolean \{[\s\S]*?\n\}",
+              re.MULTILINE,
+          )
+          url_replacement = '''function previewBaseUrl(): string {
+            try {
+              return typeof window === 'undefined' ? '' : window.location.href;
+            } catch {
+              return '';
+            }
+          }
+
+          export function safePreviewHref(url: string | undefined, baseUrl = previewBaseUrl()): string | undefined {
+            if (!url || !baseUrl) return undefined;
+            try {
+              const base = new URL(baseUrl);
+              const parsed = new URL(url, base);
+              if (parsed.origin !== base.origin) return undefined;
+              if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+              return parsed.toString();
+            } catch {
+              return undefined;
+            }
+          }
+
+          export function safePreviewImageUrl(url: string | undefined, baseUrl = previewBaseUrl()): string | undefined {
+            if (!url) return undefined;
+            if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(url)) return url;
+            return safePreviewHref(url, baseUrl);
+          }
+
+          function safeHref(url: string | undefined): string | undefined {
+            return safePreviewHref(url);
+          }
+
+          function localPreviewUrl(url: string | undefined): boolean {
+            return Boolean(safePreviewHref(url));
+          }'''
+          text, helper_count = url_helpers.subn(url_replacement, text, count=1)
+          if helper_count != 1:
+              raise SystemExit(f'URL helper replacement count={helper_count}')
+
+          html_helpers = re.compile(
+              r"function escapeHtmlAttribute\(value: string\): string \{[\s\S]*?\n\}\n\nfunction htmlWithBase\(content: string, url\?: string\): string \{[\s\S]*?\n\}",
+              re.MULTILINE,
+          )
+          html_replacement = '''function escapeHtmlAttribute(value: string): string {
+            return value
+              .replace(/&/g, '&amp;')
+              .replace(/"/g, '&quot;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+          }
+
+          const HTML_PREVIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
+
+          export function hardenedHtmlPreviewDocument(content: string): string {
+            const csp = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(HTML_PREVIEW_CSP)}">`;
+            const referrer = '<meta name="referrer" content="no-referrer">';
+            const metadata = `${csp}${referrer}`;
+            if (/<head[^>]*>/i.test(content)) {
+              return content.replace(/<head([^>]*)>/i, `<head$1>${metadata}`);
+            }
+            return `<!doctype html><html><head>${metadata}</head><body>${content}</body></html>`;
+          }'''
+          text, html_count = html_helpers.subn(html_replacement, text, count=1)
+          if html_count != 1:
+              raise SystemExit(f'HTML helper replacement count={html_count}')
+
+          text = text.replace('      imageUrl: data.url,', '      imageUrl: safePreviewImageUrl(data.url),', 1)
+          text = text.replace('      href: data.url,\n      content: data.content,', '      href: safeHref(data.url),\n      content: data.content,', 1)
+          text = text.replace('    href: data.url,\n    imageUrl: data.screenshot,', '    href: safeHref(data.url),\n    imageUrl: safePreviewImageUrl(data.screenshot),', 1)
+
+          web_pattern = re.compile(r"function WebPreviewContent\(\{ data \}: \{ data: WebPreview \}\) \{[\s\S]*?\n\}\n\nfunction CodePreviewContent", re.MULTILINE)
+          web_replacement = '''function WebPreviewContent({ data }: { data: WebPreview }) {
+            const openUrl = safeHref(data.url);
+            const screenshotUrl = safePreviewImageUrl(data.screenshot);
+            const canEmbed = localPreviewUrl(data.url) && Boolean(openUrl);
+            return (
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border-b border-zinc-800/60 flex-shrink-0">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                    <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                    <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                  </div>
+                  <div className="flex-1 flex items-center gap-2 bg-zinc-800 rounded px-2.5 py-1 text-[10px] text-zinc-500 font-mono truncate">
+                    <Globe size={10} className="flex-shrink-0 text-zinc-600" />
+                    <span className="truncate">{data.url}</span>
+                  </div>
+                  {openUrl ? (
+                    <a href={openUrl} target="_blank" rel="noreferrer" referrerPolicy="no-referrer" className="text-zinc-600 hover:text-zinc-400 transition-colors" aria-label={`Open trusted preview ${data.title || data.url}`}>
+                      <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="text-zinc-600" title="External preview blocked by URL policy"><EyeOff size={12} /></span>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-hidden">
+                  {canEmbed && openUrl ? (
+                    <iframe
+                      src={openUrl}
+                      title={data.title || data.url}
+                      className="h-full w-full border-0 bg-white"
+                      sandbox={WEB_PREVIEW_IFRAME_SANDBOX}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : screenshotUrl ? (
+                    <img src={screenshotUrl} alt={data.title} referrerPolicy="no-referrer" className="m-4 w-[calc(100%-2rem)] rounded border border-zinc-800" />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+                      <EyeOff size={28} className="text-zinc-700" />
+                      <div className="max-w-full">
+                        <h3 className="truncate text-sm font-medium text-zinc-200">{data.title}</h3>
+                        <p className="mt-1 break-all font-mono text-[10px] text-zinc-600">{data.url}</p>
+                        {data.snippet && <p className="mt-2 text-xs leading-relaxed text-zinc-500">{data.snippet}</p>}
+                        <p role="note" className="mt-3 text-[11px] leading-4 text-amber-200">External previews are blocked from loading automatically. Review the displayed destination before opening it through an approved navigation surface.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          function CodePreviewContent'''
+          text, web_count = web_pattern.subn(web_replacement, text, count=1)
+          if web_count != 1:
+              raise SystemExit(f'WebPreviewContent replacement count={web_count}')
+
+          old_fetch_guard = '''    if (inlineContent !== undefined || !data.url) {
+              setIsLoading(false);
+              return () => {
+                cancelled = true;
+              };
+            }
+            setIsLoading(true);
+            void fetch(data.url, { cache: 'no-store' })'''
+          new_fetch_guard = '''    if (inlineContent !== undefined || !data.url) {
+              setIsLoading(false);
+              return () => {
+                cancelled = true;
+              };
+            }
+            const fetchUrl = safeHref(data.url);
+            if (!fetchUrl) {
+              setIsLoading(false);
+              setError('Remote preview blocked by URL policy.');
+              return () => {
+                cancelled = true;
+              };
+            }
+            setIsLoading(true);
+            void fetch(fetchUrl, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })'''
+          if old_fetch_guard not in text:
+              raise SystemExit('remote fetch guard missing')
+          text = text.replace(old_fetch_guard, new_fetch_guard, 1)
+
+          text = text.replace("  const srcDoc = content ? htmlWithBase(content, data.url) : undefined;", "  const srcDoc = content ? hardenedHtmlPreviewDocument(content) : undefined;\n  const openUrl = safeHref(data.url);", 1)
+          text = text.replace('        {data.url && (\n          <a\n            href={data.url}', '        {openUrl && (\n          <a\n            href={openUrl}', 1)
+          text = text.replace('            rel="noreferrer"\n            className=', '            rel="noreferrer"\n            referrerPolicy="no-referrer"\n            className=', 1)
+          text = text.replace('            sandbox="allow-forms allow-modals allow-popups allow-scripts"\n          />', '            sandbox={WEB_PREVIEW_IFRAME_SANDBOX}\n            referrerPolicy="no-referrer"\n          />', 1)
+
+          text = text.replace('function FilePreviewContent({ data }: { data: FilePreview }) {\n  const loaded = useRemotePreviewText(data);', 'function FilePreviewContent({ data }: { data: FilePreview }) {\n  const loaded = useRemotePreviewText(data);\n  const openUrl = safeHref(data.url);', 1)
+          text = text.replace('          {data.url && (\n            <a\n              href={data.url}', '          {openUrl && (\n            <a\n              href={openUrl}', 1)
+
+          image_pattern = re.compile(r"function ImagePreviewContent\(\{ data \}: \{ data: ImagePreview \}\) \{[\s\S]*?\n\}\n\n// =+\n// Canvas timeline", re.MULTILINE)
+          image_replacement = '''function ImagePreviewContent({ data }: { data: ImagePreview }) {
+            const imageUrl = safePreviewImageUrl(data.url);
+            return (
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border-b border-zinc-800/60 flex-shrink-0">
+                  <Image size={12} className="text-zinc-500" />
+                  <span className="text-[11px] text-zinc-300">{data.alt}</span>
+                </div>
+                <div className="flex-1 p-4 flex items-center justify-center overflow-y-auto">
+                  {imageUrl ? (
+                    <img src={imageUrl} alt={data.alt} referrerPolicy="no-referrer" className="max-w-full max-h-full rounded-lg border border-zinc-800" />
+                  ) : (
+                    <div role="note" className="w-full max-w-sm rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-center">
+                      <EyeOff size={28} className="mx-auto text-amber-300" />
+                      <p className="mt-2 text-[11px] leading-4 text-amber-100">The image source is external or unsupported, so it was not loaded automatically.</p>
+                      {data.url && <p className="mt-2 break-all font-mono text-[10px] text-zinc-500">{data.url}</p>}
+                    </div>
+                  )}
+                </div>
+                {data.prompt && (
+                  <div className="px-3 py-2 border-t border-zinc-800/60 flex-shrink-0">
+                    <p className="text-[10px] text-zinc-600"><span className="text-zinc-500">Prompt:</span> {data.prompt}</p>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          // ============================================================
+          // Canvas timeline'''
+          text, image_count = image_pattern.subn(image_replacement, text, count=1)
+          if image_count != 1:
+              raise SystemExit(f'ImagePreviewContent replacement count={image_count}')
+
+          forbidden = [
+              "fetch(data.url",
+              "allow-forms allow-modals allow-popups allow-scripts",
+              "imageUrl: data.url",
+              "imageUrl: data.screenshot",
+              "src={data.url}",
+          ]
+          remaining = [item for item in forbidden if item in text]
+          if remaining:
+              raise SystemExit(f'unsafe preview patterns remain: {remaining}')
+          page.write_text(text, encoding='utf-8')
+
+          test_path = root / 'src/components/ToolPreview.test.ts'
+          tests = test_path.read_text(encoding='utf-8')
+          tests = tests.replace(
+              '  hasCanvasItems,\n  isCanvasPreviewItemRenderable,\n  WEB_PREVIEW_IFRAME_SANDBOX,',
+              '  hasCanvasItems,\n  hardenedHtmlPreviewDocument,\n  isCanvasPreviewItemRenderable,\n  safePreviewHref,\n  safePreviewImageUrl,\n  WEB_PREVIEW_IFRAME_SANDBOX,',
+              1,
+          )
+          old_sandbox = '''test("web preview iframe sandbox keeps same-origin content isolated", () => {
+            assert.match(WEB_PREVIEW_IFRAME_SANDBOX, /allow-scripts/);
+            assert.doesNotMatch(WEB_PREVIEW_IFRAME_SANDBOX, /allow-same-origin/);
+          });'''
+          new_sandbox = '''test("web preview iframe sandbox disables active capabilities", () => {
+            assert.equal(WEB_PREVIEW_IFRAME_SANDBOX, "");
+          });'''
+          if old_sandbox not in tests:
+              raise SystemExit('existing sandbox test missing')
+          tests = tests.replace(old_sandbox, new_sandbox, 1)
+          marker = 'test("tool preview URL policy blocks external and active-content destinations"'
+          if marker not in tests:
+              tests += '''
+
+          test("tool preview URL policy blocks external and active-content destinations", () => {
+            const base = "https://rumi.example/chat";
+            assert.equal(safePreviewHref("/artifact/1", base), "https://rumi.example/artifact/1");
+            assert.equal(safePreviewHref("https://attacker.example/track", base), undefined);
+            assert.equal(safePreviewHref("javascript:alert(1)", base), undefined);
+            assert.equal(safePreviewHref("file:///tmp/secret", base), undefined);
+          });
+
+          test("tool preview image policy permits raster data only and rejects SVG", () => {
+            assert.equal(safePreviewImageUrl("data:image/png;base64,abc", "https://rumi.example/"), "data:image/png;base64,abc");
+            assert.equal(safePreviewImageUrl("data:image/svg+xml;base64,PHN2Zz4=", "https://rumi.example/"), undefined);
+            assert.equal(safePreviewImageUrl("https://attacker.example/pixel.gif", "https://rumi.example/"), undefined);
+          });
+
+          test("HTML preview document has a fail-closed CSP and no injected base URL", () => {
+            const document = hardenedHtmlPreviewDocument("<script>fetch('https://attacker.example')</script><form action='https://attacker.example'><button>go</button></form>");
+            assert.match(document, /Content-Security-Policy/);
+            assert.match(document, /default-src 'none'/);
+            assert.match(document, /connect-src 'none'/);
+            assert.match(document, /form-action 'none'/);
+            assert.match(document, /base-uri 'none'/);
+            assert.doesNotMatch(document, /<base\s/i);
+          });
+          '''
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm ci
+      - name: Validate and rebuild
+        continue-on-error: true
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: |
+          npx tsx --test src/components/ToolPreview.test.ts
+          npm run lint
+          npm run build
+      - name: Commit implementation and remove helper
+        if: always()
+        run: |
+          rm -f .github/workflows/issue-1058-autofix.yml .github/.ci-trigger-1058
+          git config user.name "rumiai-ui-bot"
+          git config user.email "rumiai-ui-bot@users.noreply.github.com"
+          git add -A .github/workflows/issue-1058-autofix.yml .github/.ci-trigger-1058 rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/ToolPreview.tsx rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/ToolPreview.test.ts rumi_ai_1_10/ecosystem/defaultspack/ui
+          git diff --cached --quiet && exit 0
+          git commit -m "[auto-patched] Harden Tool Preview trust boundary"
+          git push origin HEAD:fix/1058-harden-tool-preview-boundary
