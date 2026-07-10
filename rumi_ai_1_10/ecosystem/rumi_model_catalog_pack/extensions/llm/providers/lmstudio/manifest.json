@@ -13,12 +13,14 @@
     "LM_API_TOKEN"
   ],
   "base_url_env": "LMSTUDIO_BASE_URL",
-  "default_base_url": "http://127.0.0.1:1234/v1",
+  "default_base_url": "local://lmstudio",
   "credential_required": false,
   "catalog_only": false,
   "supports_invoke": true,
   "config": {
     "api_compatibility": "openai",
+    "inference_base_url_default": "http://127.0.0.1:1234/v1",
+    "management_base_url_default": "http://127.0.0.1:1234",
     "model_sync": "lmstudio_native",
     "model_list_path": "/api/v1/models",
     "model_load_path": "/api/v1/models/load",
