@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  PLACEMENT_HTML_MAX_SOURCE_BYTES,
   buildBuiltinPlacementManifests,
   filterPlacementCandidates,
   readPinnedPlacements,
@@ -73,15 +74,72 @@ test("builtin placements include yolo switch and model manager", () => {
   assert.ok(ids.includes("model-manager"));
 });
 
-test("html placements resolve to sandboxed iframe rendering", () => {
+test("html placements fail closed instead of creating an origin-bearing iframe", () => {
   const rendering = resolvePlacementHtmlRendering({
     id: "html-test",
     label: "HTML",
-    source: { type: "custom" },
-    renderer: { kind: "html", html: "<script>alert(1)</script>" },
+    source: { type: "custom", sourceId: "example-extension" },
+    renderer: { kind: "html", trusted: true, html: "<script>alert(1)</script>" },
     placements: [{ surface: "right_sidebar", orientation: "vertical" }],
   });
 
-  assert.equal(rendering.kind, "html_iframe");
-  assert.equal(rendering.sandbox, "allow-same-origin");
+  assert.equal(rendering.kind, "blocked_html");
+  if (rendering.kind !== "blocked_html") return;
+  assert.equal(rendering.reason, "unverified_active_content");
+  assert.equal(rendering.sourceLabel, "custom:example-extension");
+  assert.match(rendering.message, /Arbitrary HTML placements are disabled/);
+  assert.equal("sandbox" in rendering, false);
+  assert.equal("html" in rendering, false);
+});
+
+test("active and network-capable HTML payloads are all blocked", () => {
+  const payloads = [
+    '<img src="https://tracker.example/pixel">',
+    '<link rel="stylesheet" href="http://127.0.0.1/private.css">',
+    '<meta http-equiv="refresh" content="0;url=https://example.test">',
+    '<form><button>Approve access</button></form>',
+    '<svg><image href="http://192.168.1.1/secret"></image></svg>',
+    '<style>@import url("https://fonts.example/font.css")</style>',
+  ];
+
+  for (const html of payloads) {
+    const rendering = resolvePlacementHtmlRendering({
+      id: "adversarial-html",
+      label: "Adversarial HTML",
+      source: { type: "custom" },
+      renderer: { kind: "html", html },
+      placements: [{ surface: "settings", orientation: "vertical" }],
+    });
+    assert.equal(rendering.kind, "blocked_html");
+    if (rendering.kind === "blocked_html") {
+      assert.equal(rendering.reason, "unverified_active_content");
+    }
+  }
+});
+
+test("oversized and empty HTML placements expose bounded blocked states", () => {
+  const oversized = resolvePlacementHtmlRendering({
+    id: "oversized-html",
+    label: "Oversized HTML",
+    source: { type: "custom" },
+    renderer: { kind: "html", html: "x".repeat(PLACEMENT_HTML_MAX_SOURCE_BYTES + 1) },
+    placements: [{ surface: "settings", orientation: "vertical" }],
+  });
+  assert.equal(oversized.kind, "blocked_html");
+  if (oversized.kind === "blocked_html") {
+    assert.equal(oversized.reason, "oversized_html");
+    assert.equal(oversized.byteLength, PLACEMENT_HTML_MAX_SOURCE_BYTES + 1);
+  }
+
+  const empty = resolvePlacementHtmlRendering({
+    id: "empty-html",
+    label: "Empty HTML",
+    source: { type: "custom" },
+    renderer: { kind: "html", html: "  " },
+    placements: [{ surface: "settings", orientation: "vertical" }],
+  });
+  assert.equal(empty.kind, "blocked_html");
+  if (empty.kind === "blocked_html") {
+    assert.equal(empty.reason, "empty_html");
+  }
 });
