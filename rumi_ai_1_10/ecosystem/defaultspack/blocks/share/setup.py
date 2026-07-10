@@ -31,6 +31,7 @@ def run(context):
         ("GET", "/api/share", _lazy("blocks.share.list"), {}),
         ("POST", "/api/share", _lazy("blocks.share.create"), {}),
         ("GET", "/api/share/{token}", _lazy("blocks.share.get"), {"token": "token"}),
+        ("POST", "/api/share/{token}/export", _lazy("blocks.share.export_bundle"), {"token": "token"}),
         ("POST", "/api/share/{token}/import", _lazy("blocks.share.import_conversation"), {"token": "token"}),
         ("POST", "/api/packs/defaultspack/chat/conversations/import", _lazy("blocks.share.import_bundle"), {}),
         ("DELETE", "/api/share/{token}", _lazy("blocks.share.revoke"), {"token": "token"}),

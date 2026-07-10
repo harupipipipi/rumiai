@@ -215,6 +215,9 @@ def prepare_chat_run(
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         raise ValueError("Conversation not found")
+    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    if conversation_metadata.get("shared_read_only") is True:
+        raise ValueError("This imported conversation is read-only. Create a continue copy to send messages.")
     active_startup_profile = _load_active_startup_profile()
     conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 

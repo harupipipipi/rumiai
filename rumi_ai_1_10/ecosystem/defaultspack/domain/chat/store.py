@@ -382,6 +382,8 @@ class ChatStore:
             conv = self._conversations.get(conversation_id)
             if conv is None:
                 return None
+            if self._is_read_only_conversation(conv):
+                return None
             msg = copy.deepcopy(message_dict)
             if "id" not in msg or msg["id"] is None:
                 msg["id"] = _gen_id()
@@ -428,6 +430,8 @@ class ChatStore:
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return None
+        if self._is_read_only_conversation(conv):
+            return None
         protected = {"id", "conversation_id", "created_at"}
         for msg in conv["messages"]:
             if msg["id"] == message_id:
@@ -444,6 +448,8 @@ class ChatStore:
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
+            return False
+        if self._is_read_only_conversation(conv):
             return False
         target = None
         for msg in conv["messages"]:
@@ -505,6 +511,8 @@ class ChatStore:
         conv = self._conversations.get(conversation_id)
         if conv is None:
             return 0
+        if self._is_read_only_conversation(conv):
+            return 0
         delete_set = set(message_ids)
         # 削除対象外メッセージの children_ids から削除対象を除去
         for msg in conv["messages"]:
@@ -548,6 +556,8 @@ class ChatStore:
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
+            return None
+        if self._is_read_only_conversation(conv):
             return None
         msg = copy.deepcopy(message_dict)
         if "id" not in msg or msg["id"] is None:
@@ -844,6 +854,11 @@ class ChatStore:
             conversation.get("title") or "New Conversation",
             conversation.get("id") or conversation_id,
         )
+
+    @staticmethod
+    def _is_read_only_conversation(conversation):
+        metadata = conversation.get("metadata") if isinstance(conversation, dict) and isinstance(conversation.get("metadata"), dict) else {}
+        return metadata.get("shared_read_only") is True
 
     @staticmethod
     def _set_metadata_icon(metadata, title, conversation_id):

@@ -12,7 +12,10 @@ def run(input_data, context=None):
     if not isinstance(payload, dict):
         return error("bundle or history object is required", code="INVALID_INPUT")
     try:
-        conversation = import_shared_conversation(payload, source_url=(input_data or {}).get("source_url"))
+        conversation = import_shared_conversation(
+            payload, source_url=(input_data or {}).get("source_url"),
+            import_mode=str((input_data or {}).get("import_mode") or "continue_copy"),
+        )
     except (PermissionError, TypeError, ValueError) as exc:
         return error(str(exc), code="INVALID_INPUT")
     return ok({"conversation": conversation, "conversation_id": conversation["id"]})

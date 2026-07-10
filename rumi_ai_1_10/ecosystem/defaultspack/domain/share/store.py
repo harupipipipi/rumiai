@@ -19,6 +19,8 @@ class ShareStore:
         self._environ = environment
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from domain.share.audit import record_share_event
+
         target_type = str(payload.get("target_type") or "content")
         token = secrets.token_urlsafe(18)
         visibility = str(payload.get("visibility") or "local").strip().lower()
@@ -28,7 +30,7 @@ class ShareStore:
 
             content = build_conversation_share_bundle(
                 str(payload.get("target_id") or ""), store=self._chat_store, share_token=token,
-                visibility=visibility, expires_at=payload.get("expires_at"),
+                visibility=visibility, expires_at=payload.get("expires_at"), permissions=payload.get("permissions"),
             )
         record = {
             "token": token,
@@ -41,11 +43,17 @@ class ShareStore:
             "expires_at": payload.get("expires_at"),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "revoked": False,
+            "audit": [],
         }
         self._add_urls(record)
         if str(record.get("share_url") or "").startswith("https://"):
             record["public_share_url"] = record["share_url"]
-        self._path(token).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        event = record_share_event(
+            "link_create", target_id=payload.get("target_id"), mode=visibility,
+            message_count=self._message_count(content),
+        )
+        record["audit"].append(event)
+        self._write(record)
         return record
 
     def get(self, token: str) -> dict[str, Any] | None:
@@ -73,18 +81,46 @@ class ShareStore:
         return records
 
     def revoke(self, token: str) -> bool:
+        from domain.share.audit import record_share_event
+
         path = self._path(token)
         if not path.exists():
             return False
         record = json.loads(path.read_text(encoding="utf-8"))
         record["revoked"] = True
         record["revoked_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        event = record_share_event("revoke", target_id=record.get("target_id"))
+        record.setdefault("audit", []).append(event)
+        self._write(record)
         return True
+
+    def append_audit(self, token: str, event: dict[str, Any]) -> None:
+        path = self._path(token)
+        if not path.exists():
+            return
+        record = json.loads(path.read_text(encoding="utf-8"))
+        audit = record.get("audit") if isinstance(record.get("audit"), list) else []
+        audit.append({key: event[key] for key in ("operation", "timestamp", "result", "mode") if key in event})
+        record["audit"] = audit[-20:]
+        self._write(record)
 
     def _path(self, token: str) -> Path:
         safe = "".join(ch for ch in token if ch.isalnum() or ch in "-_")
         return self._root / f"share_{safe}.json"
+
+    def _write(self, record: dict[str, Any]) -> None:
+        path = self._path(str(record.get("token") or ""))
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(path)
+
+    @staticmethod
+    def _message_count(content: Any) -> int | None:
+        if not isinstance(content, dict):
+            return None
+        preview = content.get("preview") if isinstance(content.get("preview"), dict) else {}
+        value = preview.get("message_count")
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
     def _add_urls(self, record: dict[str, Any]) -> None:
         token = str(record.get("token") or "")

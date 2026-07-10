@@ -2149,6 +2149,12 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     ),
     HttpRouteSpec(
         "POST",
+        "/api/share/{token}/export",
+        block_module="blocks.share.export_bundle",
+        path_inject={"token": "token"},
+    ),
+    HttpRouteSpec(
+        "POST",
         "/api/share/{token}/import",
         block_module="blocks.share.import_conversation",
         path_inject={"token": "token"},
