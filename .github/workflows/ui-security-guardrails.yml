@@ -1,0 +1,35 @@
+name: UI Security Guardrails
+
+on:
+  pull_request:
+    paths:
+      - "rumi_ai_1_10/ecosystem/defaultspack/webapp/**"
+      - ".github/workflows/ui-security-guardrails.yml"
+  push:
+    branches:
+      - soon
+    paths:
+      - "rumi_ai_1_10/ecosystem/defaultspack/webapp/**"
+      - ".github/workflows/ui-security-guardrails.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - run: npm ci
+      - name: Verify static UI security boundaries
+        run: node scripts/check-ui-security-guardrails.mjs
+      - name: Run focused security tests
+        run: npx tsx --test src/lib/authorityApprovalBrowserToken.test.ts src/lib/defaultspackLocalAuth.test.ts src/lib/attachments.test.ts

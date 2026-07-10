@@ -2,6 +2,7 @@ import type { AttachedFile } from "../renderers/types";
 
 const TEXT_TRUNCATE_LIMIT = 120_000;
 const IMAGE_INLINE_LIMIT_BYTES = 8 * 1024 * 1024;
+const ATTACHMENT_NAME_LIMIT = 240;
 
 const TEXT_MIME_PREFIXES = ["text/"];
 const TEXT_MIME_TYPES = new Set([
@@ -72,6 +73,37 @@ function fileExtension(name: string): string {
   return dotIndex >= 0 ? basename.slice(dotIndex + 1).toLowerCase() : "";
 }
 
+function safeAttachmentName(name: string): string {
+  const normalized = name
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, ATTACHMENT_NAME_LIMIT);
+  return normalized || "attachment";
+}
+
+function longestDelimiterRun(text: string, delimiter: "`" | "~"): number {
+  let longest = 0;
+  let current = 0;
+  for (const character of text) {
+    if (character === delimiter) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
+}
+
+function markdownFenceFor(content: string): string {
+  const backtickRun = longestDelimiterRun(content, "`");
+  const tildeRun = longestDelimiterRun(content, "~");
+  const delimiter = backtickRun <= tildeRun ? "`" : "~";
+  const longestRun = delimiter === "`" ? backtickRun : tildeRun;
+  return delimiter.repeat(Math.max(3, longestRun + 1));
+}
+
 export function isTextLikeFile(file: Pick<File, "name" | "type">): boolean {
   const mime = (file.type || "").toLowerCase();
   if (mime && TEXT_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix))) return true;
@@ -123,5 +155,7 @@ export async function fileToAttachment(file: File): Promise<AttachedFile> {
 
 export function buildAttachmentSnippet(file: AttachedFile): string {
   if (file.content === undefined) return "";
-  return `\n\n添付ファイル: ${file.name}\n\`\`\`\n${file.content}${file.truncated ? "\n..." : ""}\n\`\`\``;
+  const content = `${file.content}${file.truncated ? "\n..." : ""}`;
+  const fence = markdownFenceFor(content);
+  return `\n\n添付ファイル: ${safeAttachmentName(file.name)}\n${fence}\n${content}\n${fence}`;
 }

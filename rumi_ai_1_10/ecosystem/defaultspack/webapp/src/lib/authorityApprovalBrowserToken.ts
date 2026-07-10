@@ -20,7 +20,11 @@ export function readBrowserApprovalTokenFromLocation(search = locationSearch()):
 }
 
 export function readBrowserApprovalTokenFromStorage(): string {
-  return readBrowserApprovalTokenFromSessionStorage() || readBrowserApprovalTokenFromLocalStorage();
+  // A reusable approval credential must not survive a browser/profile restart.
+  // Remove any legacy localStorage value as part of the read path so existing
+  // installations migrate toward session-only handling.
+  removeStorageValue("localStorage");
+  return readStorageValue("sessionStorage");
 }
 
 export function readBrowserApprovalToken(): string {
@@ -30,7 +34,12 @@ export function readBrowserApprovalToken(): string {
 export function rememberBrowserApprovalToken(token: string): void {
   const normalized = token.trim();
   writeStorageValue("sessionStorage", normalized);
-  writeStorageValue("localStorage", normalized);
+  removeStorageValue("localStorage");
+}
+
+export function clearBrowserApprovalToken(): void {
+  removeStorageValue("sessionStorage");
+  removeStorageValue("localStorage");
 }
 
 export function browserAuthorityApprovalPath(requestId: string, browserApprovalToken: string, returnTo = ""): string {
@@ -38,7 +47,7 @@ export function browserAuthorityApprovalPath(requestId: string, browserApprovalT
   params.set("request_id", requestId);
   const token = browserApprovalToken.trim();
   if (token) params.set("browser_approval_token", token);
-  const normalizedReturnTo = returnTo.trim();
+  const normalizedReturnTo = sameOriginRelativePath(returnTo);
   if (normalizedReturnTo) params.set("return_to", normalizedReturnTo);
   return `/approval?${params.toString()}`;
 }
@@ -46,21 +55,44 @@ export function browserAuthorityApprovalPath(requestId: string, browserApprovalT
 export function browserApprovalTokenizedPath(pathOrUrl: string, browserApprovalToken = readBrowserApprovalToken()): string {
   const token = browserApprovalToken.trim();
   if (!token) return pathOrUrl;
+
+  // Never transform an external, protocol-relative, or malformed destination.
+  // In particular, the approval token must not be appended before the origin
+  // policy has been checked.
+  const url = sameOriginUrl(pathOrUrl);
+  if (!url) return pathOrUrl;
+
+  if (!url.searchParams.get("browser_approval_token")?.trim()) {
+    url.searchParams.set("browser_approval_token", token);
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function sameOriginRelativePath(pathOrUrl: string): string {
+  const normalized = pathOrUrl.trim();
+  if (!normalized) return "";
+  const url = sameOriginUrl(normalized);
+  return url ? `${url.pathname}${url.search}${url.hash}` : "";
+}
+
+function sameOriginUrl(pathOrUrl: string): URL | null {
   try {
     const hasWindow = typeof window !== "undefined";
-    const base = hasWindow ? window.location.origin : "http://127.0.0.1";
     const relativeSameOriginPath = pathOrUrl.startsWith("/") && !pathOrUrl.startsWith("//");
+
+    // Outside a browser there is no authoritative application origin. Keep
+    // tests and server-side rendering fail-closed by accepting only an
+    // unambiguous root-relative path.
+    if (!hasWindow && !relativeSameOriginPath) return null;
+
+    const base = hasWindow ? window.location.origin : "http://127.0.0.1";
     const url = new URL(pathOrUrl, base);
-    if (!url.searchParams.get("browser_approval_token")?.trim()) {
-      url.searchParams.set("browser_approval_token", token);
-    }
-    if ((hasWindow && url.origin === window.location.origin) || (!hasWindow && relativeSameOriginPath)) {
-      return `${url.pathname}${url.search}${url.hash}`;
-    }
-    return url.toString();
+
+    if (hasWindow && url.origin !== window.location.origin) return null;
+    if (!hasWindow && !relativeSameOriginPath) return null;
+    return url;
   } catch {
-    const separator = pathOrUrl.includes("?") ? "&" : "?";
-    return `${pathOrUrl}${separator}browser_approval_token=${encodeURIComponent(token)}`;
+    return null;
   }
 }
 
@@ -72,15 +104,7 @@ function locationSearch(): string {
   }
 }
 
-function readBrowserApprovalTokenFromSessionStorage(): string {
-  return readStorageValue("sessionStorage");
-}
-
-function readBrowserApprovalTokenFromLocalStorage(): string {
-  return readStorageValue("localStorage");
-}
-
-function readStorageValue(kind: "sessionStorage" | "localStorage"): string {
+function readStorageValue(kind: "sessionStorage"): string {
   try {
     return window[kind].getItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY)?.trim() ?? "";
   } catch {
@@ -88,10 +112,18 @@ function readStorageValue(kind: "sessionStorage" | "localStorage"): string {
   }
 }
 
-function writeStorageValue(kind: "sessionStorage" | "localStorage", value: string): void {
+function writeStorageValue(kind: "sessionStorage", value: string): void {
   try {
     if (value) window[kind].setItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY, value);
     else window[kind].removeItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY);
+  } catch {
+    // Browser storage may be unavailable in restricted webviews or private contexts.
+  }
+}
+
+function removeStorageValue(kind: "sessionStorage" | "localStorage"): void {
+  try {
+    window[kind].removeItem(BROWSER_APPROVAL_TOKEN_STORAGE_KEY);
   } catch {
     // Browser storage may be unavailable in restricted webviews or private contexts.
   }
