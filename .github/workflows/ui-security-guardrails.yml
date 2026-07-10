@@ -32,4 +32,4 @@ jobs:
       - name: Verify static UI security boundaries
         run: node scripts/check-ui-security-guardrails.mjs
       - name: Run focused security tests
-        run: npx tsx --test src/lib/authorityApprovalBrowserToken.test.ts src/lib/attachments.test.ts
+        run: npx tsx --test src/lib/authorityApprovalBrowserToken.test.ts src/lib/defaultspackLocalAuth.test.ts src/lib/attachments.test.ts
