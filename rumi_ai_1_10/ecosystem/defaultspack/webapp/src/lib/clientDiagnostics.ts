@@ -248,7 +248,7 @@ function safeMessage(input: ClientDiagnosticInput, category: string): string {
   const generic = AUTOMATIC_DIAGNOSTIC_CATEGORIES.has(category)
     ? genericAutomaticMessage(category)
     : null;
-  return generic ?? redactDiagnosticText(input.message || "Frontend diagnostic", 320) || "Frontend diagnostic";
+  return generic ?? (redactDiagnosticText(input.message || "Frontend diagnostic", 320) || "Frontend diagnostic");
 }
 
 function payloadBytes(payload: ClientDiagnosticPayloadV2): number {
