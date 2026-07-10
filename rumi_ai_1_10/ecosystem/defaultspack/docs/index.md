@@ -23,6 +23,7 @@ For the repo-wide glossary and migration guidance, see
 | PR97 architecture overview | [defaultspack-explained.md](defaultspack-explained.md) |
 | Getting started | [getting-started.md](getting-started.md) |
 | Runtime architecture | [architecture.md](architecture.md) |
+| Pack and domain public contracts | [domain-boundaries.md](domain-boundaries.md) |
 | Local-first policy | [local_first_policy.md](local_first_policy.md) |
 | Safety and permission audit | [safety_permission_audit_design.md](safety_permission_audit_design.md) |
 

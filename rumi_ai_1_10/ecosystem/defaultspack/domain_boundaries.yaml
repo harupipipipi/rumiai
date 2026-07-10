@@ -21,7 +21,6 @@ domains:
     path: domain/agent_runtime
   ai_client:
     may_import:
-    - domain/chat
     - domain/components
     - domain/connections
     - domain/extensions
@@ -29,6 +28,11 @@ domains:
     - domain/temporal_context
     - domain/tool
     path: domain/ai_client
+    public_imports:
+    - domain/chat/ir
+    - domain/chat/ir_blocks
+    - domain/chat/ir_legacy_adapter
+    - domain/chat/store
   ambient:
     may_import:
     - domain/input
@@ -59,7 +63,6 @@ domains:
     may_import:
     - domain/ai_client
     - domain/capabilities
-    - domain/capability
     - domain/coding
     - domain/context_engine
     - domain/dev
@@ -74,6 +77,8 @@ domains:
     - domain/tool
     - domain/vision
     path: domain/chat
+    public_imports:
+    - domain/capability/catalog
   coding:
     may_import: []
     path: domain/coding
@@ -129,7 +134,6 @@ domains:
   frontend:
     may_import:
     - domain/ai_client
-    - domain/capability
     - domain/chat
     - domain/components
     - domain/codex
@@ -139,6 +143,8 @@ domains:
     - domain/tool
     - domain/webhook
     path: domain/frontend
+    public_imports:
+    - domain/capability/catalog
   function_runtime:
     may_import:
     - domain/adaptive
@@ -243,6 +249,9 @@ domains:
   research:
     may_import: []
     path: domain/research
+  runtime_config:
+    may_import: []
+    path: domain/runtime_config.py
   safety:
     may_import: []
     path: domain/safety
@@ -255,6 +264,16 @@ domains:
   share:
     may_import: []
     path: domain/share
+  skill_feedback:
+    may_import:
+    - domain/extensions
+    - domain/memory2
+    - domain/tool
+    path: domain/skill_feedback.py
+  skill_trigger:
+    may_import:
+    - domain/extensions
+    path: domain/skill_trigger.py
   stream:
     may_import: []
     path: domain/stream
@@ -264,13 +283,15 @@ domains:
   templates:
     may_import: []
     path: domain/templates
+  temporal_context:
+    may_import: []
+    path: domain/temporal_context.py
   tool:
     may_import:
     - domain/adaptive
     - domain/ai_client
     - domain/artifact
     - domain/capabilities
-    - domain/chat
     - domain/coding
     - domain/components
     - domain/extensions
@@ -284,6 +305,9 @@ domains:
     - domain/safety
     - domain/tool_policy
     path: domain/tool
+    public_imports:
+    - domain/chat/ir_blocks
+    - domain/chat/tool_selection_schema
   tool_policy:
     may_import:
     - domain/agent_runtime

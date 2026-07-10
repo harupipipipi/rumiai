@@ -66,6 +66,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 | やりたいこと | 読む場所 |
 |---|---|
 | docs の入口から探したい | `docs/index.md` |
+| pack/domain の公開契約と import 境界を知りたい | `docs/domain-boundaries.md` |
 | PR97 の全体像と UI/chat/tool/MCP/skill/memory/scheduler/trigger の関係を知りたい | `docs/defaultspack-explained.md` |
 | AI agent service defaults の全体像を見たい | `docs/ai_agent_services_feature_catalog.md`, `docs/local_agent_implementation_plan.md` |
 | ローカル優先・承認・安全方針を見たい | `docs/local_first_policy.md`, `docs/safety_permission_audit_design.md` |

@@ -1,6 +1,6 @@
 # Migration Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## `defaults` -> `defaultspack`
 
@@ -36,7 +36,8 @@ Status:
 
 - defaultspack domain import policy now lives in `ecosystem/defaultspack/domain_boundaries.yaml`.
 - `scripts/quality/scan_defaultspack_boundaries.py` checks cross-domain imports against that policy.
+- `ecosystem/defaultspack/docs/domain-boundaries.md` defines pack contracts, domain contracts, and the intentional target dependency map.
 
 Status:
-- Baseline policy is captured and enforced.
-- Tightening the policy is a follow-up migration, not finished work.
+- Domain-level edges and exact public-module edges are enforced in CI.
+- The first narrowed edges cover chat IR/schema consumers and capability catalog consumers; remaining broad edges are migration debt rather than precedent for new imports.

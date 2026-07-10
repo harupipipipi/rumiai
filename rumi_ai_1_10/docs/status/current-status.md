@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## Implemented
 
@@ -18,11 +18,12 @@ Last updated: 2026-06-06
 - `PackAPIHandler` is mostly decomposed into mixins, but the verb methods still coordinate multiple fallback paths in one file.
 - defaultspack HTTP routes are in migration: many now resolve through functions or flows first, but legacy block fallbacks still exist and are now tracked explicitly.
 - compatibility aliases under `defaults.*` still exist broadly for stability; they are tracked as compatibility, not canonical naming.
-- defaultspack domain boundaries are now declared, but the current YAML largely reflects the repo's existing dependency graph and will tighten over time.
+- defaultspack domain boundaries are declared and CI-enforced. The first intentional public-only edges now restrict `ai_client -> chat`, `tool -> chat`, and capability-catalog consumers to exact contract modules; remaining broad edges are tracked for incremental tightening.
 
 ## Planned Next Tightening
 
 - reduce remaining handwritten API branches where manifest-driven routes are already sufficient
 - continue shrinking legacy defaultspack HTTP fallbacks by replacing allowlisted block routes with direct function boundaries
 - narrow compatibility aliases and domain exceptions over subsequent migrations
+- replace understood broad `may_import` edges with exact `public_imports` contracts, following `ecosystem/defaultspack/docs/domain-boundaries.md`
 - keep desktop/runtime docs aligned with actual shipped surfaces instead of historical plans
