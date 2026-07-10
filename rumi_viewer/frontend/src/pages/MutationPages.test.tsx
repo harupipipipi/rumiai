@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
-import {act, type ReactNode} from 'react';
+import {act, StrictMode, useEffect, useRef, useState, type ReactNode} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 
 import type {Flow, Profile, Toast} from '@/src/store';
 import {useAppStore} from '@/src/store';
+import {fetchFlowDetail} from '@/src/lib/api';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -195,6 +196,8 @@ beforeEach(async () => {
     Element: {configurable: true, value: dom.window.Element, writable: true},
     getComputedStyle: {configurable: true, value: dom.window.getComputedStyle, writable: true},
     HTMLElement: {configurable: true, value: dom.window.HTMLElement, writable: true},
+    HTMLInputElement: {configurable: true, value: dom.window.HTMLInputElement, writable: true},
+    HTMLTextAreaElement: {configurable: true, value: dom.window.HTMLTextAreaElement, writable: true},
     Image: {configurable: true, value: dom.window.Image, writable: true},
     localStorage: {configurable: true, value: dom.window.localStorage, writable: true},
     MouseEvent: {configurable: true, value: dom.window.MouseEvent, writable: true},
@@ -855,6 +858,77 @@ test('Flows ignores an aborted initial detail after a confirmed update on the ne
   assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
 });
 
+test('Flow detail StrictMode refetches the same ID after abort without obsolete feedback', async () => {
+  let detailRequests = 0;
+  let firstDetailSignal: AbortSignal | null | undefined;
+  const obsoleteFeedback: string[] = [];
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      assert.equal(String(input), `/api/panel/flows/${existingFlow.id}`);
+      detailRequests += 1;
+      if (detailRequests === 1) {
+        firstDetailSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          const rejectAbort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init?.signal?.aborted) {
+            rejectAbort();
+            return;
+          }
+          init?.signal?.addEventListener('abort', rejectAbort, {once: true});
+        });
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    },
+    writable: true,
+  });
+
+  function StrictDetailProbe() {
+    const requestIdRef = useRef(0);
+    const [status, setStatus] = useState('pending');
+
+    useEffect(() => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const controller = new AbortController();
+      let cancelled = false;
+      void fetchFlowDetail(existingFlow.id, {signal: controller.signal})
+        .then(() => {
+          if (!cancelled && requestIdRef.current === requestId) setStatus('loaded');
+        })
+        .catch((error: unknown) => {
+          if (cancelled || requestIdRef.current !== requestId) return;
+          obsoleteFeedback.push(error instanceof Error ? error.message : String(error));
+          setStatus('error');
+        });
+      return () => {
+        cancelled = true;
+        requestIdRef.current += 1;
+        controller.abort();
+      };
+    }, []);
+
+    return <div data-testid="strict-detail-status">{status}</div>;
+  }
+
+  await renderPage(
+    <StrictMode>
+      <StrictDetailProbe />
+    </StrictMode>,
+  );
+  await act(async () => {
+    await settlePromises();
+  });
+
+  assert.equal(detailRequests, 2);
+  assert.equal(firstDetailSignal?.aborted, true);
+  assert.equal(
+    container?.querySelector('[data-testid="strict-detail-status"]')?.textContent,
+    'loaded',
+  );
+  assert.deepEqual(obsoleteFeedback, []);
+});
+
 test('Flows blocks mutations and canvas interaction while initial detail is loading', async () => {
   const initialDetail = deferred<Response>();
   const requests: string[] = [];
@@ -900,6 +974,85 @@ test('Flows blocks mutations and canvas interaction while initial detail is load
   assert.equal(buttonByText('Save').disabled, false);
   assert.equal(buttonByText('Delete').disabled, false);
   assert.equal(buttonByText('Execute').disabled, false);
+});
+
+test('Flows locks every editing surface while an update is pending and restores it after confirmation', async () => {
+  const updateResponse = deferred<Response>();
+  const requests: string[] = [];
+  let submittedContent = existingFlow.content;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'PUT') {
+        submittedContent = JSON.parse(String(init?.body)).yaml_content as string;
+        return updateResponse.promise;
+      }
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([existingFlow])));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(
+        existingFlow,
+        submittedContent,
+      )));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(<FlowsPage />);
+  assert.equal(container?.querySelector('[data-testid="flow-canvas"]')?.getAttribute('aria-busy'), 'false');
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+
+  const canvas = container?.querySelector<HTMLElement>('[data-testid="flow-canvas"]');
+  const toolbar = container?.querySelector<HTMLElement>('[data-testid="flow-editor-toolbar"]');
+  assert.ok(canvas);
+  assert.ok(toolbar);
+  assert.equal(canvas.getAttribute('aria-busy'), 'true');
+  assert.equal(canvas.hasAttribute('inert'), true);
+  assert.equal(toolbar.getAttribute('aria-disabled'), 'true');
+  assert.equal(toolbar.hasAttribute('inert'), true);
+  assert.ok(canvas.querySelector('.pointer-events-auto'));
+  assert.equal(buttonByText('Save').disabled, true);
+  assert.equal(buttonByText('Delete').disabled, true);
+  assert.equal(buttonByText('Execute').disabled, true);
+  assert.equal(toolbar.querySelector<HTMLButtonElement>('button')?.disabled, true);
+  assert.ok(Array.from(toolbar.querySelectorAll<HTMLElement>('[draggable]'))
+    .every((step) => step.getAttribute('draggable') === 'false'));
+
+  await act(async () => {
+    assert.ok(dom);
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      bubbles: true,
+      key: 'F7',
+    }));
+    await settlePromises();
+  });
+  assert.equal(requests.filter((request) => request.startsWith('PUT ')).length, 1);
+
+  await act(async () => {
+    updateResponse.resolve(successfulResponse({
+      filename: existingFlow.name,
+      flow_id: existingFlow.id,
+      updated: true,
+    }));
+    await settlePromises();
+  });
+
+  assert.equal(canvas.getAttribute('aria-busy'), 'false');
+  assert.equal(canvas.hasAttribute('inert'), false);
+  assert.equal(toolbar.getAttribute('aria-disabled'), 'false');
+  assert.equal(toolbar.hasAttribute('inert'), false);
+  assert.equal(buttonByText('Save').disabled, false);
+  assert.equal(buttonByText('Delete').disabled, false);
+  assert.equal(buttonByText('Execute').disabled, false);
+  assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
 });
 
 test('Flows create completion preserves a newer user selection', async () => {

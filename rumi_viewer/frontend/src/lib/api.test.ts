@@ -16,6 +16,7 @@ import {
   fetchStartupProfileAiInputTraces,
   fetchStartupProfileGraph,
   fetchDesktopSystemInfo,
+  fetchFlowDetail,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   openExternalUrl,
@@ -352,6 +353,52 @@ test('apiFetch deduplicates concurrent GET requests for the same URL', async () 
   assert.equal(requestCount, 1);
   assert.deepEqual(first, {ok: true});
   assert.deepEqual(second, {ok: true});
+});
+
+test('signal-owned flow detail reads do not join an aborted URL-only request', async () => {
+  let requestCount = 0;
+  fetchHandler = async (_input, init) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return new Promise<Response>((_resolve, reject) => {
+        const rejectAbort = () => reject(new DOMException('aborted', 'AbortError'));
+        if (init?.signal?.aborted) {
+          rejectAbort();
+          return;
+        }
+        init?.signal?.addEventListener('abort', rejectAbort, {once: true});
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        data: {
+          flow_id: 'same-flow',
+          name: 'same-flow.flow.yaml',
+          pack_id: 'defaultspack',
+          filename: 'same-flow.flow.yaml',
+          yaml_content: 'flow_id: same-flow\nsteps: []\n',
+        },
+        success: true,
+      }),
+      {headers: {'Content-Type': 'application/json'}, status: 200},
+    );
+  };
+
+  const obsoleteController = new AbortController();
+  const obsoleteRead = fetchFlowDetail('same-flow', {
+    signal: obsoleteController.signal,
+  });
+  await Promise.resolve();
+  obsoleteController.abort();
+
+  const currentController = new AbortController();
+  const currentRead = fetchFlowDetail('same-flow', {
+    signal: currentController.signal,
+  });
+
+  await assert.rejects(obsoleteRead, {name: 'AbortError'});
+  assert.equal((await currentRead).flow_id, 'same-flow');
+  assert.equal(requestCount, 2);
 });
 
 test('apiFetch can bypass an older deduplicated GET for a fresh confirmation read', async () => {

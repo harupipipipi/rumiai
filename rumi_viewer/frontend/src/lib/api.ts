@@ -672,7 +672,9 @@ export function fetchFlowDetail(
   return apiFetch<ApiFlowDetail>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
     {signal: options.signal},
-    {dedupeGet: !options.fresh},
+    // A caller-owned AbortSignal also owns the request lifetime. Joining a
+    // URL-only shared GET would let an older caller abort a newer detail read.
+    {dedupeGet: !options.fresh && options.signal === undefined},
   );
 }
 

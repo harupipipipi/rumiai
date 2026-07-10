@@ -391,6 +391,10 @@ function FlowEditorInner() {
   };
 
   const onDragStart = (event: DragEvent, step: AvailableStep) => {
+    if (flowInteractionLocked) {
+      event.preventDefault();
+      return;
+    }
     const ghost = new Image();
     ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     event.dataTransfer.setDragImage(ghost, 0, 0);
@@ -402,7 +406,7 @@ function FlowEditorInner() {
   };
 
   const handleStepMiddleClick = useCallback((event: MouseEvent, step: AvailableStep) => {
-    if (event.button !== 1 || !reactFlowInstance) return;
+    if (flowInteractionLocked || event.button !== 1 || !reactFlowInstance) return;
     event.preventDefault();
     const wrapper = reactFlowWrapper.current;
     if (!wrapper) return;
@@ -424,7 +428,7 @@ function FlowEditorInner() {
         ports: step.ports ?? [],
       },
     }));
-  }, [history, reactFlowInstance, setNodes]);
+  }, [flowInteractionLocked, history, reactFlowInstance, setNodes]);
 
   const handleStepRailWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     const rail = stepRailRef.current;
@@ -518,6 +522,7 @@ function FlowEditorInner() {
                     placeholder={t('flows.name_placeholder')}
                     value={newFlowName}
                     onChange={(event) => setNewFlowName(event.target.value)}
+                    disabled={flowInteractionLocked}
                     className="max-w-sm"
                   />
                 ) : (
@@ -559,11 +564,21 @@ function FlowEditorInner() {
               </div>
             </div>
 
-            <div className={cn('flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5', !isFlowLibraryOpen && 'ml-12')}>
+            <div
+              data-testid="flow-editor-toolbar"
+              aria-disabled={flowInteractionLocked}
+              inert={flowInteractionLocked ? true : undefined}
+              className={cn(
+                'flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5',
+                !isFlowLibraryOpen && 'ml-12',
+                flowInteractionLocked && 'pointer-events-none opacity-60',
+              )}
+            >
               <div ref={packDropdownRef} className="relative">
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={flowInteractionLocked}
                   className="h-8 gap-1.5 border-border bg-bg-card px-3 text-xs font-medium"
                   onClick={() => setIsPackDropdownOpen((open) => !open)}
                   aria-haspopup="listbox"
@@ -607,7 +622,7 @@ function FlowEditorInner() {
                   <div
                     key={step.id}
                     className="flex shrink-0 cursor-grab items-center gap-1.5 rounded-full border border-border bg-bg-card px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:border-accent hover:text-accent"
-                    draggable
+                    draggable={!flowInteractionLocked}
                     onDragStart={(event) => onDragStart(event, step)}
                     onMouseDown={(event) => handleStepMiddleClick(event, step)}
                     onAuxClick={(event) => event.preventDefault()}
@@ -622,6 +637,9 @@ function FlowEditorInner() {
 
             <div
               ref={reactFlowWrapper}
+              data-testid="flow-canvas"
+              aria-busy={flowInteractionLocked}
+              inert={flowInteractionLocked ? true : undefined}
               className="flow-canvas relative flex-1 overflow-hidden rounded-[28px] border border-border"
             >
               <ReactFlow<Node, Edge>
@@ -647,8 +665,11 @@ function FlowEditorInner() {
                 onDragOver={dragDrop.onDragOver}
                 isValidConnection={editorHook.isValidConnection}
                 nodeTypes={nodeTypes}
-                panOnDrag={[1, 2]}
-                selectionOnDrag
+                nodesDraggable={!flowInteractionLocked}
+                nodesConnectable={!flowInteractionLocked}
+                elementsSelectable={!flowInteractionLocked}
+                panOnDrag={flowInteractionLocked ? false : [1, 2]}
+                selectionOnDrag={!flowInteractionLocked}
                 selectionMode={SelectionMode.Partial}
                 fitView
                 className="flow-grid"
@@ -660,7 +681,7 @@ function FlowEditorInner() {
               <div
                 className={cn(
                   'absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
-                  flowLoading
+                  flowInteractionLocked
                     ? 'pointer-events-auto opacity-100'
                     : 'pointer-events-none opacity-0',
                 )}
