@@ -60,7 +60,23 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerMentionMetadataFromWidgets, composerMentionToolIdsFromWidgets, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, normalizeComposerMentionMetadata, publicComposerWidgetMetadata, reconcileComposerSemanticDraft, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget, withComposerMentionSelectionOwnership } from "./lib/composerWidgets";
+import {
+  canExecuteComposerEndpointAction,
+  composerMentionMetadataFromWidgets,
+  composerMentionSyntaxesForToolId,
+  composerMentionToolIdsFromWidgets,
+  composerSkillMentionWidget,
+  composerToolMentionWidget,
+  isSafeLocalEndpoint,
+  normalizeComposerMentionMetadata,
+  publicComposerWidgetMetadata,
+  reconcileComposerSemanticDraft,
+  skillMentionIdsFromText,
+  toolMentionIdsFromText,
+  trustedComposerActionForWidget,
+  withComposerMentionSelectionOwnership,
+} from "./lib/composerWidgets";
+import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
 import { toolGroupFor } from "./lib/toolUi";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
@@ -2501,7 +2517,9 @@ function ChatApp() {
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
-  const dismissedComposerMentionToolIdsRef = useRef<Set<string>>(new Set());
+  const dismissedComposerMentionToolsRef = useRef<Map<string, string[]>>(
+    new Map(),
+  );
   const composerDraftGenerationRef = useRef(0);
   const mentionAttachmentTokenRef = useRef(0);
   const pendingMentionAttachmentRequestsRef = useRef<
@@ -2523,6 +2541,13 @@ function ChatApp() {
     }
     syncPendingMentionAttachmentPaths();
   };
+
+  const semanticAttachmentPathsIncludingPending = (files: AttachedFile[]) => [
+    ...new Set([
+      ...semanticAttachmentPaths(files),
+      ...pendingMentionAttachmentRequestsRef.current.keys(),
+    ]),
+  ];
 
   useEffect(() => {
     if (mode === "chat") {
@@ -3589,7 +3614,7 @@ function ChatApp() {
     cancelPendingMentionAttachments();
     setAttachedFiles([]);
     setDroppedWidgets([]);
-    dismissedComposerMentionToolIdsRef.current.clear();
+    dismissedComposerMentionToolsRef.current.clear();
     replaceChatIdInUrl(null, false);
   };
 
@@ -4026,9 +4051,12 @@ function ChatApp() {
       composerMentionToolIdsFromWidgets(droppedWidgets),
     );
     if (selectedToolIdSet.has(item.id) && semanticMentionToolIds.has(item.id)) {
-      dismissedComposerMentionToolIdsRef.current.add(item.id);
+      dismissedComposerMentionToolsRef.current.set(
+        item.id,
+        composerMentionSyntaxesForToolId(droppedWidgets, item.id),
+      );
     } else if (!selectedToolIdSet.has(item.id)) {
-      dismissedComposerMentionToolIdsRef.current.delete(item.id);
+      dismissedComposerMentionToolsRef.current.delete(item.id);
     }
     toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
@@ -4112,7 +4140,7 @@ function ChatApp() {
         cancelPendingMentionAttachments();
         setAttachedFiles([]);
         setDroppedWidgets([]);
-        dismissedComposerMentionToolIdsRef.current.clear();
+        dismissedComposerMentionToolsRef.current.clear();
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -4322,7 +4350,13 @@ function ChatApp() {
   };
 
   const handleComposerInputChange = (value: string) => {
-    if (value !== input) dismissedComposerMentionToolIdsRef.current.clear();
+    if (value !== input) {
+      for (const [toolId, syntaxes] of dismissedComposerMentionToolsRef.current) {
+        if (!syntaxes.some((syntax) => hasUnescapedMentionSyntax(value, syntax))) {
+          dismissedComposerMentionToolsRef.current.delete(toolId);
+        }
+      }
+    }
     setInput(value);
     if (isGenerating || isConversationPending) {
       setComposerCandidateMenu(null);
@@ -4483,7 +4517,7 @@ function ChatApp() {
   const handlePendingMentionAttachmentRemove = (path: string) => {
     cancelPendingMentionAttachments(path);
     const reconciled = reconcileComposerSemanticDraft({
-      attachmentPaths: semanticAttachmentPaths(attachedFiles),
+      attachmentPaths: semanticAttachmentPathsIncludingPending(attachedFiles),
       droppedWidgets,
       requireFileAttachment: true,
       selectedToolIds,
@@ -4550,7 +4584,7 @@ function ChatApp() {
   const handleFileRemove = (fileId: string) => {
     const remainingFiles = attachedFiles.filter((file) => file.id !== fileId);
     const reconciled = reconcileComposerSemanticDraft({
-      attachmentPaths: semanticAttachmentPaths(remainingFiles),
+      attachmentPaths: semanticAttachmentPathsIncludingPending(remainingFiles),
       droppedWidgets,
       requireFileAttachment: true,
       selectedToolIds,
@@ -4564,7 +4598,7 @@ function ChatApp() {
   const handleDropWidget = (widget: DroppedWidget) => {
     const ownedWidget = withComposerMentionSelectionOwnership(widget, selectedToolIds);
     for (const toolId of composerMentionToolIdsFromWidgets([ownedWidget])) {
-      dismissedComposerMentionToolIdsRef.current.delete(toolId);
+      dismissedComposerMentionToolsRef.current.delete(toolId);
     }
     setDroppedWidgets((prev) => {
       if (prev.some((w) => w.id === ownedWidget.id)) return prev;
@@ -4611,9 +4645,12 @@ function ChatApp() {
       composerMentionToolIdsFromWidgets(droppedWidgets),
     );
     for (const toolId of requestedIds) {
-      if (enabled) dismissedComposerMentionToolIdsRef.current.delete(toolId);
+      if (enabled) dismissedComposerMentionToolsRef.current.delete(toolId);
       else if (semanticMentionToolIds.has(toolId)) {
-        dismissedComposerMentionToolIdsRef.current.add(toolId);
+        dismissedComposerMentionToolsRef.current.set(
+          toolId,
+          composerMentionSyntaxesForToolId(droppedWidgets, toolId),
+        );
       }
     }
     toolSelectionController.setTurnMode("manual");
@@ -4629,7 +4666,10 @@ function ChatApp() {
       target.kind === "tool"
       && composerMentionToolIdsFromWidgets(droppedWidgets).includes(target.id)
     ) {
-      dismissedComposerMentionToolIdsRef.current.add(target.id);
+      dismissedComposerMentionToolsRef.current.set(
+        target.id,
+        composerMentionSyntaxesForToolId(droppedWidgets, target.id),
+      );
     }
     toolSelectionController.removeTarget(target);
   };
@@ -5246,7 +5286,7 @@ function ChatApp() {
     const semanticMentionToolIds = new Set(composerMentionToolIdsFromWidgets(requestedDroppedWidgets));
     const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions)
       .filter((toolId) => !semanticMentionToolIds.has(toolId))
-      .filter((toolId) => !dismissedComposerMentionToolIdsRef.current.has(toolId));
+      .filter((toolId) => !dismissedComposerMentionToolsRef.current.has(toolId));
     const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
       toolIds: selectedToolIdsForSubmit,
@@ -5746,7 +5786,7 @@ function ChatApp() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
-      dismissedComposerMentionToolIdsRef.current.clear();
+      dismissedComposerMentionToolsRef.current.clear();
       toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
@@ -5796,7 +5836,7 @@ function ChatApp() {
             ? "応答ストリームが途中で切れたため、ここまで届いた内容を保護して着地しました。"
             : "応答ストリームが途中で切れました。画面は保護したまま、再接続の余地を残しています。",
         );
-        dismissedComposerMentionToolIdsRef.current.clear();
+        dismissedComposerMentionToolsRef.current.clear();
         setIsNewChatLaunching(false);
         return;
       }

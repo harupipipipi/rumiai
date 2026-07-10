@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import unicodedata
 
 
@@ -10,6 +11,7 @@ ASCII_MENTION_BOUNDARY_BLOCKERS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.%+-/:@\\"
 )
 MENTION_TOKEN_SYMBOLS = frozenset("_./:-")
+URL_SCHEME_IN_CURRENT_SEGMENT_RE = re.compile(r"(?:https?|ftp)://\S*$", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +30,42 @@ def is_mention_start(text: str, at_index: int) -> bool:
         return False
     if at_index == 0:
         return True
-    return text[at_index - 1] not in ASCII_MENTION_BOUNDARY_BLOCKERS
+    previous_character = text[at_index - 1]
+    if previous_character in ASCII_MENTION_BOUNDARY_BLOCKERS:
+        return False
+
+    # Japanese prose intentionally supports adjacency (お願い@pm), while an @
+    # inside the current URL segment or before a domain-like suffix is literal.
+    if URL_SCHEME_IN_CURRENT_SEGMENT_RE.search(text[:at_index]):
+        return False
+    if _is_unicode_word_char(previous_character):
+        end = at_index + 1
+        while end < len(text) and _is_mention_token_char(text[end]):
+            end += 1
+        while end > at_index + 1 and text[end - 1] == ".":
+            end -= 1
+        if _looks_like_domain(text[at_index + 1 : end]):
+            return False
+    return True
+
+
+def _is_unicode_word_char(value: str) -> bool:
+    return bool(value) and unicodedata.category(value)[0] in {"L", "M", "N"}
+
+
+def _looks_like_domain(value: str) -> bool:
+    labels = value.split(".")
+    if len(labels) < 2 or any(not label for label in labels):
+        return False
+    for label in labels:
+        if not _is_unicode_word_char(label[0]) or not _is_unicode_word_char(label[-1]):
+            return False
+        if any(
+            not (_is_unicode_word_char(character) or character == "-")
+            for character in label
+        ):
+            return False
+    return True
 
 
 def _is_mention_token_char(value: str) -> bool:

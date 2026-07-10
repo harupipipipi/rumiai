@@ -13,6 +13,9 @@ export type ActiveMention = {
 
 const ASCII_MENTION_BOUNDARY_BLOCKERS = /[A-Za-z0-9_.%+\-/:@\\]/;
 const MENTION_TOKEN_CHAR = /[\p{L}\p{M}\p{N}_./:-]/u;
+const UNICODE_WORD_CHAR = /[\p{L}\p{M}\p{N}]/u;
+const DOMAIN_LIKE_MENTION = /^(?:[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]*[\p{L}\p{N}])?\.)+[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]*[\p{L}\p{N}])?$/u;
+const URL_SCHEME_IN_CURRENT_SEGMENT = /(?:https?|ftp):\/\/\S*$/iu;
 
 /** Convert a textarea UTF-16 offset to the parser's Unicode code-point index. */
 export function utf16OffsetToCodePointIndex(text: string, offset: number): number {
@@ -45,7 +48,21 @@ export function isMentionStart(text: string, atIndex: number): boolean {
   const characters = [...text];
   if (atIndex < 0 || atIndex >= characters.length || characters[atIndex] !== "@") return false;
   if (atIndex === 0) return true;
-  return !ASCII_MENTION_BOUNDARY_BLOCKERS.test(characters[atIndex - 1]);
+  const previousCharacter = characters[atIndex - 1];
+  if (ASCII_MENTION_BOUNDARY_BLOCKERS.test(previousCharacter)) return false;
+
+  // Japanese prose intentionally supports adjacency (お願い@pm), but an @ in
+  // the current URL segment or before a domain-like suffix remains literal.
+  const prefix = characters.slice(0, atIndex).join("");
+  if (URL_SCHEME_IN_CURRENT_SEGMENT.test(prefix)) return false;
+  if (UNICODE_WORD_CHAR.test(previousCharacter)) {
+    let end = atIndex + 1;
+    while (end < characters.length && isMentionTokenChar(characters[end])) end += 1;
+    while (end > atIndex + 1 && characters[end - 1] === ".") end -= 1;
+    const value = characters.slice(atIndex + 1, end).join("");
+    if (DOMAIN_LIKE_MENTION.test(value)) return false;
+  }
+  return true;
 }
 
 function isMentionTokenChar(value: string): boolean {
