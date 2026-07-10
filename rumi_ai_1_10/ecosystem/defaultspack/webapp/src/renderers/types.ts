@@ -246,6 +246,7 @@ export type RightSidebarRendererProps = {
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  dashboardHealth?: import("../lib/api").DashboardHealth | null;
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;

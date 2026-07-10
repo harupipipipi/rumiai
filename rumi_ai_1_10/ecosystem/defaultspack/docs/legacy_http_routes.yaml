@@ -3080,6 +3080,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/dashboard/health
+  legacy_block_module: blocks.ai.dashboard_health
+  replacement_function_id: ''
+  owner: ai
+  reason: tracked compatibility fallback for sanitized dashboard health primitives
+  remove_after: v2.4
+- method: GET
   pattern: /api/ai/catalog
   legacy_block_module: blocks.ai.catalog
   replacement_function_id: ai_catalog

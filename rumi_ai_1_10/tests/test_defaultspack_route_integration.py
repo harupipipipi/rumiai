@@ -201,6 +201,9 @@ def test_template_function_routes_join_canonical_transport_registry():
     connection_import_route = canonical[("POST", "/api/connections/import")]
     assert connection_import_route.block_module == "blocks.connections.import_bundle"
     assert connection_import_route.sensitive is True
+    dashboard_health_route = canonical[("GET", "/api/dashboard/health")]
+    assert dashboard_health_route.block_module == "blocks.ai.dashboard_health"
+    assert dashboard_health_route.fallback_block_module == "blocks.ai.dashboard_health"
     external_template_route = canonical[("POST", "/api/external/templates")]
     assert (
         external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"

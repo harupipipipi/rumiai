@@ -67,6 +67,7 @@ import type {
   SidebarCategory,
   SidebarField,
   SidebarItem,
+  DashboardHealth,
 } from "../lib/api";
 import { toolResources } from "../features/tools/resources/toolResources";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
@@ -74,7 +75,7 @@ import { toolFilterBlockedSummary } from "../lib/toolStatus";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement } from "../lib/placement";
 import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
-import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
+import { DashboardHealthWidget, ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
 import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
@@ -946,6 +947,7 @@ export function RightSidebar({
   selectedProfile = null,
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
+  dashboardHealth = null,
   promptUsage = null,
   promptProfileId,
   conversationId = null,
@@ -980,6 +982,7 @@ export function RightSidebar({
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  dashboardHealth?: DashboardHealth | null;
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;
@@ -1897,6 +1900,7 @@ export function RightSidebar({
               <ToolFilterLogWidget entries={toolFilterEntries} />
             ) : isRuntimeStatusActive ? (
               <div className="space-y-3">
+                <DashboardHealthWidget health={dashboardHealth} />
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2.5">
                   <p className="text-[11px] uppercase tracking-wide text-zinc-600">Model</p>
                   <p className="mt-1 text-sm text-zinc-100">{selectedProfile?.display_name ?? "Unknown"}</p>

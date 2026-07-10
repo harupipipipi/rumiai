@@ -2519,6 +2519,55 @@ export type CodexConnectionActionResponse = Partial<CodexConnectionStatusRespons
   probe?: Record<string, unknown>;
 };
 
+export type DashboardHealthProvider = {
+  provider_id: string;
+  label?: string;
+  kind?: string;
+  registered?: boolean;
+  configured?: boolean;
+  auth_mode?: string;
+  key_source?: string;
+  model_catalog_age_seconds?: number | null;
+  quota_classification?: string;
+  last_error?: string | null;
+  failure?: { code: string; message: string } | null;
+};
+
+export type DashboardHealth = {
+  generated_at?: string;
+  provider?: {
+    providers?: DashboardHealthProvider[];
+    count?: number;
+    configured_count?: number;
+    failure_count?: number;
+    failure_codes?: string[];
+  };
+  gateway?: {
+    local_url?: string;
+    tunnel_url?: string;
+    webhook_url?: string;
+    active_devices?: number;
+    token_expires_at?: string;
+  };
+  approval?: {
+    pending?: number;
+    recent?: Array<Record<string, unknown>>;
+    denied?: number;
+    risky?: number;
+    replayed?: number;
+    counts?: Record<string, number>;
+  };
+  tool_risk_map?: Record<string, unknown>;
+  pack_integrity?: Record<string, unknown>;
+  runtime?: {
+    status?: string;
+    probe_count?: number;
+    last_smoke_run?: string;
+    failed_scenario?: string;
+    open_regression_issues?: unknown[];
+  };
+};
+
 export const api = {
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
@@ -2766,6 +2815,10 @@ export const api = {
 
   health() {
     return request<{ status: string; pack: string; ts: string }>("/api/health");
+  },
+
+  dashboardHealth() {
+    return request<DashboardHealth>("/api/dashboard/health", { cache: "no-store" });
   },
 
   uiCatalog() {

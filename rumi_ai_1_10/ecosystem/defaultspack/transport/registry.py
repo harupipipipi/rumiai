@@ -2147,6 +2147,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         block_module="blocks.ai.oauth",
         path_inject={"provider_id": "provider_id"},
     ),
+    HttpRouteSpec("GET", "/api/dashboard/health", block_module="blocks.ai.dashboard_health"),
     HttpRouteSpec("GET", "/api/ai/catalog", block_module="blocks.ai.catalog"),
     HttpRouteSpec("GET", "/api/ai/providers", block_module="blocks.ai.providers"),
     HttpRouteSpec("GET", "/api/ai/models", block_module="blocks.ai.models"),
