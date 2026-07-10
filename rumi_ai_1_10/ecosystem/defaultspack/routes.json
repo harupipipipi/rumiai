@@ -946,187 +946,187 @@
       "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
-      "description": "List company workspaces"
+      "description": "List team workspaces"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
-      "description": "Create a company workspace"
+      "description": "Create a team workspace"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}",
       "flow_id": "company_workspace",
-      "description": "Get a company workspace"
+      "description": "Get a team workspace"
     },
     {
       "method": "PUT",
       "path": "/api/agent/companies/{company_id}",
       "flow_id": "company_workspace",
-      "description": "Update a company workspace"
+      "description": "Update a team workspace"
     },
     {
       "method": "DELETE",
       "path": "/api/agent/companies/{company_id}",
       "flow_id": "company_workspace",
-      "description": "Delete a company workspace"
+      "description": "Delete a team workspace"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/bootstrap",
       "flow_id": "company_workspace",
-      "description": "Bootstrap a company workspace"
+      "description": "Bootstrap a team workspace"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/status",
       "flow_id": "company_workspace",
-      "description": "Read company workspace status"
+      "description": "Read team workspace status"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/settings",
       "flow_id": "company_workspace",
-      "description": "Read company workspace settings"
+      "description": "Read team workspace settings"
     },
     {
       "method": "PUT",
       "path": "/api/agent/companies/{company_id}/settings",
       "flow_id": "company_workspace",
-      "description": "Update company workspace settings"
+      "description": "Update team workspace settings"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/agents",
       "flow_id": "company_workspace",
-      "description": "List company agents"
+      "description": "List team agents"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/agents",
       "flow_id": "company_workspace",
-      "description": "Create or upsert a company agent"
+      "description": "Create or upsert a team agent"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
       "flow_id": "company_workspace",
-      "description": "Get a company agent"
+      "description": "Get a team agent"
     },
     {
       "method": "PUT",
       "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
       "flow_id": "company_workspace",
-      "description": "Update a company agent"
+      "description": "Update a team agent"
     },
     {
       "method": "DELETE",
       "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
       "flow_id": "company_workspace",
-      "description": "Delete a company agent"
+      "description": "Delete a team agent"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/channels",
       "flow_id": "company_workspace",
-      "description": "List company channels"
+      "description": "List team channels"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/channels",
       "flow_id": "company_workspace",
-      "description": "Create or upsert a company channel"
+      "description": "Create or upsert a team channel"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
       "flow_id": "company_workspace",
-      "description": "List company channel messages"
+      "description": "List team channel messages"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
       "flow_id": "company_workspace",
-      "description": "Add a company channel message"
+      "description": "Add a team channel message"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/threads",
       "flow_id": "company_workspace",
-      "description": "List company threads"
+      "description": "List team threads"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/threads",
       "flow_id": "company_workspace",
-      "description": "Create a company thread"
+      "description": "Create a team thread"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/threads/{thread_id}",
       "flow_id": "company_workspace",
-      "description": "Get a company thread"
+      "description": "Get a team thread"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/threads/{thread_id}/messages",
       "flow_id": "company_workspace",
-      "description": "Post a company thread message"
+      "description": "Post a team thread message"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/mention",
       "flow_id": "company_workspace",
-      "description": "Resolve or queue company work from mentions"
+      "description": "Resolve or queue team work from mentions"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/dispatch",
       "flow_id": "company_workspace",
-      "description": "Queue a company task dispatch"
+      "description": "Queue a team task dispatch"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/tasks",
       "flow_id": "company_workspace",
-      "description": "List company tasks"
+      "description": "List team tasks"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/tasks",
       "flow_id": "company_workspace",
-      "description": "Create a company task"
+      "description": "Create a team task"
     },
     {
       "method": "PUT",
       "path": "/api/agent/companies/{company_id}/tasks/{task_id}",
       "flow_id": "company_workspace",
-      "description": "Update a company task"
+      "description": "Update a team task"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch",
       "flow_id": "company_workspace",
-      "description": "Dispatch a company task through AgentEngine"
+      "description": "Dispatch a team task through AgentEngine"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/runs",
       "flow_id": "company_workspace",
-      "description": "List company run links"
+      "description": "List team run links"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/agents/{agent_id}/inbox",
       "flow_id": "company_workspace",
-      "description": "List a company agent inbox"
+      "description": "List a team agent inbox"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/agents/{agent_id}/inbox/{inbox_id}/consume",
       "flow_id": "company_workspace",
-      "description": "Consume a company agent inbox item"
+      "description": "Consume a team agent inbox item"
     },
     {
       "method": "POST",
@@ -1138,43 +1138,43 @@
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/summaries",
       "flow_id": "company_workspace",
-      "description": "List company summaries"
+      "description": "List team summaries"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/summaries/refresh",
       "flow_id": "company_workspace",
-      "description": "Refresh a company summary"
+      "description": "Refresh a team summary"
     },
     {
       "method": "GET",
       "path": "/api/agent/companies/{company_id}/inbound-routes",
       "flow_id": "company_workspace",
-      "description": "List company inbound routes"
+      "description": "List team inbound routes"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/inbound-routes",
       "flow_id": "company_workspace",
-      "description": "Create or upsert a company inbound route"
+      "description": "Create or upsert a team inbound route"
     },
     {
       "method": "PUT",
       "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
       "flow_id": "company_workspace",
-      "description": "Update a company inbound route"
+      "description": "Update a team inbound route"
     },
     {
       "method": "DELETE",
       "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
       "flow_id": "company_workspace",
-      "description": "Delete a company inbound route"
+      "description": "Delete a team inbound route"
     },
     {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}/ingest",
       "flow_id": "company_workspace",
-      "description": "Ingest content through a company inbound route"
+      "description": "Ingest content through a team inbound route"
     },
     {
       "method": "GET",

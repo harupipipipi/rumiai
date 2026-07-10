@@ -311,7 +311,7 @@ def approve_with_extended_expiry(
 
     Unlike ``approve()``, this helper may refresh an ``expired`` request. Callers
     must enforce their own policy before using it; the scheduler uses it only
-    after matching the MiMo scheduled auto-approval allowlist and conversation
+    after matching the scheduled auto-approval allowlist and conversation
     scope.
     """
     with _LOCK:
