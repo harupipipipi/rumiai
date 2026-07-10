@@ -6,6 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ApprovalQueue } from "./ApprovalQueue";
+import { CheckpointPanel } from "./CheckpointPanel";
 import { CodingCockpit } from "./CodingCockpit";
 import { DiffPanel } from "./DiffPanel";
 import { TerminalPanel } from "./TerminalPanel";
@@ -55,7 +56,7 @@ test("approval queue separates expired pending approvals from active approvals",
   assert.doesNotMatch(html, />拒否</);
 });
 
-test("diff panel renders status and diff content", () => {
+test("diff panel renders status, content, and an operable refresh control", () => {
   const html = renderToStaticMarkup(
     createElement(DiffPanel, {
       initialStatus: { branch: "main", clean: false, modified: ["src/App.tsx"] },
@@ -67,6 +68,28 @@ test("diff panel renders status and diff content", () => {
   assert.match(html, /src\/App\.tsx/);
   assert.match(html, /-old/);
   assert.match(html, /\+new/);
+  assert.match(html, /aria-label="Refresh diff"/);
+});
+
+test("checkpoint panel renders refresh and restore-review controls for supplied snapshots", () => {
+  const html = renderToStaticMarkup(
+    createElement(CheckpointPanel, {
+      workspaceId: "ws-main",
+      initialCheckpoints: [
+        {
+          snapshot_id: "snapshot-1",
+          path: "/repo/.rumi/checkpoints/snapshot-1",
+        },
+      ],
+      initialDiff: { diff: "-before\n+after", files_changed: 1, files: ["src/App.tsx"] },
+    }),
+  );
+
+  assert.match(html, /snapshot-1/);
+  assert.match(html, /Refresh checkpoints/);
+  assert.match(html, /Review restore snapshot-1/);
+  assert.match(html, /Restore diff/);
+  assert.match(html, /-before/);
 });
 
 test("terminal panel renders classification and risk reasons", () => {
