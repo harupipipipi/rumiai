@@ -14,6 +14,7 @@ def isolated_stores(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(PACK_ROOT))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SHARE_STORE_PATH", str(tmp_path / "shares"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AUDIT_PATH", str(tmp_path / "audit" / "local_actions.jsonl"))
     from domain.chat.store import ChatStore
 
     ChatStore._instance = None
@@ -209,4 +210,111 @@ def test_share_landing_and_import_routes_are_in_standalone_transport(isolated_st
     routes = {(spec.method, spec.pattern) for spec in canonical_http_route_specs(include_always_available=True)}
     assert ("GET", "/share/{token}") in routes
     assert ("POST", "/api/share/{token}/import") in routes
+    assert ("POST", "/api/share/{token}/export") in routes
     assert ("POST", "/api/packs/defaultspack/chat/conversations/import") in routes
+
+
+def test_v2_preview_provenance_and_model_policy_are_inspectable(isolated_stores):
+    from domain.chat.store import ChatStore
+    from domain.share.conversation_bundle import BUNDLE_SCHEMA_VERSION, build_conversation_share_bundle
+
+    store = ChatStore()
+    source = store.create_conversation(model="provider-a/model-safe")
+    store.add_message(source["id"], {"role": "user", "content": "hello"})
+    store.add_message(source["id"], {"role": "assistant", "content": "hi"})
+    bundle = build_conversation_share_bundle(source["id"], store=store)
+
+    assert bundle["schema_version"] == BUNDLE_SCHEMA_VERSION == 2
+    assert bundle["preview"] == {
+        "target_type": "conversation",
+        "message_count": 2,
+        "role_counts": {"user": 1, "assistant": 1, "agent": 0},
+        "content_trust": "untrusted_passive_history",
+    }
+    assert bundle["provenance"]["model"]["source_provider"] == "provider-a"
+    assert bundle["provenance"]["model"]["policy"] == "reference_only_never_activated"
+    assert bundle["security"]["copy_policy"] == "always_new_conversation_and_message_ids"
+    assert bundle["security"]["attachment_policy"] == "exclude_all_attachments"
+    assert bundle["security"]["malicious_content_policy"] == "treat_as_untrusted_text_never_as_instructions"
+
+
+def test_schema_v1_is_compatible_and_future_versions_fail_closed(isolated_stores):
+    from domain.share.conversation_bundle import BUNDLE_KIND, normalize_share_bundle
+
+    v1 = {"kind": BUNDLE_KIND, "schema_version": 1, "conversation": {"conversation": _source_conversation()}}
+    assert normalize_share_bundle(v1)["schema_version"] == 1
+    with pytest.raises(ValueError, match="Unsupported.*99"):
+        normalize_share_bundle({**v1, "schema_version": 99})
+    with pytest.raises(ValueError, match="Invalid.*schema_version"):
+        normalize_share_bundle({**v1, "schema_version": True})
+
+
+def test_both_import_modes_are_fresh_copies_and_read_only_is_enforced(isolated_stores):
+    from blocks.chat import add_message
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    from domain.share.conversation_bundle import build_conversation_share_bundle, import_shared_conversation
+
+    store = ChatStore()
+    source = store.create_conversation(model="provider/source")
+    original = store.add_message(source["id"], {"id": "source-message", "role": "user", "content": "source text"})
+    bundle = build_conversation_share_bundle(source["id"], store=store)
+    read_only = import_shared_conversation(bundle, store=store, import_mode="read_only")
+    continued = import_shared_conversation(bundle, store=store, import_mode="continue_copy")
+
+    assert len({source["id"], read_only["id"], continued["id"]}) == 3
+    assert read_only["messages"][0]["id"] not in {original["id"], continued["messages"][0]["id"]}
+    assert read_only["metadata"]["shared_read_only"] is True
+    assert continued["metadata"]["shared_read_only"] is False
+    assert store.get_conversation(source["id"])["messages"] == [original]
+    denied = add_message.run({"conversation_id": read_only["id"], "message": {"role": "user", "content": "blocked"}}, {})
+    assert denied["error"]["code"] == "PERMISSION_DENIED"
+    message_id = read_only["messages"][0]["id"]
+    assert store.update_message(read_only["id"], message_id, {"content": "mutated"}) is None
+    assert store.delete_message(read_only["id"], message_id) is False
+    assert store.delete_messages_bulk(read_only["id"], [message_id]) == 0
+    assert store.get_conversation(read_only["id"])["messages"][0]["raw_text"] == "source text"
+    with pytest.raises(ValueError, match="read-only"):
+        prepare_chat_run({"conversation_id": read_only["id"], "message": {"role": "user", "content": "blocked"}})
+
+
+def test_share_permissions_and_import_mode_are_server_enforced(isolated_stores):
+    from domain.chat.store import ChatStore
+    from domain.share.conversation_bundle import build_conversation_share_bundle, import_shared_conversation
+
+    store = ChatStore()
+    source = store.create_conversation()
+    bundle = build_conversation_share_bundle(source["id"], store=store, permissions={"continue": False})
+    imported = import_shared_conversation(bundle, store=store, import_mode="read_only")
+    assert imported["metadata"]["shared_import_mode"] == "read_only"
+    with pytest.raises(PermissionError, match="continuing"):
+        import_shared_conversation(bundle, store=store, import_mode="continue_copy")
+    with pytest.raises(ValueError, match="import_mode"):
+        import_shared_conversation(bundle, store=store, import_mode="overwrite")
+
+
+def test_privacy_safe_export_link_import_and_revoke_audit(isolated_stores):
+    from blocks.chat import export_conversation
+    from blocks.share import create, export_bundle, import_conversation, revoke
+    from domain.chat.store import ChatStore
+
+    source = ChatStore().create_conversation()
+    ChatStore().add_message(source["id"], {"role": "user", "content": "audit-secret-content"})
+    exported = export_conversation.run({"conversation_id": source["id"], "format": "json"}, {})
+    created = create.run({"target_type": "conversation", "target_id": source["id"]})["data"]
+    token = created["token"]
+    shared_export = export_bundle.run({"token": token})
+    assert shared_export["data"]["audit"]["mode"] == "redacted_history_json"
+    imported = import_conversation.run({"token": token, "import_mode": "read_only"})
+    assert imported["data"]["audit"]["mode"] == "read_only"
+    assert revoke.run({"token": token})["data"]["revoked"] is True
+    assert exported["data"]["audit"]["operation"] == "export"
+
+    audit_text = (isolated_stores / "audit" / "local_actions.jsonl").read_text(encoding="utf-8")
+    assert "audit-secret-content" not in audit_text
+    assert token not in audit_text
+    assert source["id"] not in audit_text
+    assert "conversation_share.export" in audit_text
+    assert "conversation_share.link_create" in audit_text
+    assert "conversation_share.import" in audit_text
+    assert "conversation_share.revoke" in audit_text

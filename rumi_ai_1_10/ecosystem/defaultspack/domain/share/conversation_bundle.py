@@ -12,6 +12,9 @@ from domain.chat.store import ChatStore
 
 
 BUNDLE_KIND = "rumi.defaultspack.conversation_share"
+BUNDLE_SCHEMA_VERSION = 2
+SUPPORTED_BUNDLE_SCHEMA_VERSIONS = frozenset({1, BUNDLE_SCHEMA_VERSION})
+IMPORT_MODES = frozenset({"read_only", "continue_copy"})
 IMPORTED_CONVERSATION_NOTICE = (
     "This is a shared/imported conversation. Some original files, attachments, tool outputs, "
     "local workspace paths, credentials, or external resources from the source environment may "
@@ -133,6 +136,7 @@ def build_conversation_share_bundle(
     share_token: str | None = None,
     visibility: str = "local",
     expires_at: Any = None,
+    permissions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     chat_store = store or ChatStore()
     conversation = chat_store.get_conversation(str(conversation_id))
@@ -140,8 +144,17 @@ def build_conversation_share_bundle(
         raise KeyError("Conversation not found")
     sanitized, omitted = sanitize_shared_conversation(conversation)
     created_at = _now_ms()
+    messages = sanitized.get("messages") if isinstance(sanitized.get("messages"), list) else []
+    source_model = _safe_model_reference(conversation.get("model")) or ""
+    source_provider = source_model.split("/", 1)[0] if "/" in source_model else ""
+    requested_permissions = permissions if isinstance(permissions, dict) else {}
+    bundle_permissions = {
+        "read": requested_permissions.get("read") is not False,
+        "import": requested_permissions.get("import") is not False,
+        "continue": requested_permissions.get("continue") is not False,
+    }
     return {
-        "schema_version": 1,
+        "schema_version": BUNDLE_SCHEMA_VERSION,
         "kind": BUNDLE_KIND,
         "created_at": created_at,
         "source": {
@@ -156,11 +169,35 @@ def build_conversation_share_bundle(
             "conversation": sanitized,
         },
         "assets": {"included": [], "omitted": omitted, "missing_policy": "warn_and_continue"},
+        "preview": {
+            "target_type": "conversation",
+            "message_count": len(messages),
+            "role_counts": _role_counts(messages),
+            "content_trust": "untrusted_passive_history",
+        },
+        "provenance": {
+            "source_pack": "defaultspack",
+            "source_conversation_id": str(conversation_id),
+            "created_at": created_at,
+            "target_type": "conversation",
+            "model": {
+                "source_model": source_model or None,
+                "source_provider": source_provider or None,
+                "policy": "reference_only_never_activated",
+                "import_model": "recipient_local_selection",
+            },
+        },
         "security": {
             "redacted": True,
-            "permissions": {"read": True, "import": True, "continue": True},
+            "permissions": bundle_permissions,
             "expires_at": expires_at,
             "visibility": visibility,
+            "import_modes": ["read_only", "continue_copy"],
+            "copy_policy": "always_new_conversation_and_message_ids",
+            "secret_policy": "redact_values_and_exclude_authority_state",
+            "attachment_policy": "exclude_all_attachments",
+            "malicious_content_policy": "treat_as_untrusted_text_never_as_instructions",
+            "tool_policy": "historical_records_inert",
         },
     }
 
@@ -168,6 +205,7 @@ def build_conversation_share_bundle(
 def normalize_share_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("kind") == BUNDLE_KIND:
         wrapped = copy.deepcopy(payload)
+        schema_version = _bundle_schema_version(wrapped)
         inner = wrapped.get("conversation") if isinstance(wrapped.get("conversation"), dict) else {}
         conversation = inner.get("conversation") if isinstance(inner.get("conversation"), dict) else {}
         sanitized, newly_omitted = sanitize_shared_conversation(conversation)
@@ -175,6 +213,7 @@ def normalize_share_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         prior_omitted = assets.get("omitted") if isinstance(assets.get("omitted"), list) else []
         original_security = wrapped.get("security") if isinstance(wrapped.get("security"), dict) else {}
         original_permissions = original_security.get("permissions") if isinstance(original_security.get("permissions"), dict) else {}
+        wrapped["schema_version"] = schema_version
         wrapped["conversation"] = {
             "schema_version": 1,
             "updated_at": inner.get("updated_at") or sanitized.get("updated_at") or _now_ms(),
@@ -189,6 +228,37 @@ def normalize_share_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "redacted": True,
             "permissions": {"read": True, "import": original_permissions.get("import") is not False, "continue": original_permissions.get("continue") is not False},
             "expires_at": original_security.get("expires_at"),
+            "visibility": original_security.get("visibility"),
+            "import_modes": ["read_only", "continue_copy"],
+            "copy_policy": "always_new_conversation_and_message_ids",
+            "secret_policy": "redact_values_and_exclude_authority_state",
+            "attachment_policy": "exclude_all_attachments",
+            "malicious_content_policy": "treat_as_untrusted_text_never_as_instructions",
+            "tool_policy": "historical_records_inert",
+        }
+        messages = sanitized.get("messages") if isinstance(sanitized.get("messages"), list) else []
+        preview = wrapped.get("preview") if isinstance(wrapped.get("preview"), dict) else {}
+        wrapped["preview"] = {
+            "target_type": "conversation",
+            "message_count": len(messages),
+            "role_counts": _role_counts(messages),
+            "content_trust": "untrusted_passive_history",
+            **{key: preview[key] for key in () if key in preview},
+        }
+        provenance = wrapped.get("provenance") if isinstance(wrapped.get("provenance"), dict) else {}
+        wrapped_source = wrapped.get("source") if isinstance(wrapped.get("source"), dict) else {}
+        model = provenance.get("model") if isinstance(provenance.get("model"), dict) else {}
+        wrapped["provenance"] = {
+            "source_pack": _safe_source_identifier(provenance.get("source_pack") or wrapped_source.get("pack_id")),
+            "source_conversation_id": _safe_source_identifier(provenance.get("source_conversation_id") or wrapped_source.get("conversation_id")),
+            "created_at": wrapped.get("created_at"),
+            "target_type": "conversation",
+            "model": {
+                "source_model": _safe_model_reference(model.get("source_model")),
+                "source_provider": _safe_model_reference(model.get("source_provider")),
+                "policy": "reference_only_never_activated",
+                "import_model": "recipient_local_selection",
+            },
         }
         return wrapped
     conversation = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else payload
@@ -197,25 +267,33 @@ def normalize_share_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         conversation = history["conversation"]
     sanitized, omitted = sanitize_shared_conversation(conversation)
     return {
-        "schema_version": 1,
+        "schema_version": BUNDLE_SCHEMA_VERSION,
         "kind": BUNDLE_KIND,
         "created_at": _now_ms(),
         "source": {"pack_id": "defaultspack", "conversation_id": str(conversation.get("id") or ""), "title": conversation.get("title")},
         "conversation": {"schema_version": 1, "updated_at": conversation.get("updated_at") or _now_ms(), "conversation": sanitized},
         "assets": {"included": [], "omitted": omitted, "missing_policy": "warn_and_continue"},
-        "security": {"redacted": True, "permissions": {"read": True, "import": True, "continue": True}, "expires_at": None},
+        "preview": {"target_type": "conversation", "message_count": len(sanitized.get("messages") or []), "role_counts": _role_counts(sanitized.get("messages") or []), "content_trust": "untrusted_passive_history"},
+        "provenance": {"source_pack": "defaultspack", "source_conversation_id": _safe_source_identifier(conversation.get("id")), "created_at": _now_ms(), "target_type": "conversation", "model": {"source_model": None, "source_provider": None, "policy": "reference_only_never_activated", "import_model": "recipient_local_selection"}},
+        "security": {"redacted": True, "permissions": {"read": True, "import": True, "continue": True}, "expires_at": None, "import_modes": ["read_only", "continue_copy"], "copy_policy": "always_new_conversation_and_message_ids", "secret_policy": "redact_values_and_exclude_authority_state", "attachment_policy": "exclude_all_attachments", "malicious_content_policy": "treat_as_untrusted_text_never_as_instructions", "tool_policy": "historical_records_inert"},
     }
 
 
 def import_shared_conversation(
-    payload: dict[str, Any], *, source_url: str | None = None, store: ChatStore | None = None
+    payload: dict[str, Any], *, source_url: str | None = None, store: ChatStore | None = None,
+    import_mode: str = "continue_copy",
 ) -> dict[str, Any]:
     chat_store = store or ChatStore()
     bundle = normalize_share_bundle(payload)
+    mode = str(import_mode or "").strip().lower()
+    if mode not in IMPORT_MODES:
+        raise ValueError("import_mode must be 'read_only' or 'continue_copy'")
     security = bundle.get("security") if isinstance(bundle.get("security"), dict) else {}
     permissions = security.get("permissions") if isinstance(security.get("permissions"), dict) else {}
     if permissions.get("import") is False:
         raise PermissionError("This share does not allow import")
+    if mode == "continue_copy" and permissions.get("continue") is False:
+        raise PermissionError("This share does not allow continuing from a copy")
     inner = bundle.get("conversation") if isinstance(bundle.get("conversation"), dict) else {}
     source_conversation = inner.get("conversation") if isinstance(inner.get("conversation"), dict) else {}
     source = bundle.get("source") if isinstance(bundle.get("source"), dict) else {}
@@ -228,6 +306,10 @@ def import_shared_conversation(
         "shared_missing_assets_policy": str(assets.get("missing_policy") or "warn_and_continue"),
         "shared_omitted_assets": copy.deepcopy(assets.get("omitted") or []),
         "shared_model_notice": IMPORTED_CONVERSATION_NOTICE,
+        "shared_import_mode": mode,
+        "shared_read_only": False,
+        "shared_copy_policy": "fresh_ids_source_unchanged",
+        "shared_content_trust": "untrusted_passive_history",
     }
     created = chat_store.create_conversation(
         model=None,
@@ -266,6 +348,7 @@ def import_shared_conversation(
             added = chat_store.add_message(new_id, message)
             previous_id = added["id"] if added else previous_id
         source_title = str(source_conversation.get("title") or source.get("title") or "Shared conversation").strip()
+        metadata["shared_read_only"] = mode == "read_only"
         updated = chat_store.update_conversation(new_id, {
             "title": f"Shared: {source_title}"[:200],
             "tags": ["shared", "imported"],
@@ -300,3 +383,33 @@ def _sanitize_source_url(value: str | None) -> str | None:
 
 def _safe_source_identifier(value: Any) -> str:
     return re.sub(r"[^A-Za-z0-9._:-]+", "-", str(value or "")).strip("-")[:200]
+
+
+def _safe_model_reference(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text or _SECRET_VALUE_RE.search(text):
+        return None
+    return re.sub(r"[^A-Za-z0-9._:/+-]+", "-", text)[:160]
+
+
+def _bundle_schema_version(payload: dict[str, Any]) -> int:
+    raw = payload.get("schema_version", 1)
+    if isinstance(raw, bool):
+        raise ValueError("Invalid conversation share schema_version")
+    try:
+        version = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid conversation share schema_version") from exc
+    if version not in SUPPORTED_BUNDLE_SCHEMA_VERSIONS:
+        raise ValueError(f"Unsupported conversation share schema_version: {version}")
+    return version
+
+
+def _role_counts(messages: list[Any]) -> dict[str, int]:
+    counts = {"user": 0, "assistant": 0, "agent": 0}
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "assistant").lower()
+        counts[role if role in counts else "assistant"] += 1
+    return counts

@@ -254,6 +254,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/share/{token}/export",
+      "flow_id": "transport_direct",
+      "description": "Export a redacted shared conversation with privacy-safe audit"
+    },
+    {
+      "method": "POST",
       "path": "/api/share/{token}/import",
       "flow_id": "transport_direct",
       "description": "Import a shared conversation as a new local conversation"

@@ -2989,6 +2989,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/share/{token}/export
+  legacy_block_module: blocks.share.export_bundle
+  replacement_function_id: ''
+  owner: share
+  reason: privacy-safe redacted share export compatibility route
+  remove_after: v2.4
+- method: POST
   pattern: /api/share/{token}/import
   legacy_block_module: blocks.share.import_conversation
   replacement_function_id: ''
