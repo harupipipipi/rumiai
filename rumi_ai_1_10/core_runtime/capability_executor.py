@@ -157,6 +157,21 @@ DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 300.0
 
 
+def _record_defaultspack_compat_alias_use(alias: str, principal_id: str) -> None:
+    """Record alias identity and caller class only; never request arguments."""
+    principal = str(principal_id or "")
+    core_prefix = str(_CORE_PACK_ID_PREFIX or "core_")
+    internal_caller = principal in TRUSTED_BUILTIN_PACK_IDS or principal.startswith(core_prefix)
+    try:
+        from ecosystem.defaultspack.domain.function_runtime.compat_aliases import (
+            record_compat_alias_use,
+        )
+
+        record_compat_alias_use(alias, internal_caller=internal_caller)
+    except Exception:
+        logger.debug("Failed to record defaultspack compatibility alias use", exc_info=True)
+
+
 # W25.5: user function execution
 DEFAULT_FUNCTION_TIMEOUT = 30.0
 FUNCTION_BASE_IMAGE = "python:3.11-slim"
@@ -682,6 +697,8 @@ class CapabilityExecutor:
         # FunctionRegistry で解決
         entry = self._resolve_entry(permission_id)
         if entry is not None:
+            if permission_id.startswith("defaults.") and entry.pack_id == "defaultspack":
+                _record_defaultspack_compat_alias_use(permission_id, principal_id)
             return self._unified_execute(entry, principal_id, request, start_time)
 
         # 未登録の permission_id → handler_not_found（フォールバックなし）
@@ -1563,6 +1580,7 @@ class CapabilityExecutor:
                         detail_reason="FunctionRegistry not available in DI container")
             return resp
         entry = self._function_registry.get(qualified_name)
+        resolved_compat_alias = False
         if entry is None and hasattr(self._function_registry, "resolve_by_alias"):
             try:
                 alias_entry = self._function_registry.resolve_by_alias(qualified_name)
@@ -1572,6 +1590,7 @@ class CapabilityExecutor:
                     and isinstance(getattr(alias_entry, "function_id", None), str)
                 ):
                     entry = alias_entry
+                    resolved_compat_alias = qualified_name.startswith("defaults.")
             except Exception:
                 logger.debug("Function alias lookup failed for '%s'", qualified_name, exc_info=True)
         if entry is None:
@@ -1580,6 +1599,8 @@ class CapabilityExecutor:
             self._audit(principal_id, "function.call", None, resp, args, request_id,
                         detail_reason=f"Function '{qualified_name}' not found in FunctionRegistry")
             return resp
+        if resolved_compat_alias and entry.pack_id == "defaultspack":
+            _record_defaultspack_compat_alias_use(qualified_name, principal_id)
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)

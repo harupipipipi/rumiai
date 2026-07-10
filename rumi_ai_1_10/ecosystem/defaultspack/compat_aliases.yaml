@@ -1,3 +1,19 @@
+migration:
+  current_stage: warning
+  stages:
+    inventory: complete
+    warning: active
+    enforcement: planned-v2.4
+    removal: per-alias-remove-after
+  telemetry:
+    event_type: compat_alias_used
+    payload_policy: alias-metadata-only
+  removed_alias_groups:
+  - prefix: defaults.model_runtime.
+    removed_on: 2026-07-10
+    evidence: no repository callers outside generated manifests and this inventory
+    canonical_replacements: defaultspack.ai.* and defaultspack.model_runtime.*
+
 aliases:
   defaults.agent.add.instruction:
     owner: agent
@@ -1914,26 +1930,6 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.memory.vector_store
-  defaults.model_runtime.get_effective_thinking_level:
-    owner: ai
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.ai.get_effective_thinking_level
-  defaults.model_runtime.get_thinking_level:
-    owner: ai
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.ai.get_thinking_level
-  defaults.model_runtime.normalize_thinking_level:
-    owner: ai
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.ai.normalize_thinking_level
-  defaults.model_runtime.set_thinking_level:
-    owner: ai
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.ai.set_thinking_level
   defaults.pack.request.forced.patch:
     owner: pack
     reason: legacy caller compatibility
