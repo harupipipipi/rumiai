@@ -1,7 +1,9 @@
-const AUTHORITY_APPROVAL_CHANNEL = "rumi-authority-approval";
-const AUTHORITY_APPROVAL_MESSAGE_TYPE = "rumi-authority-approval-settlement";
-const AUTHORITY_APPROVAL_STORAGE_KEY = "rumi.authority.approval.settlement";
-const AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS = 5 * 60 * 1000;
+import { api, type AuthorityRequest } from "./api";
+
+const AUTHORITY_APPROVAL_CHANNEL = "rumi-authority-approval.v2";
+const AUTHORITY_APPROVAL_MESSAGE_TYPE = "rumi-authority-approval-hint";
+const LEGACY_AUTHORITY_APPROVAL_STORAGE_KEY = "rumi.authority.approval.settlement";
+const AUTHORITY_APPROVAL_HINT_MAX_AGE_MS = 30_000;
 
 export type AuthorityApprovalSettlement = {
   requestId: string;
@@ -9,150 +11,170 @@ export type AuthorityApprovalSettlement = {
   conversationId?: string | null;
 };
 
+export type AuthorityApprovalHint = {
+  requestId: string;
+  conversationId?: string | null;
+  emittedAt: number;
+  nonce: string;
+};
+
 type SubscribeAuthorityApprovalSettlementOptions = {
   replayStored?: boolean;
   replayStoredRequestId?: string;
 };
 
-type StoredAuthorityApprovalSettlement = AuthorityApprovalSettlement & {
-  ts: number;
-};
+type AuthorityRequestFetcher = (requestId: string) => Promise<AuthorityRequest>;
 
-function isSettlement(value: unknown): value is AuthorityApprovalSettlement {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.requestId === "string"
-    && (record.status === "approved" || record.status === "denied");
+function cleanString(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text || null;
 }
 
-function settlementFromMessage(value: unknown): AuthorityApprovalSettlement | null {
-  if (isSettlement(value)) return value;
+function createNonce(): string {
+  try {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+  }
+}
+
+function hintFromMessage(value: unknown, now = Date.now()): AuthorityApprovalHint | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (record.type !== AUTHORITY_APPROVAL_MESSAGE_TYPE) return null;
-  return isSettlement(record.event) ? record.event : null;
+  const hint = record.hint;
+  if (!hint || typeof hint !== "object" || Array.isArray(hint)) return null;
+  const hintRecord = hint as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(hintRecord, "status")) return null;
+  const requestId = cleanString(hintRecord.requestId);
+  const nonce = cleanString(hintRecord.nonce);
+  const emittedAt = Number(hintRecord.emittedAt);
+  const conversationId = cleanString(hintRecord.conversationId);
+  if (!requestId || !nonce || !Number.isFinite(emittedAt)) return null;
+  if (emittedAt > now + 5_000 || now - emittedAt > AUTHORITY_APPROVAL_HINT_MAX_AGE_MS) return null;
+  return {
+    requestId,
+    conversationId,
+    emittedAt,
+    nonce,
+  };
 }
 
-function storedSettlementFromMessage(value: unknown): StoredAuthorityApprovalSettlement | null {
-  const settlement = settlementFromMessage(value);
-  if (!settlement || !value || typeof value !== "object" || Array.isArray(value)) return null;
-  const ts = Number((value as Record<string, unknown>).ts);
-  if (!Number.isFinite(ts) || ts <= 0) return null;
-  return { ...settlement, ts };
+export function authorityApprovalHintMessage(
+  event: Pick<AuthorityApprovalSettlement, "requestId" | "conversationId">,
+  now = Date.now(),
+): { type: string; hint: AuthorityApprovalHint } {
+  return {
+    type: AUTHORITY_APPROVAL_MESSAGE_TYPE,
+    hint: {
+      requestId: event.requestId,
+      conversationId: event.conversationId ?? null,
+      emittedAt: now,
+      nonce: createNonce(),
+    },
+  };
+}
+
+export async function verifyAuthorityApprovalHint(
+  hint: AuthorityApprovalHint,
+  fetchRequest: AuthorityRequestFetcher = (requestId) => api.getAuthorityRequest(requestId),
+  now = Date.now(),
+): Promise<AuthorityApprovalSettlement | null> {
+  if (hint.emittedAt > now + 5_000 || now - hint.emittedAt > AUTHORITY_APPROVAL_HINT_MAX_AGE_MS) return null;
+  let request: AuthorityRequest;
+  try {
+    request = await fetchRequest(hint.requestId);
+  } catch {
+    return null;
+  }
+  if (String(request.request_id || "") !== hint.requestId) return null;
+  if (request.status !== "approved" && request.status !== "denied") return null;
+  const authoritativeConversationId = cleanString(request.conversation_id);
+  if (hint.conversationId && authoritativeConversationId !== hint.conversationId) return null;
+  return {
+    requestId: request.request_id,
+    status: request.status,
+    conversationId: authoritativeConversationId,
+  };
 }
 
 export function broadcastAuthorityApprovalSettlement(event: AuthorityApprovalSettlement): void {
+  const message = authorityApprovalHintMessage(event);
   try {
     const channel = new BroadcastChannel(AUTHORITY_APPROVAL_CHANNEL);
-    channel.postMessage(event);
+    channel.postMessage(message);
     channel.close();
   } catch {
-    // BroadcastChannel is optional; the approval decision itself already completed.
+    // Notification delivery is optional; the authoritative request remains queryable.
   }
   try {
-    window.opener?.postMessage({ type: AUTHORITY_APPROVAL_MESSAGE_TYPE, event }, window.location.origin);
+    window.opener?.postMessage(message, window.location.origin);
   } catch {
     // Some dedicated windows do not expose opener.
   }
-  try {
-    window.localStorage.setItem(AUTHORITY_APPROVAL_STORAGE_KEY, JSON.stringify({ ...event, ts: Date.now() }));
-  } catch {
-    // Storage events are only a fallback for browsers without BroadcastChannel.
-  }
+  clearStoredAuthorityApprovalSettlement();
 }
 
-export function clearStoredAuthorityApprovalSettlement(requestId?: string): void {
+export function clearStoredAuthorityApprovalSettlement(_requestId?: string): void {
   try {
-    const stored = window.localStorage.getItem(AUTHORITY_APPROVAL_STORAGE_KEY);
-    if (!stored) return;
-    if (requestId) {
-      const settlement = settlementFromMessage(JSON.parse(stored));
-      if (settlement && settlement.requestId !== requestId) return;
-    }
-    window.localStorage.removeItem(AUTHORITY_APPROVAL_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_AUTHORITY_APPROVAL_STORAGE_KEY);
   } catch {
     // Storage may be unavailable in restricted browser contexts.
   }
 }
 
 export function readStoredAuthorityApprovalSettlement(
-  options?: { requestId?: string; maxAgeMs?: number },
+  _options?: { requestId?: string; maxAgeMs?: number },
 ): AuthorityApprovalSettlement | null {
-  try {
-    const stored = window.localStorage.getItem(AUTHORITY_APPROVAL_STORAGE_KEY);
-    if (!stored) return null;
-    const settlement = storedSettlementFromMessage(JSON.parse(stored));
-    if (!settlement) {
-      window.localStorage.removeItem(AUTHORITY_APPROVAL_STORAGE_KEY);
-      return null;
-    }
-    if (options?.requestId && settlement.requestId !== options.requestId) return null;
-    const maxAgeMs = options?.maxAgeMs ?? AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS;
-    if (Date.now() - settlement.ts > maxAgeMs) {
-      clearStoredAuthorityApprovalSettlement(settlement.requestId);
-      return null;
-    }
-    return {
-      requestId: settlement.requestId,
-      status: settlement.status,
-      conversationId: settlement.conversationId,
-    };
-  } catch {
-    return null;
-  }
+  clearStoredAuthorityApprovalSettlement();
+  return null;
 }
 
 export function subscribeAuthorityApprovalSettlements(
   handler: (event: AuthorityApprovalSettlement) => void,
-  options?: SubscribeAuthorityApprovalSettlementOptions,
+  _options?: SubscribeAuthorityApprovalSettlementOptions,
 ): () => void {
   let active = true;
   let channel: BroadcastChannel | null = null;
+  const seenNonces = new Set<string>();
+  const inFlightRequestIds = new Set<string>();
+  const settledRequestIds = new Set<string>();
+
+  const acceptHint = (value: unknown) => {
+    const hint = hintFromMessage(value);
+    if (!hint || seenNonces.has(hint.nonce) || settledRequestIds.has(hint.requestId)) return;
+    seenNonces.add(hint.nonce);
+    if (inFlightRequestIds.has(hint.requestId)) return;
+    inFlightRequestIds.add(hint.requestId);
+    void verifyAuthorityApprovalHint(hint)
+      .then((settlement) => {
+        if (!active || !settlement) return;
+        settledRequestIds.add(settlement.requestId);
+        handler(settlement);
+      })
+      .finally(() => {
+        inFlightRequestIds.delete(hint.requestId);
+      });
+  };
+
   try {
     channel = new BroadcastChannel(AUTHORITY_APPROVAL_CHANNEL);
-    channel.onmessage = (event) => {
-      const settlement = settlementFromMessage(event.data);
-      if (settlement) handler(settlement);
-    };
+    channel.onmessage = (event) => acceptHint(event.data);
   } catch {
     channel = null;
   }
   const onWindowMessage = (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return;
-    const settlement = settlementFromMessage(event.data);
-    if (settlement) handler(settlement);
-  };
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== AUTHORITY_APPROVAL_STORAGE_KEY || !event.newValue) return;
-    try {
-      const settlement = settlementFromMessage(JSON.parse(event.newValue));
-      if (settlement) handler(settlement);
-    } catch {
-      // Ignore malformed fallback messages.
-    }
+    acceptHint(event.data);
   };
   window.addEventListener("message", onWindowMessage);
-  window.addEventListener("storage", onStorage);
-  if (options?.replayStored) {
-    const replay = () => {
-      if (!active) return;
-      const settlement = readStoredAuthorityApprovalSettlement({
-        requestId: options.replayStoredRequestId,
-      });
-      if (!settlement) return;
-      clearStoredAuthorityApprovalSettlement(settlement.requestId);
-      handler(settlement);
-    };
-    if (typeof window.queueMicrotask === "function") {
-      window.queueMicrotask(replay);
-    } else {
-      window.setTimeout(replay, 0);
-    }
-  }
+  clearStoredAuthorityApprovalSettlement();
+
   return () => {
     active = false;
     channel?.close();
     window.removeEventListener("message", onWindowMessage);
-    window.removeEventListener("storage", onStorage);
   };
 }
