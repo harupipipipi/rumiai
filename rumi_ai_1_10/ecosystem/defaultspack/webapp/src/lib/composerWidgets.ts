@@ -357,6 +357,24 @@ export function composerMentionToolIdsFromWidgets(widgets: DroppedWidget[]): str
   return result;
 }
 
+/** Return the exact human-facing syntaxes that bind a tool to mention widgets. */
+export function composerMentionSyntaxesForToolId(
+  widgets: DroppedWidget[],
+  toolId: string,
+): string[] {
+  const syntaxes = new Set<string>();
+  for (const widget of widgets) {
+    if (!composerMentionToolIdsFromWidgets([widget]).includes(toolId)) continue;
+    const mention = composerMentionRecord(widget);
+    if (!mention) continue;
+    const syntax = String(
+      mention.syntax ?? `@${String(mention.label ?? widget.label)}`,
+    ).trim();
+    if (syntax) syntaxes.add(syntax);
+  }
+  return [...syntaxes];
+}
+
 /** Record only selections that this mention added, preserving prior manual choices. */
 export function withComposerMentionSelectionOwnership(
   widget: DroppedWidget,

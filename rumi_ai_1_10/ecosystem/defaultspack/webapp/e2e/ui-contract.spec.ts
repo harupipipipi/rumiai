@@ -1149,6 +1149,8 @@ test("composer keeps a no-space mention disabled after its chip is toggled off",
   await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
     .toBe("[]");
+  await composer.press("End");
+  await composer.pressSequentially(" and summarize the result");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => streamRequests.length).toBe(1);
 
@@ -1244,6 +1246,45 @@ test("cancelling a pending workspace mention discards its late result", async ({
   expect(metadata.attachments).toEqual([]);
 });
 
+test("cancelling one pending workspace mention preserves another transaction", async ({ page }) => {
+  let releaseReadme!: () => void;
+  let releaseApp!: () => void;
+  const readmeGate = new Promise<void>((resolve) => { releaseReadme = resolve; });
+  const appGate = new Promise<void>((resolve) => { releaseApp = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: (payload) => (
+      payload.path === "README.md" ? readmeGate : appGate
+    ),
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await composer.press("End");
+  await composer.pressSequentially(" @src");
+  await page.getByRole("option").filter({ hasText: "@src/App.tsx" }).click();
+
+  await page.getByRole("button", { name: "README.md の読み込みを取り消す" }).click();
+  releaseApp();
+  await expect(page.getByRole("button", { name: "App.tsx を削除" })).toBeVisible();
+  releaseReadme();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toEqual([
+    expect.objectContaining({ name: "src/App.tsx", sourcePath: "src/App.tsx" }),
+  ]);
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "src/App.tsx", kind: "file", label: "src/App.tsx", syntax: "@src/App.tsx" },
+  ]);
+});
+
 test("starting a new draft discards a pending workspace mention result", async ({ page }) => {
   let releaseRead!: () => void;
   const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
@@ -1306,6 +1347,9 @@ test("composer mention keyboard and ARIA contracts stay predictable at Unicode a
   await expect(composer).toHaveAttribute("aria-expanded", "false");
 
   await composer.fill("mail@example.com https://example.com/@name \\@web_search @@web_search");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("ユーザー@example.com https://example.com/日本@pm");
   await expect(mentions).toBeHidden();
 
   await composer.fill("@this_candidate_does_not_exist");
@@ -1395,6 +1439,63 @@ test("composer controls are keyboard reachable, visibly named, and at least 44px
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
+});
+
+test("attachment remove and cancel actions expose 44px visible focus targets", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+
+  const cancel = page.getByRole("button", { name: "README.md の読み込みを取り消す" });
+  const cancelBox = await cancel.boundingBox();
+  expect(cancelBox).not.toBeNull();
+  expect(cancelBox!.width).toBeGreaterThanOrEqual(44);
+  expect(cancelBox!.height).toBeGreaterThanOrEqual(44);
+  await cancel.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(cancel).toBeFocused();
+  expect(await cancel.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+
+  releaseRead();
+  const inlineRemove = page.getByRole("button", { name: "README.md を削除" });
+  await expect(inlineRemove).toBeVisible();
+  const inlineBox = await inlineRemove.boundingBox();
+  expect(inlineBox).not.toBeNull();
+  expect(inlineBox!.width).toBeGreaterThanOrEqual(44);
+  expect(inlineBox!.height).toBeGreaterThanOrEqual(44);
+  await inlineRemove.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(inlineRemove).toBeFocused();
+  expect(await inlineRemove.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+
+  await page.getByTitle("New Chat").first().click();
+  const newComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await newComposer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  const cardRemove = page.getByRole("button", { name: "README.md を削除" });
+  const cardBox = await cardRemove.boundingBox();
+  expect(cardBox).not.toBeNull();
+  expect(cardBox!.width).toBeGreaterThanOrEqual(44);
+  expect(cardBox!.height).toBeGreaterThanOrEqual(44);
+  await cardRemove.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(cardRemove).toBeFocused();
+  const focusedCardStyle = await cardRemove.evaluate((element) => ({
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    opacity: getComputedStyle(element).opacity,
+  }));
+  expect(focusedCardStyle.opacity).toBe("1");
+  expect(focusedCardStyle.outlineStyle).not.toBe("none");
 });
 
 test("history reload restores localized semantic mention badges", async ({ page }) => {

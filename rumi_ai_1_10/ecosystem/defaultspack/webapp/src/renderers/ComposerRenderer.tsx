@@ -694,7 +694,7 @@ function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: stri
           type="button"
           aria-label={`${file.name} を削除`}
           onClick={() => onRemove(file.id)}
-          className="ml-0.5 text-zinc-500 hover:text-zinc-200 flex-shrink-0"
+          className="relative -my-2.5 -mr-2 ml-0.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-sky-400 focus-visible:ring-2 focus-visible:ring-sky-400"
         >
           <X size={10} />
         </button>
@@ -724,7 +724,7 @@ function PendingFileChip({
           type="button"
           aria-label={`${name} の読み込みを取り消す`}
           onClick={() => onRemove(path)}
-          className="ml-0.5 flex-shrink-0 text-blue-200/60 hover:text-blue-100"
+          className="relative -my-2.5 -mr-2 ml-0.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md text-blue-200/60 hover:text-blue-100 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-sky-300 focus-visible:ring-2 focus-visible:ring-sky-300"
         >
           <X size={10} />
         </button>
@@ -755,7 +755,7 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
           type="button"
           aria-label={`${file.name} を削除`}
           onClick={() => onRemove(file.id)}
-          className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-zinc-400 opacity-0 transition-opacity hover:text-zinc-100 group-hover/file:opacity-100"
+          className="absolute right-0 top-0 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-950/80 text-zinc-400 transition-opacity hover:text-zinc-100 focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-sky-400 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400"
           title="削除"
         >
           <X size={12} />

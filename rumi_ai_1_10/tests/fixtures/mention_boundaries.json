@@ -77,6 +77,12 @@
     "active_query": null
   },
   {
+    "name": "international email address",
+    "text": "ユーザー@example.com",
+    "tokens": [],
+    "active_query": null
+  },
+  {
     "name": "URL path",
     "text": "https://example.com/@name",
     "tokens": [],
@@ -85,6 +91,12 @@
   {
     "name": "URL suffix",
     "text": "https://example.com/path@name",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "Unicode URL path handle",
+    "text": "https://example.com/日本@pm",
     "tokens": [],
     "active_query": null
   },
