@@ -490,6 +490,69 @@ test('Packs confirms against a fresh post-write GET and ignores the late mount r
   assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
 });
 
+test('Packs rejects a fresh enabled-state mismatch while displaying server truth', async () => {
+  const requests: string[] = [];
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      requests.push(`${method} ${String(input)}`);
+      if (method === 'POST') {
+        return Promise.resolve(successfulResponse({
+          pack_id: originalPack.id,
+          enabled: false,
+        }));
+      }
+      return Promise.resolve(successfulResponse({
+        packs: [apiPack(originalPack, true)],
+        count: 1,
+      }));
+    },
+    writable: true,
+  });
+
+  await renderPacks();
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+  ]);
+  assert.equal(packSwitch().getAttribute('aria-checked'), 'true');
+  assert.equal(useAppStore.getState().packs[0]?.enabled, true);
+  assert.deepEqual(feedback, [{message: 'Pack update was not confirmed', type: 'error'}]);
+});
+
+test('Packs rejects a missing confirmation target while displaying the fresh list', async () => {
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(successfulResponse({
+          pack_id: originalPack.id,
+          enabled: false,
+        }));
+      }
+      return Promise.resolve(successfulResponse({packs: [], count: 0}));
+    },
+    writable: true,
+  });
+
+  await renderPacks();
+  await act(async () => {
+    clickPackSwitch();
+    await settlePromises();
+  });
+
+  assert.deepEqual(useAppStore.getState().packs, []);
+  assert.equal(container?.querySelector('button[role="switch"]'), null);
+  assert.match(container?.textContent ?? '', /No packs found/);
+  assert.deepEqual(feedback, [{message: 'Pack update was not confirmed', type: 'error'}]);
+});
+
 test('Pack pending state survives remount into PackDetail and blocks the inverse toggle', async () => {
   const post = deferred<Response>();
   const refresh = deferred<Response>();

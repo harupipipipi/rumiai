@@ -241,6 +241,10 @@ const defaultProfile: Profile = {
   connected: false,
 };
 
+const allowedProfileLanguages = new Set([
+  'ja', 'en', 'zh', 'ko', 'es', 'fr', 'de', 'pt', 'ru', 'ar',
+]);
+
 const defaultVersion: VersionInfo = {
   app: RUMI_DISPLAY_VERSION,
   kernel: '--',
@@ -419,7 +423,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           await apiDisablePack(id);
         }
         const data = await fetchPacks({fresh: true});
-        set({ packs: transformPacks(data.packs) });
+        const confirmedPacks = transformPacks(data.packs);
+        set({ packs: confirmedPacks });
+        const confirmedPack = confirmedPacks.find((candidate) => candidate.id === id);
+        if (!confirmedPack || confirmedPack.enabled !== targetEnabled) {
+          throw new Error('Pack update was not confirmed');
+        }
         return { ok: true };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
@@ -596,10 +605,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     profileReadGeneration += 1;
     try {
       const current = get().profile;
+      const submittedUsername = profileUpdate.username ?? current.username;
+      const submittedLanguage = profileUpdate.language ?? current.language;
+      if (submittedUsername.trim() === '') {
+        throw new Error('username is required and must be a non-empty string');
+      }
+      if (submittedUsername.length > 100) {
+        throw new Error('username must be 100 characters or less');
+      }
+      if (!allowedProfileLanguages.has(submittedLanguage)) {
+        throw new Error('language is not allowed');
+      }
       const expected: Profile = {
         avatar: profileUpdate.avatar ?? current.avatar,
-        username: profileUpdate.username ?? current.username,
-        language: profileUpdate.language ?? current.language,
+        username: submittedUsername.trim(),
+        language: submittedLanguage,
         job: profileUpdate.job ?? current.job,
         connected: current.connected,
       };

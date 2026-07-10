@@ -314,6 +314,108 @@ test('Settings uses a fresh profile confirmation and ignores its late mount read
   assert.deepEqual(feedback, [{message: 'Settings saved', type: 'success'}]);
 });
 
+test('Settings accepts the backend-canonical trimmed username as confirmed state', async () => {
+  const staleMountRead = deferred<Response>();
+  const freshRead = deferred<Response>();
+  const canonicalProfile = {...originalProfile, username: 'Alice'};
+  const requests: string[] = [];
+  let getCalls = 0;
+  let submittedUsername = '';
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      requests.push(`${method} ${String(input)}`);
+      if (method === 'PUT') {
+        submittedUsername = JSON.parse(String(init?.body)).username as string;
+        return Promise.resolve(successfulResponse({
+          profile: apiProfile(canonicalProfile),
+          updated: true,
+        }));
+      }
+      getCalls += 1;
+      return getCalls === 1 ? staleMountRead.promise : freshRead.promise;
+    },
+    writable: true,
+  });
+
+  await renderPage(<SettingsPage />);
+  const usernameInput = Array.from(container?.querySelectorAll('input') ?? [])
+    .find((input) => input.value === originalProfile.username);
+  assert.ok(usernameInput);
+  await act(async () => {
+    changeInput(usernameInput, ' Alice ');
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+  assert.equal(submittedUsername, canonicalProfile.username);
+  assert.deepEqual(requests, [
+    'GET /api/panel/settings/profile',
+    'PUT /api/panel/settings/profile',
+    'GET /api/panel/settings/profile',
+  ]);
+
+  await act(async () => {
+    freshRead.resolve(successfulResponse({profile: apiProfile(canonicalProfile)}));
+    await settlePromises();
+  });
+  assert.equal(useAppStore.getState().profile.username, canonicalProfile.username);
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === canonicalProfile.username));
+  assert.deepEqual(feedback, [{message: 'Settings saved', type: 'success'}]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+    await settlePromises();
+  });
+  assert.equal(useAppStore.getState().profile.username, canonicalProfile.username);
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === canonicalProfile.username));
+  assert.deepEqual(feedback, [{message: 'Settings saved', type: 'success'}]);
+});
+
+test('Settings rejects an empty canonical username without a false save', async () => {
+  const staleMountRead = deferred<Response>();
+  const requests: string[] = [];
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      requests.push(`${init?.method ?? 'GET'} ${String(input)}`);
+      return staleMountRead.promise;
+    },
+    writable: true,
+  });
+
+  await renderPage(<SettingsPage />);
+  const usernameInput = Array.from(container?.querySelectorAll('input') ?? [])
+    .find((input) => input.value === originalProfile.username);
+  assert.ok(usernameInput);
+  await act(async () => {
+    changeInput(usernameInput, '   ');
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, ['GET /api/panel/settings/profile']);
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === '   '));
+  assert.deepEqual(feedback, [{
+    message: 'username is required and must be a non-empty string',
+    type: 'error',
+  }]);
+
+  await act(async () => {
+    staleMountRead.resolve(successfulResponse({profile: apiProfile(originalProfile)}));
+    await settlePromises();
+  });
+  assert.ok(Array.from(container?.querySelectorAll('input') ?? [])
+    .some((input) => input.value === '   '));
+  assert.deepEqual(feedback, [{
+    message: 'username is required and must be a non-empty string',
+    type: 'error',
+  }]);
+});
+
 test('Settings keeps edited data when fresh profile state does not confirm the update', async () => {
   const staleMountRead = deferred<Response>();
   const freshRead = deferred<Response>();
