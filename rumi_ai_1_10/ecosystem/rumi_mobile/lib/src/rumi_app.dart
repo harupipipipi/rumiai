@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat/chat_screen.dart';
 import 'chat/chat_store.dart';
-import 'data/pc/device_store.dart';
+import 'data/pc/durable_device_store.dart';
 import 'settings/api_config_store.dart';
 
 class RumiApp extends StatelessWidget {
@@ -12,7 +12,7 @@ class RumiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = ChatStore();
     final configStore = ApiConfigStore();
-    final deviceStore = MobileDeviceStore();
+    final deviceStore = DurableMobileDeviceStore();
 
     return MaterialApp(
       title: 'Rumi',
