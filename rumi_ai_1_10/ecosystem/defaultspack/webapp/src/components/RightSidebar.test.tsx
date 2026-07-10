@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   getRailFloatingMenuPosition,
+  nextPinWidgetPanelState,
   RightSidebar,
   shouldShowToolManagerEmptyState,
   sidebarActionDisabledReason,
@@ -225,6 +226,76 @@ test("YOLO switch and Model Manager can be pinned", () => {
 
   assert.match(html, /title="YOLO Switch"/);
   assert.match(html, /title="Model Manager"/);
+});
+
+test("right sidebar Pin widget click state toggles a real panel", () => {
+  const opened = nextPinWidgetPanelState(null);
+
+  assert.equal(typeof opened, "string");
+  assert.equal(nextPinWidgetPanelState(opened), null);
+  assert.equal(nextPinWidgetPanelState("__tool_manager__"), opened);
+});
+
+test("right sidebar Pin widget panel renders empty state and add actions", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      initialActivePanel: nextPinWidgetPanelState(null),
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /aria-label="Pin widget"/);
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /id="right-rail-pin-widget-panel"/);
+  assert.match(html, /Pinned widgets/);
+  assert.match(html, /No pinned widgets yet/);
+  assert.match(html, /Add Tool Filter Log/);
+  assert.match(html, /Add widgets/);
+  assert.match(html, /Runtime Status/);
+});
+
+test("right sidebar Pin widget panel explains when all widget candidates are already pinned", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      initialActivePanel: nextPinWidgetPanelState(null),
+      settingsValues: {
+        sidebar: {
+          pinned_item_ids: [],
+          starred_item_ids: [],
+          custom_tool_tags: {},
+          ui_placements: [
+            { id: "tool-filter-log", surface: "right_sidebar" },
+            { id: "runtime-status", surface: "right_sidebar" },
+            { id: "yolo-switch", surface: "right_sidebar" },
+            { id: "model-manager", surface: "right_sidebar" },
+            { id: "model-pack-switcher", surface: "right_sidebar" },
+            { id: "webhook-endpoints", surface: "right_sidebar" },
+          ],
+        },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /6 pinned/);
+  assert.match(html, /Pinned on rail/);
+  assert.match(html, /Unpin Runtime Status/);
+  assert.match(html, /No addable widgets are available/);
+  assert.match(html, /All available right-rail widgets are already pinned/);
+  assert.doesNotMatch(html, /No pinned widgets yet/);
 });
 
 test("right sidebar exposes workspace tabs as a vertical switcher widget", () => {
