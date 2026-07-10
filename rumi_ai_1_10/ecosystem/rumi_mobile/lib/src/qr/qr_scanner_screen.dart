@@ -66,6 +66,13 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     if (raw.isEmpty) return;
     _handled = true;
     final payload = parseQrPayload(raw);
+    if (payload is QrRejected) {
+      setState(() {
+        _scanError = payload.reason;
+        _handled = false;
+      });
+      return;
+    }
     final mismatch = !_matchesPurpose(payload);
     Navigator.of(context).pop((payload, mismatch));
   }
