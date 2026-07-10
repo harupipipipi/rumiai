@@ -888,7 +888,10 @@ test("composer at mention selects tools and skills and sends mention metadata", 
 
   await page.getByRole("option", { name: /web_search|@web search/i }).click();
   await expect(composer).toHaveValue("Use @web_search ");
-  await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
+  const webReference = page.locator('[data-composer-inline-reference="tool:web_search"]');
+  await expect(webReference).toBeVisible();
+  await expect(webReference).toHaveText("Web Search");
+  await expect(webReference.locator("svg")).toHaveCount(1);
 
   await composer.pressSequentially("@live");
   await expect(mentions).toBeVisible();
@@ -896,7 +899,10 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   await expect(mentions).toContainText("feedback/live-review");
   await page.getByRole("option", { name: /feedback\/live-review|@live review/i }).click();
   await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
-  await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
+  const skillReference = page.locator('[data-composer-inline-reference="skill:feedback/live-review"]');
+  await expect(skillReference).toBeVisible();
+  await expect(skillReference).toHaveText("Live Review");
+  await expect(skillReference.locator("svg")).toHaveCount(1);
 
   await page.locator(".rumi-send-button").click();
   await expect.poll(() => streamRequests.length).toBe(1);
@@ -948,6 +954,23 @@ test("composer at mention selects tools and skills and sends mention metadata", 
       }),
     }),
   ]);
+});
+
+test("explicit composer widget drops remain in the widget row", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+  const frame = page.locator(".rumi-composer-frame");
+  await frame.evaluate((element) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("application/rumi-widget", JSON.stringify({
+      id: "github_issue_search",
+      type: "tool",
+      label: "untrusted label",
+    }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+  });
+
+  await expect(frame.locator('button[title="Search GitHub issues."]')).toHaveText("GitHub Issues");
+  await expect(frame.locator('[data-composer-inline-reference="tool:github_issue_search"]')).toHaveCount(0);
 });
 
 test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
