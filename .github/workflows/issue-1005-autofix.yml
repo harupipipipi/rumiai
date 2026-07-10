@@ -1,0 +1,79 @@
+name: Apply issue 1005 fix
+
+on:
+  pull_request:
+    branches: [soon]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-1005-no-mcp-auto-approval
+      - name: Remove requester-side MCP auto approval
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          cockpit = Path('rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/coding/CodingCockpit.tsx')
+          source = cockpit.read_text(encoding='utf-8')
+          old = '''      let result = await codingResources.connectMcpServer({ server_id: serverId });
+      if (result.approval_required && typeof result.approval_request_id === "string") {
+        const decision = await codingResources.approveCodingApproval(result.approval_request_id);
+        if (!decision.approved || !decision.token) {
+          throw new Error("MCP approval was not granted");
+        }
+        result = await codingResources.connectMcpServer({ server_id: serverId, approval_token: decision.token });
+      }
+      const tools = Array.isArray(result.tools) ? result.tools.length : 0;'''
+          new = '''      const result = await codingResources.connectMcpServer({ server_id: serverId });
+      if (result.approval_required && typeof result.approval_request_id === "string") {
+        await loadSidecarState();
+        setStatus(`MCP approval required for ${serverId}. Review request ${result.approval_request_id} in the separate Approvals queue, then press Connect again. The requesting form cannot approve its own request.`);
+        return;
+      }
+      const tools = Array.isArray(result.tools) ? result.tools.length : 0;'''
+          if old not in source:
+              raise SystemExit('MCP auto-approval block changed upstream')
+          source = source.replace(old, new)
+          if 'codingResources.approveCodingApproval' in source:
+              raise SystemExit('requester-side approval call remains')
+          cockpit.write_text(source, encoding='utf-8')
+
+          test_path = Path('rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/coding/CodingCockpit.test.tsx')
+          tests = test_path.read_text(encoding='utf-8')
+          tests = tests.replace('import assert from "node:assert/strict";\n', 'import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport { resolve } from "node:path";\n')
+          if 'MCP requester never approves its own request' not in tests:
+              tests += '''\n\ntest("MCP requester never approves its own request", () => {\n  const source = readFileSync(resolve(import.meta.dirname, "CodingCockpit.tsx"), "utf8");\n  assert.doesNotMatch(source, /codingResources\\.approveCodingApproval/);\n  assert.match(source, /separate Approvals queue/);\n  assert.match(source, /requesting form cannot approve its own request/);\n});\n'''
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm ci
+      - name: Validate
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: |
+          npx tsx --test src/components/coding/CodingCockpit.test.tsx
+          npm run lint
+          npm run build
+      - name: Commit implementation
+        run: |
+          rm .github/workflows/issue-1005-autofix.yml
+          git config user.name "rumiai-ui-bot"
+          git config user.email "rumiai-ui-bot@users.noreply.github.com"
+          git add -A .github/workflows/issue-1005-autofix.yml \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/coding/CodingCockpit.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/components/coding/CodingCockpit.test.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/ui
+          git commit -m "Stop MCP requester-side auto approval"
+          git push origin HEAD:fix-1005-no-mcp-auto-approval
