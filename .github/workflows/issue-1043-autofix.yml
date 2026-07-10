@@ -1,0 +1,107 @@
+name: Apply issue 1043 fix
+
+on:
+  push:
+    branches:
+      - fix/1043-truthful-ui-precision-demo
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[auto-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1043-truthful-ui-precision-demo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+      - name: Replace benchmark claims with truthful static-demo copy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path('rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.tsx')
+          text = page.read_text(encoding='utf-8')
+
+          replacements = {
+              'data-rumi-node={variant === "raw" ? "mimo-raw-preview" : "rumi-recursive-preview"}': 'data-rumi-node={variant === "raw" ? "raw-static-preview" : "structured-static-preview"}',
+              'data-rumi-role="comparison-render"': 'data-rumi-role="static-demo-render"',
+              '{isRaw ? "single pass" : `split ${scenario.leaves.length} leaves`}': '{isRaw ? "static raw fixture" : `static structured fixture · ${scenario.leaves.length} leaves`}',
+              'const title = variant === "raw" ? "MiMo V2.5 Pro raw" : "Rumi recursive split";': 'const title = variant === "raw" ? "Illustrative raw layout" : "Illustrative structured layout";',
+              'const subtitle = variant === "raw" ? "single pass generation" : "leaf-by-leaf accepted composition";': 'const subtitle = "hand-authored static fixture; no model invocation";',
+              '<p className="mt-1 truncate text-[11px] font-medium text-cyan-200">input: shared request brief only</p>': '<p className="mt-1 text-[11px] font-medium leading-4 text-cyan-200">Static example data. Editing the brief does not regenerate this preview.</p>',
+              '{variant === "raw" ? `${summary.rawFailed} hard fails` : `${summary.rumiFailed} hard fails`}': '{variant === "raw" ? `${summary.rawFailed} illustrative flags` : `${summary.rumiFailed} illustrative flags`}',
+              '<h2 className="text-sm font-semibold text-zinc-100">Fairness lock</h2>': '<h2 className="text-sm font-semibold text-zinc-100">Static scenario disclosure</h2>',
+              'MiMoとRumiは同じrequest briefだけを読む。追加プロンプト、口出し、手修正は0です。': 'この画面は手作業で作成した説明用fixtureです。モデル実行、候補生成、採点、再現実験は行いません。',
+              '<p className="text-[11px] font-semibold uppercase text-zinc-500">Human hints</p>': '<p className="text-[11px] font-semibold uppercase text-zinc-500">Runtime calls</p>',
+              '<p className="text-[11px] font-semibold uppercase text-zinc-500">Manual edits</p>': '<p className="text-[11px] font-semibold uppercase text-zinc-500">Generated artifacts</p>',
+              '<h2 className="text-sm font-semibold text-zinc-100">Score inspector</h2>': '<h2 className="text-sm font-semibold text-zinc-100">Illustrative layout inspector</h2>',
+              '<p className="text-[11px] font-semibold uppercase text-zinc-500">Raw output</p>': '<p className="text-[11px] font-semibold uppercase text-zinc-500">Raw fixture</p>',
+              '<p className="text-[11px] font-semibold uppercase text-zinc-500">Rumi output</p>': '<p className="text-[11px] font-semibold uppercase text-zinc-500">Structured fixture</p>',
+              '<ScoreBar label="MiMo raw compression" value={selectedLeaf.rawCompression} tone="raw" />': '<ScoreBar label="Illustrative raw density" value={selectedLeaf.rawCompression} tone="raw" />',
+              '<ScoreBar label="Rumi split compression" value={selectedLeaf.rumiCompression} tone="rumi" />': '<ScoreBar label="Illustrative structured density" value={selectedLeaf.rumiCompression} tone="rumi" />',
+              '<span>Hard gates</span>': '<span>Illustrative review flags</span>',
+              '<span className="text-xs font-semibold text-zinc-200">Viewport proof</span>': '<span className="text-xs font-semibold text-zinc-200">Viewport note</span>',
+              '<h2 className="text-sm font-semibold text-zinc-100">Candidate tournament</h2>': '<h2 className="text-sm font-semibold text-zinc-100">Candidate layout examples</h2>',
+              '失敗候補をpatchせず、空ディレクトリから再生成します。': '候補名・状態・数値は説明用の静的サンプルで、生成結果ではありません。',
+              '<h2 className="text-sm font-semibold text-zinc-100">Viewport proof strip</h2>': '<h2 className="text-sm font-semibold text-zinc-100">Viewport example strip</h2>',
+              '390 / 768 / 1440px の証拠を同じ基準で比較します。': '390 / 768 / 1440px向けに用意した静的なレイアウト例を切り替えます。',
+              '<h2 className="text-sm font-semibold text-zinc-100">Evidence timeline</h2>': '<h2 className="text-sm font-semibold text-zinc-100">Design rationale timeline</h2>',
+              'selectorが採用した理由をnode単位で残します。': 'このfixtureを作成した際の設計意図をnode単位で示します。',
+              '  const [runCount, setRunCount] = useState(1);\n': '',
+              '  const rerun = () => {\n    setRunCount((value) => value + 1);\n  };': '  const resetDemo = () => {\n    setRequest(scenario.request);\n    setSelectedLeafId(scenario.leaves[1]?.id ?? scenario.leaves[0].id);\n    setViewport(1440);\n  };',
+              '<h1 className="truncate text-base font-semibold text-zinc-50">Rumi UI Precision Comparator</h1>': '<h1 className="truncate text-base font-semibold text-zinc-50">Rumi UI Design Scenario Demo</h1>',
+              '<p className="truncate text-xs text-zinc-500">MiMo V2.5 Pro vs recursive split UI compiler / {scenario.label}</p>': '<p className="truncate text-xs text-zinc-500">Static illustrative fixtures / {scenario.label}</p>',
+              '              MiMo V2.5 Pro': '              Static fixtures',
+              'onClick={rerun}': 'onClick={resetDemo}',
+              'Run comparison #{runCount}': 'Reset demo view',
+              '<h2 className="text-sm font-semibold text-zinc-100">{scenario.label} generation contract</h2>': '<h2 className="text-sm font-semibold text-zinc-100">{scenario.label} static design contract</h2>',
+              '{ icon: SlidersHorizontal, label: "gates", value: `${gateSummary(scenario.gates).rawFailed}->0 fail` },': '{ icon: SlidersHorizontal, label: "flags", value: `${gateSummary(scenario.gates).rawFailed} → ${gateSummary(scenario.gates).rumiFailed}` },',
+              '{ icon: Mail, label: "proof", value: `${viewport}px` },': '{ icon: Mail, label: "example", value: `${viewport}px` },',
+          }
+
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing expected source fragment: {old[:120]}')
+              text = text.replace(old, new)
+
+          main_marker = '      <main className="mx-auto grid max-w-[1680px] gap-4 px-4 py-4 xl:grid-cols-[315px_minmax(0,1fr)_360px]">\n'
+          disclosure = '''      <main className="mx-auto grid max-w-[1680px] gap-4 px-4 py-4 xl:grid-cols-[315px_minmax(0,1fr)_360px]">\n        <section role="note" className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 xl:col-span-3">\n          <h2 className="text-sm font-semibold text-amber-100">Static demonstration data</h2>\n          <p className="mt-1 text-xs leading-5 text-amber-50/80">\n            These previews, scores, candidates, flags, and timelines are hand-authored examples. This page does not invoke MiMo, Rumi, or any other model, and editing the brief does not recompute the fixtures.\n          </p>\n        </section>\n'''
+          if main_marker not in text:
+              raise SystemExit('main marker missing')
+          text = text.replace(main_marker, disclosure, 1)
+          page.write_text(text, encoding='utf-8')
+
+          test_path = Path('rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.test.tsx')
+          tests = test_path.read_text(encoding='utf-8')
+          marker = 'test("UI precision demo discloses static fixtures instead of claiming a live benchmark"'
+          if marker not in tests:
+              tests += '''\n\ntest("UI precision demo discloses static fixtures instead of claiming a live benchmark", () => {\n  const html = renderToStaticMarkup(createElement(UiPrecisionComparator));\n\n  assert.match(html, /Static demonstration data/);\n  assert.match(html, /does not invoke MiMo, Rumi, or any other model/);\n  assert.match(html, /Reset demo view/);\n  assert.doesNotMatch(html, /Run comparison/);\n  assert.doesNotMatch(html, /Fairness lock/);\n  assert.doesNotMatch(html, /MiMo V2\\.5 Pro vs recursive split UI compiler/);\n});\n'''
+              test_path.write_text(tests, encoding='utf-8')
+          PY
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm ci
+      - name: Validate focused tests and typecheck
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: |
+          npx tsx --test src/pages/UiPrecisionComparator.test.tsx
+          npm run lint
+          npm run build
+      - name: Commit generated implementation
+        run: |
+          rm .github/workflows/issue-1043-autofix.yml
+          git config user.name "rumiai-ui-bot"
+          git config user.email "rumiai-ui-bot@users.noreply.github.com"
+          git add .github/workflows/issue-1043-autofix.yml \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/src/pages/UiPrecisionComparator.test.tsx \
+            rumi_ai_1_10/ecosystem/defaultspack/ui
+          git commit -m "[auto-patched] Make UI precision demo truthful"
+          git push origin HEAD:fix/1043-truthful-ui-precision-demo
