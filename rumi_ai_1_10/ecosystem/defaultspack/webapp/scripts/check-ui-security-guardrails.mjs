@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 
 const WEBAPP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const approvalPath = path.join(WEBAPP_ROOT, "src/lib/authorityApprovalBrowserToken.ts");
+const localAuthPath = path.join(WEBAPP_ROOT, "src/lib/defaultspackLocalAuth.ts");
 const attachmentPath = path.join(WEBAPP_ROOT, "src/lib/attachments.ts");
 
 const approvalSource = readFileSync(approvalPath, "utf8");
+const localAuthSource = readFileSync(localAuthPath, "utf8");
 const attachmentSource = readFileSync(attachmentPath, "utf8");
 const failures = [];
 
@@ -46,6 +48,48 @@ const requiredApprovalPatterns = [
 
 for (const check of requiredApprovalPatterns) {
   if (!check.pattern.test(approvalSource)) failures.push(check.message);
+}
+
+const forbiddenLocalAuthPatterns = [
+  {
+    pattern: /return\s+url\.toString\(\)/,
+    message: "local-auth tokenized destinations must not return an arbitrary absolute URL",
+  },
+  {
+    pattern: /const separator = pathOrUrl\.includes\(["']#["']\)/,
+    message: "local-auth parse failures must not concatenate credentials to unvalidated strings",
+  },
+  {
+    pattern: /rumi_local_auth=\$\{encodeURIComponent\(localToken\)\}/,
+    message: "local-auth credentials must not be appended by string interpolation",
+  },
+];
+
+for (const check of forbiddenLocalAuthPatterns) {
+  if (check.pattern.test(localAuthSource)) failures.push(check.message);
+}
+
+const requiredLocalAuthPatterns = [
+  {
+    pattern: /const url = sameOriginHttpUrl\(pathOrUrl\);\s*if \(!url\) return pathOrUrl;/,
+    message: "defaultspackUrlWithLocalAuthToken must validate the destination before adding a credential",
+  },
+  {
+    pattern: /normalized\.startsWith\("\/\/"\)/,
+    message: "local-auth destination policy must reject protocol-relative URLs",
+  },
+  {
+    pattern: /url\.protocol !== "http:" && url\.protocol !== "https:"/,
+    message: "local-auth destination policy must allow only HTTP(S)",
+  },
+  {
+    pattern: /if \(url\.username \|\| url\.password\) return null;/,
+    message: "local-auth destination policy must reject embedded URL credentials",
+  },
+];
+
+for (const check of requiredLocalAuthPatterns) {
+  if (!check.pattern.test(localAuthSource)) failures.push(check.message);
 }
 
 if (attachmentSource.includes("\\`\\`\\`\\n${file.content}")) {
