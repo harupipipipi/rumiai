@@ -10,6 +10,7 @@ import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStat
 import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
 import type { ActionApprovalMode } from "../features/tools/ActionApprovalControl";
 import type { PendingToolReview, ToolSelectionChip } from "../features/tools/types";
+import type { ComposerMentionMetadata } from "../lib/composerWidgets";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -37,6 +38,7 @@ export type ChatUiMessage = {
       reason?: string;
       [key: string]: unknown;
     };
+    mentions?: ComposerMentionMetadata[];
     promptUsage?: PromptUsageSummary;
   };
   events?: ChatActivityEvent[];

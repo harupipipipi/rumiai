@@ -32,8 +32,8 @@ function smokeConversation() {
       {
         id: "m-user",
         role: "user",
-        content: [{ type: "text", text: "Show the current tool state." }],
-        raw_text: "Show the current tool state.",
+        content: [{ type: "text", text: "Show the current @Web Search state." }],
+        raw_text: "Show the current @Web Search state.",
         created_at: now - 20_000,
         conversation_id: "c-smoke",
         parent_id: null,
@@ -42,6 +42,14 @@ function smokeConversation() {
         finish_reason: null,
         usage: null,
         widget: null,
+        metadata: {
+          mentions: [{
+            id: "web_search",
+            kind: "tool",
+            label: "Web Search",
+            syntax: "@Web Search",
+          }],
+        },
       },
       {
         id: "m-assistant",
@@ -665,6 +673,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
+    if (path === "/api/coding/files/read" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      return fulfill(route, {
+        path: String(payload.path ?? "README.md"),
+        content: "# Fixture\n",
+        size: 10,
+        encoding: "utf-8",
+        workspace_id: "ws-main",
+        workspace_root: "/repo",
+      });
+    }
+
     if (path === "/api/coding/git/branch") {
       return fulfill(route, { branch: "main", branches: ["main", "codex/pr97"], workspace_id: "ws-main" });
     }
@@ -851,7 +871,7 @@ test("tool hub service selections can be scoped to the conversation and survive 
   await expect(reloadedGithubCard).toContainText("会話固定");
 });
 
-test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {
+test("composer at mention selects tools skills and services with semantic metadata", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
@@ -862,36 +882,53 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Web Search");
-  await expect(mentions).toContainText("web_search");
+  await expect(mentions).not.toContainText("web_search");
 
   await composer.press("Enter");
-  await expect(composer).toHaveValue("Use @web_search ");
+  await expect(composer).toHaveValue("Use @Web Search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
   await composer.pressSequentially("@live");
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Live Review");
-  await expect(mentions).toContainText("feedback/live-review");
-  await page.getByRole("option", { name: /feedback\/live-review|@live review/i }).click();
-  await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
+  await expect(mentions).not.toContainText("feedback/live-review");
+  await page.getByRole("option", { name: /@live review/i }).click();
+  await expect(composer).toHaveValue("Use @Web Search @Live Review ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
+
+  await composer.press("End");
+  await composer.pressSequentially("@gith");
+  await expect(mentions).toBeVisible();
+  const githubService = page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" });
+  await expect(githubService).toBeVisible();
+  await githubService.click();
+  await expect(composer).toHaveValue("Use @Web Search @Live Review @GitHub ");
 
   await page.locator(".rumi-send-button").click();
   await expect.poll(() => streamRequests.length).toBe(1);
 
   const request = streamRequests[0];
-  expect(request.tools).toEqual(["web_search"]);
+  expect(request.tools).toEqual(["web_search", "github_issue_search"]);
   const params = request.params as Record<string, unknown>;
   const toolSelection = params.tool_selection as Record<string, unknown>;
   expect(toolSelection.mode).toBe("manual");
   expect(toolSelection.scope).toBe("turn");
-  expect(toolSelection.include).toEqual([{ kind: "tool", id: "web_search" }]);
+  expect(toolSelection.include).toEqual([
+    { kind: "tool", id: "web_search" },
+    { kind: "tool", id: "github_issue_search" },
+  ]);
 
   const message = request.message as Record<string, unknown>;
+  expect(message.content).toBe("Use @Web Search @Live Review @GitHub");
   const metadata = message.metadata as Record<string, unknown>;
-  expect(metadata.selected_tools).toEqual(["web_search"]);
+  expect(metadata.selected_tools).toEqual(["web_search", "github_issue_search"]);
   expect(metadata.skills).toEqual(["feedback/live-review"]);
   expect(metadata.skill_mentions).toEqual([{ id: "feedback/live-review", label: "Live Review" }]);
+  expect(metadata.mentions).toEqual([
+    { id: "web_search", kind: "tool", label: "Web Search", syntax: "@Web Search" },
+    { id: "feedback/live-review", kind: "skill", label: "Live Review", syntax: "@Live Review" },
+    { id: "github", kind: "service", label: "GitHub", syntax: "@GitHub" },
+  ]);
   expect(metadata.dropped_widgets).toEqual([
     expect.objectContaining({
       id: "web_search",
@@ -901,7 +938,13 @@ test("composer at mention selects tools and skills and sends mention metadata", 
       sourceItemId: "web_search",
       metadata: expect.objectContaining({
         source: "composer_at_mention",
-        mention: { syntax: "@web_search", tool_id: "web_search" },
+        mention: {
+          id: "web_search",
+          kind: "tool",
+          label: "Web Search",
+          syntax: "@Web Search",
+          tool_id: "web_search",
+        },
         tool: expect.objectContaining({
           id: "web_search",
           label: "Web Search",
@@ -917,7 +960,13 @@ test("composer at mention selects tools and skills and sends mention metadata", 
       sourceItemId: "feedback/live-review",
       metadata: expect.objectContaining({
         source: "composer_at_mention",
-        mention: { syntax: "@feedback/live-review", skill_id: "feedback/live-review" },
+        mention: {
+          id: "feedback/live-review",
+          kind: "skill",
+          label: "Live Review",
+          syntax: "@Live Review",
+          skill_id: "feedback/live-review",
+        },
         skill: expect.objectContaining({
           id: "feedback/live-review",
           label: "Live Review",
@@ -925,7 +974,152 @@ test("composer at mention selects tools and skills and sends mention metadata", 
         }),
       }),
     }),
+    expect.objectContaining({
+      id: "mention-service:github",
+      type: "service",
+      label: "GitHub",
+      widgetKind: "service_reference",
+      sourceItemId: "github",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: {
+          id: "github",
+          kind: "service",
+          label: "GitHub",
+          syntax: "@GitHub",
+        },
+        service: {
+          id: "github",
+          label: "GitHub",
+          tool_ids: ["github_issue_search"],
+        },
+      }),
+    }),
   ]);
+});
+
+test("composer mention keyboard and ARIA contracts stay predictable at Unicode and empty boundaries", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const mentions = page.getByTestId("composer-at-mention-candidates");
+
+  await composer.fill("@");
+  await expect(mentions).toBeVisible();
+  await expect(mentions.getByRole("option").first()).toBeVisible();
+
+  await composer.fill("調べて@web");
+  await expect(mentions).toBeVisible();
+  await expect(composer).toHaveAttribute("aria-expanded", "true");
+  await expect(composer).toHaveAttribute("aria-controls", "composer-at-mention-listbox");
+  await expect(composer).toHaveAttribute("aria-activedescendant", "composer-at-mention-option-0");
+  await expect(page.getByRole("option", { name: /@web search/i })).toHaveAttribute("aria-selected", "true");
+
+  await composer.fill("調べて @web_search。");
+  await expect(mentions).toBeHidden();
+  await expect(composer).toHaveAttribute("aria-expanded", "false");
+
+  await composer.fill("mail@example.com https://example.com/@name \\@web_search @@web_search");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByTestId("composer-at-mention-empty")).toBeVisible();
+  await expect(composer).not.toHaveAttribute("aria-activedescendant");
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
+
+  await composer.focus();
+  await composer.press("Escape");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await composer.press("Shift+Enter");
+  await expect(composer).toHaveValue("@this_candidate_does_not_exist\n");
+  expect(streamRequests).toHaveLength(0);
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await composer.press("Enter");
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const sentMessage = streamRequests[0].message as Record<string, unknown>;
+  expect(sentMessage.content).toBe("@this_candidate_does_not_exist");
+});
+
+test("coding file mentions keep stable semantic metadata through submit", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+  await composer.fill("Review @REA");
+  const readmeOption = page.getByRole("option").filter({ hasText: "@README.md" });
+  await expect(readmeOption).toBeVisible();
+  await readmeOption.click();
+  await expect(composer).toHaveValue("Review @README.md ");
+  await expect(page.locator(".rumi-composer-frame")).toContainText("README.md");
+
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const sentMessage = streamRequests[0].message as Record<string, unknown>;
+  const metadata = sentMessage.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "README.md", kind: "file", label: "README.md", syntax: "@README.md" },
+  ]);
+  expect(metadata.dropped_widgets).toEqual([
+    expect.objectContaining({
+      id: "mention-file:README.md",
+      type: "file",
+      label: "README.md",
+      sourceItemId: "README.md",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: {
+          file_path: "README.md",
+          id: "README.md",
+          kind: "file",
+          label: "README.md",
+          syntax: "@README.md",
+        },
+      }),
+    }),
+  ]);
+});
+
+test("composer controls are keyboard reachable, visibly named, and at least 44px", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.focus();
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
+
+  for (const control of [
+    page.getByRole("button", { name: "ファイルを添付" }),
+    page.getByRole("button", { name: "音声入力を開始" }),
+    page.getByRole("button", { name: "アクションの承認方法" }),
+    page.getByRole("button", { name: /^モデル:/ }),
+    page.getByRole("button", { name: "メッセージを送信" }),
+  ]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("history reload restores localized semantic mention badges", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
 });
 
 test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
@@ -953,8 +1147,11 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await homeComposer.fill("/coding");
   await expect(page.getByText("Commands")).toBeVisible();
 
-  await openDefaultspack(page, "/coding");
+  await openDefaultspack(page, "/chat");
   const codingComposer = page.locator("textarea.rumi-composer-textarea");
+  await codingComposer.fill("/coding");
+  await codingComposer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
   await codingComposer.fill("@REA");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
@@ -969,7 +1166,6 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await expect(mentions).toBeHidden();
 
   await page.setViewportSize({ width: 390, height: 820 });
-  await openDefaultspack(page, "/coding");
   const workspacePicker = page.locator(".rumi-workspace-picker");
   await expect(workspacePicker).toBeVisible();
   await expect(workspacePicker.locator("svg.text-emerald-300").first()).toBeVisible();

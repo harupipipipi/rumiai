@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
+from ..mention import extract_mention_values
 from .models import DEFAULT_CHANNEL_ID
 from .store import CompanyStore
 
 
-MENTION_RE = re.compile(r"(?<![\w.])@([A-Za-z0-9_][A-Za-z0-9_-]*)")
 MENTION_ALIASES = {
     "pm": "project_manager",
     "project_manager": "project_manager",
@@ -22,8 +21,8 @@ MENTION_ALIASES = {
 def extract_mentions(text: str) -> list[str]:
     mentions: list[str] = []
     seen: set[str] = set()
-    for match in MENTION_RE.finditer(text or ""):
-        name = match.group(1).strip().lower()
+    for value in extract_mention_values(text):
+        name = value.strip().lower()
         if name and name not in seen:
             seen.add(name)
             mentions.append(name)

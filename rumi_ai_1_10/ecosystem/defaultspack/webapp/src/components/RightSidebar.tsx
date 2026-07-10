@@ -757,7 +757,7 @@ function CategorySwitcher({
   active,
   counts,
   onChange,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
 }: {
   active: "all" | SidebarCategory;
   counts: Record<string, number>;
@@ -840,7 +840,7 @@ function SidebarSearchControl({
   resultCount,
   totalCount,
   onQueryChange,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
 }: {
   query: string;
   resultCount: number;
@@ -942,7 +942,7 @@ export function RightSidebar({
   selectedToolIds = [],
   companyPanel,
   codingPanel,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
   selectedProfile = null,
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,

@@ -58,7 +58,8 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerMentionMetadataFromWidgets, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, normalizeComposerMentionMetadata, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
+import { toolGroupFor } from "./lib/toolUi";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
@@ -1456,7 +1457,14 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
     ...(authorityFollowup ? { authorityFollowup } : {}),
     ...(chatDisplay ? { chatDisplay } : {}),
   };
-  const userMetadata = Object.keys(displayMetadata).length > 0 ? displayMetadata : undefined;
+  const explicitMentions = normalizeComposerMentionMetadata(metadata.mentions);
+  const fallbackMentions = explicitMentions.length === 0 && Array.isArray(metadata.dropped_widgets)
+    ? composerMentionMetadataFromWidgets(metadata.dropped_widgets as DroppedWidget[])
+    : [];
+  const mentions = explicitMentions.length > 0 ? explicitMentions : fallbackMentions;
+  const userMetadata = Object.keys(displayMetadata).length > 0 || mentions.length > 0
+    ? { ...displayMetadata, ...(mentions.length > 0 ? { mentions } : {}) }
+    : undefined;
   return {
     id: message.id,
     conversationId: message.conversation_id,
@@ -1486,7 +1494,11 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   };
 }
 
-function optimisticUserMessage(conversationId: string, text: string): ChatMessage {
+function optimisticUserMessage(
+  conversationId: string,
+  text: string,
+  metadata?: Record<string, unknown>,
+): ChatMessage {
   return {
     id: `optimistic-${Date.now()}`,
     role: "user",
@@ -1500,6 +1512,7 @@ function optimisticUserMessage(conversationId: string, text: string): ChatMessag
     finish_reason: null,
     usage: null,
     widget: null,
+    metadata,
   };
 }
 
@@ -2514,7 +2527,7 @@ function ChatApp() {
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
-  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
+  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, true);
   const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
@@ -4343,6 +4356,16 @@ function ChatApp() {
         setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
+    if (widget.type === "service" && widget.metadata?.source === "composer_at_mention") {
+      const serviceId = widget.sourceItemId || widget.id.replace(/^mention-service:/, "");
+      const serviceToolIds = composerExtensions
+        .filter((item) => !item.disabled && toolGroupFor(item).id === serviceId)
+        .map((item) => item.id);
+      if (serviceToolIds.length > 0) {
+        toolSelectionController.setTurnMode("manual");
+        setStoredSelectedToolIds((current) => [...new Set([...current, ...serviceToolIds])]);
+      }
+    }
   };
 
   const handleWidgetToggle = (widgetId: string) => {
@@ -4987,6 +5010,7 @@ function ChatApp() {
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
     const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedMentions = composerMentionMetadataFromWidgets(submittedDroppedWidgets);
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -5059,7 +5083,14 @@ function ChatApp() {
         ...conversation,
         title,
         updated_at: Date.now(),
-        messages: [...conversation.messages, optimisticUserMessage(conversation.id, userText)],
+        messages: [
+          ...conversation.messages,
+          optimisticUserMessage(
+            conversation.id,
+            userText,
+            submittedMentions.length > 0 ? { mentions: submittedMentions } : undefined,
+          ),
+        ],
       };
       setActiveConversation(optimisticConversation);
       setConversations((current) => {
@@ -5379,6 +5410,7 @@ function ChatApp() {
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
+          ...(submittedMentions.length ? { mentions: submittedMentions } : {}),
           dropped_widgets: submittedDroppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
