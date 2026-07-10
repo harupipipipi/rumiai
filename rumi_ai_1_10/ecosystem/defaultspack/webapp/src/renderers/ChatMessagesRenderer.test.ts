@@ -250,6 +250,63 @@ test("interrupted assistant keeps partial content and shows an incomplete-state 
   assert.match(html, /role="status"/);
 });
 
+test("retried tool attempts render discard history beside the clean running attempt", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: true,
+    messages: [message({
+      id: "assistant-retry",
+      metadata: { thinkingLabel: "streaming" },
+      events: [
+        {
+          type: "tool_call_started",
+          seq: 1,
+          timestamp: 1_000,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 1,
+          provider_attempt_generation: 1,
+        },
+        {
+          type: "tool_call_completed",
+          seq: 2,
+          timestamp: 1_500,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 1,
+          provider_attempt_generation: 1,
+          provider_attempt_discarded: true,
+          is_error: true,
+          display_text: "provider 応答の中断により未実行の tool 入力を破棄しました",
+        },
+        {
+          type: "tool_call_started",
+          seq: 4,
+          timestamp: 2_000,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 2,
+          provider_attempt_generation: 2,
+          arguments: { path: "README.md" },
+        },
+      ],
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /未実行の tool 入力を破棄しました/);
+  assert.match(html, /README\.md/);
+  assert.match(html, /1件失敗/);
+  assert.match(html, /作業中/);
+});
+
 test("authority approval followup is hidden while waiting response remains passive", () => {
   assert.equal(AUTHORITY_FOLLOWUP_TEXT, "Internal authority resume.");
   assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);

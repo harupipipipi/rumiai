@@ -125,6 +125,10 @@ _DISPLAY_TOOL_ALIASES = {
     "desktop_create": "desktop_create",
 }
 _SCHEDULED_MIMO_EMPTY_ARG_REPLAY_DUPLICATE_TOOLS = {"desktop_list"}
+_PROVIDER_ATTEMPT_CONTEXT_KEYS = (
+    "provider_attempt",
+    "provider_attempt_generation",
+)
 
 
 def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
@@ -529,6 +533,20 @@ def _tool_use_argument_dict(block: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(parsed, dict):
             return dict(parsed)
     return None
+
+
+def _provider_attempt_context(value: dict[str, Any] | None) -> dict[str, int | str]:
+    if not isinstance(value, dict):
+        return {}
+    context: dict[str, int | str] = {}
+    for key in _PROVIDER_ATTEMPT_CONTEXT_KEYS:
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, (int, str)):
+            continue
+        if isinstance(item, str) and not item.strip():
+            continue
+        context[key] = item
+    return context
 
 
 def _tool_arguments_without_approval_token(arguments: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1511,6 +1529,7 @@ class ChatRunEngine:
         self._thinking_transcript_parts: list[str] = []
         self._text_parts: list[str] = []
         self._started_tool_call_ids: set[str] = set()
+        self._provider_stream_generation = 0
         self._browser_state_revision = 0
         self._stream_mode = True
         self._progress_updates = 0
@@ -1539,6 +1558,7 @@ class ChatRunEngine:
         self._thinking_transcript_parts = []
         self._text_parts = []
         self._started_tool_call_ids = set()
+        self._provider_stream_generation = 0
         self._browser_state_revision = 0
         self._stream_mode = bool(stream_mode)
         self._progress_updates = 0
@@ -1711,23 +1731,24 @@ class ChatRunEngine:
                         )
                 return
             except RuntimeError as exc:
+                safe_error = _clip_error_text(exc, 1200)
                 task_failed_event = self._emit(
                     "task_failed",
-                    data={"error": str(exc), "terminal": True},
+                    data={"error": safe_error, "terminal": True},
                     message="APIエラーでタスクを終了しました",
                     phase="task_failed",
-                    error=str(exc),
+                    error=safe_error,
                     terminal=True,
                 )
                 yield task_failed_event
                 response = _ai_error_response(
                     prepared.model,
-                    str(exc),
+                    safe_error,
                     prepared.params,
                     events=list(self._activity_events),
                 )
             except Exception as exc:
-                message_text = "AI request failed: " + str(exc)
+                message_text = _clip_error_text("AI request failed: " + str(exc), 1200)
                 task_failed_event = self._emit(
                     "task_failed",
                     data={"error": message_text, "terminal": True},
@@ -1930,17 +1951,25 @@ class ChatRunEngine:
         tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
         arguments = self._tool_arguments(block)
         tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+        attempt_context = _provider_attempt_context(block)
         if tool_call_id not in self._started_tool_call_ids:
             self._started_tool_call_ids.add(tool_call_id)
             display_payload = _tool_display_payload(tool_name, arguments, status="running")
             event = self._emit(
                 "tool_call_started",
-                data={"tool_name": tool_name, "tool_call_id": tool_call_id, "arguments": arguments, **display_payload},
+                data={
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "arguments": arguments,
+                    **attempt_context,
+                    **display_payload,
+                },
                 message=display_payload["display_text"],
                 phase="tool_call_started",
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
+                **attempt_context,
             )
             self._sync_draft(draft, force=True)
             yield event
@@ -1952,6 +1981,11 @@ class ChatRunEngine:
             prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
         try:
             result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+            if attempt_context:
+                for tool_log in reversed(self._tool_logs):
+                    if str(tool_log.get("tool_call_id") or "") == tool_call_id:
+                        tool_log.update(attempt_context)
+                        break
         finally:
             if approval_context:
                 prepared.tool_context = original_tool_context
@@ -1971,6 +2005,7 @@ class ChatRunEngine:
                 "recovery_kind": _tool_result_recovery_kind(result),
                 "result_summary": summary,
                 "summary": summary,
+                **attempt_context,
                 **display_payload,
                 "result": _bounded_compact_tool_result(result, summary, artifacts),
                 "artifacts": artifacts,
@@ -1981,6 +2016,7 @@ class ChatRunEngine:
             tool_name=tool_name,
             tool_call_id=tool_call_id,
             is_error=_tool_result_is_error(result),
+            **attempt_context,
         )
         self._sync_draft(draft, force=True)
         yield completed_event
@@ -1988,12 +2024,13 @@ class ChatRunEngine:
         if approval_request is not None:
             approval_event = self._emit(
                 "approval_requested",
-                data=approval_request,
+                data={**approval_request, **attempt_context},
                 message=_APPROVAL_WAITING_TEXT,
                 phase="approval_requested",
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
                 requires_approval=True,
+                **attempt_context,
             )
             self._sync_draft(draft, force=True)
             yield approval_event
@@ -2014,11 +2051,17 @@ class ChatRunEngine:
             blocked_response = _tool_blocked_response(tool_name, result)
             yield self._emit(
                 "status",
-                data={"tool_name": tool_name, "tool_call_id": tool_call_id, "recovery_kind": recovery_kind},
+                data={
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "recovery_kind": recovery_kind,
+                    **attempt_context,
+                },
                 message="可視画面外の tool 実行要求のため停止しました",
                 phase="tool_blocked",
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
+                **attempt_context,
             )
             return blocked_response
         return None
@@ -2563,7 +2606,13 @@ class ChatRunEngine:
         attempts = _ai_retry_attempts(prepared.params)
         completed_thought_filter: _InlineThoughtFilter | None = None
         completed_accumulator: ToolCallAccumulator | None = None
+        completed_attempt_context: dict[str, int | str] = {}
         for attempt_index in range(attempts):
+            self._provider_stream_generation += 1
+            attempt_context: dict[str, int | str] = {
+                "provider_attempt": attempt_index + 1,
+                "provider_attempt_generation": self._provider_stream_generation,
+            }
             thought_filter = _InlineThoughtFilter()
             accumulator = ToolCallAccumulator()
             attempt_text_start = len(self._text_parts)
@@ -2617,11 +2666,17 @@ class ChatRunEngine:
                             display_payload = _tool_display_payload(tool_name or "tool", {}, status="running")
                             event = self._emit(
                                 "tool_call_started",
-                                data={"tool_name": tool_name, "tool_call_id": call_id, **display_payload},
+                                data={
+                                    "tool_name": tool_name,
+                                    "tool_call_id": call_id,
+                                    **attempt_context,
+                                    **display_payload,
+                                },
                                 message=display_payload["display_text"],
                                 phase="tool_call_started",
                                 tool_name=tool_name,
                                 tool_call_id=call_id,
+                                **attempt_context,
                             )
                             self._sync_draft(draft, thinking_state="streaming", force=True)
                             yield event
@@ -2635,11 +2690,13 @@ class ChatRunEngine:
                                     "arguments_chunk": arguments_chunk,
                                     "status": "running",
                                     "display_text": "{} の入力を受け取っています".format(tool_name or "tool"),
+                                    **attempt_context,
                                 },
                                 message="{} の入力を受け取っています".format(tool_name or "tool"),
                                 phase="tool_call_delta",
                                 tool_name=tool_name,
                                 tool_call_id=call_id,
+                                **attempt_context,
                             )
                             self._sync_draft(draft, thinking_state="streaming", force=True)
                             yield event
@@ -2648,6 +2705,7 @@ class ChatRunEngine:
                         usage = chunk.get("usage", usage) if isinstance(chunk.get("usage"), dict) else usage
                 completed_thought_filter = thought_filter
                 completed_accumulator = accumulator
+                completed_attempt_context = dict(attempt_context)
                 break
             except AuthorityApprovalRequired:
                 raise
@@ -2664,6 +2722,7 @@ class ChatRunEngine:
                 for event in self._discard_stream_attempt_tool_calls(
                     attempt_started_calls,
                     draft,
+                    attempt_context,
                 ):
                     yield event
                 if can_retry:
@@ -2677,9 +2736,11 @@ class ChatRunEngine:
                             "max_attempts": attempts,
                             "delay_seconds": delay,
                             "error": safe_message_text,
+                            **attempt_context,
                         },
                         message="APIエラーのため少し待って再送信します",
                         phase="ai_retry_scheduled",
+                        **attempt_context,
                     )
                     self._sync_draft(draft, thinking_state="running", force=True)
                     self._wait_for_retry_delay(delay)
@@ -2692,12 +2753,14 @@ class ChatRunEngine:
                             "error": safe_error,
                             "terminal": True,
                             "partial_response_preserved": True,
+                            **attempt_context,
                         },
                         message="応答が途中で中断しました",
                         phase="task_failed",
                         error=safe_error,
                         terminal=True,
                         partial_response_preserved=True,
+                        **attempt_context,
                     )
                     yield task_failed_event
                     return (
@@ -2719,6 +2782,9 @@ class ChatRunEngine:
                                     "retryable": _is_retryable_ai_error(message_text),
                                     "attempt": attempt_index + 1,
                                     "max_attempts": attempts,
+                                    "generation": attempt_context[
+                                        "provider_attempt_generation"
+                                    ],
                                 },
                             },
                         },
@@ -2778,12 +2844,16 @@ class ChatRunEngine:
             }
         if not tool_uses:
             tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
+        if completed_attempt_context:
+            for tool_use in tool_uses:
+                tool_use.update(completed_attempt_context)
         return response, tool_uses
 
     def _discard_stream_attempt_tool_calls(
         self,
         started_calls: dict[str, str],
         draft: _AssistantDraft | None,
+        attempt_context: dict[str, int | str],
     ) -> Iterator[dict[str, Any]]:
         for call_id, tool_name in started_calls.items():
             summary = "provider 応答の中断により未実行の tool 入力を破棄しました"
@@ -2803,6 +2873,7 @@ class ChatRunEngine:
                     "provider_attempt_discarded": True,
                     "result_summary": summary,
                     "summary": summary,
+                    **attempt_context,
                     **display_payload,
                 },
                 message=display_payload["display_text"],
@@ -2812,6 +2883,7 @@ class ChatRunEngine:
                 is_error=True,
                 executed=False,
                 provider_attempt_discarded=True,
+                **attempt_context,
             )
             self._started_tool_call_ids.discard(call_id)
             self._sync_draft(draft, force=True)
@@ -3982,13 +4054,13 @@ class ChatRunEngine:
                         "attempt": attempt_index + 1,
                         "max_attempts": attempts,
                         "delay_seconds": delay,
-                        "error": last_error,
+                        "error": _clip_error_text(last_error, 1200),
                         "timestamp": timestamp(),
                     }
                 )
                 if delay > 0:
                     time.sleep(delay)
-        raise RuntimeError(last_error)
+        raise RuntimeError(_clip_error_text(last_error, 1200))
 
     def _before_tool_call(
         self,

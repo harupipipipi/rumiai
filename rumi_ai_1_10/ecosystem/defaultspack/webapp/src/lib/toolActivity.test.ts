@@ -221,6 +221,123 @@ test("updates streamed tool activity when a completion event arrives before the 
   assert.equal(groups[0].items[0].durationLabel, "3s");
 });
 
+test("keeps discarded and retried provider attempts as independent activity rows", () => {
+  const events = [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      seq: 1,
+      timestamp: 1_000,
+      tool_call_id: "call_1",
+      tool_name: "coding_file_read",
+      provider_attempt: 1,
+      provider_attempt_generation: 1,
+      arguments: {},
+      status: "running",
+    },
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      seq: 2,
+      timestamp: 1_500,
+      tool_call_id: "call_1",
+      tool_name: "coding_file_read",
+      provider_attempt: 1,
+      provider_attempt_generation: 1,
+      provider_attempt_discarded: true,
+      is_error: true,
+      status: "failed",
+      display_text: "失敗した provider attempt の入力を破棄しました",
+    },
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      seq: 4,
+      timestamp: 2_000,
+      tool_call_id: "call_1",
+      tool_name: "coding_file_read",
+      provider_attempt: 2,
+      provider_attempt_generation: 2,
+      arguments: { path: "README.md" },
+      status: "running",
+    },
+  ];
+
+  const retrying = buildToolActivityItems([], events, { now: 2_500 });
+  assert.equal(retrying.length, 2);
+  assert.deepEqual(retrying.map((item) => item.status), ["failed", "running"]);
+  assert.notEqual(retrying[0].id, retrying[1].id);
+  assert.equal(retrying[0].providerAttemptGeneration, 1);
+  assert.equal(retrying[1].providerAttemptGeneration, 2);
+  assert.equal(retrying[1].completedAt, undefined);
+  assert.doesNotMatch(retrying[1].detail, /破棄/);
+
+  const completed = buildToolActivityItems(
+    [
+      {
+        tool_name: "coding_file_read",
+        tool_call_id: "call_1",
+        provider_attempt: 2,
+        provider_attempt_generation: 2,
+        arguments: { path: "README.md" },
+        result: { status: "ok", data: { path: "README.md", content: "ok" } },
+        timestamp: 3_000,
+      },
+    ],
+    [
+      ...events,
+      {
+        type: "tool_call_completed",
+        phase: "tool_call_completed",
+        seq: 5,
+        timestamp: 3_000,
+        tool_call_id: "call_1",
+        tool_name: "coding_file_read",
+        provider_attempt: 2,
+        provider_attempt_generation: 2,
+        arguments: { path: "README.md" },
+        is_error: false,
+        status: "completed",
+      },
+    ],
+  );
+
+  assert.equal(completed.length, 2);
+  assert.deepEqual(completed.map((item) => item.status), ["failed", "completed"]);
+  const completedRetry = completed[1];
+  assert.equal(completedRetry.kind, "tool");
+  if (completedRetry.kind !== "tool") assert.fail("expected a tool activity item");
+  assert.equal(completedRetry.startedAt, 2_000);
+  assert.equal(completedRetry.completedAt, 3_000);
+  assert.equal(completedRetry.input, "README.md");
+  assert.equal(completedRetry.detail, "読みました: README.md");
+  assert.doesNotMatch(completedRetry.detail, /破棄/);
+});
+
+test("keeps legacy tool activity merging by call id without attempt generation", () => {
+  const items = buildToolActivityItems([], [
+    {
+      type: "tool_call_started",
+      tool_call_id: "legacy_call",
+      tool_name: "coding_file_read",
+      arguments: { path: "README.md" },
+      timestamp: 1_000,
+    },
+    {
+      type: "tool_call_completed",
+      tool_call_id: "legacy_call",
+      tool_name: "coding_file_read",
+      arguments: { path: "README.md" },
+      timestamp: 2_000,
+      is_error: false,
+    },
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "completed");
+  assert.equal(items[0].toolCallId, "legacy_call");
+});
+
 test("shows live elapsed time for running streamed tool activity", () => {
   const groups = buildToolActivityGroups([], [
     {

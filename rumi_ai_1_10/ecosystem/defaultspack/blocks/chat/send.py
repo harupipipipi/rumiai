@@ -44,6 +44,28 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _SECRET_VALUE_RE = re.compile(r"\b(AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z_]{20,})\b")
+_JWT_VALUE_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*\b"
+)
+_AUTH_SCHEME_VALUE_RE = re.compile(
+    r"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}"
+)
+_SENSITIVE_ERROR_KEY_PATTERN = (
+    r"(?:api[_-]?key|x-api[_-]?key|authorization|proxy-authorization|bearer|"
+    r"credential|password|secret|access[_-]?token|refresh[_-]?token|token)"
+)
+_SENSITIVE_QUOTED_ASSIGNMENT_RE = re.compile(
+    rf"(?i)(?P<prefix>[\"']?\b{_SENSITIVE_ERROR_KEY_PATTERN}\b[\"']?\s*[:=]\s*)"
+    rf"(?P<quote>[\"'])(?P<value>.*?)(?P=quote)"
+)
+_AUTHORIZATION_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?P<prefix>\b(?:proxy-)?authorization\b[\"']?\s*[:=]\s*)"
+    r"(?:(?:bearer|basic|token)\s+)?[^\s,;}]+"
+)
+_SENSITIVE_UNQUOTED_ASSIGNMENT_RE = re.compile(
+    rf"(?i)(?P<prefix>[\"']?\b{_SENSITIVE_ERROR_KEY_PATTERN}\b[\"']?\s*[:=]\s*)"
+    r"(?![\"'])(?P<value>[^\s,;}]+)"
+)
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _TRANSIENT_AI_ERROR_RE = re.compile(
     r"\b(429|500|502|503|504)\b|temporary|temporarily|timeout|timed out|try again|rate limit|internal error",
@@ -191,20 +213,29 @@ def _call_ai_complete_with_retry(model, messages, tools, params, call_handler, e
                     attempt=attempt_index + 1,
                     max_attempts=attempts,
                     delay_seconds=delay,
-                    error=last_error,
+                    error=_clip_error_text(last_error, 1200),
                 ),
             )
             if delay > 0:
                 time.sleep(delay)
-    raise RuntimeError(last_error)
+    raise RuntimeError(_clip_error_text(last_error, 1200))
 
 
 def _redact_error_text(value):
     text = str(value or "AI request failed")
     text = _SECRET_VALUE_RE.sub("[redacted]", text)
-    text = re.sub(
-        r"(?i)\b(api[_-]?key|authorization|bearer|credential|password|secret|token)(\s*[:=]\s*)[^\s,}]+",
-        r"\1\2[redacted]",
+    text = _JWT_VALUE_RE.sub("[redacted]", text)
+    text = _SENSITIVE_QUOTED_ASSIGNMENT_RE.sub(
+        r"\g<prefix>\g<quote>[redacted]\g<quote>",
+        text,
+    )
+    text = _AUTHORIZATION_ASSIGNMENT_RE.sub(
+        r"\g<prefix>[redacted]",
+        text,
+    )
+    text = _AUTH_SCHEME_VALUE_RE.sub("[redacted]", text)
+    text = _SENSITIVE_UNQUOTED_ASSIGNMENT_RE.sub(
+        r"\g<prefix>[redacted]",
         text,
     )
     return text

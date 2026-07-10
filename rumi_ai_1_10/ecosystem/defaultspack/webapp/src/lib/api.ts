@@ -1142,6 +1142,8 @@ export type ChatActivityEvent = {
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
+  provider_attempt?: number | string;
+  provider_attempt_generation?: number | string;
   model?: string;
   [key: string]: unknown;
 };
@@ -1149,6 +1151,8 @@ export type ChatActivityEvent = {
 export type ToolLogEntry = {
   tool_name?: string;
   tool_call_id?: string;
+  provider_attempt?: number | string;
+  provider_attempt_generation?: number | string;
   arguments?: Record<string, unknown>;
   result?: unknown;
   timestamp?: number | string;
