@@ -43,19 +43,30 @@ const originalPack: Pack = {
   dependencies: [],
 };
 
-const refreshedDisabledPack = {
-  pack_id: originalPack.id,
-  name: originalPack.name,
-  version: originalPack.version,
-  description: originalPack.description,
-  is_core: true,
-  enabled: false,
-  approval_status: 'approved',
-  approved: true,
-  hash_valid: true,
-  critical_changed: false,
-  approval_issues: [],
+const secondPack: Pack = {
+  ...originalPack,
+  id: 'communitypack',
+  name: 'Community Pack',
+  type: 'community',
 };
+
+function apiPack(pack: Pack, enabled: boolean) {
+  return {
+    pack_id: pack.id,
+    name: pack.name,
+    version: pack.version,
+    description: pack.description,
+    is_core: pack.type === 'core',
+    enabled,
+    approval_status: 'approved',
+    approved: true,
+    hash_valid: true,
+    critical_changed: false,
+    approval_issues: [],
+  };
+}
+
+const refreshedDisabledPack = apiPack(originalPack, false);
 
 const storeTogglePack = useAppStore.getState().togglePack;
 let feedback: Array<Pick<Toast, 'message' | 'type'>> = [];
@@ -87,17 +98,17 @@ async function renderPacks(): Promise<void> {
   });
 }
 
-function packSwitch(): HTMLButtonElement {
+function packSwitch(name = originalPack.name): HTMLButtonElement {
   const element = container?.querySelector<HTMLButtonElement>(
-    'button[role="switch"][aria-label="Toggle Defaults Pack"]',
+    `button[role="switch"][aria-label="Toggle ${name}"]`,
   );
   assert.ok(element);
   return element;
 }
 
-function clickPackSwitch(): void {
+function clickPackSwitch(name = originalPack.name): void {
   assert.ok(dom);
-  packSwitch().dispatchEvent(new dom.window.MouseEvent('click', {
+  packSwitch(name).dispatchEvent(new dom.window.MouseEvent('click', {
     bubbles: true,
     cancelable: true,
   }));
@@ -288,4 +299,104 @@ test('Packs confirms a successful toggle exactly once after refresh completes', 
   assert.equal(packSwitch().getAttribute('aria-checked'), 'false');
   assert.equal(useAppStore.getState().packs[0]?.enabled, false);
   assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
+});
+
+test('Packs serializes different pack mutations through separate fresh refreshes', async () => {
+  const firstPost = deferred<Response>();
+  const firstRefresh = deferred<Response>();
+  const secondPost = deferred<Response>();
+  const secondRefresh = deferred<Response>();
+  const requests: string[] = [];
+  let refreshCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'POST' && path.endsWith(`/${originalPack.id}/disable`)) {
+        return firstPost.promise;
+      }
+      if (method === 'POST' && path.endsWith(`/${secondPack.id}/disable`)) {
+        return secondPost.promise;
+      }
+      if (method === 'GET' && path.endsWith('/api/panel/packs')) {
+        refreshCalls += 1;
+        return refreshCalls === 1 ? firstRefresh.promise : secondRefresh.promise;
+      }
+      return Promise.reject(new Error(`Unexpected request: ${method} ${path}`));
+    },
+    writable: true,
+  });
+  useAppStore.setState({packs: [{...originalPack}, {...secondPack}]});
+
+  await renderPacks();
+  await act(async () => {
+    clickPackSwitch(originalPack.name);
+    await settlePromises();
+  });
+  await act(async () => {
+    clickPackSwitch(secondPack.name);
+    await settlePromises();
+  });
+
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+  ]);
+  assert.equal(packSwitch(originalPack.name).disabled, true);
+  assert.equal(packSwitch(secondPack.name).disabled, true);
+
+  await act(async () => {
+    firstPost.resolve(successfulResponse({pack_id: originalPack.id, enabled: false}));
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+  ]);
+
+  await act(async () => {
+    firstRefresh.resolve(successfulResponse({
+      packs: [apiPack(originalPack, false), apiPack(secondPack, true)],
+      count: 2,
+    }));
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+    `POST /api/panel/packs/${secondPack.id}/disable`,
+  ]);
+  assert.equal(packSwitch(originalPack.name).disabled, false);
+  assert.equal(packSwitch(secondPack.name).disabled, true);
+  assert.deepEqual(useAppStore.getState().packs.map((pack) => pack.enabled), [false, true]);
+  assert.deepEqual(feedback, [{message: 'Defaults Pack disabled', type: 'success'}]);
+
+  await act(async () => {
+    secondPost.resolve(successfulResponse({pack_id: secondPack.id, enabled: false}));
+    await settlePromises();
+  });
+  assert.deepEqual(requests, [
+    `POST /api/panel/packs/${originalPack.id}/disable`,
+    'GET /api/panel/packs',
+    `POST /api/panel/packs/${secondPack.id}/disable`,
+    'GET /api/panel/packs',
+  ]);
+
+  await act(async () => {
+    secondRefresh.resolve(successfulResponse({
+      packs: [apiPack(originalPack, false), apiPack(secondPack, false)],
+      count: 2,
+    }));
+    await settlePromises();
+  });
+
+  assert.equal(packSwitch(originalPack.name).getAttribute('aria-checked'), 'false');
+  assert.equal(packSwitch(secondPack.name).getAttribute('aria-checked'), 'false');
+  assert.equal(packSwitch(secondPack.name).disabled, false);
+  assert.deepEqual(useAppStore.getState().packs.map((pack) => pack.enabled), [false, false]);
+  assert.deepEqual(feedback, [
+    {message: 'Defaults Pack disabled', type: 'success'},
+    {message: 'Community Pack disabled', type: 'success'},
+  ]);
 });

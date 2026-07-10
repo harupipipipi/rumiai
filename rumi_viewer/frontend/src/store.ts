@@ -269,6 +269,22 @@ function transformUpdateInfo(update: {
   };
 }
 
+// A pack write is not confirmed until its following list refresh completes.
+// Keep that whole transaction serial so a later write cannot share an older
+// in-flight GET through apiFetch's read deduplication.
+let packMutationQueue: Promise<void> = Promise.resolve();
+
+function enqueuePackMutation(
+  mutation: () => Promise<MutationResult>,
+): Promise<MutationResult> {
+  const result = packMutationQueue.then(mutation);
+  packMutationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   theme: normalizeTheme(readLocalStorage(THEME_STORAGE_KEY)),
   setTheme: (theme) => {
@@ -362,8 +378,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  togglePack: async (id) => {
-    const pack = get().packs.find((p) => p.id === id);
+  togglePack: (id) => enqueuePackMutation(async () => {
+    const pack = get().packs.find((candidate) => candidate.id === id);
     if (!pack) {
       const error = 'Pack not found';
       get().addToast(error, 'error');
@@ -383,7 +399,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().addToast(msg, 'error');
       return { ok: false, error: msg };
     }
-  },
+  }),
 
   // ============================================================
   // Flows
