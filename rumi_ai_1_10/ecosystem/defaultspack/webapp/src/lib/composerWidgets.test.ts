@@ -14,18 +14,30 @@ import {
   composerToolMentionWidget,
   filterComposerSkillMentions,
   isSafeLocalEndpoint,
+  reconcileComposerSemanticDraft,
   resolveComposerWidgetDrop,
   skillMentionIdsFromText,
   toolMentionIdsFromText,
   trustedComposerActionForWidget,
+  withComposerMentionSelectionOwnership,
 } from "./composerWidgets";
-import { activeMentionAtCursor, extractMentionTokens } from "./mentionContract";
+import {
+  activeMentionAtCursor,
+  codePointIndexToUtf16Offset,
+  extractMentionTokens,
+  utf16OffsetToCodePointIndex,
+} from "./mentionContract";
 import type { ComposerExtensionItem } from "../renderers/types";
 
 type BoundaryFixture = {
   active_query: string | null;
+  active_start_codepoint?: number;
+  active_start_utf16?: number;
+  cursor_codepoint?: number;
+  cursor_utf16?: number;
   name: string;
   text: string;
+  token_spans?: Array<[number, number]>;
   tokens: string[];
 };
 
@@ -42,11 +54,26 @@ test("frontend follows the shared Unicode mention boundary fixtures", () => {
       fixture.tokens,
       fixture.name,
     );
+    if (fixture.token_spans) {
+      assert.deepEqual(
+        extractMentionTokens(fixture.text).map(({ start, end }) => [start, end]),
+        fixture.token_spans,
+        fixture.name,
+      );
+    }
+    const cursor = fixture.cursor_utf16 ?? fixture.text.length;
+    const activeMention = activeMentionAtCursor(fixture.text, cursor);
     assert.equal(
-      activeMentionAtCursor(fixture.text, fixture.text.length)?.query ?? null,
+      activeMention?.query ?? null,
       fixture.active_query,
       fixture.name,
     );
+    if (fixture.cursor_codepoint !== undefined) {
+      assert.equal(utf16OffsetToCodePointIndex(fixture.text, cursor), fixture.cursor_codepoint);
+      assert.equal(codePointIndexToUtf16Offset(fixture.text, fixture.cursor_codepoint), cursor);
+      assert.equal(activeMention?.start, fixture.active_start_utf16);
+      assert.equal(activeMention?.startCodePoint, fixture.active_start_codepoint);
+    }
   }
 });
 
@@ -211,6 +238,79 @@ test("semantic mention metadata keeps stable ids separate from human labels", ()
       syntax: "@GitHub",
     },
   ]);
+});
+
+test("semantic mention reconciliation removes escaped and deselected tool state", () => {
+  const tool = { id: "web_search", label: "Web Search", category: "tool" };
+  const ownedWidget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget(tool),
+    [],
+  );
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [ownedWidget],
+    selectedToolIds: ["web_search"],
+    text: "Use \\@Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [ownedWidget],
+    selectedToolIds: [],
+    text: "Use @Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+});
+
+test("semantic mention reconciliation preserves a pre-existing manual tool choice", () => {
+  const widget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget({ id: "web_search", label: "Web Search", category: "tool" }),
+    ["web_search"],
+  );
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [widget],
+    selectedToolIds: ["web_search"],
+    text: "literal \\@Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: ["web_search"],
+  });
+});
+
+test("semantic mention reconciliation requires live file attachments and service tools", () => {
+  const fileWidget = composerFileMentionWidget("README.md");
+  const serviceWidget = withComposerMentionSelectionOwnership(composerServiceMentionWidget({
+    id: "github",
+    label: "GitHub",
+    toolIds: ["github_issue_search"],
+  }), []);
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    attachmentPaths: [],
+    droppedWidgets: [fileWidget],
+    requireFileAttachment: true,
+    selectedToolIds: [],
+    text: "Review @README.md",
+  }).droppedWidgets, []);
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    attachmentPaths: ["README.md"],
+    droppedWidgets: [fileWidget],
+    requireFileAttachment: true,
+    selectedToolIds: [],
+    text: "Review @README.md",
+  }).droppedWidgets, [fileWidget]);
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [serviceWidget],
+    selectedToolIds: [],
+    text: "Use @GitHub",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
 });
 
 test("duplicate human labels are not ambiguously reparsed", () => {

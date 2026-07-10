@@ -1,6 +1,6 @@
 import type { ComposerWidgetAction, ComposerWidgetKind } from "./api";
 import type { ComposerExtensionItem, ComposerSkillItem, DroppedWidget } from "../renderers/types";
-import { extractMentionTokens } from "./mentionContract";
+import { extractMentionTokens, hasUnescapedMentionSyntax } from "./mentionContract";
 import { supportedComposerDropKind, supportsComposerToggleDrop } from "./toolUi";
 
 export type ComposerDropAction =
@@ -13,6 +13,11 @@ export type ComposerMentionMetadata = {
   kind: "file" | "service" | "skill" | "tool";
   label: string;
   syntax: string;
+};
+
+export type ReconciledComposerSemanticDraft = {
+  droppedWidgets: DroppedWidget[];
+  selectedToolIds: string[];
 };
 
 const COMPOSER_ENDPOINT_ACTION_ALLOWLIST = new Set(["GET /api/coding/git/status"]);
@@ -312,6 +317,172 @@ export function composerMentionMetadataFromWidgets(
     });
   }
   return result;
+}
+
+function composerMentionRecord(widget: DroppedWidget): Record<string, unknown> | null {
+  if (widget.metadata?.source !== "composer_at_mention") return null;
+  const mention = widget.metadata.mention;
+  if (!mention || typeof mention !== "object" || Array.isArray(mention)) return null;
+  return mention as Record<string, unknown>;
+}
+
+function normalizedStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))];
+}
+
+/** Return stable tool ids represented by semantic tool and service mention widgets. */
+export function composerMentionToolIdsFromWidgets(widgets: DroppedWidget[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const widget of widgets) {
+    const mention = composerMentionRecord(widget);
+    if (!mention) continue;
+    const kind = String(mention.kind ?? widget.type);
+    const service = widget.metadata?.service;
+    const serviceRecord = service && typeof service === "object" && !Array.isArray(service)
+      ? service as Record<string, unknown>
+      : {};
+    const ids = kind === "tool"
+      ? [String(mention.tool_id ?? mention.id ?? widget.sourceItemId ?? widget.id).trim()]
+      : kind === "service"
+        ? normalizedStringList(serviceRecord.tool_ids)
+        : [];
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+}
+
+/** Record only selections that this mention added, preserving prior manual choices. */
+export function withComposerMentionSelectionOwnership(
+  widget: DroppedWidget,
+  selectedToolIds: string[],
+): DroppedWidget {
+  if (!composerMentionRecord(widget)) return widget;
+  const selected = new Set(selectedToolIds);
+  const ownedToolIds = composerMentionToolIdsFromWidgets([widget])
+    .filter((toolId) => !selected.has(toolId));
+  return {
+    ...widget,
+    metadata: {
+      ...(widget.metadata ?? {}),
+      composer_mention_owned_tool_ids: ownedToolIds,
+    },
+  };
+}
+
+/** Remove draft-only reconciliation provenance before persistence. */
+export function publicComposerWidgetMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  const result = { ...metadata };
+  delete result.composer_mention_owned_tool_ids;
+  return result;
+}
+
+function composerMentionOwnedToolIds(widget: DroppedWidget): string[] {
+  if (!composerMentionRecord(widget)) return [];
+  return normalizedStringList(widget.metadata?.composer_mention_owned_tool_ids);
+}
+
+function composerMentionKind(widget: DroppedWidget): string {
+  return String(composerMentionRecord(widget)?.kind ?? widget.type);
+}
+
+function composerMentionSyntax(widget: DroppedWidget): string {
+  const mention = composerMentionRecord(widget);
+  return mention ? String(mention.syntax ?? `@${String(mention.label ?? widget.label)}`) : "";
+}
+
+function composerMentionFilePath(widget: DroppedWidget): string {
+  const mention = composerMentionRecord(widget);
+  return mention
+    ? String(mention.file_path ?? mention.id ?? widget.sourceItemId ?? widget.id).trim()
+    : "";
+}
+
+function semanticMentionWidgetIsActive({
+  attachmentPaths,
+  requireFileAttachment,
+  selectedToolIds,
+  text,
+  widget,
+}: {
+  attachmentPaths: Set<string>;
+  requireFileAttachment: boolean;
+  selectedToolIds: Set<string>;
+  text: string;
+  widget: DroppedWidget;
+}): boolean {
+  if (!composerMentionRecord(widget)) return true;
+  if (widget.enabled === false || !hasUnescapedMentionSyntax(text, composerMentionSyntax(widget))) {
+    return false;
+  }
+  const kind = composerMentionKind(widget);
+  const toolIds = composerMentionToolIdsFromWidgets([widget]);
+  if (kind === "tool") return toolIds.some((toolId) => selectedToolIds.has(toolId));
+  if (kind === "service") {
+    return toolIds.length === 0 || toolIds.some((toolId) => selectedToolIds.has(toolId));
+  }
+  if (kind === "file" && requireFileAttachment) {
+    return attachmentPaths.has(composerMentionFilePath(widget));
+  }
+  return true;
+}
+
+/**
+ * Reconcile semantic mention metadata against the visible text and live controls.
+ *
+ * Internal ids owned by a removed mention are deselected, while tool selections
+ * that predated the mention remain untouched.
+ */
+export function reconcileComposerSemanticDraft({
+  attachmentPaths = [],
+  droppedWidgets,
+  requireFileAttachment = false,
+  selectedToolIds,
+  text,
+}: {
+  attachmentPaths?: string[];
+  droppedWidgets: DroppedWidget[];
+  requireFileAttachment?: boolean;
+  selectedToolIds: string[];
+  text: string;
+}): ReconciledComposerSemanticDraft {
+  const selected = new Set(selectedToolIds);
+  const attachments = new Set(attachmentPaths.filter(Boolean));
+  const activeWidgets = droppedWidgets.filter((widget) => semanticMentionWidgetIsActive({
+    attachmentPaths: attachments,
+    requireFileAttachment,
+    selectedToolIds: selected,
+    text,
+    widget,
+  }));
+  const activeOwnedToolIds = new Set(
+    activeWidgets.flatMap(composerMentionOwnedToolIds).filter((toolId) => selected.has(toolId)),
+  );
+  const staleOwnedToolIds = new Set(
+    droppedWidgets
+      .flatMap(composerMentionOwnedToolIds)
+      .filter((toolId) => !activeOwnedToolIds.has(toolId)),
+  );
+  const reconciledToolIds = selectedToolIds.filter((toolId) => !staleOwnedToolIds.has(toolId));
+  const reconciledSelected = new Set(reconciledToolIds);
+  return {
+    droppedWidgets: activeWidgets.filter((widget) => semanticMentionWidgetIsActive({
+      attachmentPaths: attachments,
+      requireFileAttachment,
+      selectedToolIds: reconciledSelected,
+      text,
+      widget,
+    })),
+    selectedToolIds: reconciledToolIds,
+  };
 }
 
 export function normalizeComposerMentionMetadata(
