@@ -23,8 +23,8 @@
       "local-first"
     ],
     "dependency_notes": {
-      "defaultspack": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, and core tool routing.",
-      "rumi_default_tools_pack": "References existing computer/browser/file/terminal tools and does not replace their implementations."
+      "defaultspack": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, core tool routing, and the model-agnostic ComputerHost broker boundary.",
+      "rumi_default_tools_pack": "References existing computer/browser/file/terminal tools and does not replace their model-facing implementations."
     },
     "optional_integrations": [
       {
@@ -80,6 +80,7 @@
         "README.md",
         "docs/README.md",
         "docs/architecture.md",
+        "docs/host_tool_boundary.md",
         "docs/interfaces.md",
         "docs/operations.md"
       ]
