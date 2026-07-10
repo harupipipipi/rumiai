@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
+  atMentionPopupStyleForAnchor,
   atMentionMenuKeyAction,
   filterAtMentionFiles,
   insertAtMentionText,
@@ -238,6 +239,56 @@ test("model candidate popup stays inside the viewport when anchored near the lef
       top: 202,
       width: 344,
       transform: "translateY(-100%)",
+    },
+  );
+});
+
+test("mention popup anchors above the composer input without covering the active line", () => {
+  assert.deepEqual(
+    atMentionPopupStyleForAnchor({ left: 120, right: 620, top: 620, bottom: 662 }, 1280, 760),
+    {
+      left: 120,
+      top: 612,
+      width: 440,
+      maxHeight: 272,
+      transform: "translateY(-100%)",
+    },
+  );
+});
+
+test("mention popup clamps horizontally on mobile composer widths", () => {
+  assert.deepEqual(
+    atMentionPopupStyleForAnchor({ left: 12, right: 344, top: 610, bottom: 650 }, 360, 700),
+    {
+      left: 8,
+      top: 602,
+      width: 344,
+      maxHeight: 272,
+      transform: "translateY(-100%)",
+    },
+  );
+});
+
+test("mention popup flips below the composer input when there is no safe room above", () => {
+  assert.deepEqual(
+    atMentionPopupStyleForAnchor({ left: 24, right: 330, top: 56, bottom: 98 }, 360, 320),
+    {
+      left: 8,
+      top: 106,
+      width: 344,
+      maxHeight: 206,
+    },
+  );
+});
+
+test("mention popup shrinks to stay inside very small viewports", () => {
+  assert.deepEqual(
+    atMentionPopupStyleForAnchor({ left: 20, right: 220, top: 24, bottom: 50 }, 240, 112),
+    {
+      left: 8,
+      top: 58,
+      width: 224,
+      maxHeight: 46,
     },
   );
 });

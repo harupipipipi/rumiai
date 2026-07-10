@@ -131,6 +131,11 @@ const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
 const MODEL_STATUS_POPOVER_GAP = 10;
 const MODEL_STATUS_POPOVER_VIEWPORT_MARGIN = 16;
+const AT_MENTION_POPOVER_WIDTH = 440;
+const AT_MENTION_POPOVER_MAX_HEIGHT = 272;
+const AT_MENTION_POPOVER_GAP = 8;
+const AT_MENTION_POPOVER_VIEWPORT_MARGIN = 8;
+const AT_MENTION_POPOVER_MIN_HEIGHT = 64;
 const TEMPLATE_COMPOSER_TEXT_MAX = 180;
 const TEMPLATE_COMPOSER_MODALITY_LABELS: Record<string, string> = {
   text: "Text",
@@ -1147,8 +1152,16 @@ function AtMentionMenu({
   style?: CSSProperties;
 }) {
   if (candidates.length === 0) return null;
+  const menuMaxHeight = style?.maxHeight;
+  const listStyle = menuMaxHeight
+    ? {
+        maxHeight: `max(3rem, calc(${
+          typeof menuMaxHeight === "number" ? `${menuMaxHeight}px` : menuMaxHeight
+        } - 2.625rem))`,
+      }
+    : undefined;
 
-  return (
+  const menu = (
     <>
       <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
@@ -1156,7 +1169,7 @@ function AtMentionMenu({
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
         style={style}
-        className="fixed rumi-layer-modal w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="fixed rumi-layer-modal flex w-[min(440px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -1165,7 +1178,7 @@ function AtMentionMenu({
           </span>
           <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
-        <div className="max-h-56 overflow-y-auto py-1">
+        <div className="max-h-56 flex-1 overflow-y-auto py-1" style={listStyle}>
           {candidates.map((candidate, index) => {
             const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
             return (
@@ -1203,6 +1216,7 @@ function AtMentionMenu({
       </div>
     </>
   );
+  return typeof document === "undefined" ? menu : createPortal(menu, document.body);
 }
 
 export function filterAtMentionFiles(files: string[], query: string): string[] {
@@ -1319,6 +1333,7 @@ function modelCandidateApiKeyBadge(candidate: ModelCommandCandidate): string | n
 }
 
 type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top">;
+type AtMentionAnchorRect = Pick<DOMRect, "left" | "right" | "top" | "bottom">;
 
 export function modelCandidatePopupStyleForAnchor(
   anchorRect: PopupAnchorRect | null,
@@ -1333,6 +1348,47 @@ export function modelCandidatePopupStyleForAnchor(
     left,
     top,
     width,
+    transform: "translateY(-100%)",
+  };
+}
+
+function atMentionMenuHeightForSpace(availableSpace: number, preferredMaxHeight: number): number {
+  return Math.min(preferredMaxHeight, Math.max(0, availableSpace));
+}
+
+export function atMentionPopupStyleForAnchor(
+  anchorRect: AtMentionAnchorRect | null,
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredWidth = AT_MENTION_POPOVER_WIDTH,
+  preferredMaxHeight = AT_MENTION_POPOVER_MAX_HEIGHT,
+): CSSProperties | undefined {
+  if (!anchorRect || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
+
+  const viewportMargin = AT_MENTION_POPOVER_VIEWPORT_MARGIN;
+  const width = Math.min(preferredWidth, Math.max(0, viewportWidth - viewportMargin * 2));
+  const left = Math.max(
+    viewportMargin,
+    Math.min(anchorRect.left, viewportWidth - width - viewportMargin),
+  );
+  const availableAbove = anchorRect.top - AT_MENTION_POPOVER_GAP - viewportMargin;
+  const availableBelow = viewportHeight - anchorRect.bottom - AT_MENTION_POPOVER_GAP - viewportMargin;
+  const placeBelow = availableAbove < AT_MENTION_POPOVER_MIN_HEIGHT && availableBelow > availableAbove;
+
+  if (placeBelow) {
+    return {
+      left,
+      top: Math.min(anchorRect.bottom + AT_MENTION_POPOVER_GAP, viewportHeight - viewportMargin),
+      width,
+      maxHeight: atMentionMenuHeightForSpace(availableBelow, preferredMaxHeight),
+    };
+  }
+
+  return {
+    left,
+    top: Math.max(viewportMargin, anchorRect.top - AT_MENTION_POPOVER_GAP),
+    width,
+    maxHeight: atMentionMenuHeightForSpace(availableAbove, preferredMaxHeight),
     transform: "translateY(-100%)",
   };
 }
@@ -1498,6 +1554,7 @@ export function ComposerRenderer({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
+  const [atMentionPopoverStyle, setAtMentionPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1701,6 +1758,38 @@ export function ComposerRenderer({
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
 
+  const updateAtMentionPopoverAnchor = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const textarea = textareaRef.current;
+    const textareaRect = textarea?.getBoundingClientRect() ?? null;
+    const surfaceRects = [
+      textarea?.form?.getBoundingClientRect(),
+      textarea?.closest<HTMLElement>(".rumi-composer-shell")?.getBoundingClientRect(),
+      textarea?.closest<HTMLElement>(".rumi-composer-main-panel")?.getBoundingClientRect(),
+    ].filter((rect): rect is DOMRect => Boolean(rect));
+    const surfaceTop = surfaceRects.length > 0
+      ? Math.min(...surfaceRects.map((rect) => rect.top))
+      : textareaRect?.top;
+    const surfaceBottom = surfaceRects.length > 0
+      ? Math.max(...surfaceRects.map((rect) => rect.bottom))
+      : textareaRect?.bottom;
+    const lineHeight = textarea
+      ? Number.parseFloat(window.getComputedStyle(textarea).lineHeight)
+      : 0;
+    const activeLineClearance = Number.isFinite(lineHeight)
+      ? Math.max(0, Math.min(40, lineHeight + AT_MENTION_POPOVER_GAP))
+      : 0;
+    const anchorRect = textareaRect && surfaceTop !== undefined && surfaceBottom !== undefined
+      ? {
+          left: textareaRect.left,
+          right: textareaRect.right,
+          top: Math.min(textareaRect.top - activeLineClearance, surfaceTop),
+          bottom: Math.max(textareaRect.bottom, surfaceBottom),
+        }
+      : textareaRect;
+    setAtMentionPopoverStyle(atMentionPopupStyleForAnchor(anchorRect, window.innerWidth, window.innerHeight));
+  }, []);
+
   const resizeNewConversationTextarea = useCallback(
     (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
       if (!textarea) return;
@@ -1823,6 +1912,7 @@ export function ComposerRenderer({
     if (!suppressPopovers) return;
     setMenuOpen(false);
     setAtMentionOpen(false);
+    setAtMentionPopoverStyle(undefined);
     setModelDropdownOpen(false);
     setModeSelectorOpen(false);
     onModelCommandCandidatesClose?.();
@@ -1843,6 +1933,17 @@ export function ComposerRenderer({
       window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
     };
   }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
+
+  useEffect(() => {
+    if (!atMentionOpen) return;
+    updateAtMentionPopoverAnchor();
+    window.addEventListener("resize", updateAtMentionPopoverAnchor);
+    window.addEventListener("scroll", updateAtMentionPopoverAnchor, true);
+    return () => {
+      window.removeEventListener("resize", updateAtMentionPopoverAnchor);
+      window.removeEventListener("scroll", updateAtMentionPopoverAnchor, true);
+    };
+  }, [atMentionOpen, updateAtMentionPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -1920,6 +2021,7 @@ export function ComposerRenderer({
       if (!textarea || suppressPopovers || !templateAllowsAtMentions) {
         setAtMentionOpen(false);
         setAtMentionQuery("");
+        setAtMentionPopoverStyle(undefined);
         return;
       }
       const cursorPos = textarea.selectionStart ?? value.length;
@@ -1930,13 +2032,14 @@ export function ComposerRenderer({
       if (atMatch && !isSteerMode && hasMentionTargets) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
-        updateComposerPopoverAnchor();
+        updateAtMentionPopoverAnchor();
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
+        setAtMentionPopoverStyle(undefined);
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerPopoverAnchor],
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateAtMentionPopoverAnchor],
   );
 
   useEffect(() => {
@@ -1961,14 +2064,15 @@ export function ComposerRenderer({
       if (!textarea) return;
 
       const cursorPos = textarea.selectionStart;
-	      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
-	      const next = insertAtMentionText(input, cursorPos, mentionText);
-	      onInputChange(next.value);
-	      if (candidate.kind === "file" && mode === "coding") {
-	        onAtFileAttach?.(candidate.file);
-	      }
+      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
+      const next = insertAtMentionText(input, cursorPos, mentionText);
+      onInputChange(next.value);
+      if (candidate.kind === "file" && mode === "coding") {
+        onAtFileAttach?.(candidate.file);
+      }
       setAtMentionOpen(false);
       setAtMentionQuery("");
+      setAtMentionPopoverStyle(undefined);
 
       setTimeout(() => {
         textarea.setSelectionRange(next.cursor, next.cursor);
@@ -2142,6 +2246,7 @@ export function ComposerRenderer({
             handleAtMentionSelect(atMentionCandidates[action.index]);
           } else if (action.type === "close") {
             setAtMentionOpen(false);
+            setAtMentionPopoverStyle(undefined);
           }
           return;
         }
@@ -2642,13 +2747,17 @@ export function ComposerRenderer({
             )
           )}
 
-          {atMentionOpen && (
+          {atMentionOpen && atMentionPopoverStyle && (
             <AtMentionMenu
               candidates={atMentionCandidates}
               activeIndex={selectedAtMentionIndex}
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
-              onClose={() => setAtMentionOpen(false)}
+              onClose={() => {
+                setAtMentionOpen(false);
+                setAtMentionPopoverStyle(undefined);
+              }}
+              style={atMentionPopoverStyle}
             />
           )}
 
