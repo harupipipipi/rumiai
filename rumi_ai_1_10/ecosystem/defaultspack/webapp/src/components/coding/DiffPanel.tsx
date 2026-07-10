@@ -22,11 +22,11 @@ export function DiffPanel({
   const [diff, setDiff] = useState<CodingDiffResponse | null>(initialDiff ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
 
   const changedFiles = useMemo(() => collectFiles(status), [status]);
 
-  const load = useCallback(async () => {
-    if (initialStatus || initialDiff) return;
+  const refresh = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
@@ -36,19 +36,24 @@ export function DiffPanel({
       ]);
       setStatus(nextStatus);
       setDiff(nextDiff);
+      setRefreshedAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [initialDiff, initialStatus, workspaceId]);
+  }, [workspaceId]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    setStatus(initialStatus ?? null);
+    setDiff(initialDiff ?? null);
+    setError(null);
+    setRefreshedAt(null);
+    if (!initialStatus || !initialDiff) void refresh();
+  }, [initialDiff, initialStatus, refresh, workspaceId]);
 
   return (
-    <section className="border-b border-zinc-800/60 p-3" aria-label="Git diff">
+    <section className="border-b border-zinc-800/60 p-3" aria-label="Git diff" aria-busy={busy}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <GitCompare size={14} className="text-sky-300" />
@@ -58,15 +63,21 @@ export function DiffPanel({
         <button
           type="button"
           disabled={busy}
-          onClick={() => void load()}
+          onClick={() => void refresh()}
           className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-40"
           title="Refresh diff"
+          aria-label={busy ? "Refreshing diff" : "Refresh diff"}
         >
-          <RefreshCw size={13} />
+          <RefreshCw size={13} aria-hidden="true" />
         </button>
       </div>
 
-      {error && <p className="mb-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">{error}</p>}
+      {error && <p role="alert" className="mb-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">{error}</p>}
+      {refreshedAt && (
+        <p role="status" className="mb-2 text-[10px] text-zinc-600">
+          Refreshed {new Date(refreshedAt).toLocaleTimeString()}
+        </p>
+      )}
 
       <div className="mb-2 flex flex-wrap gap-1">
         <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
