@@ -8,6 +8,8 @@ export function PlacementHtmlRenderer({ manifest }: { manifest: PlacementManifes
     <iframe
       title={manifest.label}
       sandbox={rendering.sandbox}
+      referrerPolicy={rendering.referrerPolicy}
+      loading="lazy"
       srcDoc={rendering.html}
       className="h-full w-full rounded-lg border border-zinc-800 bg-transparent"
     />
