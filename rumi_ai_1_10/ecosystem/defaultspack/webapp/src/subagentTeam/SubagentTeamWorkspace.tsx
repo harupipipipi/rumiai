@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   Bot,
   BookOpen,
-  Check,
   ChevronDown,
   ClipboardCheck,
   Code2,
@@ -77,7 +76,6 @@ import {
 } from "./subagentTeamData";
 
 type TreeMode = SubagentTreeMode | null;
-type DecisionStatus = "waiting" | "approved" | "revision";
 
 type SubagentTeamWorkspaceProps = {
   activeConversationId?: string | null;
@@ -291,60 +289,6 @@ function SignalBanner({
         <span>{label}</span>
       </div>
       <p className="line-clamp-2 text-[11px] leading-relaxed text-zinc-300">{text}</p>
-    </div>
-  );
-}
-
-function CreatorDecisionPreview({
-  task,
-  status,
-  onStatusChange,
-}: {
-  task: CompanyTask | null;
-  status: DecisionStatus;
-  onStatusChange: (status: DecisionStatus) => void;
-}) {
-  const title = task?.title || "Approve PM routing plan";
-  const targetAgents = task?.target_agent_ids?.length ? task.target_agent_ids.join(", ") : "pm, frontend, qa";
-  return (
-    <div className="mx-2 mb-2 rounded-lg border border-zinc-800/80 bg-[#0d0d11] p-2.5">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            <ClipboardCheck size={12} className="text-emerald-300" />
-            <span>Creator decision preview</span>
-          </div>
-          <p className="mt-1 line-clamp-2 text-[12px] font-medium leading-snug text-zinc-100">{title}</p>
-        </div>
-        <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px]", statusClassName(status))}>
-          {status}
-        </span>
-      </div>
-      <div className="grid gap-1.5 text-[10px] text-zinc-500">
-        <div className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5">
-          <span className="text-zinc-400">Route:</span> {targetAgents}
-        </div>
-        <div className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5">
-          <span className="text-zinc-400">Creator sees:</span> PM summary, changed files, and latest channel blockers.
-        </div>
-      </div>
-      <div className="mt-2 flex gap-1.5">
-        <button
-          type="button"
-          onClick={() => onStatusChange("approved")}
-          className="flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-        >
-          <Check size={12} />
-          <span className="truncate">OK</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onStatusChange("revision")}
-          className="h-7 min-w-0 flex-1 rounded-md border border-zinc-800 px-2 text-[11px] font-medium text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900"
-        >
-          Revise
-        </button>
-      </div>
     </div>
   );
 }
@@ -671,52 +615,47 @@ function TaskListCard({
   );
 }
 
-function ApprovalCard({
+export function DecisionPreviewCard({
   task,
-  status,
   source,
   error,
-  onStatusChange,
 }: {
   task: CompanyTask | null;
-  status: DecisionStatus;
   source: "api" | "preview";
   error: string | null;
-  onStatusChange: (status: DecisionStatus) => void;
 }) {
+  const targetAgents = task?.target_agent_ids?.length ? task.target_agent_ids.join(", ") : "not specified";
+  const sourceLabel = source === "api" ? "API preview · read only" : "Sample preview · read only";
   return (
-    <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+    <div
+      className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3"
+      data-testid="subagent-decision-preview"
+      aria-label="Read-only decision preview"
+    >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
             <ClipboardCheck size={12} />
-            <span>Approval card</span>
+            <span>Decision preview</span>
           </div>
-          <p className="mt-1 line-clamp-2 text-[12px] font-medium text-zinc-100">{task?.title || "PM goal gate approval"}</p>
+          <p className="mt-1 line-clamp-2 text-[12px] font-medium text-zinc-100">
+            {task?.title || "PM routing decision context"}
+          </p>
         </div>
-        <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px]", statusClassName(status))}>{status}</span>
+        <span className="shrink-0 rounded border border-zinc-700 bg-zinc-950/50 px-1.5 py-0.5 text-[9px] text-zinc-400">
+          {sourceLabel}
+        </span>
       </div>
-      <p className="line-clamp-3 text-[11px] leading-relaxed text-zinc-300">
-        {task?.description || "PM and Creator review channel context before subagents proceed with larger fanout or /goal execution."}
+      <p className="text-[11px] leading-relaxed text-zinc-300">
+        {task?.description || "PM and Creator context is shown here for inspection."}
       </p>
-      {error && <p className="mt-2 line-clamp-2 text-[10px] text-amber-100/70">{error}</p>}
-      <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <button
-          type="button"
-          onClick={() => onStatusChange("approved")}
-          className="h-8 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          onClick={() => onStatusChange("revision")}
-          className="h-8 rounded-md border border-amber-500/25 px-2 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/10"
-        >
-          Revise
-        </button>
+      <div className="mt-2 rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-[10px] text-zinc-400">
+        Route: {targetAgents}
       </div>
-      <p className="mt-1 font-mono text-[9px] text-amber-100/50">source:{source}</p>
+      <p className="mt-2 rounded border border-amber-400/20 bg-black/20 px-2 py-1.5 text-[10px] leading-4 text-amber-100">
+        This is read-only preview data. It cannot approve, revise, reject, or dispatch work. Use the authoritative approval queue when a real request is pending.
+      </p>
+      {error && <p className="mt-2 break-words text-[10px] text-amber-100/70">{error}</p>}
     </div>
   );
 }
@@ -743,7 +682,6 @@ export function SubagentTeamWorkspace({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus>("waiting");
   const [decisionPreviewTask, setDecisionPreviewTask] = useState<CompanyTask | null>(null);
   const [decisionPreviewSource, setDecisionPreviewSource] = useState<"api" | "preview">("preview");
   const [decisionPreviewError, setDecisionPreviewError] = useState<string | null>(null);
@@ -1423,14 +1361,11 @@ export function SubagentTeamWorkspace({
           </div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
             <AgentDetailCard agent={detailAgent} activity={detailAgent ? activityByAgent.get(detailAgent.agent_id) : undefined} />
-            <ApprovalCard
+            <DecisionPreviewCard
               task={effectiveDecisionTask}
-              status={decisionStatus}
               source={decisionPreviewSource}
               error={decisionPreviewError}
-              onStatusChange={setDecisionStatus}
             />
-            <CreatorDecisionPreview task={effectiveDecisionTask} status={decisionStatus} onStatusChange={setDecisionStatus} />
             <CreatorSettingsCard
               settings={creatorSettings}
               source={creatorSettingsSource}

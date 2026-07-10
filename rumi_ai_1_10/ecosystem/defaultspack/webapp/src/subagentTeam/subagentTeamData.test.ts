@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { CompanyMessage } from "../lib/api";
-import { ChannelButton } from "./SubagentTeamWorkspace";
+import { ChannelButton, DecisionPreviewCard } from "./SubagentTeamWorkspace";
 import {
   agentShortId,
   buildAgentActivity,
@@ -261,4 +261,24 @@ test("buildAgentActivity combines run status with open inbox counts", () => {
   assert.equal(activity.get("frontend")?.openInboxCount, 1);
   assert.equal(activity.get("pm")?.latestInbox?.priority, "high");
   assert.equal(activity.get("qa")?.latestRun?.run_id, "run-preview-qa");
+});
+
+
+test("decision preview is read-only and exposes no cosmetic approval controls", () => {
+  const sampleHtml = renderToStaticMarkup(createElement(DecisionPreviewCard, {
+    task: null,
+    source: "preview",
+    error: null,
+  }));
+  const apiHtml = renderToStaticMarkup(createElement(DecisionPreviewCard, {
+    task: null,
+    source: "api",
+    error: null,
+  }));
+
+  assert.match(sampleHtml, /Sample preview · read only/);
+  assert.match(apiHtml, /API preview · read only/);
+  assert.match(sampleHtml, /cannot approve, revise, reject, or dispatch work/);
+  assert.doesNotMatch(sampleHtml, /<button/);
+  assert.doesNotMatch(apiHtml, /<button/);
 });
