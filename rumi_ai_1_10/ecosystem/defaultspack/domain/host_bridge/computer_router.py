@@ -9,7 +9,9 @@ from typing import Any
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 from ..tool_policy.internal_context import tool_server_approval_context_is_internal
 
+from .computer_host import ComputerHost, LocalControllerComputerHost, ViewerBrokerComputerHost
 from .viewer_broker_client import ViewerBrokerClient
+
 
 def should_route_to_viewer(action: str) -> bool:
     if os.environ.get("RUMI_COMPUTER_HOST_INTERNAL") == "1":
@@ -29,6 +31,7 @@ def run_computer_action(
     artifact_root: Path | None = None,
     yolo_mode: bool = False,
     controller_cls: type[Any] | None = None,
+    computer_host: ComputerHost | None = None,
 ) -> dict[str, Any]:
     normalized_action = str(action or "")
     normalized_payload = dict(payload or {})
@@ -38,49 +41,12 @@ def run_computer_action(
         if approval_token:
             normalized_payload["approval_token"] = approval_token
     effective_yolo_mode = bool(yolo_mode) or _context_has_server_approval(normalized_context)
-    if should_route_to_viewer(normalized_action):
-        client = ViewerBrokerClient.from_environment()
-        if client.available():
-            try:
-                result = client.run_computer(
-                    normalized_action,
-                    normalized_payload,
-                    context=normalized_context,
-                    artifact_root=artifact_root,
-                )
-                if not isinstance(result, dict):
-                    return {"action": normalized_action, "result": result}
-                if _is_request_approval_needed(result):
-                    return _approval_required_response(
-                        tool_name,
-                        str(result.get("action") or normalized_action),
-                        normalized_payload,
-                        result,
-                        normalized_context,
-                    )
-                return dict(result)
-            except Exception as exc:
-                return {
-                    "action": normalized_action,
-                    "is_error": True,
-                    "reason": f"Rumi Viewer host broker is unavailable: {exc}",
-                    "recovery": {
-                        "kind": "open_rumi_viewer",
-                        "note": "Open Rumi Viewer and grant macOS permissions there.",
-                    },
-                    "permission_subject": "Rumi Viewer",
-                }
-        return {
-            "action": normalized_action,
-            "is_error": True,
-            "reason": "Rumi Viewer is required for computer control on macOS.",
-            "recovery": {
-                "kind": "open_rumi_viewer",
-                "note": "Open Rumi Viewer and grant macOS permissions there.",
-            },
-            "permission_subject": "Rumi Viewer",
-        }
-    return _run_local_controller(
+    host = computer_host or _default_computer_host(
+        normalized_action,
+        controller_cls=controller_cls,
+    )
+    return _run_computer_host(
+        host,
         normalized_action,
         normalized_payload,
         tool_name=tool_name,
@@ -88,11 +54,21 @@ def run_computer_action(
         artifact_root=artifact_root,
         yolo_mode=effective_yolo_mode,
         context=normalized_context,
-        controller_cls=controller_cls,
     )
 
 
-def _run_local_controller(
+def _default_computer_host(
+    action: str,
+    *,
+    controller_cls: type[Any] | None = None,
+) -> ComputerHost:
+    if should_route_to_viewer(action):
+        return ViewerBrokerComputerHost(ViewerBrokerClient.from_environment())
+    return LocalControllerComputerHost(controller_cls or BrowserComputerController)
+
+
+def _run_computer_host(
+    host: ComputerHost,
     action: str,
     payload: dict[str, Any],
     *,
@@ -101,12 +77,13 @@ def _run_local_controller(
     artifact_root: Path | None,
     yolo_mode: bool,
     context: dict[str, Any] | None,
-    controller_cls: type[Any] | None = None,
 ) -> dict[str, Any]:
-    controller_type = controller_cls or BrowserComputerController
-    result = controller_type(artifact_root=artifact_root).run(
+    del tool_arguments
+    result = host.run(
         action,
         payload,
+        context=context,
+        artifact_root=artifact_root,
         yolo_mode=yolo_mode,
     )
     if not isinstance(result, dict):
@@ -121,6 +98,30 @@ def _run_local_controller(
             context,
         )
     return dict(result)
+
+
+def _run_local_controller(
+    action: str,
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    tool_arguments: dict[str, Any] | None,
+    artifact_root: Path | None,
+    yolo_mode: bool,
+    context: dict[str, Any] | None,
+    controller_cls: type[Any] | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper for callers that still target the local controller."""
+    return _run_computer_host(
+        LocalControllerComputerHost(controller_cls or BrowserComputerController),
+        action,
+        payload,
+        tool_name=tool_name,
+        tool_arguments=tool_arguments,
+        artifact_root=artifact_root,
+        yolo_mode=yolo_mode,
+        context=context,
+    )
 
 
 def _approval_token_present(payload: dict[str, Any] | None) -> bool:
