@@ -1,0 +1,39 @@
+{
+  "id": "kiro-cli",
+  "category": "coding_backends",
+  "kind": "coding_backend",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Kiro CLI",
+  "description": "Kiro coding-agent backend with safe account-scoped model discovery and planned ACP session transport.",
+  "entrypoints": {
+    "adapter": "blocks/coding/kiro_cli.py",
+    "schema": "schema.json"
+  },
+  "security": {
+    "requires_workspace_root": true,
+    "requires_approval_for_write": true,
+    "requires_approval_for_terminal": true,
+    "requires_approval_for_git_push": true,
+    "network_default": "deny"
+  },
+  "capabilities": {
+    "coding_session": false,
+    "acp": false,
+    "model_discovery": true,
+    "account_status": true,
+    "headless_command_planning": true,
+    "image_prompt": false,
+    "approval_requests": false
+  },
+  "policy": {
+    "do_not_treat_as_llm_provider": true,
+    "discovery_is_read_only": true,
+    "do_not_auto_install_cli": true,
+    "do_not_auto_login": true,
+    "do_not_use_trust_all_tools_by_default": true,
+    "implementation_stage": "discovery_scaffold",
+    "tracking_issue": 1063
+  },
+  "source_pack_id": "defaultspack"
+}
