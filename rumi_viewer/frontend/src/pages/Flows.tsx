@@ -123,6 +123,8 @@ function FlowEditorInner() {
   const flowInteractionLocked = (
     flowLoading || isSaving || isDeleting || execution.isExecuting
   );
+  const flowInteractionLockedRef = useRef(flowInteractionLocked);
+  flowInteractionLockedRef.current = flowInteractionLocked;
 
   const menuPosRef = useRef<((pos: { x: number; y: number } | null) => void) | null>(null);
 
@@ -294,7 +296,7 @@ function FlowEditorInner() {
   const isExecuteDisabled = flowInteractionLocked || (!selectedFlowId && !isCreating);
 
   const handleSave = async () => {
-    if (isSaving || flowLoading) return;
+    if (flowInteractionLocked) return;
     if (isCreating) {
       if (!newFlowName.trim()) {
         addToast(t('flows.name_required'), 'error');
@@ -349,14 +351,14 @@ function FlowEditorInner() {
   };
 
   const handleDelete = () => {
-    if (!selectedFlowId || flowLoading) return;
+    if (!selectedFlowId || flowInteractionLocked) return;
     const flowIdToDelete = selectedFlowId;
     showDialog({
       title: t('flows.delete_title'),
       message: t('flows.delete_message'),
       confirmText: t('flows.delete_confirm'),
       onConfirm: async () => {
-        if (isDeleting) return;
+        if (flowInteractionLockedRef.current) return;
         invalidateFlowDetailRequest();
         setIsDeleting(true);
         try {
@@ -542,7 +544,7 @@ function FlowEditorInner() {
                 <Button
                   variant="outline"
                   onClick={handleSave}
-                  disabled={isDeleting || flowLoading}
+                  disabled={flowInteractionLocked}
                   loading={isSaving}
                   className="gap-2"
                 >
@@ -553,7 +555,7 @@ function FlowEditorInner() {
                   <Button
                     variant="destructive"
                     onClick={handleDelete}
-                    disabled={isSaving || flowLoading}
+                    disabled={flowInteractionLocked}
                     loading={isDeleting}
                     className="gap-2"
                   >

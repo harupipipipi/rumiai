@@ -1055,6 +1055,94 @@ test('Flows locks every editing surface while an update is pending and restores 
   assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
 });
 
+test('Flows blocks save and delete while execution is pending and restores them afterward', async () => {
+  const requests: string[] = [];
+  let submittedContent = existingFlow.content;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (method === 'PUT') {
+        submittedContent = JSON.parse(String(init?.body)).yaml_content as string;
+        return Promise.resolve(successfulResponse({
+          filename: existingFlow.name,
+          flow_id: existingFlow.id,
+          updated: true,
+        }));
+      }
+      if (method === 'DELETE') {
+        return Promise.resolve(successfulResponse({
+          deleted: true,
+          flow_id: existingFlow.id,
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([existingFlow])));
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(
+        existingFlow,
+        submittedContent,
+      )));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(
+    <>
+      <FlowsPage />
+      <DialogContainerPage />
+    </>,
+  );
+
+  await act(async () => {
+    click(buttonByText('Execute'));
+    await settlePromises();
+  });
+
+  assert.equal(buttonByText('Save').disabled, true);
+  assert.equal(buttonByText('Delete').disabled, true);
+  assert.equal(useAppStore.getState().dialog, null);
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    click(buttonByText('Delete'));
+    await settlePromises();
+  });
+
+  assert.equal(requests.some((request) => request.startsWith('PUT ')), false);
+  assert.equal(requests.some((request) => request.startsWith('DELETE ')), false);
+  assert.equal(useAppStore.getState().dialog, null);
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await settlePromises();
+  });
+
+  assert.equal(buttonByText('Save').disabled, false);
+  assert.equal(buttonByText('Delete').disabled, false);
+  assert.equal(buttonByText('Execute').disabled, false);
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+  assert.equal(requests.filter((request) => request.startsWith('PUT ')).length, 1);
+
+  await act(async () => {
+    click(buttonByText('Delete'));
+    await settlePromises();
+  });
+  assert.notEqual(useAppStore.getState().dialog, null);
+  assert.equal(requests.some((request) => request.startsWith('DELETE ')), false);
+  assert.deepEqual(feedback, [
+    {message: 'Flow execution complete', type: 'success'},
+    {message: 'Flow saved', type: 'success'},
+  ]);
+});
+
 test('Flows create completion preserves a newer user selection', async () => {
   const createResponse = deferred<Response>();
   const secondFlow: Flow = {
