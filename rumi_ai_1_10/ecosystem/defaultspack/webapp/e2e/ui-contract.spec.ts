@@ -848,6 +848,7 @@ async function openCodingWidget(page: Page) {
   await expect(codingWidgetButton).toBeVisible();
   await codingWidgetButton.click();
   await expect(page.locator(".coding-cockpit")).toBeVisible();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
 
 test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
@@ -1747,7 +1748,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {

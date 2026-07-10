@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -15,6 +17,9 @@ from domain.subagent_team.mention_parser import (  # noqa: E402
     parse_mentions,
     sanitize_agent_mentions_for_gate,
 )
+
+
+pytestmark = pytest.mark.contract
 
 
 FIXTURES = json.loads(
