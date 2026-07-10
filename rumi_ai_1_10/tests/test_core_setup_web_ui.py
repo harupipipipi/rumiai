@@ -1,5 +1,5 @@
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 SETUP_UI = (
@@ -24,15 +24,17 @@ def test_setup_pack_landing_avoids_centered_clipping_layout() -> None:
     assert "place-items: center" not in source
     assert "overflow: hidden;" not in source
     assert "margin: 0 auto;" in source
-    assert "grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.82fr)" in source
-    assert "overflow-x: hidden;" in source
+    assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr)" in source
+    assert "min-width: 0;" in source
+    assert "overflow-x: clip;" in source
+    assert "@media (max-width: 820px)" in source
 
 
 def test_setup_state_hides_raw_json_behind_debug_disclosure() -> None:
     """The default status panel should render compact copy, not a raw JSON dump."""
     source = setup_ui_source()
     set_status = re.search(
-        r"function setStatus\(label, payload, rows\) \{(?P<body>.*?)\n    \}",
+        r"function setStatus\(label, payload, rows, tone = \"neutral\"\) \{(?P<body>.*?)\n    \}",
         source,
         re.S,
     )
@@ -57,6 +59,7 @@ def test_visible_setup_profiles_are_capped_at_five() -> None:
     assert profile_block.group("body").count("id:") <= 5
     assert "PROFILE_CARDS.slice(0, 5)" in source
     assert "Advanced custom selection" in source
+    assert 'if (assigned.has(packId)) continue;' in source
 
 
 def test_setup_cards_are_full_clickable_labels() -> None:
@@ -68,6 +71,20 @@ def test_setup_cards_are_full_clickable_labels() -> None:
     assert "cursor: pointer;" in source
     assert "min-height: 44px;" in source
     assert "dataset.profilePackIds" in source
+    assert 'input.setAttribute("aria-label", "Include " + profile.title)' in source
+    assert '.pack:has(input:focus-visible)' in source
+
+
+def test_group_and_advanced_choices_share_one_selection_model() -> None:
+    """Group and individual controls must not submit stale duplicate state."""
+    source = setup_ui_source()
+
+    assert "const selectedPackIds = new Set();" in source
+    assert "function handleSelectionChange(event)" in source
+    assert "selectedPackIds.add(packId)" in source
+    assert "selectedPackIds.delete(packId)" in source
+    assert 'listEl.addEventListener("change", handleSelectionChange)' in source
+    assert "return Array.from(selectedPackIds);" in source
 
 
 def test_install_action_sends_selected_ids_and_reports_feedback() -> None:
@@ -77,7 +94,13 @@ def test_install_action_sends_selected_ids_and_reports_feedback() -> None:
     assert "const selected = selectedSetupPackIds();" in source
     assert 'body: JSON.stringify({ setup_pack_ids: selected })' in source
     assert 'getJson("/api/setup/packs/install"' in source
-    assert "installButton.disabled = true;" in source
-    assert "installButton.disabled = false;" in source
+    assert 'setInstallProgress("pending")' in source
+    assert 'setInstallProgress("success")' in source
+    assert 'setInstallProgress("error")' in source
+    assert 'id="install-progress"' in source
+    assert 'id="install-selected" disabled' in source
+    assert "const refreshed = await load({ preserveStatus: true, redirect: false });" in source
+    assert "if (!refreshed) return;" in source
+    assert 'aria-live="polite"' in source
     assert 'setStatus("Installing setup packs…"' in source
     assert 'setStatus("Setup packs installed"' in source
