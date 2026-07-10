@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 
-test("sandboxed html renderer does not inject raw untrusted HTML directly", () => {
+test("sandboxed html renderer keeps untrusted content in an opaque restricted iframe", () => {
   const html = renderToStaticMarkup(
     createElement(PlacementHtmlRenderer, {
       manifest: {
@@ -19,6 +19,10 @@ test("sandboxed html renderer does not inject raw untrusted HTML directly", () =
   );
 
   assert.match(html, /<iframe/);
-  assert.match(html, /sandbox="allow-same-origin"/);
+  assert.match(html, /sandbox=""/);
+  assert.match(html, /referrerpolicy="no-referrer"/i);
+  assert.match(html, /loading="lazy"/);
+  assert.doesNotMatch(html, /allow-same-origin/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
+  assert.match(html, /Content-Security-Policy/);
 });
