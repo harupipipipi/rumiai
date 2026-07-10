@@ -73,15 +73,22 @@ test("builtin placements include yolo switch and model manager", () => {
   assert.ok(ids.includes("model-manager"));
 });
 
-test("html placements resolve to sandboxed iframe rendering", () => {
+test("html placements resolve to an opaque CSP-restricted iframe document", () => {
   const rendering = resolvePlacementHtmlRendering({
     id: "html-test",
     label: "HTML",
     source: { type: "custom" },
-    renderer: { kind: "html", html: "<script>alert(1)</script>" },
+    renderer: { kind: "html", html: '<img src="https://tracker.example/pixel"><script>alert(1)</script>' },
     placements: [{ surface: "right_sidebar", orientation: "vertical" }],
   });
 
   assert.equal(rendering.kind, "html_iframe");
-  assert.equal(rendering.sandbox, "allow-same-origin");
+  assert.equal(rendering.sandbox, "");
+  assert.equal(rendering.referrerPolicy, "no-referrer");
+  assert.match(rendering.html ?? "", /Content-Security-Policy/);
+  assert.match(rendering.html ?? "", /default-src 'none'/);
+  assert.match(rendering.html ?? "", /connect-src 'none'/);
+  assert.match(rendering.html ?? "", /script-src 'none'/);
+  assert.match(rendering.html ?? "", /form-action 'none'/);
+  assert.doesNotMatch(rendering.html ?? "", /allow-same-origin/);
 });
