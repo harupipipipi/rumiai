@@ -1,6 +1,6 @@
 # Migration Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## `defaults` -> `defaultspack`
 
@@ -17,6 +17,7 @@ Status:
 - Control-panel API routes are manifest-driven.
 - Shared system GET routes are now declared in `core_runtime/core_pack/core_system_api/ecosystem.json`.
 - `PackAPIHandler.do_GET()` now relies on route dispatch for core system routes before pack-route fallback.
+- Remaining verb-handler and mixin families are inventoried in `docs/status/handwritten-route-inventory.md`.
 
 Status:
 - Major route families are already table-driven.
@@ -27,6 +28,8 @@ Status:
 - defaultspack transport route specs now expose canonical `function_id` / `legacy_block_module` metadata.
 - Legacy HTTP fallbacks are tracked in `ecosystem/defaultspack/docs/legacy_http_routes.yaml`.
 - Integrity scanning now checks function artifacts and legacy fallback allowlisting together.
+- Allowlist metadata now resolves auth mode, principal, CSRF/origin, rate-limit, audit category, replacement `function_id`, and `legacy_until`; the security CI job rejects missing metadata.
+- The chat-channel family has moved from compatibility block fallback to manifest-declared direct function dispatch.
 
 Status:
 - Many block-backed routes can now resolve through a function boundary first.

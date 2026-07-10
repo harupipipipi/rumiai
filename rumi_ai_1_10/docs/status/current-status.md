@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## Implemented
 
@@ -12,10 +12,13 @@ Last updated: 2026-06-06
 - `api_routes` table dispatch is already live for control-panel and pack-defined API endpoints.
 - Builtin core API routes now also include `core_system_api`, so shared system GET routes load from manifest data instead of handwritten `do_GET` branches.
 - Pack function invocation now runs through explicit execution policy checks before dispatch.
+- The defaultspack chat-channel route family now dispatches directly from manifest metadata to `chat_channel_*` functions.
+- Remaining defaultspack HTTP fallbacks have resolved auth, principal, CSRF/origin, rate-limit, audit, replacement-function, and expiration metadata enforced by CI.
 
 ## Partial / In Progress
 
 - `PackAPIHandler` is mostly decomposed into mixins, but the verb methods still coordinate multiple fallback paths in one file.
+- The remaining handwritten families are tracked in `docs/status/handwritten-route-inventory.md` with owners and migration targets.
 - defaultspack HTTP routes are in migration: many now resolve through functions or flows first, but legacy block fallbacks still exist and are now tracked explicitly.
 - compatibility aliases under `defaults.*` still exist broadly for stability; they are tracked as compatibility, not canonical naming.
 - defaultspack domain boundaries are now declared, but the current YAML largely reflects the repo's existing dependency graph and will tighten over time.

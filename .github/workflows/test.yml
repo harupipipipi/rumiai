@@ -179,6 +179,10 @@ jobs:
         working-directory: rumi_ai_1_10
         run: python scripts/quality/scan_defaultspack_boundaries.py
 
+      - name: Validate defaultspack HTTP fallback metadata
+        working-directory: rumi_ai_1_10
+        run: python scripts/quality/check_defaultspack_http_fallbacks.py
+
   frontend-security-audit:
     strategy:
       fail-fast: false
