@@ -91,6 +91,7 @@ import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
+import { initialComposerFieldValues, normalizeComposerFields, structuredComposerPayload } from "./lib/structuredComposer";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -2462,6 +2463,7 @@ function ChatApp() {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
+  const [structuredComposerValues, setStructuredComposerValues] = useState<Record<string, string>>({});
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
   const [spotlightQuery, setSpotlightQuery] = useState("");
@@ -2680,6 +2682,13 @@ function ChatApp() {
     () => selectTemplateComposerInput(catalog, composerMode, templateAiInputMetadata),
     [catalog, composerMode, templateAiInputMetadata],
   );
+  const effectiveStructuredComposerValues = useMemo(() => {
+    const fields = normalizeComposerFields(composerInputMetadata?.fields);
+    return structuredComposerPayload(fields, {
+      ...initialComposerFieldValues(fields),
+      ...structuredComposerValues,
+    });
+  }, [composerInputMetadata?.fields, structuredComposerValues]);
   const slashCommandsEnabled = useMemo(
     () => templateFeatureFlagEnabled(composerInputMetadata, "slash_commands", true),
     [composerInputMetadata],
@@ -5761,7 +5770,10 @@ function ChatApp() {
           }
         : {};
       const templateRequestPayload = {
-        params: templateAiInputParams,
+        params: {
+          ...templateAiInputParams,
+          ...(Object.keys(effectiveStructuredComposerValues).length ? { composer_fields: effectiveStructuredComposerValues } : {}),
+        },
         toolPolicy: {
           ...templatePolicyReferencePayload,
           ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
@@ -5810,6 +5822,7 @@ function ChatApp() {
             workspace_root: workspaceRootForRuntime,
           } : {}),
           ...templateRequestPayload.toolPolicy,
+          ...(Object.keys(effectiveStructuredComposerValues).length ? { structured_input: effectiveStructuredComposerValues } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
@@ -6097,6 +6110,7 @@ function ChatApp() {
       skillExtensions={composerSkills}
       commands={composerCommands}
       composerInput={composerInputMetadata}
+      structuredInputValues={effectiveStructuredComposerValues}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode || ultraYoloMode}
@@ -6138,6 +6152,7 @@ function ChatApp() {
       onProviderApiKeySave={handleProviderApiKeySave}
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={handleComposerInputChange}
+      onStructuredInputChange={setStructuredComposerValues}
       onSubmit={handleSubmit}
       onStopGenerating={handleStopGenerating}
       onSteerSubmit={(prompt) => void queueConversationSteer(prompt)}

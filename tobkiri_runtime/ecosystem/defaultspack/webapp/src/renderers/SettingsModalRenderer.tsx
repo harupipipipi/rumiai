@@ -311,10 +311,10 @@ function oauthProviderRows(providers: Array<Record<string, unknown>>): Array<Rec
   });
 }
 
-function activeSettingsProfileLabel(settingsValues: Record<string, Record<string, unknown>>, catalog: SettingsModalRendererProps["catalog"]): {
-  label: string;
-  detail: string;
-} {
+function activeSettingsProfileLabel(
+  settingsValues: Record<string, Record<string, unknown>>,
+  catalog: SettingsModalRendererProps["catalog"],
+): string {
   const candidates = [
     settingsValues.profiles?.active_profile,
     settingsValues.profiles?.profile_id,
@@ -326,17 +326,7 @@ function activeSettingsProfileLabel(settingsValues: Record<string, Record<string
     catalog?.settings?.values?.profiles?.active_profile,
     catalog?.settings?.values?.models?.preferred_model,
   ].map((value) => String(value ?? "").trim()).filter(Boolean);
-  const label = candidates[0] ?? "";
-  if (!label) {
-    return {
-      label: "No active profile reported",
-      detail: "Profile-aware settings will show live state after the runtime reports a profile.",
-    };
-  }
-  return {
-    label,
-    detail: "Profile-aware settings use the runtime profile currently reported by settings data.",
-  };
+  return candidates[0] ?? "No active profile reported";
 }
 
 function apiRowLabel(api: Record<string, unknown>): string {
@@ -3221,7 +3211,7 @@ export function SettingsModalRenderer({
     () => buildCodexAppServerPrelude(settingsValues),
     [settingsValues],
   );
-  const activeProfile = useMemo(
+  const activeProfileLabel = useMemo(
     () => activeSettingsProfileLabel(settingsValues, catalog),
     [catalog, settingsValues],
   );
@@ -3673,7 +3663,7 @@ export function SettingsModalRenderer({
     <div
       key={`${field.sourceSectionId}.${field.id}`}
       className={cn(
-        "min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
+        "min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4 transition-colors hover:border-zinc-700 hover:bg-zinc-950/60",
         settingsFieldTakesFullWidth(field) ? "lg:col-span-2" : "",
       )}
     >
@@ -3753,25 +3743,10 @@ export function SettingsModalRenderer({
   const renderSectionPrelude = (section: ControlCenterSection): ReactElement | null => {
     if (section.id === "quick_setup") {
       return (
-        <div className="grid gap-3 xl:grid-cols-3">
-          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <div className="text-sm font-medium text-emerald-100">Setup path</div>
-            <p className="mt-1 text-xs leading-5 text-emerald-100/75">
-              Models, API keys, account connections, MCP requirements, and computer approvals are surfaced first.
-            </p>
-          </div>
-          <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-4">
-            <div className="text-sm font-medium text-sky-100">Official app / self-host</div>
-            <p className="mt-1 text-xs leading-5 text-sky-100/75">
-              Cloud continuation uses the hosted OAuth broker, or a self-host OAuth client configured by the user.
-            </p>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-            <div className="text-sm font-medium text-zinc-100">Registry contract</div>
-            <p className="mt-1 text-xs leading-5 text-zinc-500">
-              Pack settings are validated before they join this control center.
-            </p>
-          </div>
+        <div className="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/35 text-xs">
+          <div className="grid gap-1 px-4 py-3 sm:grid-cols-[150px_1fr]"><span className="font-medium text-zinc-300">基本設定</span><span className="text-zinc-500">モデル、APIキー、アカウント接続を設定します。</span></div>
+          <div className="grid gap-1 px-4 py-3 sm:grid-cols-[150px_1fr]"><span className="font-medium text-zinc-300">実行権限</span><span className="text-zinc-500">MCPとコンピューター操作は必要な権限だけを有効にします。</span></div>
+          <div className="grid gap-1 px-4 py-3 sm:grid-cols-[150px_1fr]"><span className="font-medium text-zinc-300">Pack設定</span><span className="text-zinc-500">検証済みの項目だけがこの画面へ追加されます。</span></div>
         </div>
       );
     }
@@ -3781,8 +3756,8 @@ export function SettingsModalRenderer({
       const blockedCount = accountConnectionCards.filter((card) => card.disabledReason && !card.connected && !card.credential?.configured).length;
       return (
         <div className="space-y-4">
-          <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
-            <div className="bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-amber-500/15 px-4 py-4 sm:px-5">
+          <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40">
+            <div className="px-4 py-4 sm:px-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-2xl">
                   <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-cyan-200/80">{localizedCopy("Accounts & Connections", "アカウントと接続")}</div>
@@ -3792,15 +3767,15 @@ export function SettingsModalRenderer({
                   </p>
                 </div>
                 <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center text-[11px]">
-                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-emerald-200">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-zinc-200">
                     <div className="text-base font-semibold">{connectedCount}</div>
                     <div className="text-[10px] text-emerald-200/70">{localizedCopy("connected", "接続済み")}</div>
                   </div>
-                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-zinc-200">
                     <div className="text-base font-semibold">{approvalCount}</div>
                     <div className="text-[10px] text-amber-100/70">{localizedCopy("approval", "承認待ち")}</div>
                   </div>
-                  <div className="rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-zinc-300">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-zinc-200">
                     <div className="text-base font-semibold">{blockedCount}</div>
                     <div className="text-[10px] text-zinc-500">{localizedCopy("needs setup", "設定が必要")}</div>
                   </div>
@@ -3829,12 +3804,11 @@ export function SettingsModalRenderer({
               const cloudflareFacts = card.providerId === "cloudflare" ? cloudflareProvisioningFacts(card.provisioning, isJapanese) : [];
               const cloudflareBlockers = card.providerId === "cloudflare" ? cloudflareProvisioningBlockers(card.provisioning, isJapanese) : [];
               return (
-                <article key={card.providerId} className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
-                  <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass(card.providerId))} />
+                <article key={card.providerId} className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/55">
                   <div className="p-4 sm:p-5">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex min-w-0 gap-3">
-                        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-sm font-semibold text-black", providerAccentClass(card.providerId))}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-xs font-semibold text-zinc-300">
                           {card.label.slice(0, 2).toUpperCase()}
                         </div>
                         <div className="min-w-0">
@@ -4129,9 +4103,9 @@ export function SettingsModalRenderer({
         <div className="space-y-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
             <div className="space-y-4">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Tools & MCP</div>
-                <h3 className="mt-2 text-sm font-semibold text-zinc-50">Tools are not logins</h3>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/45 p-4">
+                <div className="text-[11px] font-medium text-zinc-500">Tools & MCP</div>
+                <h3 className="mt-1 text-sm font-semibold text-zinc-50">ツールとログインは別に管理されます</h3>
                 <p className="mt-2 text-xs leading-5 text-zinc-500">MCP servers and tool sources define callable actions. Account login, OAuth tokens, and access tokens remain in Accounts & Connections.</p>
                 <div className="mt-4 grid gap-2 text-[11px]">
                   <div className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2"><span className="text-zinc-300">Credential</span> → Accounts & Connections</div>
@@ -4139,7 +4113,7 @@ export function SettingsModalRenderer({
                   <div className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2"><span className="text-zinc-300">Readiness</span> → Computer & Automation</div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 p-4">
                 <div className="flex items-center gap-2 text-sm font-medium text-amber-100"><AlertTriangle className="h-4 w-4" /> Safety rules</div>
                 <ul className="mt-3 space-y-2 text-[11px] leading-5 text-amber-100/75">
                   <li>Remote WebSocket requires a separate App Server token or shared secret.</li>
@@ -4149,8 +4123,7 @@ export function SettingsModalRenderer({
               </div>
             </div>
 
-            <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
-              <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass("codex"))} />
+            <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/55">
               <div className="p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
@@ -4177,7 +4150,7 @@ export function SettingsModalRenderer({
                             key={option.value}
                             type="button"
                             onClick={() => setCodexAppServerDraft((current) => ({ ...current, transport: option.value, enabled: option.value === "off" ? false : current.enabled }))}
-                            className={cn("rounded-lg border px-3 py-2 text-left transition-colors", selected ? "border-cyan-500/60 bg-cyan-500/10" : "border-zinc-800 bg-black/20 hover:border-zinc-700")}
+                            className={cn("rounded-lg border px-3 py-2 text-left transition-colors", selected ? "border-zinc-500 bg-zinc-800/70" : "border-zinc-800 bg-black/20 hover:border-zinc-700")}
                           >
                             <div className="text-xs font-medium text-zinc-100">{option.label}</div>
                             <div className="mt-0.5 text-[11px] leading-4 text-zinc-500">{option.detail}</div>
@@ -4251,9 +4224,11 @@ export function SettingsModalRenderer({
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
           <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">{localizedCopy("Active profile", "使用中のプロファイル")}</div>
-          <div className="mt-2 break-words text-sm text-zinc-100">{isJapanese && activeProfile.label === "No active profile reported" ? "使用中のプロファイルは報告されていません" : activeProfile.label}</div>
+          <div className="mt-2 break-words text-sm text-zinc-100">{isJapanese && activeProfileLabel === "No active profile reported" ? "使用中のプロファイルは報告されていません" : activeProfileLabel}</div>
           <p className="mt-2 text-xs leading-5 text-zinc-500">
-            {isJapanese && activeProfile.label === "No active profile reported" ? "バックエンドが使用中のプロファイルを返していません。" : activeProfile.detail}
+            {activeProfileLabel === "No active profile reported"
+              ? localizedCopy("Profile-aware settings will show live state after the runtime reports a profile.", "バックエンドが使用中のプロファイルを返すと、プロファイル別の設定状態を表示します。")
+              : localizedCopy("Settings below apply to the profile reported by the runtime.", "以下の設定はruntimeが報告したプロファイルに適用されます。")}
           </p>
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
@@ -4294,7 +4269,8 @@ export function SettingsModalRenderer({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative h-[min(820px,calc(100vh-48px))] w-[min(1180px,calc(100vw-32px))] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            transition={{ type: "spring", stiffness: 360, damping: 32 }}
+            className="relative flex h-[min(860px,calc(100vh-32px))] w-[min(1240px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0d0f11] shadow-2xl shadow-black/60"
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div className="min-w-0">
@@ -4314,6 +4290,7 @@ export function SettingsModalRenderer({
                     pack: health?.pack ?? "defaultspack",
                   })}
                 </p>
+                <p className="mt-1 truncate text-[10px] text-zinc-600">Profile: {activeProfileLabel}</p>
               </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
@@ -4372,9 +4349,9 @@ export function SettingsModalRenderer({
                 </button>
               </div>
             </div>
-            <div className="grid flex-1 min-h-0 md:grid-cols-[220px_minmax(0,1fr)_260px]">
-              <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
-                <label className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+            <div className="grid min-h-0 flex-1 md:grid-cols-[220px_minmax(0,1fr)_260px]">
+              <nav className="overflow-x-auto border-b border-white/7 bg-black/20 p-3 md:overflow-y-auto md:border-b-0 md:border-r">
+                <label className="mb-3 flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 transition-colors focus-within:border-zinc-600 focus-within:text-zinc-300">
                   <Search size={14} />
                   <input
                     value={settingsSearch}
@@ -4393,7 +4370,7 @@ export function SettingsModalRenderer({
                     </button>
                   )}
                 </label>
-                <div className="flex gap-2 md:flex-col">
+                <div className="flex gap-1.5 md:flex-col">
                   {visibleSections.map((section) => {
                     const primaryFieldCount = section.fields.filter((field) => !field.advanced).length;
                     return (
@@ -4402,14 +4379,15 @@ export function SettingsModalRenderer({
                         type="button"
                         onClick={() => setActiveSectionId(section.id)}
                         className={cn(
-                          "flex-shrink-0 rounded-lg px-3 py-2 text-left text-xs transition-colors border",
+                          "group relative flex-shrink-0 overflow-hidden rounded-xl border px-3 py-2.5 text-left text-xs transition-colors",
                           activeSection?.id === section.id
-                            ? "border-zinc-600 bg-zinc-800 text-zinc-100"
-                            : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
+                            ? "border-zinc-700 bg-zinc-800 text-zinc-100"
+                            : "border-transparent text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-300",
                         )}
                       >
+                        {activeSection?.id === section.id && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-zinc-300" />}
                         <span className="block font-medium">{section.label}</span>
-                        <span className="mt-0.5 block text-[10px] text-zinc-600">{t(locale, "settings.controls", { count: primaryFieldCount })}</span>
+                        <span className="mt-1 block text-[10px] text-zinc-600 group-hover:text-zinc-500">{t(locale, "settings.controls", { count: primaryFieldCount })}</span>
                       </button>
                     );
                   })}
@@ -4421,7 +4399,7 @@ export function SettingsModalRenderer({
                 </div>
               </nav>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              <div className="flex-1 space-y-8 overflow-y-auto p-5 sm:p-7">
                 {pinnedSettingsPlacements.length > 0 && (
                   <section className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
@@ -4440,13 +4418,13 @@ export function SettingsModalRenderer({
                 )}
                 {activeSection && (
                   <section className="space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="sticky -top-7 rumi-layer-panel -mx-1 flex flex-wrap items-start justify-between gap-3 border-b border-white/7 bg-[#0e1012] px-1 py-4">
                       <div>
-                      <h3 className="text-sm font-medium text-zinc-100">{activeSection.label}</h3>
-                      {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
+                      <h3 className="text-xl font-semibold tracking-tight text-zinc-100">{activeSection.label}</h3>
+                      {activeSection.description && <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">{activeSection.description}</p>}
                       </div>
                       <span className="rounded-full border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[10px] text-zinc-500">
-                        {activeSection.order}
+                        {visiblePrimaryFields.length + visibleAdvancedFields.length} fields
                       </span>
                     </div>
                     {renderSectionPrelude(activeSection)}
@@ -4460,7 +4438,7 @@ export function SettingsModalRenderer({
                     {activeSection.id === "computer_automation" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
                     )}
-                    <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="grid gap-4 2xl:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}
                     </div>
                     {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (

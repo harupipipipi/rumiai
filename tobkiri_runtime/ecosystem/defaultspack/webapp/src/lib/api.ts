@@ -1777,6 +1777,22 @@ export type ComposerCommandExecuteResult = {
   selected_model?: string | ModelCommandCandidate | null;
 };
 
+export type TemplateComposerFieldOption = {
+  value: string;
+  label?: string;
+};
+
+export type TemplateComposerField = {
+  id: string;
+  type?: "select" | "text" | "textarea";
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  default?: string;
+  required?: boolean;
+  options?: TemplateComposerFieldOption[];
+};
+
 export type TemplateComposerInput = {
   id: string;
   label?: string;
@@ -1785,6 +1801,8 @@ export type TemplateComposerInput = {
   help?: string;
   accepted_modalities?: string[];
   feature_flags?: Record<string, boolean | string | number | null | undefined>;
+  fields?: TemplateComposerField[];
+  field_layout?: "popover_above" | "inline";
   modes?: ComposerCommandMode[];
   enabled?: boolean;
   component?: string;
