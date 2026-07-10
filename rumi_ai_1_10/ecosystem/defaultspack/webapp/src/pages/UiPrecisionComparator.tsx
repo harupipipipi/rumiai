@@ -1816,10 +1816,10 @@ function AppPreview({
         "min-w-0 max-w-full overflow-hidden rounded-lg border bg-zinc-950 text-zinc-100",
         isRaw ? "border-amber-400/30" : "border-emerald-400/30",
       )}
-      data-rumi-node={variant === "raw" ? "mimo-raw-preview" : "rumi-recursive-preview"}
+      data-rumi-node={variant === "raw" ? "raw-static-preview" : "structured-static-preview"}
       data-rumi-scenario={scenario.id}
       data-rumi-density={isRaw ? "over-compressed" : "recursive-detail"}
-      data-rumi-role="comparison-render"
+      data-rumi-role="static-demo-render"
     >
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -1827,7 +1827,7 @@ function AppPreview({
           <span className="truncate text-xs font-semibold text-zinc-100">{spec.shellTitle}</span>
         </div>
         <span className={cn("shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold", isRaw ? "border-red-500/30 text-red-100" : "border-emerald-500/30 text-emerald-100")}>
-          {isRaw ? "single pass" : `split ${scenario.leaves.length} leaves`}
+          {isRaw ? "static raw fixture" : `static structured fixture · ${scenario.leaves.length} leaves`}
         </span>
       </div>
       <PreviewToolbar spec={spec} variant={variant} />
@@ -1861,8 +1861,8 @@ function AppPreview({
 }
 
 function RenderPreviewPanel({ scenario, variant, viewport }: { scenario: Scenario; variant: PreviewVariant; viewport: PrecisionViewport }) {
-  const title = variant === "raw" ? "MiMo V2.5 Pro raw" : "Rumi recursive split";
-  const subtitle = variant === "raw" ? "single pass generation" : "leaf-by-leaf accepted composition";
+  const title = variant === "raw" ? "Illustrative raw layout" : "Illustrative structured layout";
+  const subtitle = "hand-authored static fixture; no model invocation";
   const summary = gateSummary(scenario.gates);
   const spec = variant === "raw" ? scenario.rawPreview : scenario.rumiPreview;
   return (
@@ -1873,7 +1873,7 @@ function RenderPreviewPanel({ scenario, variant, viewport }: { scenario: Scenari
           <p className="mt-1 truncate text-xs text-zinc-500">
             {scenario.label} / {subtitle}
           </p>
-          <p className="mt-1 truncate text-[11px] font-medium text-cyan-200">input: shared request brief only</p>
+          <p className="mt-1 text-[11px] font-medium leading-4 text-cyan-200">Static example data. Editing the brief does not regenerate this preview.</p>
         </div>
         <span
           className={cn(
@@ -1881,7 +1881,7 @@ function RenderPreviewPanel({ scenario, variant, viewport }: { scenario: Scenari
             variant === "raw" ? "border-amber-500/25 bg-amber-500/10 text-amber-100" : "border-emerald-500/25 bg-emerald-500/10 text-emerald-100",
           )}
         >
-          {variant === "raw" ? `${summary.rawFailed} hard fails` : `${summary.rumiFailed} hard fails`}
+          {variant === "raw" ? `${summary.rawFailed} illustrative flags` : `${summary.rumiFailed} illustrative flags`}
         </span>
       </div>
       <AppPreview scenario={scenario} spec={spec} variant={variant} viewport={viewport} />
@@ -1895,9 +1895,9 @@ function FairnessLedger({ request }: { request: string }) {
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100">Fairness lock</h2>
+          <h2 className="text-sm font-semibold text-zinc-100">Static scenario disclosure</h2>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            MiMoとRumiは同じrequest briefだけを読む。追加プロンプト、口出し、手修正は0です。
+            この画面は手作業で作成した説明用fixtureです。モデル実行、候補生成、採点、再現実験は行いません。
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2">
@@ -1906,11 +1906,11 @@ function FairnessLedger({ request }: { request: string }) {
             <p className="mt-1 truncate text-xs font-semibold text-cyan-100">{fingerprint}</p>
           </div>
           <div className="rounded-lg border border-zinc-800 bg-black/25 px-3 py-2">
-            <p className="text-[11px] font-semibold uppercase text-zinc-500">Human hints</p>
+            <p className="text-[11px] font-semibold uppercase text-zinc-500">Runtime calls</p>
             <p className="mt-1 text-xs font-semibold text-emerald-100">0</p>
           </div>
           <div className="rounded-lg border border-zinc-800 bg-black/25 px-3 py-2">
-            <p className="text-[11px] font-semibold uppercase text-zinc-500">Manual edits</p>
+            <p className="text-[11px] font-semibold uppercase text-zinc-500">Generated artifacts</p>
             <p className="mt-1 text-xs font-semibold text-emerald-100">0</p>
           </div>
         </div>
@@ -1933,26 +1933,26 @@ function InspectorPanel({
   return (
     <aside className="flex flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
       <div>
-        <h2 className="text-sm font-semibold text-zinc-100">Score inspector</h2>
+        <h2 className="text-sm font-semibold text-zinc-100">Illustrative layout inspector</h2>
         <p className="mt-1 text-xs leading-5 text-zinc-500">
           選択中: {selectedLeaf.label} / {scenario.label} / viewport {viewport}px
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
         <div className="rounded-lg border border-zinc-800 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase text-zinc-500">Raw output</p>
+          <p className="text-[11px] font-semibold uppercase text-zinc-500">Raw fixture</p>
           <p className="mt-1 text-lg font-semibold text-amber-100">{selectedLeaf.rawActions} actions</p>
           <p className="text-[11px] text-zinc-500">single prompt pressure</p>
         </div>
         <div className="rounded-lg border border-zinc-800 bg-black/25 p-3">
-          <p className="text-[11px] font-semibold uppercase text-zinc-500">Rumi output</p>
+          <p className="text-[11px] font-semibold uppercase text-zinc-500">Structured fixture</p>
           <p className="mt-1 text-lg font-semibold text-emerald-100">{selectedLeaf.rumiActions} actions</p>
           <p className="text-[11px] text-zinc-500">accepted leaf budget</p>
         </div>
       </div>
       <div className="space-y-3">
-        <ScoreBar label="MiMo raw compression" value={selectedLeaf.rawCompression} tone="raw" />
-        <ScoreBar label="Rumi split compression" value={selectedLeaf.rumiCompression} tone="rumi" />
+        <ScoreBar label="Illustrative raw density" value={selectedLeaf.rawCompression} tone="raw" />
+        <ScoreBar label="Illustrative structured density" value={selectedLeaf.rumiCompression} tone="rumi" />
         <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs leading-5 text-cyan-50">
           改善差分 {percent(compressionDelta(selectedLeaf))} / visible actions {selectedLeaf.rawActions}{" -> "}
           {selectedLeaf.rumiActions}
@@ -1960,7 +1960,7 @@ function InspectorPanel({
       </div>
       <div>
         <div className="mb-2 flex items-center justify-between text-xs font-semibold text-zinc-400">
-          <span>Hard gates</span>
+          <span>Illustrative review flags</span>
           <span>
             {summary.rawFailed}
             {" -> "}
@@ -1988,7 +1988,7 @@ function InspectorPanel({
       </div>
       <div className="rounded-lg border border-zinc-800 bg-black/25 p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold text-zinc-200">Viewport proof</span>
+          <span className="text-xs font-semibold text-zinc-200">Viewport note</span>
           <span className="text-[11px] text-zinc-500">{proof.label}</span>
         </div>
         <p className="text-[11px] leading-5 text-amber-100">Raw: {proof.rawIssues}</p>
@@ -2016,8 +2016,8 @@ function CandidateTournament({ selectedLeaf }: { selectedLeaf: LeafNode }) {
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100">Candidate tournament</h2>
-          <p className="mt-1 text-xs text-zinc-500">失敗候補をpatchせず、空ディレクトリから再生成します。</p>
+          <h2 className="text-sm font-semibold text-zinc-100">Candidate layout examples</h2>
+          <p className="mt-1 text-xs text-zinc-500">候補名・状態・数値は説明用の静的サンプルで、生成結果ではありません。</p>
         </div>
         <SplitSquareHorizontal size={18} className="text-cyan-300" aria-hidden="true" />
       </div>
@@ -2052,8 +2052,8 @@ function ProofStrip({
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100">Viewport proof strip</h2>
-          <p className="mt-1 text-xs text-zinc-500">390 / 768 / 1440px の証拠を同じ基準で比較します。</p>
+          <h2 className="text-sm font-semibold text-zinc-100">Viewport example strip</h2>
+          <p className="mt-1 text-xs text-zinc-500">390 / 768 / 1440px向けに用意した静的なレイアウト例を切り替えます。</p>
         </div>
         <LayoutDashboard size={18} className="text-cyan-300" aria-hidden="true" />
       </div>
@@ -2095,8 +2095,8 @@ function EvidenceTimeline({ scenario, selectedLeaf, viewport }: { scenario: Scen
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
       <div className="mb-3">
-        <h2 className="text-sm font-semibold text-zinc-100">Evidence timeline</h2>
-        <p className="mt-1 text-xs text-zinc-500">selectorが採用した理由をnode単位で残します。</p>
+        <h2 className="text-sm font-semibold text-zinc-100">Design rationale timeline</h2>
+        <p className="mt-1 text-xs text-zinc-500">このfixtureを作成した際の設計意図をnode単位で示します。</p>
       </div>
       <ol className="space-y-3">
         {[
@@ -2125,7 +2125,6 @@ export function UiPrecisionComparator() {
   const [request, setRequest] = useState(scenarioLibrary[0].request);
   const [selectedLeafId, setSelectedLeafId] = useState(scenarioLibrary[0].leaves[1].id);
   const [viewport, setViewport] = useState<PrecisionViewport>(1440);
-  const [runCount, setRunCount] = useState(1);
   const selectedLeaf = useMemo(
     () => scenario.leaves.find((leaf) => leaf.id === selectedLeafId) ?? scenario.leaves[0],
     [scenario, selectedLeafId],
@@ -2138,8 +2137,10 @@ export function UiPrecisionComparator() {
     setRequest(nextScenario.request);
   };
 
-  const rerun = () => {
-    setRunCount((value) => value + 1);
+  const resetDemo = () => {
+    setRequest(scenario.request);
+    setSelectedLeafId(scenario.leaves[1]?.id ?? scenario.leaves[0].id);
+    setViewport(1440);
   };
 
   return (
@@ -2151,14 +2152,14 @@ export function UiPrecisionComparator() {
               <SplitSquareHorizontal size={18} aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold text-zinc-50">Rumi UI Precision Comparator</h1>
-              <p className="truncate text-xs text-zinc-500">MiMo V2.5 Pro vs recursive split UI compiler / {scenario.label}</p>
+              <h1 className="truncate text-base font-semibold text-zinc-50">Rumi UI Design Scenario Demo</h1>
+              <p className="truncate text-xs text-zinc-500">Static illustrative fixtures / {scenario.label}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:justify-end">
             <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs font-semibold text-zinc-200">
               <CircleDashed size={14} className="text-emerald-300" aria-hidden="true" />
-              MiMo V2.5 Pro
+              Static fixtures
             </div>
             <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs font-semibold text-zinc-200">
               <MessageSquare size={14} className="text-cyan-300" aria-hidden="true" />
@@ -2181,17 +2182,21 @@ export function UiPrecisionComparator() {
             </div>
             <button
               type="button"
-              onClick={rerun}
+              onClick={resetDemo}
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-white"
             >
               <Play size={14} aria-hidden="true" />
-              Run comparison #{runCount}
+              Reset demo view
             </button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto grid max-w-[1680px] gap-4 px-4 py-4 xl:grid-cols-[315px_minmax(0,1fr)_360px]">
+        <section role="note" className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 xl:col-span-3">
+          <h2 className="text-sm font-semibold text-amber-100">Static demonstration data</h2>
+          <p className="mt-1 text-xs leading-5 text-amber-50/80">These previews, scores, candidates, flags, and timelines are hand-authored examples. This page does not invoke MiMo, Rumi, or any other model, and editing the brief does not recompute the fixtures.</p>
+        </section>
         <RequestPanel
           scenarios={scenarioLibrary}
           scenario={scenario}
@@ -2206,14 +2211,14 @@ export function UiPrecisionComparator() {
           <section className="rounded-xl border border-zinc-800 bg-zinc-950/82 p-4">
             <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
-                <h2 className="text-sm font-semibold text-zinc-100">{scenario.label} generation contract</h2>
+                <h2 className="text-sm font-semibold text-zinc-100">{scenario.label} static design contract</h2>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">{scenario.description}</p>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { icon: Search, label: "split", value: `${scenario.leaves.length} leaves` },
-                  { icon: SlidersHorizontal, label: "gates", value: `${gateSummary(scenario.gates).rawFailed}->0 fail` },
-                  { icon: Mail, label: "proof", value: `${viewport}px` },
+                  { icon: SlidersHorizontal, label: "flags", value: `${gateSummary(scenario.gates).rawFailed} → ${gateSummary(scenario.gates).rumiFailed}` },
+                  { icon: Mail, label: "example", value: `${viewport}px` },
                 ].map((item) => {
                   const Icon = item.icon;
                   return (
