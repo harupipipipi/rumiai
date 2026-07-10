@@ -6,7 +6,12 @@ const BROWSER_APPROVAL_TOKEN_PARAM_KEYS = [
   "browserApprovalToken",
 ] as const;
 
+const LEGACY_AUTHORITY_SETTLEMENT_PARAM_KEYS = [
+  "authority_approved",
+] as const;
+
 export function readBrowserApprovalTokenFromLocation(search = locationSearch()): string {
+  if (arguments.length === 0) clearLegacyAuthoritySettlementParamsFromLocation();
   try {
     const params = new URLSearchParams(search);
     for (const key of BROWSER_APPROVAL_TOKEN_PARAM_KEYS) {
@@ -38,19 +43,56 @@ export function browserAuthorityApprovalPath(requestId: string, browserApprovalT
   params.set("request_id", requestId);
   const token = browserApprovalToken.trim();
   if (token) params.set("browser_approval_token", token);
-  const normalizedReturnTo = returnTo.trim();
+  const normalizedReturnTo = stripLegacyAuthoritySettlementParamsFromPath(returnTo.trim());
   if (normalizedReturnTo) params.set("return_to", normalizedReturnTo);
   return `/approval?${params.toString()}`;
 }
 
-export function browserApprovalTokenizedPath(pathOrUrl: string, browserApprovalToken = readBrowserApprovalToken()): string {
-  const token = browserApprovalToken.trim();
-  if (!token) return pathOrUrl;
+export function stripLegacyAuthoritySettlementParamsFromPath(pathOrUrl: string): string {
+  if (!pathOrUrl) return pathOrUrl;
   try {
     const hasWindow = typeof window !== "undefined";
     const base = hasWindow ? window.location.origin : "http://127.0.0.1";
     const relativeSameOriginPath = pathOrUrl.startsWith("/") && !pathOrUrl.startsWith("//");
     const url = new URL(pathOrUrl, base);
+    for (const key of LEGACY_AUTHORITY_SETTLEMENT_PARAM_KEYS) {
+      url.searchParams.delete(key);
+    }
+    if ((hasWindow && url.origin === window.location.origin) || (!hasWindow && relativeSameOriginPath)) {
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+    return url.toString();
+  } catch {
+    return pathOrUrl;
+  }
+}
+
+export function clearLegacyAuthoritySettlementParamsFromLocation(): void {
+  try {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const key of LEGACY_AUTHORITY_SETTLEMENT_PARAM_KEYS) {
+      if (!url.searchParams.has(key)) continue;
+      url.searchParams.delete(key);
+      changed = true;
+    }
+    if (!changed) return;
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // Location/history may be unavailable in restricted webviews and tests.
+  }
+}
+
+export function browserApprovalTokenizedPath(pathOrUrl: string, browserApprovalToken = readBrowserApprovalToken()): string {
+  const sanitizedPathOrUrl = stripLegacyAuthoritySettlementParamsFromPath(pathOrUrl);
+  const token = browserApprovalToken.trim();
+  if (!token) return sanitizedPathOrUrl;
+  try {
+    const hasWindow = typeof window !== "undefined";
+    const base = hasWindow ? window.location.origin : "http://127.0.0.1";
+    const relativeSameOriginPath = sanitizedPathOrUrl.startsWith("/") && !sanitizedPathOrUrl.startsWith("//");
+    const url = new URL(sanitizedPathOrUrl, base);
     if (!url.searchParams.get("browser_approval_token")?.trim()) {
       url.searchParams.set("browser_approval_token", token);
     }
@@ -59,8 +101,8 @@ export function browserApprovalTokenizedPath(pathOrUrl: string, browserApprovalT
     }
     return url.toString();
   } catch {
-    const separator = pathOrUrl.includes("?") ? "&" : "?";
-    return `${pathOrUrl}${separator}browser_approval_token=${encodeURIComponent(token)}`;
+    const separator = sanitizedPathOrUrl.includes("?") ? "&" : "?";
+    return `${sanitizedPathOrUrl}${separator}browser_approval_token=${encodeURIComponent(token)}`;
   }
 }
 
