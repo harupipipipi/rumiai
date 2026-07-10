@@ -74,6 +74,43 @@ export type PlacementFilterOptions = {
 
 export const PINNED_PLACEMENTS_STORAGE_KEY = "rumi-ui-placements";
 
+const UNTRUSTED_PLACEMENT_CSP = [
+  "default-src 'none'",
+  "base-uri 'none'",
+  "connect-src 'none'",
+  "font-src data:",
+  "form-action 'none'",
+  "frame-src 'none'",
+  "img-src data: blob:",
+  "media-src data: blob:",
+  "object-src 'none'",
+  "script-src 'none'",
+  "style-src 'unsafe-inline'",
+].join("; ");
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+export function buildUntrustedPlacementHtmlDocument(html: string): string {
+  return [
+    "<!doctype html>",
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(UNTRUSTED_PLACEMENT_CSP)}">`,
+    '<meta name="referrer" content="no-referrer">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    "</head>",
+    `<body>${html}</body>`,
+    "</html>",
+  ].join("");
+}
+
 export function normalizePinnedPlacements(value: unknown): PinnedPlacement[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -158,14 +195,16 @@ export function resolvePlacementHtmlRendering(manifest: PlacementManifest): {
   kind: "component" | "template" | "html_iframe" | "unsupported";
   html?: string;
   sandbox?: string;
+  referrerPolicy?: "no-referrer";
 } {
   if (manifest.renderer.kind === "component") return { kind: "component" };
   if (manifest.renderer.kind === "template") return { kind: "template" };
   if (manifest.renderer.kind === "html") {
     return {
       kind: "html_iframe",
-      html: String(manifest.renderer.html ?? ""),
-      sandbox: "allow-same-origin",
+      html: buildUntrustedPlacementHtmlDocument(String(manifest.renderer.html ?? "")),
+      sandbox: "",
+      referrerPolicy: "no-referrer",
     };
   }
   return { kind: "unsupported" };
