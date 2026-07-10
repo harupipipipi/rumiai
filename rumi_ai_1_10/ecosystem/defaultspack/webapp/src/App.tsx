@@ -60,6 +60,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
@@ -2251,6 +2252,10 @@ function ChatApp() {
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const widgetContext = useMemo(
+    () => createWidgetConversationContext(activeConversationId),
+    [activeConversationId],
+  );
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
@@ -5427,6 +5432,7 @@ function ChatApp() {
   };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
+      widgetContext={widgetContext}
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
@@ -5675,6 +5681,7 @@ function ChatApp() {
               <div className="flex min-h-0 flex-1 p-1.5">
                 <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
                   <Renderers.toolPreviewPanel
+                    widgetContext={widgetContext}
                     previews={canvasPreviews}
                     showPreview
                     onClose={() => {
@@ -5863,6 +5870,7 @@ function ChatApp() {
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
+                widgetContext={widgetContext}
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
                 onClose={() => setShowPreview(false)}
@@ -5879,6 +5887,7 @@ function ChatApp() {
         {showRegion("right_sidebar") && (
           <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
+            widgetContext={widgetContext}
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}

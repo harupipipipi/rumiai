@@ -3168,7 +3168,7 @@ export const api = {
   },
 
   exportConversation(conversationId: string, format = "markdown") {
-    return request<{ content: string; format?: string }>(
+    return request<{ conversation_id: string; content: string; format: "markdown" | "json" }>(
       `/api/chat/conversations/${conversationId}/export`,
       {
         method: "POST",
