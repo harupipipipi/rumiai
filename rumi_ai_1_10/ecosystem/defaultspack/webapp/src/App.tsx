@@ -91,6 +91,11 @@ type ComposerCandidateMenuState = {
 
 type BackendConnectionState = "online" | "degraded" | "offline";
 
+type PendingMentionAttachmentRequest = {
+  generation: number;
+  token: number;
+};
+
 const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
   "ambient.routing.mode": "mode",
   "ambient.routing.model": "model",
@@ -2481,6 +2486,7 @@ function ChatApp() {
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [pendingMentionAttachmentPaths, setPendingMentionAttachmentPaths] = useState<string[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
   const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
@@ -2494,6 +2500,29 @@ function ChatApp() {
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
+  const authorityApprovalWindowRequestRef = useRef<string | null>(null);
+  const dismissedComposerMentionToolIdsRef = useRef<Set<string>>(new Set());
+  const composerDraftGenerationRef = useRef(0);
+  const mentionAttachmentTokenRef = useRef(0);
+  const pendingMentionAttachmentRequestsRef = useRef<
+    Map<string, PendingMentionAttachmentRequest>
+  >(new Map());
+
+  const syncPendingMentionAttachmentPaths = () => {
+    setPendingMentionAttachmentPaths([
+      ...pendingMentionAttachmentRequestsRef.current.keys(),
+    ]);
+  };
+
+  const cancelPendingMentionAttachments = (path?: string) => {
+    if (path) {
+      pendingMentionAttachmentRequestsRef.current.delete(path);
+    } else {
+      composerDraftGenerationRef.current += 1;
+      pendingMentionAttachmentRequestsRef.current.clear();
+    }
+    syncPendingMentionAttachmentPaths();
+  };
 
   useEffect(() => {
     if (mode === "chat") {
@@ -3557,8 +3586,10 @@ function ChatApp() {
     setPreviews([]);
     setError(null);
     setIsGenerating(false);
+    cancelPendingMentionAttachments();
     setAttachedFiles([]);
     setDroppedWidgets([]);
+    dismissedComposerMentionToolIdsRef.current.clear();
     replaceChatIdInUrl(null, false);
   };
 
@@ -3991,6 +4022,14 @@ function ChatApp() {
       setError(`${item.label || item.id} は機能と接続の権限設定でブロックされています。`);
       return;
     }
+    const semanticMentionToolIds = new Set(
+      composerMentionToolIdsFromWidgets(droppedWidgets),
+    );
+    if (selectedToolIdSet.has(item.id) && semanticMentionToolIds.has(item.id)) {
+      dismissedComposerMentionToolIdsRef.current.add(item.id);
+    } else if (!selectedToolIdSet.has(item.id)) {
+      dismissedComposerMentionToolIdsRef.current.delete(item.id);
+    }
     toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (current.includes(item.id)) {
@@ -4070,8 +4109,10 @@ function ChatApp() {
         return;
       case "clear_composer_state":
         setInput("");
+        cancelPendingMentionAttachments();
         setAttachedFiles([]);
         setDroppedWidgets([]);
+        dismissedComposerMentionToolIdsRef.current.clear();
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -4281,6 +4322,7 @@ function ChatApp() {
   };
 
   const handleComposerInputChange = (value: string) => {
+    if (value !== input) dismissedComposerMentionToolIdsRef.current.clear();
     setInput(value);
     if (isGenerating || isConversationPending) {
       setComposerCandidateMenu(null);
@@ -4293,6 +4335,7 @@ function ChatApp() {
   };
 
   const handleModeChange = (newMode: AppMode, updateRoute = true) => {
+    if (newMode !== "coding") cancelPendingMentionAttachments();
     setMode(newMode);
     if (!updateRoute) return;
     if (newMode === "coding" && window.location.pathname !== "/coding") {
@@ -4378,22 +4421,80 @@ function ChatApp() {
   };
 
   const handleAtFileAttach = (path: string) => {
-    if (mode !== "coding") return;
-    if (hasWorkspaceAttachment(attachedFiles, path)) return;
+    const normalizedPath = path.trim();
+    if (mode !== "coding" || !normalizedPath) return;
+    if (hasWorkspaceAttachment(attachedFiles, normalizedPath)) return;
+    if (pendingMentionAttachmentRequestsRef.current.has(normalizedPath)) return;
 
-    void api.readWorkspaceFile(path, { workspace_id: effectiveWorkspaceId })
+    const request: PendingMentionAttachmentRequest = {
+      generation: composerDraftGenerationRef.current,
+      token: mentionAttachmentTokenRef.current + 1,
+    };
+    mentionAttachmentTokenRef.current = request.token;
+    pendingMentionAttachmentRequestsRef.current.set(normalizedPath, request);
+    syncPendingMentionAttachmentPaths();
+
+    void api.readWorkspaceFile(normalizedPath, {
+      workspace_id: effectiveWorkspaceId,
+    })
       .then((result) => {
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (
+          !currentRequest
+          || currentRequest.token !== request.token
+          || currentRequest.generation !== request.generation
+          || composerDraftGenerationRef.current !== request.generation
+        ) return;
         setAttachedFiles((prev) => {
-          if (hasWorkspaceAttachment(prev, path)) return prev;
-          return [...prev, workspaceFileToAttachment(result.path || path, result.content, result.size)];
+          if (hasWorkspaceAttachment(prev, normalizedPath)) return prev;
+          return [
+            ...prev,
+            workspaceFileToAttachment(
+              result.path || normalizedPath,
+              result.content,
+              result.size,
+            ),
+          ];
         });
       })
       .catch((readError) => {
-        setError(readError instanceof Error ? readError.message : "workspace file の添付に失敗しました。");
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (currentRequest?.token !== request.token) return;
+        setError(
+          readError instanceof Error
+            ? readError.message
+            : "workspace file の添付に失敗しました。",
+        );
+      })
+      .finally(() => {
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (currentRequest?.token !== request.token) return;
+        pendingMentionAttachmentRequestsRef.current.delete(normalizedPath);
+        syncPendingMentionAttachmentPaths();
       });
   };
 
+  const handlePendingMentionAttachmentRemove = (path: string) => {
+    cancelPendingMentionAttachments(path);
+    const reconciled = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPaths(attachedFiles),
+      droppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds,
+      text: input,
+    });
+    setDroppedWidgets(reconciled.droppedWidgets);
+    setStoredSelectedToolIds(reconciled.selectedToolIds);
+  };
+
   const handleCodingWorkspaceSelect = (workspaceId: string) => {
+    cancelPendingMentionAttachments();
     handleModeChange("coding");
     setSelectedCodingWorkspaceId(workspaceId);
     void api.selectCodingWorkspace(workspaceId)
@@ -4462,6 +4563,9 @@ function ChatApp() {
 
   const handleDropWidget = (widget: DroppedWidget) => {
     const ownedWidget = withComposerMentionSelectionOwnership(widget, selectedToolIds);
+    for (const toolId of composerMentionToolIdsFromWidgets([ownedWidget])) {
+      dismissedComposerMentionToolIdsRef.current.delete(toolId);
+    }
     setDroppedWidgets((prev) => {
       if (prev.some((w) => w.id === ownedWidget.id)) return prev;
       return [...prev, { ...ownedWidget, enabled: ownedWidget.enabled ?? true }];
@@ -4503,12 +4607,31 @@ function ChatApp() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
+    const semanticMentionToolIds = new Set(
+      composerMentionToolIdsFromWidgets(droppedWidgets),
+    );
+    for (const toolId of requestedIds) {
+      if (enabled) dismissedComposerMentionToolIdsRef.current.delete(toolId);
+      else if (semanticMentionToolIds.has(toolId)) {
+        dismissedComposerMentionToolIdsRef.current.add(toolId);
+      }
+    }
     toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (enabled) return [...new Set([...current, ...requestedIds])];
       const requestedIdSet = new Set(requestedIds);
       return current.filter((toolId) => !requestedIdSet.has(toolId));
     });
+  };
+
+  const handleToolSelectionTargetRemove = (target: ToolTarget) => {
+    if (
+      target.kind === "tool"
+      && composerMentionToolIdsFromWidgets(droppedWidgets).includes(target.id)
+    ) {
+      dismissedComposerMentionToolIdsRef.current.add(target.id);
+    }
+    toolSelectionController.removeTarget(target);
   };
 
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
@@ -5088,6 +5211,10 @@ function ChatApp() {
       setError("This imported conversation is read-only. Import a continue copy to send messages.");
       return;
     }
+    if (pendingMentionAttachmentRequestsRef.current.size > 0) {
+      setError("workspace file の読み込みが終わるまでお待ちください。");
+      return;
+    }
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
     const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
@@ -5118,7 +5245,8 @@ function ChatApp() {
     const selectedToolIdsForSubmit = reconciledDraft.selectedToolIds;
     const semanticMentionToolIds = new Set(composerMentionToolIdsFromWidgets(requestedDroppedWidgets));
     const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions)
-      .filter((toolId) => !semanticMentionToolIds.has(toolId));
+      .filter((toolId) => !semanticMentionToolIds.has(toolId))
+      .filter((toolId) => !dismissedComposerMentionToolIdsRef.current.has(toolId));
     const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
       toolIds: selectedToolIdsForSubmit,
@@ -5140,6 +5268,7 @@ function ChatApp() {
           },
         });
         setInput("");
+        cancelPendingMentionAttachments();
         setAttachedFiles([]);
         setDroppedWidgets([]);
       } catch (previewError) {
@@ -5148,6 +5277,7 @@ function ChatApp() {
       return;
     }
     setIsGenerating(true);
+    cancelPendingMentionAttachments();
     setError(null);
     if (wasNewConversation) {
       setIsNewChatLaunching(true);
@@ -5616,6 +5746,7 @@ function ChatApp() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
+      dismissedComposerMentionToolIdsRef.current.clear();
       toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
@@ -5665,6 +5796,7 @@ function ChatApp() {
             ? "応答ストリームが途中で切れたため、ここまで届いた内容を保護して着地しました。"
             : "応答ストリームが途中で切れました。画面は保護したまま、再接続の余地を残しています。",
         );
+        dismissedComposerMentionToolIdsRef.current.clear();
         setIsNewChatLaunching(false);
         return;
       }
@@ -5873,6 +6005,7 @@ function ChatApp() {
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
+      pendingMentionAttachmentPaths={pendingMentionAttachmentPaths}
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
@@ -5887,7 +6020,7 @@ function ChatApp() {
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onActionApprovalModeChange={handleActionApprovalModeChange}
-      onToolSelectionTargetRemove={toolSelectionController.removeTarget}
+      onToolSelectionTargetRemove={handleToolSelectionTargetRemove}
       onToolSelectionReviewApprove={handleToolReviewApprove}
       onToolSelectionReviewEdit={handleToolReviewEdit}
       onToolSelectionReviewNoTools={handleToolReviewNoTools}
@@ -5907,6 +6040,7 @@ function ChatApp() {
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
+      onPendingMentionAttachmentRemove={handlePendingMentionAttachmentRemove}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
       onWidgetAction={handleWidgetAction}

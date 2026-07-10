@@ -25,6 +25,7 @@ import {
   activeMentionAtCursor,
   codePointIndexToUtf16Offset,
   extractMentionTokens,
+  hasUnescapedMentionSyntax,
   utf16OffsetToCodePointIndex,
 } from "./mentionContract";
 import type { ComposerExtensionItem } from "../renderers/types";
@@ -259,6 +260,26 @@ test("semantic mention reconciliation removes escaped and deselected tool state"
     droppedWidgets: [ownedWidget],
     selectedToolIds: [],
     text: "Use @Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+});
+
+test("semantic mention matching requires a complete token boundary", () => {
+  assert.equal(hasUnescapedMentionSyntax("Use @GitHub", "@Git"), false);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git/foo", "@Git"), false);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git.", "@Git"), true);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git, please", "@Git"), true);
+
+  const widget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget({ id: "git", label: "Git", category: "tool" }),
+    [],
+  );
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [widget],
+    selectedToolIds: ["git"],
+    text: "Use @GitHub",
   }), {
     droppedWidgets: [],
     selectedToolIds: [],

@@ -703,6 +703,36 @@ function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: stri
   );
 }
 
+function PendingFileChip({
+  path,
+  onRemove,
+}: {
+  path: string;
+  onRemove?: (path: string) => void;
+}) {
+  const name = path.split("/").filter(Boolean).pop() || path;
+  return (
+    <span
+      role="status"
+      aria-label={`${name} を読み込み中`}
+      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[11px] text-blue-100"
+    >
+      <Loader2 size={12} className="flex-shrink-0 animate-spin" />
+      <span className="truncate">{name} を読み込み中</span>
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={`${name} の読み込みを取り消す`}
+          onClick={() => onRemove(path)}
+          className="ml-0.5 flex-shrink-0 text-blue-200/60 hover:text-blue-100"
+        >
+          <X size={10} />
+        </button>
+      )}
+    </span>
+  );
+}
+
 function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (id: string) => void }) {
   const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
   const lineCount = file.content ? file.content.split(/\r\n|\r|\n/).length : null;
@@ -1457,6 +1487,7 @@ export function ComposerRenderer({
   codingWorkspaces = [],
   selectedCodingWorkspaceId = null,
   attachedFiles = [],
+  pendingMentionAttachmentPaths = [],
   droppedWidgets = [],
   selectedToolIds = [],
   actionApprovalMode = "ask",
@@ -1491,6 +1522,7 @@ export function ComposerRenderer({
   onModeChange,
   onFileAttach,
   onAtFileAttach,
+  onPendingMentionAttachmentRemove,
   onFileRemove,
   onDropWidget,
   onWidgetAction,
@@ -2091,6 +2123,10 @@ export function ComposerRenderer({
         }
         return;
       }
+      if (pendingMentionAttachmentPaths.length > 0) {
+        event.preventDefault();
+        return;
+      }
       if (needsApiKey(selectedProfile)) {
         event.preventDefault();
         if (selectedProfile) setApiKeyPromptProfile(selectedProfile);
@@ -2098,18 +2134,19 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, selectedProfile, steerBusy],
+    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy],
   );
 
   const handleSendButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) return;
+      if (!isGenerating && pendingMentionAttachmentPaths.length > 0) return;
       if (!isGenerating && !input.trim() && attachedFiles.length === 0) return;
       if (isGenerating && !input.trim()) return;
       submitPointerHandledRef.current = true;
       handleSubmitWithApiKeyGuard(event);
     },
-    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating],
+    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating, pendingMentionAttachmentPaths.length],
   );
 
   const handleSendButtonClick = useCallback(
@@ -2551,11 +2588,22 @@ export function ComposerRenderer({
         <button
           type="button"
           tabIndex={chromeButtonTabIndex}
-          aria-label={isGenerating ? (input.trim() ? "追加指示を送る" : "生成を停止") : "メッセージを送信"}
-          disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
+          aria-label={isGenerating
+            ? (input.trim() ? "追加指示を送る" : "生成を停止")
+            : pendingMentionAttachmentPaths.length > 0
+              ? "ファイルを読み込み中"
+              : "メッセージを送信"}
+          disabled={!isGenerating && (
+            pendingMentionAttachmentPaths.length > 0
+            || (!input.trim() && attachedFiles.length === 0)
+          )}
           onPointerDown={handleSendButtonPointerDown}
           onClick={handleSendButtonClick}
-	          title={isGenerating ? (input.trim() ? "追加指示を送る" : "停止") : "送信"}
+          title={isGenerating
+            ? (input.trim() ? "追加指示を送る" : "停止")
+            : pendingMentionAttachmentPaths.length > 0
+              ? "ファイルを読み込み中"
+              : "送信"}
           className={`rumi-send-button h-11 w-11 flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
             isGenerating
               ? "bg-zinc-200 text-black hover:bg-white shadow-sm transition-colors"
@@ -2870,8 +2918,11 @@ export function ComposerRenderer({
             </>
           )}
 
-          {isNewConversation && attachedFiles.length > 0 && (
+          {isNewConversation && (attachedFiles.length > 0 || pendingMentionAttachmentPaths.length > 0) && (
             <div className="flex gap-4 overflow-x-auto px-6 pb-2 pt-5">
+              {pendingMentionAttachmentPaths.map((path) => (
+                <PendingFileChip key={path} path={path} onRemove={onPendingMentionAttachmentRemove} />
+              ))}
               {attachedFiles.map((file) => (
                 <FilePreviewCard key={file.id} file={file} onRemove={onFileRemove} />
               ))}
@@ -3070,8 +3121,11 @@ export function ComposerRenderer({
             }}
           />
 
-          {((!isNewConversation && attachedFiles.length > 0) || visibleComposerWidgets.length > 0) && (
+          {((!isNewConversation && (attachedFiles.length > 0 || pendingMentionAttachmentPaths.length > 0)) || visibleComposerWidgets.length > 0) && (
             <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
+              {!isNewConversation && pendingMentionAttachmentPaths.map((path) => (
+                <PendingFileChip key={path} path={path} onRemove={onPendingMentionAttachmentRemove} />
+              ))}
               {!isNewConversation && attachedFiles.map((file) => (
                 <FileChip key={file.id} file={file} onRemove={onFileRemove} />
               ))}
