@@ -728,3 +728,298 @@ test('Flows delete confirms fresh absence and ignores the late mount list', asyn
   assert.deepEqual(useAppStore.getState().flows, []);
   assert.deepEqual(feedback, [{message: 'Flow deleted', type: 'success'}]);
 });
+
+test('Flows ignores an aborted initial detail after a failed update on the new selection', async () => {
+  const staleInitialDetail = deferred<Response>();
+  const secondFlow: Flow = {
+    id: 'second-flow',
+    name: 'second-flow.flow.yaml',
+    content: [
+      'flow_id: second-flow',
+      'name: second-flow.flow.yaml',
+      'base_pack: defaultspack',
+      'steps: []',
+      '',
+    ].join('\n'),
+  };
+  let initialSignal: AbortSignal | null | undefined;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      if (method === 'PUT') return Promise.reject(new Error('update rejected'));
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([existingFlow, secondFlow])));
+      }
+      if (path.endsWith(`/${existingFlow.id}`)) {
+        initialSignal = init?.signal;
+        return staleInitialDetail.promise;
+      }
+      return Promise.resolve(successfulResponse(apiFlowDetail(secondFlow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}, {...secondFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText(secondFlow.name));
+    await settlePromises();
+  });
+  assert.equal(initialSignal?.aborted, true);
+  assert.equal(container?.querySelector('h2')?.textContent, secondFlow.name);
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+  assert.deepEqual(feedback, [{message: 'update rejected', type: 'error'}]);
+
+  await act(async () => {
+    staleInitialDetail.reject(new Error('late detail rejected'));
+    await settlePromises();
+  });
+  assert.equal(container?.querySelector('h2')?.textContent, secondFlow.name);
+  assert.match(container?.textContent ?? '', /flow_id:\s*second-flow/);
+  assert.deepEqual(feedback, [{message: 'update rejected', type: 'error'}]);
+});
+
+test('Flows ignores an aborted initial detail after a confirmed update on the new selection', async () => {
+  const staleInitialDetail = deferred<Response>();
+  const secondFlow: Flow = {
+    id: 'confirmed-second-flow',
+    name: 'confirmed-second-flow.flow.yaml',
+    content: [
+      'flow_id: confirmed-second-flow',
+      'name: confirmed-second-flow.flow.yaml',
+      'base_pack: defaultspack',
+      'steps: []',
+      '',
+    ].join('\n'),
+  };
+  let detailCalls = 0;
+  let initialSignal: AbortSignal | null | undefined;
+  let updatedContent = '';
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      if (method === 'PUT') {
+        updatedContent = JSON.parse(String(init?.body)).yaml_content as string;
+        return Promise.resolve(successfulResponse({
+          filename: secondFlow.name,
+          flow_id: secondFlow.id,
+          updated: true,
+        }));
+      }
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([existingFlow, secondFlow])));
+      }
+      if (path.endsWith(`/${existingFlow.id}`)) {
+        initialSignal = init?.signal;
+        return staleInitialDetail.promise;
+      }
+      detailCalls += 1;
+      return Promise.resolve(successfulResponse(apiFlowDetail(
+        secondFlow,
+        detailCalls === 1 ? secondFlow.content : updatedContent,
+      )));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}, {...secondFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText(secondFlow.name));
+    await settlePromises();
+  });
+  assert.equal(initialSignal?.aborted, true);
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+  assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
+
+  await act(async () => {
+    staleInitialDetail.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    await settlePromises();
+  });
+  assert.equal(container?.querySelector('h2')?.textContent, secondFlow.name);
+  assert.match(container?.textContent ?? '', /flow_id:\s*confirmed-second-flow/);
+  assert.deepEqual(feedback, [{message: 'Flow saved', type: 'success'}]);
+});
+
+test('Flows blocks mutations and canvas interaction while initial detail is loading', async () => {
+  const initialDetail = deferred<Response>();
+  const requests: string[] = [];
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      requests.push(`${method} ${path}`);
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([existingFlow])));
+      }
+      return initialDetail.promise;
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}]});
+
+  await renderPage(<FlowsPage />);
+  assert.equal(buttonByText('Save').disabled, true);
+  assert.equal(buttonByText('Delete').disabled, true);
+  assert.equal(buttonByText('Execute').disabled, true);
+  assert.ok(container?.querySelector('.pointer-events-auto'));
+  assert.deepEqual(requests, [
+    'GET /api/panel/flows',
+    `GET /api/panel/flows/${existingFlow.id}`,
+  ]);
+
+  await act(async () => {
+    click(buttonByText('Save'));
+    click(buttonByText('Delete'));
+    click(buttonByText('Execute'));
+    await settlePromises();
+  });
+  assert.equal(requests.some((request) => request.startsWith('PUT ')), false);
+  assert.equal(requests.some((request) => request.startsWith('DELETE ')), false);
+  assert.deepEqual(feedback, []);
+
+  await act(async () => {
+    initialDetail.resolve(successfulResponse(apiFlowDetail(existingFlow)));
+    await settlePromises();
+  });
+  assert.equal(buttonByText('Save').disabled, false);
+  assert.equal(buttonByText('Delete').disabled, false);
+  assert.equal(buttonByText('Execute').disabled, false);
+});
+
+test('Flows create completion preserves a newer user selection', async () => {
+  const createResponse = deferred<Response>();
+  const secondFlow: Flow = {
+    id: 'selection-after-create',
+    name: 'selection-after-create.flow.yaml',
+    content: 'flow_id: selection-after-create\nsteps: []\n',
+  };
+  const createdFlow: Flow = {
+    id: 'created-in-background',
+    name: 'created-in-background.flow.yaml',
+    content: '',
+  };
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      if (method === 'POST') return createResponse.promise;
+      if (path === '/api/panel/flows') {
+        return Promise.resolve(successfulResponse(flowList([
+          existingFlow,
+          secondFlow,
+          createdFlow,
+        ])));
+      }
+      const flow = path.endsWith(`/${secondFlow.id}`) ? secondFlow : existingFlow;
+      return Promise.resolve(successfulResponse(apiFlowDetail(flow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}, {...secondFlow}]});
+
+  await renderPage(<FlowsPage />);
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText('New Flow'));
+    await settlePromises();
+  });
+  const nameInput = container?.querySelector<HTMLInputElement>(
+    'input[placeholder^="Flow name"]',
+  );
+  assert.ok(nameInput);
+  await act(async () => {
+    changeInput(nameInput, 'created-in-background');
+    click(buttonByText('Save'));
+    await settlePromises();
+  });
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText(secondFlow.name));
+    await settlePromises();
+  });
+
+  await act(async () => {
+    createResponse.resolve(successfulResponse({
+      created: true,
+      filename: createdFlow.name,
+      flow_id: createdFlow.id,
+    }));
+    await settlePromises();
+  });
+  assert.equal(container?.querySelector('h2')?.textContent, secondFlow.name);
+  assert.match(container?.textContent ?? '', /flow_id:\s*selection-after-create/);
+  assert.deepEqual(feedback, [{message: 'Flow created', type: 'success'}]);
+});
+
+test('Flows delete completion preserves a newer user selection and graph', async () => {
+  const deleteResponse = deferred<Response>();
+  const secondFlow: Flow = {
+    id: 'selection-after-delete',
+    name: 'selection-after-delete.flow.yaml',
+    content: 'flow_id: selection-after-delete\nsteps: []\n',
+  };
+  let listCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET';
+      const path = String(input);
+      if (method === 'DELETE') return deleteResponse.promise;
+      if (path === '/api/panel/flows') {
+        listCalls += 1;
+        return Promise.resolve(successfulResponse(flowList(
+          listCalls === 1 ? [existingFlow, secondFlow] : [secondFlow],
+        )));
+      }
+      const flow = path.endsWith(`/${secondFlow.id}`) ? secondFlow : existingFlow;
+      return Promise.resolve(successfulResponse(apiFlowDetail(flow)));
+    },
+    writable: true,
+  });
+  useAppStore.setState({flows: [{...existingFlow}, {...secondFlow}]});
+
+  await renderPage(
+    <>
+      <FlowsPage />
+      <DialogContainerPage />
+    </>,
+  );
+  await act(async () => {
+    click(buttonByText('Delete'));
+    await settlePromises();
+  });
+  await act(async () => {
+    click(buttonsByText('Delete')[1]);
+    await settlePromises();
+  });
+  await openFlowLibrary();
+  await act(async () => {
+    click(buttonByText(secondFlow.name));
+    await settlePromises();
+  });
+
+  await act(async () => {
+    deleteResponse.resolve(successfulResponse({deleted: true, flow_id: existingFlow.id}));
+    await settlePromises();
+  });
+  assert.equal(container?.querySelector('h2')?.textContent, secondFlow.name);
+  assert.match(container?.textContent ?? '', /flow_id:\s*selection-after-delete/);
+  assert.deepEqual(feedback, [{message: 'Flow deleted', type: 'success'}]);
+});

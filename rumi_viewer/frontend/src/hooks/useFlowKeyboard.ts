@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Node, ReactFlowInstance } from '@xyflow/react';
 
 interface UseFlowKeyboardParams {
+  disabled?: boolean;
   nodes: Node[];
   setNodes: (updater: Node[] | ((nodes: Node[]) => Node[])) => void;
   saveHistory: () => void;
@@ -13,6 +14,7 @@ interface UseFlowKeyboardParams {
 }
 
 export function useFlowKeyboard({
+  disabled = false,
   nodes,
   setNodes,
   saveHistory,
@@ -26,6 +28,7 @@ export function useFlowKeyboard({
   const copiedNodesRef = useRef<Node[]>([]);
 
   // Refs for stable closures (H-1)
+  const disabledRef = useRef(disabled);
   const nodesRef = useRef(nodes);
   const saveHistoryRef = useRef(saveHistory);
   const undoRef = useRef(undo);
@@ -35,6 +38,7 @@ export function useFlowKeyboard({
   const setNodesRef = useRef(setNodes);
   const setMenuPosRef = useRef(setMenuPos);
 
+  disabledRef.current = disabled;
   nodesRef.current = nodes;
   saveHistoryRef.current = saveHistory;
   undoRef.current = undo;
@@ -47,6 +51,7 @@ export function useFlowKeyboard({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (disabledRef.current) return;
 
       pressedKeys.current.add(e.key.toLowerCase());
 

@@ -105,8 +105,14 @@ function FlowEditorInner() {
   const stepRailRef = useRef<HTMLDivElement>(null);
   const packDropdownRef = useRef<HTMLDivElement>(null);
   const flowRequestIdRef = useRef(0);
+  const flowDetailAbortRef = useRef<AbortController | null>(null);
+  const editorIntentGenerationRef = useRef(0);
   const flowsRef = useRef(flows);
+  const selectedFlowIdRef = useRef(selectedFlowId);
+  const isCreatingRef = useRef(isCreating);
   flowsRef.current = flows;
+  selectedFlowIdRef.current = selectedFlowId;
+  isCreatingRef.current = isCreating;
 
   const selectedFlow = flows.find((flow) => flow.id === selectedFlowId);
   const packs = useMemo(() => ['all', ...Array.from(new Set(availableSteps.map((step) => step.pack)))], [availableSteps]);
@@ -114,10 +120,14 @@ function FlowEditorInner() {
 
   const history = useFlowHistory(nodes, edges, setNodes, setEdges);
   const execution = useFlowExecution(nodes, edges, setNodes);
+  const flowInteractionLocked = (
+    flowLoading || isSaving || isDeleting || execution.isExecuting
+  );
 
   const menuPosRef = useRef<((pos: { x: number; y: number } | null) => void) | null>(null);
 
   const keyboard = useFlowKeyboard({
+    disabled: flowInteractionLocked,
     nodes,
     setNodes,
     saveHistory: history.saveHistory,
@@ -196,11 +206,14 @@ function FlowEditorInner() {
     if (!selectedFlowId || isCreating) return;
     const requestId = flowRequestIdRef.current + 1;
     flowRequestIdRef.current = requestId;
+    const abortController = new AbortController();
+    flowDetailAbortRef.current?.abort();
+    flowDetailAbortRef.current = abortController;
     let cancelled = false;
     const fallbackFlow = flowsRef.current.find((flow) => flow.id === selectedFlowId);
 
     setFlowLoading(true);
-    fetchFlowDetail(selectedFlowId)
+    fetchFlowDetail(selectedFlowId, {signal: abortController.signal})
       .then((detail) => {
         if (cancelled || flowRequestIdRef.current !== requestId) return;
         const flow = transformFlowDetail(detail);
@@ -231,21 +244,40 @@ function FlowEditorInner() {
       })
       .finally(() => {
         if (cancelled || flowRequestIdRef.current !== requestId) return;
+        if (flowDetailAbortRef.current === abortController) {
+          flowDetailAbortRef.current = null;
+        }
         setFlowLoading(false);
       });
 
     return () => {
       cancelled = true;
+      abortController.abort();
+      if (flowDetailAbortRef.current === abortController) {
+        flowDetailAbortRef.current = null;
+      }
     };
   }, [addToast, execution.clearResult, isCreating, selectedFlowId, setEdges, setNodes, editorHook.setSelectedNode]);
 
+  const invalidateFlowDetailRequest = () => {
+    flowRequestIdRef.current += 1;
+    flowDetailAbortRef.current?.abort();
+    flowDetailAbortRef.current = null;
+    setFlowLoading(false);
+  };
+
   const handleSelectFlow = (id: string) => {
+    if (id === selectedFlowId && !isCreating) return;
+    editorIntentGenerationRef.current += 1;
+    invalidateFlowDetailRequest();
     setSelectedFlowId(id);
     setIsCreating(false);
     setIsFlowLibraryOpen(false);
   };
 
   const handleCreateNew = () => {
+    editorIntentGenerationRef.current += 1;
+    invalidateFlowDetailRequest();
     setIsCreating(true);
     setSelectedFlowId(null);
     setIsFlowLibraryOpen(false);
@@ -259,10 +291,10 @@ function FlowEditorInner() {
   };
 
   const generatedYaml = nodesToYaml(nodes, edges, flowMeta);
-  const isExecuteDisabled = execution.isExecuting || (!selectedFlowId && !isCreating);
+  const isExecuteDisabled = flowInteractionLocked || (!selectedFlowId && !isCreating);
 
   const handleSave = async () => {
-    if (isSaving) return;
+    if (isSaving || flowLoading) return;
     if (isCreating) {
       if (!newFlowName.trim()) {
         addToast(t('flows.name_required'), 'error');
@@ -275,17 +307,24 @@ function FlowEditorInner() {
         flowId,
         name: fileName,
       });
+      const editorIntentGeneration = editorIntentGenerationRef.current;
+      invalidateFlowDetailRequest();
       setIsSaving(true);
       try {
         await runConfirmedMutation(
           () => addFlow({ id: flowId, name: fileName, content: yamlContent }),
           () => {
             const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
-            if (created) {
+            if (
+              created
+              && editorIntentGenerationRef.current === editorIntentGeneration
+              && isCreatingRef.current
+              && selectedFlowIdRef.current === null
+            ) {
               setSelectedFlowId(created.id);
+              setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
+              setIsCreating(false);
             }
-            setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
-            setIsCreating(false);
             addToast(t('flows.created'), 'success');
           },
         );
@@ -296,6 +335,7 @@ function FlowEditorInner() {
     }
 
     if (selectedFlowId) {
+      invalidateFlowDetailRequest();
       setIsSaving(true);
       try {
         await runConfirmedMutation(
@@ -309,23 +349,27 @@ function FlowEditorInner() {
   };
 
   const handleDelete = () => {
-    if (!selectedFlowId) return;
+    if (!selectedFlowId || flowLoading) return;
+    const flowIdToDelete = selectedFlowId;
     showDialog({
       title: t('flows.delete_title'),
       message: t('flows.delete_message'),
       confirmText: t('flows.delete_confirm'),
       onConfirm: async () => {
         if (isDeleting) return;
+        invalidateFlowDetailRequest();
         setIsDeleting(true);
         try {
           await runConfirmedMutation(
-            () => deleteFlow(selectedFlowId),
+            () => deleteFlow(flowIdToDelete),
             () => {
-              setSelectedFlowId(null);
-              const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
-              setNodes(graph.nodes);
-              setEdges(graph.edges);
-              setFlowMeta(graph.meta);
+              if (selectedFlowIdRef.current === flowIdToDelete) {
+                setSelectedFlowId(null);
+                const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
+                setNodes(graph.nodes);
+                setEdges(graph.edges);
+                setFlowMeta(graph.meta);
+              }
               addToast(t('flows.deleted'), 'success');
             },
           );
@@ -337,6 +381,7 @@ function FlowEditorInner() {
   };
 
   const handleExecute = async () => {
+    if (flowInteractionLocked) return;
     setActiveTab('result');
     setIsConsoleOpen(true);
     const result = await execution.execute();
@@ -489,12 +534,24 @@ function FlowEditorInner() {
                     {execution.isExecuting ? t('flows.executing') : t('flows.execute')}
                   </Button>
                 )}
-                <Button variant="outline" onClick={handleSave} disabled={isDeleting} loading={isSaving} className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleSave}
+                  disabled={isDeleting || flowLoading}
+                  loading={isSaving}
+                  className="gap-2"
+                >
                   <Save className="h-4 w-4" />
                   {t('flows.save')}
                 </Button>
                 {!isCreating && (
-                  <Button variant="destructive" onClick={handleDelete} disabled={isSaving} loading={isDeleting} className="gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={isSaving || flowLoading}
+                    loading={isDeleting}
+                    className="gap-2"
+                  >
                     <Trash2 className="h-4 w-4" />
                     {t('flows.delete')}
                   </Button>
@@ -602,8 +659,10 @@ function FlowEditorInner() {
 
               <div
                 className={cn(
-                  'pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
-                  flowLoading ? 'opacity-100' : 'opacity-0',
+                  'absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
+                  flowLoading
+                    ? 'pointer-events-auto opacity-100'
+                    : 'pointer-events-none opacity-0',
                 )}
               >
                 <div className="rounded-full border border-border bg-bg-card/85 p-3 shadow-lg backdrop-blur-sm">

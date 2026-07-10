@@ -667,11 +667,11 @@ export function fetchFlows(options: {fresh?: boolean} = {}): Promise<FlowsRespon
 
 export function fetchFlowDetail(
   id: string,
-  options: {fresh?: boolean} = {},
+  options: {fresh?: boolean; signal?: AbortSignal} = {},
 ): Promise<ApiFlowDetail> {
   return apiFetch<ApiFlowDetail>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
-    {},
+    {signal: options.signal},
     {dedupeGet: !options.fresh},
   );
 }
