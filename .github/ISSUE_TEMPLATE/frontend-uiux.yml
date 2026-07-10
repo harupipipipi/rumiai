@@ -1,0 +1,62 @@
+name: Frontend / UI-UX finding
+description: File an actionable visual, interaction, accessibility, state, trust, or responsive defect.
+title: "[P?][surface] "
+labels: []
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 — security/trust boundary or dangerous incorrect action
+        - P1 — blocked core task, data loss, state divergence, or major accessibility failure
+        - P2 — significant usability, consistency, responsive, or accessibility defect
+        - P3 — polish or low-frequency improvement
+    validations:
+      required: true
+  - type: input
+    id: surface
+    attributes:
+      label: Surface and branch
+      placeholder: "defaultspack Calendar on soon"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: Describe the observable contract failure, not only the desired implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Code/runtime evidence
+      description: Include paths, components, state transitions, screenshots, recordings, accessibility tree, or network evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: User impact
+      description: State who is affected, what can go wrong, and why the current feedback is misleading or insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: states
+    attributes:
+      label: Required states
+      placeholder: "idle, loading, empty, pending, success, partial, offline, stale, conflict, error, retry"
+  - type: textarea
+    id: accessibility
+    attributes:
+      label: Accessibility and responsive checks
+      placeholder: "keyboard, focus, screen reader, 200%/400% zoom, touch, reduced motion, forced colors, narrow width/height"
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use testable checkboxes and include regression tests.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
