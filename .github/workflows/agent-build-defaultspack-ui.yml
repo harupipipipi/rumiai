@@ -1,0 +1,39 @@
+name: Agent build defaultspack UI
+
+on:
+  push:
+    branches:
+      - agent/issue-1080-block-untrusted-html-placements
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm ci
+
+      - name: Build synchronized UI bundle
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm run build
+
+      - name: Upload UI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: defaultspack-ui-bundle
+          path: rumi_ai_1_10/ecosystem/defaultspack/ui
+          if-no-files-found: error
