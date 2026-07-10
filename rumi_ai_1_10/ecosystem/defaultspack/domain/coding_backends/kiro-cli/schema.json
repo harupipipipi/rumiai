@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kiro CLI Coding Backend",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["status", "list_models", "build_headless_command"],
+      "default": "status"
+    },
+    "command": {
+      "type": "string",
+      "default": "kiro-cli",
+      "description": "Executable path or command name. It is passed as a structured argv element, never through a shell."
+    },
+    "connection_id": {
+      "type": "string",
+      "default": "default"
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60,
+      "default": 12
+    },
+    "include_models": {
+      "type": "boolean",
+      "default": true
+    },
+    "workspace_root": {
+      "type": "string",
+      "description": "Trusted workspace root required before ACP or headless execution is enabled."
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "trusted_tools": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "description": "Least-privilege Kiro tool categories for an explicit headless command plan."
+    },
+    "effort": {
+      "type": "string",
+      "enum": ["", "low", "medium", "high", "xhigh", "max"],
+      "default": ""
+    },
+    "agent": {
+      "type": "string"
+    }
+  }
+}
