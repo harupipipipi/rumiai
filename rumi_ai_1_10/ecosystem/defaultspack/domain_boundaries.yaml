@@ -66,6 +66,7 @@ domains:
     - domain/extensions
     - domain/human_operator
     - domain/kanban
+    - domain/mention
     - domain/prompt
     - domain/safety
     - domain/skill_trigger
@@ -94,6 +95,7 @@ domains:
     - domain/ai_client
     - domain/chat
     - domain/input
+    - domain/mention
     path: domain/company
   components:
     may_import: []
@@ -269,6 +271,7 @@ domains:
     may_import:
     - domain/coding
     - domain/company
+    - domain/mention
     path: domain/subagent_team
   template:
     may_import: []
