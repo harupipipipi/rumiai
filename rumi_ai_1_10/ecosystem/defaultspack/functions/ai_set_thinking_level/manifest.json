@@ -18,7 +18,6 @@
     "defaultspack.ai.set_thinking_level",
     "defaults.ai.set.thinking.level",
     "defaultspack.ai.set.thinking.level",
-    "defaults.model_runtime.set_thinking_level",
     "defaultspack.model_runtime.set_thinking_level"
   ],
   "input_schema": {
