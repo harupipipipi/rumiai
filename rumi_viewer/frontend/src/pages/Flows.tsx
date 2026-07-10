@@ -50,6 +50,7 @@ import {
   DEFAULT_BASE_PACK,
   normalizeContracts,
 } from '@/src/lib/flowGraph';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 
 function buildAvailableSteps(t: ReturnType<typeof useT>): AvailableStep[] {
   return [
@@ -94,6 +95,8 @@ function FlowEditorInner() {
   const [activeTab, setActiveTab] = useState<'yaml' | 'result'>('yaml');
   const [selectedPack, setSelectedPack] = useState<string>('all');
   const [flowLoading, setFlowLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [flowMeta, setFlowMeta] = useState<FlowDocumentMeta>(() => createDefaultFlowGraph().meta);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -260,6 +263,7 @@ function FlowEditorInner() {
   const isExecuteDisabled = execution.isExecuting || (!selectedFlowId && !isCreating);
 
   const handleSave = async () => {
+    if (isSaving) return;
     if (isCreating) {
       if (!newFlowName.trim()) {
         addToast(t('flows.name_required'), 'error');
@@ -272,20 +276,36 @@ function FlowEditorInner() {
         flowId,
         name: fileName,
       });
-      await addFlow({ id: flowId, name: fileName, content: yamlContent });
-      const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
-      if (created) {
-        setSelectedFlowId(created.id);
+      setIsSaving(true);
+      try {
+        await runConfirmedMutation(
+          () => addFlow({ id: flowId, name: fileName, content: yamlContent }),
+          () => {
+            const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
+            if (created) {
+              setSelectedFlowId(created.id);
+            }
+            setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
+            setIsCreating(false);
+            addToast(t('flows.created'), 'success');
+          },
+        );
+      } finally {
+        setIsSaving(false);
       }
-      setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
-      setIsCreating(false);
-      addToast(t('flows.created'), 'success');
       return;
     }
 
     if (selectedFlowId) {
-      await updateFlow(selectedFlowId, generatedYaml);
-      addToast(t('flows.saved'), 'success');
+      setIsSaving(true);
+      try {
+        await runConfirmedMutation(
+          () => updateFlow(selectedFlowId, generatedYaml),
+          () => addToast(t('flows.saved'), 'success'),
+        );
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -296,13 +316,23 @@ function FlowEditorInner() {
       message: t('flows.delete_message'),
       confirmText: t('flows.delete_confirm'),
       onConfirm: async () => {
-        await deleteFlow(selectedFlowId);
-        setSelectedFlowId(null);
-        const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
-        setNodes(graph.nodes);
-        setEdges(graph.edges);
-        setFlowMeta(graph.meta);
-        addToast(t('flows.deleted'), 'success');
+        if (isDeleting) return;
+        setIsDeleting(true);
+        try {
+          await runConfirmedMutation(
+            () => deleteFlow(selectedFlowId),
+            () => {
+              setSelectedFlowId(null);
+              const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
+              setNodes(graph.nodes);
+              setEdges(graph.edges);
+              setFlowMeta(graph.meta);
+              addToast(t('flows.deleted'), 'success');
+            },
+          );
+        } finally {
+          setIsDeleting(false);
+        }
       },
     });
   };
@@ -460,12 +490,12 @@ function FlowEditorInner() {
                     {execution.isExecuting ? t('flows.executing') : t('flows.execute')}
                   </Button>
                 )}
-                <Button variant="outline" onClick={handleSave} className="gap-2">
+                <Button variant="outline" onClick={handleSave} disabled={isDeleting} loading={isSaving} className="gap-2">
                   <Save className="h-4 w-4" />
                   {t('flows.save')}
                 </Button>
                 {!isCreating && (
-                  <Button variant="destructive" onClick={handleDelete} className="gap-2">
+                  <Button variant="destructive" onClick={handleDelete} disabled={isSaving} loading={isDeleting} className="gap-2">
                     <Trash2 className="h-4 w-4" />
                     {t('flows.delete')}
                   </Button>

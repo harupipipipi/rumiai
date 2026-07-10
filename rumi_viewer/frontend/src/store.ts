@@ -36,6 +36,7 @@ import {
   normalizeTheme,
 } from './lib/appearance';
 import type { ColorMode, Theme } from './lib/appearance';
+import type { MutationResult } from './lib/mutations';
 
 export type { ColorMode, Theme } from './lib/appearance';
 
@@ -190,13 +191,13 @@ interface AppState {
 
   packs: Pack[];
   loadPacks: () => Promise<void>;
-  togglePack: (id: string) => Promise<void>;
+  togglePack: (id: string) => Promise<MutationResult>;
 
   flows: Flow[];
   loadFlows: () => Promise<void>;
-  addFlow: (flow: { id: string; name: string; content: string }) => Promise<void>;
-  updateFlow: (id: string, content: string) => Promise<void>;
-  deleteFlow: (id: string) => Promise<void>;
+  addFlow: (flow: { id: string; name: string; content: string }) => Promise<MutationResult>;
+  updateFlow: (id: string, content: string) => Promise<MutationResult>;
+  deleteFlow: (id: string) => Promise<MutationResult>;
 
   dashboard: DashboardData;
   loadDashboard: () => Promise<void>;
@@ -205,7 +206,7 @@ interface AppState {
 
   profile: Profile;
   loadProfile: () => Promise<void>;
-  updateProfile: (profile: Partial<Profile>) => Promise<void>;
+  updateProfile: (profile: Partial<Profile>) => Promise<MutationResult>;
   connectAccount: () => Promise<void>;
 
   version: VersionInfo;
@@ -363,17 +364,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   togglePack: async (id) => {
     const pack = get().packs.find((p) => p.id === id);
-    if (!pack) return;
+    if (!pack) {
+      const error = 'Pack not found';
+      get().addToast(error, 'error');
+      return { ok: false, error };
+    }
     try {
       if (pack.enabled) {
         await apiDisablePack(id);
       } else {
         await apiEnablePack(id);
       }
-      await get().loadPacks();
+      const data = await fetchPacks();
+      set({ packs: transformPacks(data.packs) });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
     }
   },
 
@@ -402,30 +410,39 @@ export const useAppStore = create<AppState>((set, get) => ({
         yaml_content: flow.content,
         filename: flow.name,
       });
-      await get().loadFlows();
+      const data = await fetchFlows();
+      set({ flows: transformFlows(data.flows) });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
     }
   },
 
   updateFlow: async (id, content) => {
     try {
       await apiUpdateFlow(id, { yaml_content: content });
-      await get().loadFlows();
+      const data = await fetchFlows();
+      set({ flows: transformFlows(data.flows) });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
     }
   },
 
   deleteFlow: async (id) => {
     try {
       await apiDeleteFlow(id);
-      await get().loadFlows();
+      const data = await fetchFlows();
+      set({ flows: transformFlows(data.flows) });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
     }
   },
 
@@ -496,10 +513,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         occupation: profileUpdate.job ?? current.job,
       };
       await apiUpdateProfile(payload);
-      await get().loadProfile();
+      const data = await fetchProfile();
+      set({ profile: transformProfile(data.profile) });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update profile';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
     }
   },
 
