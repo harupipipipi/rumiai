@@ -33,7 +33,10 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
-from domain.frontend_settings_store import FrontendSettingsStore
+from domain.frontend_settings_store import (
+    FrontendSettingsCorruptError,
+    FrontendSettingsStore,
+)
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import (
@@ -2629,7 +2632,15 @@ class FrontendRegistry:
 
     def _read_settings(self) -> dict[str, Any]:
         values = self._default_settings()
-        saved = self._settings_store.read()
+        try:
+            saved = self._settings_store.read()
+        except FrontendSettingsCorruptError:
+            try:
+                raw_settings = self._settings_path.read_bytes()
+            except OSError:
+                return self._refresh_derived_settings(values)
+            self._backup_corrupt_settings(raw_settings)
+            return self._refresh_derived_settings(values)
         saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
         if migrated:
             saved = self._settings_store.update(

@@ -223,7 +223,6 @@ def test_prepare_chat_run_current_turn_history_only_still_works(tmp_path, monkey
 
 def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and_computer_aliases(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
-    from domain.chat.store import ChatStore
 
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(model="stub/default")
