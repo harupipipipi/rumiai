@@ -1,7 +1,7 @@
 # Frontend UI/UX issue ledger
 
-**Authoritative tracker:** #1069  
-**Audit date:** 2026-07-10  
+**Authoritative tracker:** #1069
+**Audit date:** 2026-07-10
 **Primary maintained web/viewer target:** `soon`
 
 This document is an index, not a replacement for GitHub issue state. Number gaps can be pull requests or unrelated activity.
