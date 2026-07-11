@@ -33,12 +33,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "dmg",
-      "nsis",
-      "deb",
-      "appimage"
-    ],
+    "targets": [],
     "resources": {
       "./gen/app": "app"
     },
