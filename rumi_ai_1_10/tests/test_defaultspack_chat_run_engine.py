@@ -1344,6 +1344,29 @@ def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
     assert any(event.get("type") == "tool_call_completed" for event in events)
 
 
+def test_stream_engine_recovers_issue396_scheduled_mimo_rumi_api_text_tool_call(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "<tool_call>\n"
+            "<function=rumi_api>\n"
+            "<parameter=action>list_routes</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+        metadata={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+        request_context={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+        tool_names=("rumi_api",),
+    )
+
+    assert calls == [("rumi_api", {"action": "list_routes"})]
+    assert len(gateway.complete_requests) == 2
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
 def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler(tmp_path, monkeypatch):
     calls, gateway, events, stored = _run_text_tool_call_response(
         tmp_path,
