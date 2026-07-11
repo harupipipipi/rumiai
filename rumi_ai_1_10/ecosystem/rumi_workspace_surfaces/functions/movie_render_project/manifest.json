@@ -1,6 +1,6 @@
 {
   "function_id": "movie_render_project",
-  "description": "Prepare a local movie render plan and report ffmpeg availability.",
+  "description": "Report movie rendering as disabled because no safe render route is configured.",
   "tags": ["surface", "movie", "render"],
   "risk": "low",
   "requires": [],

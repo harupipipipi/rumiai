@@ -206,12 +206,21 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
 
     def _stream_from_response(self, resp):
         tool_call_state = {}
+        finish_reason = ""
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:
                     obj = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                usage_raw = obj.get("usage") or {}
+                if usage_raw:
+                    usage = {
+                        "input_tokens": usage_raw.get("prompt_tokens", usage["input_tokens"]),
+                        "output_tokens": usage_raw.get("completion_tokens", usage["output_tokens"]),
+                        "total_tokens": usage_raw.get("total_tokens", usage["total_tokens"]),
+                    }
                 choices = obj.get("choices", [])
                 if not choices:
                     continue
@@ -225,15 +234,20 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
                 yield from self._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
-                    usage_raw = obj.get("usage") or {}
+                    finish_reason = str(finish)
+
+            for current in tool_call_state.values():
+                if current.get("started") and not current.get("ended"):
+                    current["ended"] = True
                     yield {
-                        "type": "stream_end",
-                        "finish_reason": finish,
-                        "usage": {
-                            "input_tokens": usage_raw.get("prompt_tokens", 0),
-                            "output_tokens": usage_raw.get("completion_tokens", 0),
-                            "total_tokens": usage_raw.get("total_tokens", 0),
-                        },
+                        "type": "tool_call_end",
+                        "id": current.get("id", ""),
+                        "name": current.get("name", ""),
                     }
+            yield {
+                "type": "stream_end",
+                "finish_reason": finish_reason or "stop",
+                "usage": usage,
+            }
         finally:
             resp.close()

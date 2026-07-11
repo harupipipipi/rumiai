@@ -163,6 +163,44 @@ def test_opencode_zen_stream_uses_openai_sse_and_omits_tools(monkeypatch):
     assert response.closed is True
 
 
+def test_opencode_zen_stream_finalizes_once_after_finish_usage_tail_and_done():
+    """SSE terminal chunks must not create duplicate terminal events."""
+    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
+
+    # Bypass construction so this parser test never reads a credential or
+    # creates a network-capable client.
+    provider = object.__new__(OpencodeZenProvider)
+    response = _FakeSseResponse(
+        [
+            b'data: {"choices":[{"delta":{"reasoning_content":"plan"},'
+            b'"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"Answer"},'
+            b'"finish_reason":"length"}],"usage":{"prompt_tokens":2,'
+            b'"completion_tokens":3,"total_tokens":5}}\n\n'
+            b'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+            b'data: {"choices":[],"usage":{"prompt_tokens":2,'
+            b'"completion_tokens":4,"total_tokens":6}}\n\n'
+            b'data: [DONE]\n\n',
+        ]
+    )
+
+    events = list(provider._stream_from_response(response))
+
+    assert [event["type"] for event in events] == [
+        "reasoning_delta",
+        "content_delta",
+        "stream_end",
+    ]
+    assert events[0]["delta"] == {"type": "text", "text": "plan"}
+    assert events[1]["delta"] == {"type": "text", "text": "Answer"}
+    assert events[-1] == {
+        "type": "stream_end",
+        "finish_reason": "length",
+        "usage": {"input_tokens": 2, "output_tokens": 4, "total_tokens": 6},
+    }
+    assert response.closed is True
+
+
 def test_opencode_zen_secret_keys_and_detection(monkeypatch):
     from domain.ai_client.api_key_store import provider_secret_keys
     from domain.ai_client.providers import detect_available_providers

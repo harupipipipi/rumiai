@@ -1150,6 +1150,79 @@ def test_stream_engine_ir_handles_streaming_tool_delta():
     assert any(event.get("type") == "tool_call_delta" for event in events)
 
 
+def test_stream_engine_keeps_reasoning_only_length_response_finalized():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class Gateway:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, request):
+            del request
+            return iter(
+                [
+                    {"type": "reasoning_delta", "delta": {"type": "text", "text": "private plan"}},
+                    {
+                        "type": "stream_end",
+                        "finish_reason": "length",
+                        "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+                    },
+                ]
+            )
+
+        def complete(self, request):
+            raise AssertionError("reasoning-only stream must not trigger a fallback completion")
+
+        def resolve_provider(self, model):
+            class Provider:
+                pass
+
+            return Provider(), model
+
+    prepared = PreparedChatRun(
+        conversation_id="c",
+        conversation={},
+        input_data={},
+        request_id="r",
+        content=[],
+        metadata={},
+        user_message={"id": "u"},
+        model="openai/gpt",
+        params={},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+    engine = ChatRunEngine(gateway=Gateway())
+    generator = engine._model_turn(prepared, [{"role": "user", "content": "think"}], None)
+    events = []
+    try:
+        while True:
+            events.append(next(generator))
+    except StopIteration as exc:
+        response, tool_uses = exc.value
+
+    assert tool_uses == []
+    assert response == {
+        "content": [{"type": "text", "text": ""}],
+        "finish_reason": "length",
+        "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+        "metadata": {},
+    }
+    assert [event["type"] for event in events] == ["thinking_delta"]
+    assert engine._thinking_transcript_parts == ["private plan"]
+
+
 def test_stream_engine_ir_finalizes_assistant_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
