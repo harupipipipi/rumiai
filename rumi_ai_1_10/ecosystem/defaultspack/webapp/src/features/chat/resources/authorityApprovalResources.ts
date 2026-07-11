@@ -10,10 +10,6 @@ export const authorityApprovalResources = {
     return api.getAuthorityRequest(requestId) as Promise<AuthorityRequest>;
   },
 
-  getBrowserAuthorityApprovalContext(requestId: string, browserApprovalToken: string) {
-    return api.browserAuthorityUiOperator(requestId, browserApprovalToken);
-  },
-
   approveAuthorityApproval(
     requestId: string,
     options: {

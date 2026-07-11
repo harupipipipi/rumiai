@@ -1,5 +1,4 @@
 import { defaultspackApiFetch } from "../lib/api";
-import { readBrowserApprovalToken } from "../lib/authorityApprovalBrowserToken";
 import type { AuthorityUiOperator, ToolSelectionRequest } from "../lib/api";
 
 export type AmbientPermissionId = "host.microphone.capture" | "host.camera.capture" | "ambient.trigger.dispatch" | string;
@@ -138,11 +137,6 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.data ?? payload) as T;
 }
 
-function browserApprovalHeaders(): Record<string, string> {
-  const token = readBrowserApprovalToken().trim();
-  return token ? { "X-Rumi-Approval-Browser-Token": token } : {};
-}
-
 export const ambientTriggerClient = {
   status() {
     return requestJson<AmbientStatus>("/api/ambient/status", { cache: "no-store" });
@@ -151,7 +145,6 @@ export const ambientTriggerClient = {
   startMonitor(options?: { voice_wake?: boolean; gesture_pinch?: boolean }) {
     return requestJson<AmbientStatus>("/api/ambient/monitor/start", {
       method: "POST",
-      headers: browserApprovalHeaders(),
       body: JSON.stringify(options ?? {}),
     });
   },
@@ -159,7 +152,6 @@ export const ambientTriggerClient = {
   stopMonitor() {
     return requestJson<AmbientStatus>("/api/ambient/monitor/stop", {
       method: "POST",
-      headers: browserApprovalHeaders(),
       body: JSON.stringify({}),
     });
   },
@@ -199,7 +191,6 @@ export const ambientTriggerClient = {
   submitEvent(payload: AmbientEventPayload) {
     return requestJson<Record<string, unknown>>("/api/ambient/events", {
       method: "POST",
-      headers: browserApprovalHeaders(),
       body: JSON.stringify(payload),
     });
   },
