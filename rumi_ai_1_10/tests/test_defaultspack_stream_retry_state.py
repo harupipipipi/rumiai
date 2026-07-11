@@ -1028,7 +1028,8 @@ def test_error_redactor_preserves_quotes_and_does_not_redact_auth_prose() -> Non
     )
     prose = (
         "Basic authentication is required; Bearer authentication and bearer "
-        "capacity remain available as diagnostic information."
+        "capacity remain available as diagnostic information. Token responsibilities "
+        "are documented by the authorization scheme."
     )
 
     assert quoted == '{"authorization": "[redacted]"}'
@@ -1039,11 +1040,32 @@ def test_error_redactor_preserves_quotes_and_does_not_redact_auth_prose() -> Non
 def test_error_redactor_removes_standalone_alpha_bearer_credentials() -> None:
     from blocks.chat.send import _redact_error_text
 
-    secret = "abcdefghijklmnop"
-    redacted = _redact_error_text(f"provider rejected Bearer {secret}")
+    for scheme, secret in (
+        ("Bearer", "abcdefgh"),
+        ("Basic", "abcdefghi"),
+        ("Token", "abcdefghijklmno"),
+    ):
+        redacted = _redact_error_text(f"provider rejected {scheme} {secret}")
 
-    assert secret not in redacted
-    assert redacted == "provider rejected [redacted]"
+        assert secret not in redacted
+        assert redacted == "provider rejected [redacted]"
+
+
+def test_error_redactor_removes_short_alpha_credentials_in_assignments_and_quotes() -> None:
+    from blocks.chat.send import _redact_error_text
+
+    secret = "abcdefgh"
+    samples = [
+        f"Authorization: Bearer {secret}",
+        f"Proxy-Authorization=Basic {secret}",
+        f'{{"authorization": "Token {secret}"}}',
+        f'provider rejected "Bearer {secret}"',
+    ]
+
+    for sample in samples:
+        redacted = _redact_error_text(sample)
+        assert secret not in redacted
+        assert "[redacted]" in redacted
 
 
 def test_alpha_bearer_secret_is_redacted_across_stream_retry_and_persistence(
@@ -1053,7 +1075,7 @@ def test_alpha_bearer_secret_is_redacted_across_stream_retry_and_persistence(
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
 
-    secret = "abcdefghijklmnop"
+    secret = "abcdefgh"
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
@@ -1102,14 +1124,14 @@ def test_outer_stream_failure_redacts_activity_and_persisted_error(
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
 
-    secret = fake_jwt()
+    secret = "abcdefghi"
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
 
     store = ChatStore()
     conversation = store.create_conversation(model="openai/gpt-test")
-    gateway = ScriptedGateway([[RuntimeError(f"401 Authorization: Bearer {secret}")]])
+    gateway = ScriptedGateway([[RuntimeError(f"401 provider rejected Bearer {secret}")]])
     events = list(
         ChatRunEngine(store=store, gateway=gateway).stream(
             {
@@ -1139,7 +1161,7 @@ def test_non_stream_retry_redacts_activity_and_persisted_message(
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
 
-    secret = fake_jwt()
+    secret = "abcdefghijklmno"
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
@@ -1148,7 +1170,7 @@ def test_non_stream_retry_redacts_activity_and_persisted_message(
     conversation = store.create_conversation(model="openai/gpt-test")
     gateway = ScriptedCompleteGateway(
         [
-            RuntimeError(f"503 Authorization: Bearer {secret}"),
+            RuntimeError(f"503 provider rejected Token {secret}"),
             {
                 "content": [{"type": "text", "text": "success"}],
                 "finish_reason": "stop",
@@ -1176,6 +1198,10 @@ def test_non_stream_retry_redacts_activity_and_persisted_message(
     assert secret not in str(events)
     assert secret not in str(final)
     assert "[redacted]" in str(final["events"])
+    ChatStore._instance = None
+    reloaded = ChatStore().get_conversation(conversation["id"])
+    assert secret not in str(reloaded["messages"][-1])
+    assert "[redacted]" in str(reloaded["messages"][-1]["events"])
     ChatStore._instance = None
 
 

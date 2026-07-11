@@ -54,10 +54,12 @@ _AUTH_SCHEME_VALUE_RE = re.compile(
 _AUTH_PROSE_STOPWORDS = {
     "authentication",
     "authorization",
+    "capacity",
     "credential",
     "credentials",
     "information",
     "interoperability",
+    "responsibilities",
     "scheme",
 }
 _SENSITIVE_ERROR_KEY_PATTERN = (
@@ -255,8 +257,6 @@ def _redact_auth_scheme_value(match):
     candidate = match.group("value")
     normalized = candidate.lower()
     if normalized in _AUTH_PROSE_STOPWORDS:
-        return match.group(0)
-    if candidate.isalpha() and len(candidate) < 16:
         return match.group(0)
     return "[redacted]"
 
