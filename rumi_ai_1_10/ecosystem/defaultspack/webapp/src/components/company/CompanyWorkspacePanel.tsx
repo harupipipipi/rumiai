@@ -38,6 +38,23 @@ const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
 const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
 const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
 
+type P2PDetailResources = Pick<typeof companyResources, "getP2PIdentity" | "listP2PPeers">;
+
+export async function loadEnabledP2PDetails(
+  status: P2PStatusResponse | null,
+  resources: P2PDetailResources = companyResources,
+): Promise<{ identity: P2PIdentity | null; peers: P2PPeer[] }> {
+  if (!status?.p2p?.enabled) return { identity: null, peers: [] };
+  const [identityResult, peersResult] = await Promise.allSettled([
+    resources.getP2PIdentity(),
+    resources.listP2PPeers(),
+  ]);
+  return {
+    identity: identityResult.status === "fulfilled" ? identityResult.value.identity : null,
+    peers: peersResult.status === "fulfilled" ? peersResult.value.peers : [],
+  };
+}
+
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -126,12 +143,10 @@ export function CompanyWorkspacePanel({
         : activeConversationId
           ? { conversationId: activeConversationId, bootstrap: true }
           : activeCompanyId ?? undefined;
-      const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
+      const [companyListResult, statusResult, p2pStatusResult] = await Promise.allSettled([
         companyResources.listCompanies(),
         companyResources.getCompanyStatus(statusTarget),
         companyResources.getP2PStatus(),
-        companyResources.getP2PIdentity(),
-        companyResources.listP2PPeers(),
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
@@ -141,9 +156,11 @@ export function CompanyWorkspacePanel({
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);
 
-      if (p2pStatusResult.status === "fulfilled") setP2PStatus(p2pStatusResult.value);
-      if (p2pIdentityResult.status === "fulfilled") setP2PIdentity(p2pIdentityResult.value.identity);
-      if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
+      const nextP2PStatus = p2pStatusResult.status === "fulfilled" ? p2pStatusResult.value : null;
+      setP2PStatus(nextP2PStatus);
+      const p2pDetails = await loadEnabledP2PDetails(nextP2PStatus);
+      setP2PIdentity(p2pDetails.identity);
+      setPeers(p2pDetails.peers);
 
       if (selectedId) {
         const [agentResult, channelResult, taskResult, routeResult, messageResult, runResult] = await Promise.allSettled([
