@@ -130,3 +130,14 @@ export function persistRouteStateRemotely(state: RouteSessionState): void {
     keepalive: true,
   }).catch(() => undefined);
 }
+
+export function clearRouteStateRemotely(): void {
+  persistRouteStateRemotely({
+    query: "",
+    target_url: "",
+    fallback_url: "",
+    selected_index: -1,
+    target_candidates: [],
+    updated_at: new Date().toISOString(),
+  });
+}
