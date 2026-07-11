@@ -8,13 +8,12 @@ driver chain on failure.
 from __future__ import annotations
 
 import sys
-import time
 from dataclasses import asdict
 from typing import Any
 
 from .audit import AuditLogger
 from .models import ActionResult, ComputerTarget, ObserveResult
-from .permissions import requires_approval, risk_level
+from .permissions import requires_approval
 from .registry import DriverRegistry
 
 
@@ -40,6 +39,15 @@ class ComputerSeatService:
         self._registry = registry
         self._audit = audit_logger or AuditLogger()
         self._platform = sys.platform
+
+    @property
+    def platform(self) -> str:
+        """Return the native platform identifier used for driver selection."""
+        return self._platform
+
+    def driver_chain(self) -> list[Any]:
+        """Return the currently available native driver chain."""
+        return self._registry.get_driver_chain(self._platform)
 
     def observe(self, target: ComputerTarget | dict[str, Any]) -> dict[str, Any]:
         """Observe the target – returns screenshot + AX tree + capabilities.
