@@ -2,6 +2,8 @@ import type { ChatMessage } from "./api";
 
 export type PendingChatRequest = {
   conversationId: string;
+  operationId?: string;
+  requestFingerprint?: string;
   startedAt: number;
   status: string;
   toolNames: string[];

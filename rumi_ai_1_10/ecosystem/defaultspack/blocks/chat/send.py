@@ -2045,12 +2045,39 @@ def _sanitize_attachment_metadata(attachments):
 
 def run(input_data, context):
     from domain.chat.run_request import validate_chat_run_input
+    from domain.chat.idempotency import (
+        IdempotencyConflictError,
+        reserve_chat_operation,
+    )
     from domain.chat.stream_engine import ChatRunEngine
     from domain.stream.events import to_legacy_chat_stream_event
 
     validation_error = validate_chat_run_input(input_data if isinstance(input_data, dict) else {})
     if validation_error:
         return error(validation_error, "INVALID_INPUT")
+
+    try:
+        engine_context = reserve_chat_operation(input_data, context)
+    except IdempotencyConflictError as exc:
+        response = error(str(exc), "IDEMPOTENCY_CONFLICT")
+        response["_http_status"] = 409
+        return response
+    except ValueError as exc:
+        response = error(str(exc), "INVALID_INPUT")
+        response["_http_status"] = 400
+        return response
+    reservation = engine_context.get("_chat_idempotency_reservation")
+    claim = reservation.get("claim") if isinstance(reservation, dict) else None
+    if (
+        getattr(claim, "status", "") == "in_progress"
+        and getattr(claim, "state", "") == "replay"
+    ):
+        response = error(
+            "This chat operation is already in progress",
+            "IDEMPOTENCY_IN_PROGRESS",
+        )
+        response["_http_status"] = 409
+        return response
 
     final_message = None
     try:
@@ -2073,7 +2100,6 @@ def run(input_data, context):
             "ai_retry_scheduled",
             "task_failed",
         }
-        engine_context = dict(context or {}) if isinstance(context, dict) else {}
         engine_context.setdefault("run_source", "blocks.chat.send")
         for event in ChatRunEngine().stream(input_data, engine_context, stream_mode=use_stream_adapter):
             if not isinstance(event, dict):
