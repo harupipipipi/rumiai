@@ -803,6 +803,35 @@ async function openCodingWidget(page: Page) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
 }
 
+test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 520 });
+  await openDefaultspack(page, "/static/chat");
+
+  await expect(page.locator(".rumi-app-shell")).toBeVisible();
+  await expect(page.locator(".rumi-workspace-main")).toHaveCSS("min-height", "0px");
+
+  for (const viewport of [
+    { width: 390, height: 520 },
+    { width: 320, height: 620 },
+    { width: 390, height: 340 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => {
+      document.querySelector("[data-qa-scroll-fallback]")?.remove();
+      const fallbackProbe = document.createElement("div");
+      fallbackProbe.dataset.qaScrollFallback = "true";
+      fallbackProbe.style.height = "80vh";
+      fallbackProbe.style.pointerEvents = "none";
+      document.body.appendChild(fallbackProbe);
+      window.scrollTo(0, 0);
+    });
+
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).overflowY)).not.toBe("hidden");
+    await page.mouse.wheel(0, viewport.height);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  }
+});
+
 test("tool hub search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
   await openDefaultspack(page);
 
