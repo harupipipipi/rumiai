@@ -452,6 +452,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
+    ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
+    : [];
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
@@ -682,6 +685,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      if (codingApprovalRequest?.request_id === payload.approval_request_id) {
+        codingApprovalRequest = { ...codingApprovalRequest, status: "approved" };
+      }
       return fulfill(route, {
         request_id: payload.approval_request_id,
         approved: true,
@@ -712,12 +718,17 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/coding/files/restore" && method === "POST" && options.codingApprovalAfterRestore) {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const snapshotId = String(payload.snapshot_id ?? "checkpoint-1");
+      if (payload.approval_token) {
+        return fulfill(route, { restored: true, snapshot_id: snapshotId });
+      }
       codingApprovalRequest = {
-        request_id: "apr-checkpoint-restore",
+        request_id: `apr-${snapshotId}-restore`,
         operation: "file.restore",
         risk_level: "high",
         status: "pending",
-        display_summary: "file.restore: checkpoint-1",
+        display_summary: `file.restore: ${snapshotId}`,
         created_at: now,
       };
       return fulfill(route, {
@@ -732,10 +743,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/coding/checkpoints") {
-      const checkpoints = options.codingApprovalAfterRestore
-        ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
-        : [];
-      return fulfill(route, { checkpoints, workspace_id: "ws-main", workspace_root: "/repo" });
+      if (method === "POST") {
+        const checkpoint = {
+          snapshot_id: "checkpoint-2",
+          path: "/repo/.rumi/checkpoints/checkpoint-2",
+        };
+        codingCheckpoints.unshift(checkpoint);
+        return fulfill(route, { checkpoint, workspace_id: "ws-main", workspace_root: "/repo" });
+      }
+      return fulfill(route, {
+        checkpoints: codingCheckpoints,
+        workspace_id: "ws-main",
+        workspace_root: "/repo",
+      });
     }
 
     if (path === "/api/coding/rumi-log") {
@@ -1342,16 +1362,20 @@ test("coding approval queue refreshes immediately after terminal requests approv
   await expect(approvals.getByTitle("Deny")).toBeVisible();
 });
 
-test("coding approval queue refreshes immediately after checkpoint restore requests approval", async ({ page }) => {
+test("checkpoint create selects the new snapshot and approved restore settles successfully", async ({ page }) => {
   await openCodingWidget(page, { codingApprovalAfterRestore: true });
 
   const checkpoints = page.getByLabel("Checkpoints");
   await expect(checkpoints.locator("select")).toHaveValue("checkpoint-1");
+  await checkpoints.getByTitle("Create checkpoint").click();
+  await expect(checkpoints.locator("select")).toHaveValue("checkpoint-2");
+  await expect(checkpoints).toContainText("Created checkpoint-2");
   await checkpoints.getByTitle("Restore checkpoint").click();
 
   await expect(checkpoints).toContainText("Approval required");
   const approvals = page.getByLabel("Approval queue");
   await expect(approvals).toContainText("file.restore");
-  await expect(approvals.getByTitle("Approve")).toBeVisible();
-  await expect(approvals.getByTitle("Deny")).toBeVisible();
+  await approvals.getByTitle("Approve").click();
+  await expect(checkpoints).toContainText("Restored checkpoint-2");
+  await expect(checkpoints).not.toContainText("Approval required");
 });
