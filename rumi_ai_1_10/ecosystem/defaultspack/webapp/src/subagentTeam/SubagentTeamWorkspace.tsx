@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   Bot,
   BookOpen,
-  Check,
   ChevronDown,
   ClipboardCheck,
   Code2,
@@ -298,13 +297,11 @@ function SignalBanner({
 function CreatorDecisionPreview({
   task,
   status,
-  onStatusChange,
 }: {
   task: CompanyTask | null;
   status: DecisionStatus;
-  onStatusChange: (status: DecisionStatus) => void;
 }) {
-  const title = task?.title || "Approve PM routing plan";
+  const title = task?.title || "PM routing plan preview";
   const targetAgents = task?.target_agent_ids?.length ? task.target_agent_ids.join(", ") : "pm, frontend, qa";
   return (
     <div className="mx-2 mb-2 rounded-lg border border-zinc-800/80 bg-[#0d0d11] p-2.5">
@@ -328,22 +325,13 @@ function CreatorDecisionPreview({
           <span className="text-zinc-400">Creator sees:</span> PM summary, changed files, and latest channel blockers.
         </div>
       </div>
-      <div className="mt-2 flex gap-1.5">
-        <button
-          type="button"
-          onClick={() => onStatusChange("approved")}
-          className="flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-        >
-          <Check size={12} />
-          <span className="truncate">OK</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onStatusChange("revision")}
-          className="h-7 min-w-0 flex-1 rounded-md border border-zinc-800 px-2 text-[11px] font-medium text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900"
-        >
-          Revise
-        </button>
+      <div
+        role="note"
+        data-testid="subagent-creator-decision-readonly"
+        className="mt-2 flex items-start gap-1.5 rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1.5 text-[10px] leading-4 text-sky-100"
+      >
+        <ShieldCheck size={12} className="mt-0.5 shrink-0" />
+        <span>Read-only preview. No approval or revision is recorded from this card.</span>
       </div>
     </div>
   );
@@ -676,23 +664,24 @@ function ApprovalCard({
   status,
   source,
   error,
-  onStatusChange,
 }: {
   task: CompanyTask | null;
   status: DecisionStatus;
   source: "api" | "preview";
   error: string | null;
-  onStatusChange: (status: DecisionStatus) => void;
 }) {
+  const previewMessage = source === "preview"
+    ? "Fallback preview data is read-only and cannot be approved."
+    : "Decision preview only. Open the authoritative pending request to approve, reject, or request revision.";
   return (
     <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
             <ClipboardCheck size={12} />
-            <span>Approval card</span>
+            <span>Decision preview</span>
           </div>
-          <p className="mt-1 line-clamp-2 text-[12px] font-medium text-zinc-100">{task?.title || "PM goal gate approval"}</p>
+          <p className="mt-1 line-clamp-2 text-[12px] font-medium text-zinc-100">{task?.title || "PM goal gate preview"}</p>
         </div>
         <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[9px]", statusClassName(status))}>{status}</span>
       </div>
@@ -700,21 +689,12 @@ function ApprovalCard({
         {task?.description || "PM and Creator review channel context before subagents proceed with larger fanout or /goal execution."}
       </p>
       {error && <p className="mt-2 line-clamp-2 text-[10px] text-amber-100/70">{error}</p>}
-      <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <button
-          type="button"
-          onClick={() => onStatusChange("approved")}
-          className="h-8 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          onClick={() => onStatusChange("revision")}
-          className="h-8 rounded-md border border-amber-500/25 px-2 text-[11px] font-semibold text-amber-100 hover:bg-amber-500/10"
-        >
-          Revise
-        </button>
+      <div
+        role="note"
+        data-testid="subagent-approval-preview-readonly"
+        className="mt-2 rounded-md border border-amber-400/25 bg-black/20 px-2 py-1.5 text-[10px] leading-4 text-amber-50"
+      >
+        {previewMessage}
       </div>
       <p className="mt-1 font-mono text-[9px] text-amber-100/50">source:{source}</p>
     </div>
@@ -743,7 +723,6 @@ export function SubagentTeamWorkspace({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus>("waiting");
   const [decisionPreviewTask, setDecisionPreviewTask] = useState<CompanyTask | null>(null);
   const [decisionPreviewSource, setDecisionPreviewSource] = useState<"api" | "preview">("preview");
   const [decisionPreviewError, setDecisionPreviewError] = useState<string | null>(null);
@@ -921,6 +900,12 @@ export function SubagentTeamWorkspace({
   const activeAgent = activeThread.type === "dm" ? agentsById.get(activeThread.id) : null;
   const latestDecisionTask = visibleTasks.find((task) => /decision|approve|review/i.test(`${task.title} ${task.status ?? ""}`)) ?? visibleTasks[0] ?? null;
   const effectiveDecisionTask = decisionPreviewTask ?? latestDecisionTask;
+const decisionStatus: DecisionStatus = (() => {
+  const value = String(effectiveDecisionTask?.status ?? "").trim().toLowerCase();
+  if (["approved", "completed", "done"].includes(value)) return "approved";
+  if (["revision", "changes_requested", "blocked"].includes(value)) return "revision";
+  return "waiting";
+})();
 
   const loadSubagentTeamControls = useCallback(async () => {
     if (!activeCompanyId && !activeConversationId) {
@@ -1428,9 +1413,8 @@ export function SubagentTeamWorkspace({
               status={decisionStatus}
               source={decisionPreviewSource}
               error={decisionPreviewError}
-              onStatusChange={setDecisionStatus}
             />
-            <CreatorDecisionPreview task={effectiveDecisionTask} status={decisionStatus} onStatusChange={setDecisionStatus} />
+            <CreatorDecisionPreview task={effectiveDecisionTask} status={decisionStatus} />
             <CreatorSettingsCard
               settings={creatorSettings}
               source={creatorSettingsSource}
