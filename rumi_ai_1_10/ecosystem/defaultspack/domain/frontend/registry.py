@@ -30,6 +30,7 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
+from domain.frontend_settings_store import FrontendSettingsStore
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import (
@@ -52,6 +53,7 @@ class FrontendRegistry:
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._settings_store = FrontendSettingsStore(self._settings_path)
 
     def build_catalog(self, profile_id: str | None = None, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
@@ -150,16 +152,15 @@ class FrontendRegistry:
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
-        current = self._read_settings()
         sanitized_patch = self._sanitize_settings_patch(patch or {})
-        merged = self._deep_merge(current, sanitized_patch)
-        merged = self._refresh_derived_settings(merged)
-        self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self._settings_path.write_text(
-            json.dumps(merged, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return merged
+
+        def merge(current: dict[str, Any]) -> dict[str, Any]:
+            values = self._deep_merge(self._default_settings(), current)
+            return self._refresh_derived_settings(
+                self._deep_merge(values, sanitized_patch)
+            )
+
+        return self._settings_store.update(merge)
 
     def build_conversation_preview(self, conversation_id: str) -> dict[str, Any]:
         store = ChatStore()
@@ -2617,11 +2618,8 @@ class FrontendRegistry:
 
     def _read_settings(self) -> dict[str, Any]:
         values = self._default_settings()
-        if self._settings_path.exists():
-            try:
-                saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                saved = {}
+        saved = self._settings_store.read()
+        if saved:
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)

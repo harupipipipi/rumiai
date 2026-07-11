@@ -23,6 +23,7 @@ from domain.ai_client.rumi_process import (
     ensure_default_rumi_model_pack,
     resolve_rumi_base_model,
 )
+from domain.frontend_settings_store import FrontendSettingsStore
 
 
 VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
@@ -41,20 +42,28 @@ class ModelRuntimeSettingsService:
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._settings_store = FrontendSettingsStore(self._settings_path)
 
     def get_settings(self) -> dict[str, Any]:
         return self.refresh_models_settings(self._read_all().get("models", {}))
 
     def update_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
-        all_settings = self._read_all()
-        current_models = all_settings.get("models", {})
-        if not isinstance(current_models, dict):
-            current_models = {}
-        sanitized = self.sanitize_models_patch(patch or {}, current_models=current_models)
-        merged = self._deep_merge(current_models, sanitized)
-        all_settings["models"] = self.refresh_models_settings(merged)
-        self._write_all(all_settings)
-        return all_settings["models"]
+        result: dict[str, Any] = {}
+
+        def merge(all_settings: dict[str, Any]) -> dict[str, Any]:
+            current_models = all_settings.get("models", {})
+            if not isinstance(current_models, dict):
+                current_models = {}
+            sanitized = self.sanitize_models_patch(
+                patch or {}, current_models=current_models
+            )
+            merged = self._deep_merge(current_models, sanitized)
+            result.update(self.refresh_models_settings(merged))
+            all_settings["models"] = dict(result)
+            return all_settings
+
+        self._settings_store.update(merge)
+        return result
 
     def get_preferred_model(self) -> str:
         return str(self.get_settings().get("preferred_model") or DEFAULT_MODEL)
@@ -783,21 +792,10 @@ class ModelRuntimeSettingsService:
 
     def _read_all(self) -> dict[str, Any]:
         values: dict[str, Any] = {"models": self.default_model_settings()}
-        try:
-            saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
-            if isinstance(saved, dict):
-                values = self._deep_merge(values, saved)
-        except (OSError, json.JSONDecodeError):
-            pass
+        saved = self._settings_store.read()
+        values = self._deep_merge(values, saved)
         values["models"] = self.refresh_models_settings(values.get("models", {}))
         return values
-
-    def _write_all(self, values: dict[str, Any]) -> None:
-        self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self._settings_path.write_text(
-            json.dumps(values, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
     def _normalize_level(self, value: Any) -> str:
         level = str(value or "").strip()
