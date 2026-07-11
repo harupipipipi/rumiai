@@ -1,12 +1,7 @@
-import { api, type ChatMessage, type Conversation } from "../../../lib/api";
+import { api } from "../../../lib/api";
 
-export type { ChatMessage, Conversation };
+export type AgentNotificationProjection = Awaited<ReturnType<typeof api.listAgentNotifications>>;
 
-export async function listAgentNotificationConversations(): Promise<Conversation[]> {
-  const result = await api.listConversations({
-    include_messages: true,
-    is_archived: false,
-    limit: 120,
-  });
-  return result.conversations;
+export function listAgentNotifications(): Promise<AgentNotificationProjection> {
+  return api.listAgentNotifications();
 }

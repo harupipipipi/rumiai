@@ -2446,6 +2446,23 @@ export type CodexConnectionActionResponse = Partial<CodexConnectionStatusRespons
 };
 
 export const api = {
+  listAgentNotifications() {
+    return request<{
+      storage_namespace: string;
+      items: Array<{
+        id: string;
+        conversation_id: string;
+        title: string;
+        status: "waiting" | "running" | "done" | "failed";
+        summary: string;
+        source: string;
+        tool_names: string[];
+        updated_at: number;
+        fingerprint: string;
+      }>;
+    }>("/api/ui/agent-notifications");
+  },
+
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
       withQuery("/api/chat/conversations", options),

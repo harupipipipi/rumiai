@@ -11,10 +11,9 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { listAgentNotificationConversations, type ChatMessage, type Conversation } from "../../features/notifications/resources/agentNotificationResources";
-import { formatRelativeTime, messageToText, orderConversationMessages } from "../../lib/chat";
+import { listAgentNotifications } from "../../features/notifications/resources/agentNotificationResources";
+import { formatRelativeTime } from "../../lib/chat";
 import { cn } from "../../lib/cn";
-import { PENDING_CHAT_REQUEST_TTL_MS, isAssistantMessageStillRunning, type PendingChatRequest } from "../../lib/pendingChat";
 import { layerClassName } from "../../ui/layers/layerTokens";
 
 type AgentNotificationStatus = "waiting" | "running" | "done" | "failed";
@@ -38,7 +37,6 @@ type AgentNotificationCenterProps = {
   className?: string;
 };
 
-const PENDING_REQUESTS_STORAGE_KEY = "rumi-pending-chat-requests";
 const READ_STATE_STORAGE_KEY = "rumi-agent-notification-read-state.v1";
 const TOAST_SEEN_STORAGE_KEY = "rumi-agent-notification-toast-seen.v1";
 
@@ -89,169 +87,6 @@ function readNumericRecord(key: string): Record<string, number> {
   return result;
 }
 
-function readPendingRequests(now = Date.now()): Record<string, PendingChatRequest> {
-  const raw = readJsonRecord(PENDING_REQUESTS_STORAGE_KEY);
-  const result: Record<string, PendingChatRequest> = {};
-  for (const [conversationId, value] of Object.entries(raw)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const record = value as Record<string, unknown>;
-    const startedAt = Number(record.startedAt);
-    if (!conversationId || !Number.isFinite(startedAt)) continue;
-    if (now - startedAt >= PENDING_CHAT_REQUEST_TTL_MS) continue;
-    const toolNames = Array.isArray(record.toolNames)
-      ? record.toolNames.map((item) => String(item).trim()).filter(Boolean)
-      : [];
-    const toolStartedAtRaw = record.toolStartedAt && typeof record.toolStartedAt === "object" && !Array.isArray(record.toolStartedAt)
-      ? record.toolStartedAt as Record<string, unknown>
-      : {};
-    const toolStartedAt: Record<string, number> = {};
-    for (const [toolName, value] of Object.entries(toolStartedAtRaw)) {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric)) toolStartedAt[toolName] = numeric;
-    }
-    result[conversationId] = {
-      conversationId,
-      startedAt,
-      status: String(record.status ?? "Agent が実行中"),
-      toolNames,
-      toolStartedAt,
-      recoveredFromLocation: record.recoveredFromLocation === true,
-    };
-  }
-  return result;
-}
-
-function latestMessage(conversation: Conversation): ChatMessage | undefined {
-  const ordered = orderConversationMessages(conversation.messages ?? []);
-  return ordered[ordered.length - 1];
-}
-
-function conversationEvents(conversation: Conversation) {
-  return (conversation.messages ?? []).flatMap((message) => message.events ?? []);
-}
-
-function metadataRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function messageHasPendingApproval(message: ChatMessage | undefined): boolean {
-  if (!message) return false;
-  const metadata = metadataRecord(message.metadata);
-  if (metadata.pending_approval || metadata.pendingApproval) return true;
-  if (metadata.pending_authority_approval || metadata.pendingAuthorityApproval) return true;
-  return (message.events ?? []).some((event) => event.type === "approval_requested");
-}
-
-function messageFailed(message: ChatMessage | undefined): boolean {
-  if (!message) return false;
-  const finishReason = String(message.finish_reason ?? "").toLowerCase();
-  if (["failed", "error", "cancelled", "interrupted"].includes(finishReason)) return true;
-  const metadata = metadataRecord(message.metadata);
-  const transport = metadataRecord(metadata.transport);
-  const transportStatus = String(transport.status ?? "").toLowerCase();
-  if (["failed", "error", "interrupted"].includes(transportStatus)) return true;
-  return (message.events ?? []).some((event) => {
-    const eventType = String(event.type ?? "").toLowerCase();
-    const status = String(event.status ?? "").toLowerCase();
-    return eventType === "task_failed" || status === "failed" || status === "error";
-  });
-}
-
-function collectToolNames(conversation: Conversation, pending?: PendingChatRequest): string[] {
-  const toolNames = new Set<string>();
-  for (const toolName of pending?.toolNames ?? []) {
-    if (toolName.trim()) toolNames.add(toolName.trim());
-  }
-  for (const event of conversationEvents(conversation)) {
-    const eventToolName = typeof event.tool_name === "string" ? event.tool_name.trim() : "";
-    if (eventToolName) toolNames.add(eventToolName);
-  }
-  return [...toolNames].slice(0, 4);
-}
-
-function firstUsefulLine(text: string): string {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean) ?? "";
-}
-
-function truncateText(text: string, maxLength: number): string {
-  const normalized = text.trim().replace(/\s+/g, " ");
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1).trim()}…`;
-}
-
-function sourceLabel(conversation: Conversation): string {
-  const metadata = conversation.metadata ?? {};
-  const workspaceLabel = typeof metadata.workspace_label === "string" ? metadata.workspace_label.trim() : "";
-  const workspaceId = typeof metadata.workspace_id === "string" ? metadata.workspace_id.trim() : "";
-  const externalProvider = typeof metadata.external_provider === "string" ? metadata.external_provider.trim() : "";
-  if (workspaceLabel) return workspaceLabel;
-  if (workspaceId) return workspaceId;
-  if (externalProvider) return externalProvider.toUpperCase();
-  if (conversation.conversation_kind === "coding" || conversation.tags?.includes("coding")) return "Coding";
-  if (conversation.conversation_kind === "operations_company") return "Operations";
-  if (conversation.conversation_kind === "mimo_coding_company") return "Mimo Coding";
-  return "Chat";
-}
-
-function buildSummary(
-  conversation: Conversation,
-  status: AgentNotificationStatus,
-  latest: ChatMessage | undefined,
-  pending?: PendingChatRequest,
-): string {
-  const latestText = latest ? messageToText(latest) : "";
-  const firstLine = firstUsefulLine(latestText);
-  if (status === "running") return pending?.status || "Agent が実行中です";
-  if (status === "waiting") return messageHasPendingApproval(latest)
-    ? "承認または判断を待っています"
-    : firstLine || "あなたの返信待ちです";
-  if (status === "failed") {
-    const failedEvent = [...conversationEvents(conversation)].reverse().find((event) => {
-      const eventType = String(event.type ?? "").toLowerCase();
-      const eventStatus = String(event.status ?? "").toLowerCase();
-      return eventType === "task_failed" || eventStatus === "failed" || eventStatus === "error";
-    });
-    const eventMessage = typeof failedEvent?.message === "string" ? failedEvent.message.trim() : "";
-    return eventMessage || firstLine || "Agent の実行が失敗しました";
-  }
-  return firstLine || "Agent の応答が完了しました";
-}
-
-export function classifyConversation(conversation: Conversation, pendingRequests: Record<string, PendingChatRequest>, readState: Record<string, number>, now = Date.now()): AgentNotificationItem {
-  const pending = pendingRequests[conversation.id];
-  const latest = latestMessage(conversation);
-  let status: AgentNotificationStatus = "done";
-  if (pending || isAssistantMessageStillRunning(latest)) {
-    status = "running";
-  } else if (messageFailed(latest)) {
-    status = "failed";
-  } else if (messageHasPendingApproval(latest) || latest?.role === "user") {
-    status = "waiting";
-  }
-  const summary = truncateText(buildSummary(conversation, status, latest, pending), 180);
-  const updatedAt = Number(conversation.updated_at || latest?.created_at || now);
-  const readAt = readState[conversation.id] ?? 0;
-  const fingerprint = `${conversation.id}:${status}:${updatedAt}:${summary}`;
-  return {
-    id: `${conversation.id}:${status}`,
-    conversationId: conversation.id,
-    title: conversation.title?.trim() || "Untitled conversation",
-    status,
-    summary,
-    source: sourceLabel(conversation),
-    toolNames: collectToolNames(conversation, pending),
-    updatedAt,
-    startedAt: pending?.startedAt,
-    unread: updatedAt > readAt && status !== "running",
-    fingerprint,
-  };
-}
-
 function statusTone(status: AgentNotificationStatus): string {
   if (status === "waiting") return "border-amber-500/30 bg-amber-500/10 text-amber-100";
   if (status === "running") return "border-blue-500/30 bg-blue-500/10 text-blue-100";
@@ -278,10 +113,12 @@ function openConversation(conversationId: string) {
 }
 
 export function AgentNotificationCenter({ className }: AgentNotificationCenterProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<Record<string, PendingChatRequest>>({});
-  const [readState, setReadState] = useState<Record<string, number>>(() => readNumericRecord(READ_STATE_STORAGE_KEY));
-  const [readStateBootstrapped, setReadStateBootstrapped] = useState(() => Object.keys(readJsonRecord(READ_STATE_STORAGE_KEY)).length > 0);
+  const [projectedItems, setProjectedItems] = useState<Omit<AgentNotificationItem, "unread">[]>([]);
+  const [storageNamespace, setStorageNamespace] = useState("");
+  const readStorageKey = storageNamespace ? `${READ_STATE_STORAGE_KEY}:${storageNamespace}` : "";
+  const toastStorageKey = storageNamespace ? `${TOAST_SEEN_STORAGE_KEY}:${storageNamespace}` : "";
+  const [readState, setReadState] = useState<Record<string, number>>({});
+  const [readStateBootstrapped, setReadStateBootstrapped] = useState(false);
   const [filter, setFilter] = useState<AgentNotificationFilter>("attention");
   const [query, setQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
@@ -292,16 +129,29 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
 
   const updateReadState = useCallback((nextState: Record<string, number>) => {
     setReadState(nextState);
-    writeJsonRecord(READ_STATE_STORAGE_KEY, nextState);
-  }, []);
+    if (readStorageKey) writeJsonRecord(readStorageKey, nextState);
+  }, [readStorageKey]);
 
   const refresh = useCallback(async () => {
-    const now = Date.now();
     setRefreshing(true);
-    setPendingRequests(readPendingRequests(now));
-    setReadState(readNumericRecord(READ_STATE_STORAGE_KEY));
     try {
-      setConversations(await listAgentNotificationConversations());
+      const projection = await listAgentNotifications();
+      const namespace = projection.storage_namespace;
+      const scopedReadKey = `${READ_STATE_STORAGE_KEY}:${namespace}`;
+      setStorageNamespace(namespace);
+      setReadState(readNumericRecord(scopedReadKey));
+      setReadStateBootstrapped(Object.keys(readJsonRecord(scopedReadKey)).length > 0);
+      setProjectedItems(projection.items.map((item) => ({
+        id: item.id,
+        conversationId: item.conversation_id,
+        title: item.title,
+        status: item.status,
+        summary: item.summary,
+        source: item.source,
+        toolNames: item.tool_names,
+        updatedAt: item.updated_at,
+        fingerprint: item.fingerprint,
+      })));
       setError(null);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "通知の読み込みに失敗しました。");
@@ -313,10 +163,10 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 8_000);
+    const interval = window.setInterval(() => void refresh(), 30_000);
     const handleFocus = () => void refresh();
     const handleStorage = (event: StorageEvent) => {
-      if (!event.key || [PENDING_REQUESTS_STORAGE_KEY, READ_STATE_STORAGE_KEY].includes(event.key)) {
+      if (!event.key || event.key === readStorageKey) {
         void refresh();
       }
     };
@@ -327,18 +177,18 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("storage", handleStorage);
     };
-  }, [refresh]);
+  }, [readStorageKey, refresh]);
 
   const items = useMemo(() => {
-    const now = Date.now();
-    return conversations
-      .map((conversation) => classifyConversation(conversation, pendingRequests, readState, now))
+    return projectedItems
+      .map((item) => ({ ...item, unread: item.updatedAt > (readState[item.conversationId] ?? 0) && item.status !== "running" }))
       .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.updatedAt - a.updatedAt);
-  }, [conversations, pendingRequests, readState]);
+  }, [projectedItems, readState]);
 
   useEffect(() => {
     if (loading || readStateBootstrapped) return;
-    const stored = readNumericRecord(READ_STATE_STORAGE_KEY);
+    if (!readStorageKey) return;
+    const stored = readNumericRecord(readStorageKey);
     if (Object.keys(stored).length > 0) {
       setReadState(stored);
       setReadStateBootstrapped(true);
@@ -350,7 +200,7 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
     }
     updateReadState(nextState);
     setReadStateBootstrapped(true);
-  }, [items, loading, readStateBootstrapped, updateReadState]);
+  }, [items, loading, readStateBootstrapped, readStorageKey, updateReadState]);
 
   const counts = useMemo(() => {
     const base: Record<AgentNotificationStatus | AgentNotificationFilter | "unread", number> = {
@@ -393,8 +243,8 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
     if (!candidate) return;
     const toastKey = candidate.fingerprint;
     try {
-      if (window.localStorage.getItem(TOAST_SEEN_STORAGE_KEY) === toastKey) return;
-      window.localStorage.setItem(TOAST_SEEN_STORAGE_KEY, toastKey);
+      if (!toastStorageKey || window.localStorage.getItem(toastStorageKey) === toastKey) return;
+      window.localStorage.setItem(toastStorageKey, toastKey);
     } catch {
       // Toast can still show even when storage is unavailable.
     }
@@ -403,7 +253,7 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
       setToastItem((current) => current?.fingerprint === toastKey ? null : current);
     }, 5_200);
     return () => window.clearTimeout(timer);
-  }, [items, readStateBootstrapped]);
+  }, [items, readStateBootstrapped, toastStorageKey]);
 
   const markRead = useCallback((item: AgentNotificationItem) => {
     updateReadState({

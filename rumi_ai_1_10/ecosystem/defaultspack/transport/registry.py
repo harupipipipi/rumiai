@@ -70,6 +70,7 @@ _ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES = {
     "blocks.integrations.line",
     "blocks.integrations.slack",
     "blocks.ui.catalog",
+    "blocks.ui.agent_notifications",
 }
 
 
@@ -2199,6 +2200,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/vision/describe-images", block_module="blocks.vision.describe_images"
     ),
     HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
+    HttpRouteSpec("GET", "/api/ui/agent-notifications", block_module="blocks.ui.agent_notifications"),
     HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
     HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
