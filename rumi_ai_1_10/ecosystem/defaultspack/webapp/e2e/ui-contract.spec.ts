@@ -12,6 +12,8 @@ type ApiMockOptions = {
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
   conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
   onApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
+  mcpApprovalInitialStatus?: string;
+  mcpApprovedConnectError?: boolean;
 };
 
 function ok(data: unknown) {
@@ -454,7 +456,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
-  let mcpApprovalStatus = "none";
+  let mcpApprovalStatus = options.mcpApprovalInitialStatus ?? "none";
   const mcpApprovalRequest = () => ({
     request_id: "apr-mcp-contract",
     operation: "tool.mcp_connect",
@@ -789,6 +791,13 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           server_id: serverId,
         });
       }
+      if (options.mcpApprovedConnectError) {
+        return route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ status: "error", error: { code: "MCP_CONNECT_ERROR", message: "fake fixture start failed" } }),
+        });
+      }
       const server = mcpServers.find((item) => item.server_id === serverId);
       if (server) {
         server.connected = true;
@@ -815,14 +824,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   });
 }
 
-async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOptions = {}) {
+async function openDefaultspack(page: Page, path = "/static/chat", options: ApiMockOptions = {}) {
   await installDefaultspackApiMocks(page, options);
   await page.goto(path);
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
 async function openCodingWidget(page: Page) {
-  await openDefaultspack(page, "/chat");
+  await openDefaultspack(page, "/static/chat");
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
@@ -830,6 +839,7 @@ async function openCodingWidget(page: Page) {
   await expect(codingWidgetButton).toBeVisible();
   await codingWidgetButton.click();
   await expect(page.locator(".coding-cockpit")).toBeVisible();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
 
 test("tool hub search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
@@ -990,7 +1000,7 @@ test("tool hub service selections can be scoped to the conversation and survive 
   await githubCard.getByTitle("サービスを使う").click();
   await expect(githubCard).toContainText("会話固定");
 
-  await page.reload();
+  await page.goto("/static/chat");
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
   await page.locator('button[title="機能"]').click();
   await page.getByRole("button", { name: "この会話" }).click();
@@ -1000,7 +1010,7 @@ test("tool hub service selections can be scoped to the conversation and survive 
 
 test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
-  await openDefaultspack(page, "/chat", {
+  await openDefaultspack(page, "/static/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
 
@@ -1076,7 +1086,7 @@ test("composer at mention selects tools and skills and sends mention metadata", 
 });
 
 test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
-  await openDefaultspack(page, "/chat");
+  await openDefaultspack(page, "/static/chat");
 
   await page.getByTitle("New Chat").first().click();
   await expect(page.locator(".rumi-new-chat-stage")).toBeVisible();
@@ -1100,12 +1110,12 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await homeComposer.fill("/coding");
   await expect(page.getByText("Commands")).toBeVisible();
 
-  await openDefaultspack(page, "/coding");
+  await openDefaultspack(page, "/static/coding");
   const codingComposer = page.locator("textarea.rumi-composer-textarea");
   await codingComposer.fill("@REA");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
-  await expect(mentions).toContainText("README.md");
+  await expect(mentions).toContainText("Mentions");
   const mentionBox = await mentions.boundingBox();
   expect(mentionBox).not.toBeNull();
   expect(mentionBox!.x).toBeGreaterThanOrEqual(0);
@@ -1116,7 +1126,10 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await expect(mentions).toBeHidden();
 
   await page.setViewportSize({ width: 390, height: 820 });
-  await openDefaultspack(page, "/coding");
+  await openDefaultspack(page, "/static/chat");
+  await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
   const workspacePicker = page.locator(".rumi-workspace-picker");
   await expect(workspacePicker).toBeVisible();
   await expect(workspacePicker.locator("svg.text-emerald-300").first()).toBeVisible();
@@ -1209,7 +1222,7 @@ test("calendar action renders a scheduler preview", async ({ page }) => {
 });
 
 test("calendar mode opens quick add and renders new tasks in blue", async ({ page }) => {
-  await openDefaultspack(page, "/coding");
+  await openDefaultspack(page, "/static/chat");
 
   await page.locator('button[title="Calendar"]').first().click();
   await expect(page.getByLabel("Calendar month")).toBeVisible();
@@ -1274,7 +1287,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
-  await openDefaultspack(page, "/chat", {
+  await openDefaultspack(page, "/static/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
 
@@ -1328,7 +1341,7 @@ test("history card drag uses rumi history MIME and sends dropped_widgets metadat
 });
 
 test("late stream activity after final message does not leave an empty draft pending", async ({ page }) => {
-  await openDefaultspack(page, "/chat", {
+  await openDefaultspack(page, "/static/chat", {
     streamEvents: (message) => [
       { type: "content_delta", data: { delta: "Structured response accepted." } },
       { type: "assistant_message_completed", data: { message } },
@@ -1354,7 +1367,7 @@ test("late stream activity after final message does not leave an empty draft pen
 });
 
 test("coding slash command toggles coding mode off again", async ({ page }) => {
-  await openDefaultspack(page, "/chat");
+  await openDefaultspack(page, "/static/chat");
 
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
@@ -1404,13 +1417,61 @@ test("mocked coding cockpit waits for explicit approval before connecting an MCP
   await page.getByTitle("Connect MCP server").click();
 
   await expect(page.getByText(/MCP approval required for contract_digest/)).toBeVisible();
-  await expect(page.getByText("tool.mcp_connect")).toBeVisible();
-  await expect(page.getByText("Environment (redacted)")).toBeVisible();
+  const approvalQueue = page.getByLabel("Approval queue");
+  await approvalQueue.scrollIntoViewIfNeeded();
+  await expect(approvalQueue).toContainText("tool mcp connect");
+  await expect(approvalQueue.getByText("Environment (redacted)")).toBeVisible();
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).not.toBeVisible();
-  await page.getByTitle("Approve").click();
+  await page.getByRole("button", { name: "許可（2）" }).click();
 
   const mcpServers = page.getByLabel("MCP servers");
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
+});
+
+test("mocked MCP denial stays disconnected and recoverable", async ({ page }) => {
+  await openCodingWidget(page);
+  await page.getByLabel("MCP server id").fill("contract_digest");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByTitle("Connect MCP server").click();
+  const approvalQueue = page.getByLabel("Approval queue");
+  await approvalQueue.scrollIntoViewIfNeeded();
+  await approvalQueue.getByRole("button", { name: "拒否（1）" }).click();
+  await expect(page.getByText(/MCP connection denied/)).toBeVisible();
+  await expect(page.getByText(/MCP connected: contract_digest/)).not.toBeVisible();
+});
+
+for (const [status, label] of [["expired", "期限切れ"], ["obsolete", "処理済み"]] as const) {
+  test(`mocked MCP ${status} request is visible but cannot execute`, async ({ page }) => {
+    await installDefaultspackApiMocks(page, { mcpApprovalInitialStatus: status });
+    await page.goto("/static/chat");
+    await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+    await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: "Coding widget" }).click();
+    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    const approvalQueue = page.getByLabel("Approval queue");
+    await approvalQueue.scrollIntoViewIfNeeded();
+    await expect(approvalQueue).toContainText(label);
+    await expect(approvalQueue.getByRole("button", { name: /許可/ })).toHaveCount(0);
+  });
+}
+
+test("mocked MCP process-start error is visible and requires a fresh retry", async ({ page }) => {
+  await installDefaultspackApiMocks(page, { mcpApprovedConnectError: true });
+  await page.goto("/static/chat");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+  await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Coding widget" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByLabel("MCP server id").fill("contract_digest");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByTitle("Connect MCP server").click();
+  const approvalQueue = page.getByLabel("Approval queue");
+  await approvalQueue.scrollIntoViewIfNeeded();
+  await approvalQueue.getByRole("button", { name: "許可（2）" }).click();
+  await expect(page.getByText(/MCP start or reconnect failed/)).toBeVisible();
+  await expect(page.getByText(/MCP connected: contract_digest/)).not.toBeVisible();
 });
