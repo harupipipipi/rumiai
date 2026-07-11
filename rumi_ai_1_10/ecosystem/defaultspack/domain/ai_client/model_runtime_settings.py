@@ -50,7 +50,7 @@ class ModelRuntimeSettingsService:
         current_models = all_settings.get("models", {})
         if not isinstance(current_models, dict):
             current_models = {}
-        sanitized = self.sanitize_models_patch(patch or {})
+        sanitized = self.sanitize_models_patch(patch or {}, current_models=current_models)
         merged = self._deep_merge(current_models, sanitized)
         all_settings["models"] = self.refresh_models_settings(merged)
         self._write_all(all_settings)
@@ -385,6 +385,8 @@ class ModelRuntimeSettingsService:
         for profile in base_profiles:
             if not isinstance(profile, dict):
                 continue
+            if not self._is_real_chat_profile(profile):
+                continue
             availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
             is_active = bool(
                 availability.get("active")
@@ -408,6 +410,8 @@ class ModelRuntimeSettingsService:
             for model in get_all_known_models():
                 if not isinstance(model, dict):
                     continue
+                if not self._is_real_chat_profile(model):
+                    continue
                 provider_id = str(model.get("provider") or model.get("provider_id") or "").strip()
                 model_id = str(model.get("id") or model.get("qualified_model_id") or "").strip()
                 if provider_id and provider_id in available_providers and model_id:
@@ -426,14 +430,26 @@ class ModelRuntimeSettingsService:
             base_model=self._runtime_rumi_base_model(settings),
         )
 
-    def sanitize_models_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
+    def sanitize_models_patch(
+        self,
+        patch: dict[str, Any],
+        *,
+        current_models: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         sanitized = deepcopy(patch or {})
+        current = current_models if isinstance(current_models, dict) else {}
         has_main_model = "main_model" in sanitized
         has_lightweight_model = "lightweight_model" in sanitized
         main_model = str(sanitized.pop("main_model", "") or "").strip()
         lightweight_model = str(sanitized.pop("lightweight_model", "") or "").strip()
         raw_slots = sanitized.get("model_slots")
         slots = dict(raw_slots) if isinstance(raw_slots, dict) else {}
+        if not has_main_model and MODEL_SLOT_MAIN in slots:
+            has_main_model = True
+            main_model = str(slots.get(MODEL_SLOT_MAIN) or "").strip()
+        if not has_lightweight_model and MODEL_SLOT_LIGHTWEIGHT in slots:
+            has_lightweight_model = True
+            lightweight_model = str(slots.get(MODEL_SLOT_LIGHTWEIGHT) or "").strip()
         if has_main_model:
             normalized_main = main_model or DEFAULT_MODEL
             sanitized["preferred_model"] = normalized_main
@@ -450,7 +466,10 @@ class ModelRuntimeSettingsService:
                     utility_models = json.loads(utility_models)
                 except json.JSONDecodeError:
                     utility_models = {}
-            utility_patch = dict(utility_models) if isinstance(utility_models, dict) else {}
+            current_utility = current.get("utility_models")
+            utility_patch = dict(current_utility) if isinstance(current_utility, dict) else {}
+            if isinstance(utility_models, dict):
+                utility_patch.update(utility_models)
             utility_patch["fast_reply"] = lightweight_model
             utility_patch["subagent_default"] = lightweight_model
             sanitized["utility_models"] = utility_patch
@@ -1064,6 +1083,24 @@ class ModelRuntimeSettingsService:
             or metadata_capabilities.get("chat")
             or metadata_capabilities.get("text")
         )
+
+    @classmethod
+    def _is_real_chat_profile(cls, profile: dict[str, Any]) -> bool:
+        if not cls._is_chat_profile(profile):
+            return False
+        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip().lower()
+        profile_id = str(
+            profile.get("profile_id")
+            or profile.get("qualified_model_id")
+            or profile.get("id")
+            or ""
+        ).strip().lower()
+        metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+        if provider_id in {"stub", "rumi", "modelpack", "composite", "synthetic"}:
+            return False
+        if profile_id == DEFAULT_MODEL or profile_id.startswith("modelpack/"):
+            return False
+        return not bool(metadata.get("model_pack") or metadata.get("composite") or metadata.get("synthetic"))
 
     def _candidate_from_profile(self, profile: dict[str, Any], favorites: set[str]) -> dict[str, Any]:
         profile_id = str(profile.get("profile_id") or profile.get("id") or profile.get("qualified_model_id") or "").strip()

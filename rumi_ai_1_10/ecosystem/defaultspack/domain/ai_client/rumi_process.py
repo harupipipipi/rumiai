@@ -83,7 +83,13 @@ def resolve_rumi_base_model(
         if str(item or "").strip()
     }
     default_base = str(default_profile_base_model or "").strip()
-    if default_base and default_base in model_ids:
+    reserved_providers = {"stub", "rumi", "modelpack", "composite", "synthetic"}
+    default_provider, _, _ = default_base.partition("/")
+    if (
+        default_base
+        and default_base in model_ids
+        and default_provider.lower() not in reserved_providers
+    ):
         return default_base
     for candidate in RUMI_BASE_MODEL_CANDIDATES:
         if candidate in model_ids:
