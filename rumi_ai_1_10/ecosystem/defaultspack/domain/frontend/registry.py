@@ -2057,7 +2057,7 @@ class FrontendRegistry:
         paths: list[str] = []
         if isinstance(value, dict):
             preferred = ""
-            for key in ("model_image_path", "screenshot_path", "path"):
+            for key in ("model_image_path", "screenshot_path", "workspace_path", "path"):
                 item = value.get(key)
                 if isinstance(item, str) and item.strip():
                     preferred = item.strip()
@@ -2066,7 +2066,7 @@ class FrontendRegistry:
                 seen.add(preferred)
                 paths.append(preferred)
             for key, item in value.items():
-                if key in {"path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
+                if key in {"path", "workspace_path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
                     continue
                 paths.extend(self._artifact_paths_from_value(item, seen))
         elif isinstance(value, list):

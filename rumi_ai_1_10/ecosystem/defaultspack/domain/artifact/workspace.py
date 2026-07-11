@@ -35,6 +35,18 @@ class ArtifactWorkspace:
         resolved = Path(path).resolve()
         return resolved.relative_to(self.root.resolve()).as_posix()
 
+    def workspace_relative(self, path: Path) -> str:
+        """Return a path suitable for conversation workspace file serving."""
+        relative = self.relative(path)
+        conversation_workspace = self.context.get("conversation_workspace_dir")
+        if not isinstance(conversation_workspace, str) or not conversation_workspace.strip():
+            return relative
+        try:
+            artifact_prefix = self.root.resolve().relative_to(Path(conversation_workspace).expanduser().resolve())
+        except ValueError:
+            return relative
+        return (artifact_prefix / relative).as_posix()
+
     def ensure_dir(self, user_path: str = ".") -> Path:
         path = self.resolve(user_path, allow_root=True)
         path.mkdir(parents=True, exist_ok=True)
