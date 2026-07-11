@@ -248,12 +248,33 @@ class OpencodeZenProvider(AnthropicProvider):
             **self._request_timeout_kwargs(params),
         )
         tool_call_state = {}
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        saw_stream_end = False
         try:
             for payload in OpenAIProvider._parse_sse_lines(resp):
+                payload = str(payload or "").strip()
+                if not payload:
+                    continue
+                if payload == "[DONE]":
+                    if not saw_stream_end:
+                        yield {
+                            "type": "stream_end",
+                            "finish_reason": "stop",
+                            "usage": usage,
+                        }
+                        saw_stream_end = True
+                    break
                 try:
                     obj = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                usage_raw = obj.get("usage") or {}
+                if usage_raw:
+                    usage = {
+                        "input_tokens": usage_raw.get("prompt_tokens", 0),
+                        "output_tokens": usage_raw.get("completion_tokens", 0),
+                        "total_tokens": usage_raw.get("total_tokens", 0),
+                    }
                 choices = obj.get("choices", [])
                 if not choices:
                     continue
@@ -261,6 +282,16 @@ class OpencodeZenProvider(AnthropicProvider):
                 text = delta.get("content")
                 if text:
                     yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                reasoning_text = (
+                    delta.get("reasoning_content")
+                    or delta.get("reasoning")
+                    or delta.get("thinking")
+                )
+                if reasoning_text:
+                    yield {
+                        "type": "reasoning_delta",
+                        "delta": {"type": "text", "text": str(reasoning_text)},
+                    }
                 yield from OpenAIProvider._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
@@ -272,16 +303,18 @@ class OpencodeZenProvider(AnthropicProvider):
                                 "id": current.get("id", ""),
                                 "name": current.get("name", ""),
                             }
-                    usage_raw = obj.get("usage") or {}
                     yield {
                         "type": "stream_end",
                         "finish_reason": finish,
-                        "usage": {
-                            "input_tokens": usage_raw.get("prompt_tokens", 0),
-                            "output_tokens": usage_raw.get("completion_tokens", 0),
-                            "total_tokens": usage_raw.get("total_tokens", 0),
-                        },
+                        "usage": usage,
                     }
+                    saw_stream_end = True
+            if not saw_stream_end:
+                yield {
+                    "type": "stream_end",
+                    "finish_reason": "stop",
+                    "usage": usage,
+                }
         finally:
             resp.close()
 
