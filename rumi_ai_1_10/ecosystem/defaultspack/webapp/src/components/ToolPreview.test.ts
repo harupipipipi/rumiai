@@ -5,6 +5,8 @@ import {
   artifactDialogItemFromToolPreview,
   buildToolPreviewDisplayItems,
   buildToolPreviewTimelineItems,
+  CANVAS_CLOSE_LABEL,
+  CanvasCloseButton,
   hasCanvasItems,
   isCanvasPreviewItemRenderable,
   WEB_PREVIEW_IFRAME_SANDBOX,
@@ -25,6 +27,23 @@ const previews: ToolPreviewItem[] = [
     data: { type: "web", url: "https://example.com", title: "Example" },
   },
 ];
+
+test("canvas close button has a stable accessible name and closes the panel", () => {
+  let closeCalls = 0;
+  const button = CanvasCloseButton({
+    onClose: () => {
+      closeCalls += 1;
+    },
+  });
+
+  assert.equal(button.type, "button");
+  assert.equal(button.props.type, "button");
+  assert.equal(button.props["aria-label"], CANVAS_CLOSE_LABEL);
+  assert.equal(button.props.title, CANVAS_CLOSE_LABEL);
+
+  button.props.onClick();
+  assert.equal(closeCalls, 1);
+});
 
 test("canvas stays hidden until a preview or memo content exists", () => {
   assert.equal(hasCanvasItems([], ""), false);
