@@ -11,7 +11,7 @@ import type {
 } from "../../lib/api";
 import { codingResources } from "../../features/coding/resources/codingResources";
 import { ApprovalQueue } from "./ApprovalQueue";
-import { CheckpointPanel } from "./CheckpointPanel";
+import { CheckpointPanel, type ApprovedCheckpointDecision } from "./CheckpointPanel";
 import { DiffPanel } from "./DiffPanel";
 import { RumiLogPanel } from "./RumiLogPanel";
 import { TerminalPanel, type ApprovedTerminalDecision } from "./TerminalPanel";
@@ -74,6 +74,7 @@ export function CodingCockpit({
   const [sessionTask, setSessionTask] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [approvedTerminalDecision, setApprovedTerminalDecision] = useState<ApprovedTerminalDecision | null>(null);
+  const [approvedCheckpointDecision, setApprovedCheckpointDecision] = useState<ApprovedCheckpointDecision | null>(null);
   const [approvalRefreshSignal, setApprovalRefreshSignal] = useState(0);
   const [mcpServerId, setMcpServerId] = useState("");
   const [mcpCommand, setMcpCommand] = useState("");
@@ -129,13 +130,17 @@ export function CodingCockpit({
   };
 
   const handleApprovalApproved = (decision: CodingApprovalDecision, request: CodingApprovalRequest) => {
-    if (request.operation !== "terminal.exec") return;
-    setApprovedTerminalDecision({
+    const approvedDecision = {
       request_id: decision.request_id,
       approved: decision.approved,
       token: decision.token,
       nonce: Date.now(),
-    });
+    };
+    if (request.operation === "terminal.exec") {
+      setApprovedTerminalDecision(approvedDecision);
+    } else if (request.operation === "file.restore") {
+      setApprovedCheckpointDecision(approvedDecision);
+    }
   };
 
   const handleCodingActionResult = useCallback((result: unknown) => {
@@ -251,6 +256,7 @@ export function CodingCockpit({
         <CheckpointPanel
           workspaceId={activeWorkspaceId}
           onActionResult={handleCodingActionResult}
+          approvedDecision={approvedCheckpointDecision}
         />
         <TerminalPanel
           workspaceId={activeWorkspaceId}
