@@ -4,6 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[2]
 TAURI_ROOT = ROOT / "rumi_viewer" / "src-tauri"
