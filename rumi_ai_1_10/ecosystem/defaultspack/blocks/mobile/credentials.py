@@ -1,42 +1,20 @@
-"""blocks.mobile.credentials — APIキー転送 (E2E暗号化).
-
-PC → スマホへのAPIキー転送を安全に行う。
-スマホ公開鍵で暗号化し、一度だけ取得可能。
-
-ルート:
-  POST /api/mobile/v1/credential-transfers          → create (PC主導)
-  GET  /api/mobile/v1/credential-transfers/{id}     → get (スマホが取得)
-  POST /api/mobile/v1/credential-transfers/{id}/ack → ack (スマホが受領)
-"""
+"""Secure provider credential transfer between the PC and a paired device."""
 
 from __future__ import annotations
 
 import os
 import sys
-import time
-import uuid
+from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
+from core_runtime.runtime_audit_helpers import audit_event
+from domain.ai_client.api_key_store import provider_api_metadata, read_provider_api_key
 from domain.mobile.contract import mobile_feature_enabled
-
-
-_TRANSFER_TTL_SECONDS = 60
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def _transfers_dir(store_path) -> str:
-    import json
-    import json
-    import pathlib
-    d = pathlib.Path(store_path) / "credential_transfers"
-    d.mkdir(parents=True, exist_ok=True)
-    return str(d)
+from domain.p2p.credential_transfer import CredentialTransferStore
+from domain.p2p.device_store import DeviceStore
 
 
 def _merged(input_data: dict) -> dict:
@@ -48,156 +26,204 @@ def _merged(input_data: dict) -> dict:
         if isinstance(value, dict):
             merged.update(value)
     for key, value in input_data.items():
-        if key in {"query_params", "params", "body", "path_params", "query"}:
-            continue
-        merged[key] = value
+        if key not in {"query_params", "params", "body", "path_params", "query"}:
+            merged[key] = value
     return merged
 
 
 def _authenticated_device_id(context) -> str:
-    if isinstance(context, dict):
-        return str(
-            context.get("_authenticated_device_id")
-            or context.get("authenticated_device_id")
-            or ""
-        ).strip()
-    return ""
+    if not isinstance(context, dict):
+        return ""
+    return str(context.get("_authenticated_device_id") or context.get("authenticated_device_id") or "").strip()
 
 
-def _load_transfer(path):
-    import json
+def _profile_id(input_data: dict, context) -> str:
+    values = [
+        (context or {}).get("profile_id") if isinstance(context, dict) else None,
+        os.environ.get("RUMI_PROFILE_ID"),
+        os.environ.get("RUMI_ACTIVE_PROFILE_ID"),
+    ]
+    for value in values:
+        if str(value or "").strip():
+            return str(value).strip()
+    return "default"
 
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    return record if isinstance(record, dict) else None
+
+def _store(input_data, context) -> CredentialTransferStore:
+    return CredentialTransferStore(settings_from(input_data, context).store_path)
 
 
-def _device_mismatch(record: dict, context) -> bool:
-    device_id = _authenticated_device_id(context)
-    return not device_id or device_id != str(record.get("device_id") or "").strip()
+def _audit(context, action: str, record: dict[str, Any], *, success: bool = True) -> None:
+    audit_event(context, action, {
+        "success": success,
+        "transfer_id": record.get("transfer_id"),
+        "status": record.get("status"),
+        "device_id": record.get("device_id"),
+        "profile_id": record.get("profile_id"),
+        "provider_id": record.get("provider_id"),
+        "api_id": record.get("api_id"),
+        "reason": record.get("reason"),
+    })
+
+
+def _failure(exc: Exception):
+    if isinstance(exc, KeyError):
+        return error("transfer not found", "NOT_FOUND")
+    if isinstance(exc, PermissionError):
+        return error(str(exc), "FORBIDDEN")
+    message = str(exc)
+    if "expired" in message:
+        return error("transfer expired", "EXPIRED")
+    if "recipient proof" in message:
+        return error("recipient proof rejected", "RECIPIENT_PROOF_REJECTED")
+    return error(message or "credential transfer failed", "INVALID_STATE")
 
 
 def create_transfer(input_data, context=None):
-    """PC creates an encrypted credential transfer for a specific device."""
-    args = _merged(input_data)
-    device_id = str(args.get("device_id") or "").strip()
-    if not device_id:
-        return error("device_id is required", "INVALID_INPUT")
-
-    provider_id = str(args.get("provider_id") or "").strip()
-    label = str(args.get("label") or "").strip()
-    ciphertext = str(args.get("ciphertext") or "").strip()
-    nonce = str(args.get("nonce") or "").strip()
-    algorithm = str(args.get("algorithm") or "x25519-aes-gcm").strip()
-
     if _authenticated_device_id(context):
         return error("credential transfers must be created from the PC", "FORBIDDEN")
-    if not ciphertext or not nonce:
-        return error("ciphertext and nonce are required", "INVALID_INPUT")
-    if algorithm in {"base64-wrapper", "plaintext"}:
-        return error("plaintext credential transfer is not allowed", "INVALID_INPUT")
-
-    s = settings_from(input_data, context)
-    transfer_id = "transfer-" + uuid.uuid4().hex[:12]
-    now = _now_ms()
-    expires_at = now + _TRANSFER_TTL_SECONDS * 1000
-
-    record = {
-        "transfer_id": transfer_id,
-        "device_id": device_id,
-        "provider_id": provider_id,
-        "label": label,
-        "algorithm": algorithm,
-        "ciphertext": ciphertext,
-        "nonce": nonce,
-        "status": "pending",
-        "created_at": now,
-        "expires_at": expires_at,
-        "acked": False,
-        "acknowledged_at": 0,
-    }
-
-    import json
-    import pathlib
-    transfers_dir = pathlib.Path(s.store_path) / "credential_transfers"
-    transfers_dir.mkdir(parents=True, exist_ok=True)
-    transfer_path = transfers_dir / f"{transfer_id}.json"
-    transfer_path.write_text(
-        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-    safe = {k: v for k, v in record.items() if k != "ciphertext"}
-    return ok({"transfer": safe, "transfer_id": transfer_id, "status": "pending"})
-
-
-def get_transfer(input_data, context=None):
-    """Mobile retrieves the encrypted credential transfer."""
     args = _merged(input_data)
-    transfer_id = str(args.get("transfer_id") or args.get("id") or "").strip()
-    if not transfer_id:
-        return error("transfer_id is required", "INVALID_INPUT")
+    device_id = str(args.get("device_id") or "").strip()
+    provider_id = str(args.get("provider_id") or "").strip()
+    api_id = str(args.get("api_id") or "").strip()
+    if not device_id or not provider_id or not api_id:
+        return error("device_id, provider_id and api_id are required", "INVALID_INPUT")
+    if any(key in args for key in ("api_key", "secret", "plaintext", "ciphertext", "nonce")):
+        return error("client-supplied credential material is forbidden", "INVALID_INPUT")
 
-    s = settings_from(input_data, context)
-    import json
-    import pathlib
-    transfer_path = pathlib.Path(s.store_path) / "credential_transfers" / f"{transfer_id}.json"
-    if not transfer_path.exists():
-        return error("transfer not found or expired", "NOT_FOUND")
-    record = _load_transfer(transfer_path)
-    if record is None:
-        return error("transfer record corrupted", "CORRUPT")
-    if _device_mismatch(record, context):
-        return error("transfer is not for this device", "FORBIDDEN")
+    settings = settings_from(input_data, context)
+    device = DeviceStore(settings.store_path).get_device(device_id)
+    if device is None or not device.active:
+        return error("recipient device is not active", "DEVICE_NOT_ACTIVE")
+    if "credentials.request" not in device.scopes:
+        return error("recipient device is not allowed to receive credentials", "SCOPE_NOT_ALLOWED")
+    if device.profile_id != _profile_id(input_data, context):
+        return error("recipient profile does not match", "WRONG_PROFILE")
+    if not device.encryption_public_key or not device.public_key:
+        return error("recipient must pair again to register secure transfer keys", "RECIPIENT_KEY_REQUIRED")
 
-    if _now_ms() > record.get("expires_at", 0):
-        transfer_path.unlink(missing_ok=True)
-        return error("transfer expired", "EXPIRED")
-
-    if record.get("acked"):
-        return error("transfer already acknowledged", "ALREADY_ACKED")
-
-    record["status"] = "pending"
+    metadata = provider_api_metadata(provider_id, api_id)
+    if not metadata and read_provider_api_key(provider_id, api_id) is None:
+        return error("provider credential not found", "CREDENTIAL_NOT_FOUND")
+    try:
+        record = _store(input_data, context).create(
+            device_id=device.device_id,
+            device_label=device.label or "Rumi Mobile",
+            profile_id=device.profile_id,
+            provider_id=provider_id,
+            api_id=api_id,
+            provider_label=str(metadata.get("name") or metadata.get("label") or provider_id),
+            recipient_public_key=device.encryption_public_key,
+            recipient_signing_key=device.public_key,
+            ttl_seconds=int(args.get("ttl_seconds") or 90),
+        )
+    except Exception as exc:
+        return _failure(exc)
+    _audit(context, "credential_transfer.created", record)
     return ok({"transfer": record})
 
 
-def ack_transfer(input_data, context=None):
-    """Mobile acknowledges receipt — PC deletes the transfer record."""
+def confirm_transfer(input_data, context=None):
+    if _authenticated_device_id(context):
+        return error("credential transfers must be confirmed on the PC", "FORBIDDEN")
     args = _merged(input_data)
     transfer_id = str(args.get("transfer_id") or args.get("id") or "").strip()
-    if not transfer_id:
-        return error("transfer_id is required", "INVALID_INPUT")
+    if args.get("user_confirmed") is not True:
+        return error("explicit user confirmation is required", "CONFIRMATION_REQUIRED")
+    try:
+        current = _store(input_data, context).get_admin(transfer_id)
+        expected = {key: str(args.get(key) or "").strip() for key in ("device_id", "provider_id", "api_id")}
+        secret = read_provider_api_key(current["provider_id"], current["api_id"])
+        if not secret:
+            return error("provider credential not found", "CREDENTIAL_NOT_FOUND")
+        metadata = provider_api_metadata(current["provider_id"], current["api_id"])
+        payload = {
+            "provider_id": current["provider_id"],
+            "api_id": current["api_id"],
+            "api_key": secret,
+            "label": current["provider_label"],
+            "base_url": str(metadata.get("base_url") or ""),
+            "default_model": str(metadata.get("default_model") or ""),
+            "expires_at": current["expires_at"],
+        }
+        record = _store(input_data, context).confirm(transfer_id, payload=payload, expected=expected)
+        payload.clear()
+        secret = ""
+    except Exception as exc:
+        return _failure(exc)
+    _audit(context, "credential_transfer.confirmed", record)
+    return ok({"transfer": record})
 
-    s = settings_from(input_data, context)
-    import pathlib
-    transfer_path = pathlib.Path(s.store_path) / "credential_transfers" / f"{transfer_id}.json"
-    if not transfer_path.exists():
-        return error("transfer not found", "NOT_FOUND")
 
-    record = _load_transfer(transfer_path)
-    if record is None:
-        return error("transfer record corrupted", "CORRUPT")
-    if _device_mismatch(record, context):
-        return error("transfer is not for this device", "FORBIDDEN")
+def list_transfers(input_data, context=None):
+    device_id = _authenticated_device_id(context)
+    if not device_id:
+        return error("device authentication is required", "FORBIDDEN")
+    return ok({"transfers": _store(input_data, context).list_for_device(device_id)})
 
-    transfer_path.unlink(missing_ok=True)
-    return ok({"acked": True, "transfer_id": transfer_id})
+
+def get_status(input_data, context=None):
+    if _authenticated_device_id(context):
+        return error("transfer status is only available on the PC", "FORBIDDEN")
+    args = _merged(input_data)
+    try:
+        record = _store(input_data, context).get_admin(str(args.get("transfer_id") or args.get("id") or ""))
+    except Exception as exc:
+        return _failure(exc)
+    return ok({"transfer": record})
+
+
+def redeem_transfer(input_data, context=None):
+    device_id = _authenticated_device_id(context)
+    if not device_id:
+        return error("device authentication is required", "FORBIDDEN")
+    args = _merged(input_data)
+    try:
+        result = _store(input_data, context).redeem(
+            str(args.get("transfer_id") or args.get("id") or ""),
+            device_id=device_id,
+            signature=str(args.get("signature") or ""),
+        )
+    except Exception as exc:
+        return _failure(exc)
+    _audit(context, "credential_transfer.accepted", result["transfer"])
+    return ok(result)
+
+
+def _transition(input_data, context, status: str):
+    args = _merged(input_data)
+    device_id = _authenticated_device_id(context)
+    if status in {"rejected", "completed"} and not device_id:
+        return error("only the recipient can update this transfer", "FORBIDDEN")
+    if status in {"cancelled", "revoked"} and device_id:
+        return error("only the PC can cancel or revoke a transfer", "FORBIDDEN")
+    try:
+        record = _store(input_data, context).transition(
+            str(args.get("transfer_id") or args.get("id") or ""),
+            status=status,
+            actor_device_id=device_id,
+            reason=str(args.get("reason") or status),
+        )
+    except Exception as exc:
+        return _failure(exc)
+    _audit(context, f"credential_transfer.{status}", record)
+    return ok({"transfer": record})
 
 
 def run(input_data, context=None):
     if not mobile_feature_enabled("credential_transfer"):
-        return error(
-            "mobile credential transfer is disabled until encrypted device-bound delivery is complete",
-            "FEATURE_DISABLED",
-        )
-    args = _merged(input_data)
-    action = str(args.get("action") or "").strip().lower()
+        return error("mobile credential transfer is disabled", "FEATURE_DISABLED")
+    action = str(_merged(input_data).get("action") or "").strip().lower()
     handlers = {
         "create": create_transfer,
-        "get": get_transfer,
-        "ack": ack_transfer,
+        "confirm": confirm_transfer,
+        "list": list_transfers,
+        "status": get_status,
+        "redeem": redeem_transfer,
+        "reject": lambda data, ctx=None: _transition(data, ctx, "rejected"),
+        "cancel": lambda data, ctx=None: _transition(data, ctx, "cancelled"),
+        "revoke": lambda data, ctx=None: _transition(data, ctx, "revoked"),
+        "ack": lambda data, ctx=None: _transition(data, ctx, "completed"),
     }
     handler = handlers.get(action)
     if handler is None:

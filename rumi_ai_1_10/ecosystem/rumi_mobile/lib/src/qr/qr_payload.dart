@@ -14,36 +14,6 @@ class QrPcConnection extends QrPayload {
   PcConnection toPcConnection() => PcConnection(baseUrl: baseUrl, token: token);
 }
 
-class QrApiImport extends QrPayload {
-  const QrApiImport({
-    required this.baseUrl,
-    required this.apiKey,
-    this.providerId,
-    this.apiId,
-    this.model,
-    this.label,
-    this.apiCompatibility,
-  });
-  final String baseUrl;
-  final String apiKey;
-  final String? providerId;
-  final String? apiId;
-  final String? model;
-  final String? label;
-  final String? apiCompatibility;
-
-  ApiConfig toApiConfig({required ApiConfig fallback}) {
-    return fallback.copyWith(
-      providerId: providerId,
-      baseUrl: baseUrl,
-      apiKey: apiKey,
-      model: model,
-      label: label,
-      apiCompatibility: apiCompatibility,
-    );
-  }
-}
-
 class QrPairingV2 extends QrPayload {
   const QrPairingV2(this.payload);
   final PairingV2Payload payload;
@@ -73,20 +43,7 @@ QrPayload parseQrPayload(String raw) {
             token: (json['token'] as String?)?.trim() ?? '',
           );
         case 'rumi_api':
-          return QrApiImport(
-            baseUrl: (json['baseUrl'] as String?)?.trim() ?? '',
-            apiKey: (json['apiKey'] as String?)?.trim() ??
-                (json['api_key'] as String?)?.trim() ??
-                '',
-            providerId: (json['providerId'] as String?)?.trim() ??
-                (json['provider_id'] as String?)?.trim(),
-            apiId: (json['apiId'] as String?)?.trim() ??
-                (json['api_id'] as String?)?.trim(),
-            model: (json['model'] as String?)?.trim(),
-            label: (json['label'] as String?)?.trim(),
-            apiCompatibility: (json['apiCompatibility'] as String?)?.trim() ??
-                (json['api_compatibility'] as String?)?.trim(),
-          );
+          return QrUnknown(trimmed);
         case 'rumi_mobile_pair_v1':
         case 'rumi_pair_v2':
           return QrPairingV2(PairingV2Payload.fromJson(json));

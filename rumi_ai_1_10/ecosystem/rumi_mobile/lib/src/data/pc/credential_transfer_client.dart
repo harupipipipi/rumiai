@@ -1,6 +1,10 @@
 import 'dart:convert';
+
+import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
+
 import '../../settings/api_config_store.dart';
+import 'device_store.dart';
 
 class CredentialTransferException implements Exception {
   const CredentialTransferException(this.message, {this.statusCode});
@@ -15,33 +19,61 @@ class CredentialTransfer {
   const CredentialTransfer({
     required this.transferId,
     required this.status,
-    this.ciphertext,
-    this.nonce,
-    this.algorithm,
-    this.label,
+    required this.deviceId,
+    required this.providerId,
+    required this.apiId,
+    required this.expiresAt,
+    this.deviceLabel = '',
+    this.profileId = '',
+    this.providerLabel = '',
+    this.redemptionChallenge = '',
+    this.reason = '',
   });
 
   final String transferId;
   final String status;
-  final String? ciphertext;
-  final String? nonce;
-  final String? algorithm;
-  final String? label;
+  final String deviceId;
+  final String deviceLabel;
+  final String profileId;
+  final String providerId;
+  final String providerLabel;
+  final String apiId;
+  final int expiresAt;
+  final String redemptionChallenge;
+  final String reason;
 
   bool get isPending => status == 'pending';
-  bool get isCompleted => status == 'acked' || status == 'completed';
+  bool get isTerminal => const {
+        'completed', 'rejected', 'expired', 'revoked', 'cancelled'
+      }.contains(status);
+  bool get isExpired => DateTime.now().millisecondsSinceEpoch >= expiresAt;
 
   factory CredentialTransfer.fromJson(Map<String, dynamic> json) {
     final transfer = json['transfer'] as Map<String, dynamic>? ?? json;
     return CredentialTransfer(
       transferId: transfer['transfer_id'] as String? ?? '',
-      status: transfer['status'] as String? ?? json['status'] as String? ?? '',
-      ciphertext: transfer['ciphertext'] as String?,
-      nonce: transfer['nonce'] as String?,
-      algorithm: transfer['algorithm'] as String?,
-      label: transfer['label'] as String?,
+      status: transfer['status'] as String? ?? '',
+      deviceId: transfer['device_id'] as String? ?? '',
+      deviceLabel: transfer['device_label'] as String? ?? '',
+      profileId: transfer['profile_id'] as String? ?? '',
+      providerId: transfer['provider_id'] as String? ?? '',
+      providerLabel: transfer['provider_label'] as String? ?? '',
+      apiId: transfer['api_id'] as String? ?? '',
+      expiresAt: (transfer['expires_at'] as num?)?.toInt() ?? 0,
+      redemptionChallenge:
+          transfer['redemption_challenge'] as String? ?? '',
+      reason: transfer['reason'] as String? ?? '',
     );
   }
+
+  Map<String, dynamic> redemptionPayload() => {
+        'transfer_id': transferId,
+        'device_id': deviceId,
+        'provider_id': providerId,
+        'api_id': apiId,
+        'expires_at': expiresAt,
+        'challenge': redemptionChallenge,
+      };
 }
 
 class CredentialTransferClient {
@@ -59,6 +91,7 @@ class CredentialTransferClient {
   Map<String, String> _headers(String token) => {
         'Authorization': 'Bearer $token',
         'Accept': 'application/json',
+        'Content-Type': 'application/json',
       };
 
   Uri _uri(String baseUrl, String path) {
@@ -68,35 +101,118 @@ class CredentialTransferClient {
     return base.replace(path: '${_trimTrailingSlash(base.path)}$path');
   }
 
-  Future<CredentialTransfer> getTransfer(
-    PcConnection pc, {
-    required String transferId,
-  }) async {
-    if (!pc.isConfigured) {
-      throw const CredentialTransferException('PC接続が設定されていません。');
-    }
-    if (_closed) {
-      throw const CredentialTransferException('クライアントは閉じられました。');
-    }
-    final uri = _uri(
-      pc.baseUrl,
-      '/api/mobile/v1/credential-transfers/$transferId',
-    );
-    final resp = await _http
-        .get(uri, headers: _headers(pc.token))
-        .timeout(const Duration(seconds: 15));
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      throw CredentialTransferException(
-        'クレデンシャル取得に失敗しました (HTTP ${resp.statusCode})',
-        statusCode: resp.statusCode,
-      );
-    }
-    return CredentialTransfer.fromJson(_decodeData(resp.body));
+  Future<List<CredentialTransfer>> listPending(PcConnection pc) async {
+    final data = await _request(pc, 'GET', '/api/mobile/v1/credential-transfers');
+    final transfers = data['transfers'] as List? ?? const [];
+    return transfers
+        .whereType<Map>()
+        .map((value) => CredentialTransfer.fromJson(
+              Map<String, dynamic>.from(value),
+            ))
+        .where((transfer) => !transfer.isExpired && transfer.isPending)
+        .toList();
   }
 
-  Future<void> ackTransfer(
+  Future<Map<String, dynamic>> redeem(
     PcConnection pc, {
-    required String transferId,
+    required CredentialTransfer transfer,
+    required MobileDeviceStore deviceStore,
+  }) async {
+    if (transfer.isExpired || !transfer.isPending) {
+      throw const CredentialTransferException(
+        'この転送は期限切れまたは受領済みです。',
+      );
+    }
+    final identity = await deviceStore.loadOrCreateIdentity();
+    if (identity.deviceId != transfer.deviceId) {
+      throw const CredentialTransferException('この転送は別の端末宛てです。');
+    }
+    final encoded = jsonEncode(transfer.redemptionPayload());
+    final digest = await Sha256().hash(utf8.encode(encoded));
+    final signature = await deviceStore.signApprovalPayloadHash(
+      _hex(digest.bytes),
+    );
+    final data = await _request(
+      pc,
+      'POST',
+      '/api/mobile/v1/credential-transfers/${transfer.transferId}',
+      body: {'signature': signature},
+    );
+    final envelope = Map<String, dynamic>.from(data['envelope'] as Map);
+    return deviceStore.decryptCredentialTransferEnvelope(
+      envelope,
+      transferId: transfer.transferId,
+      deviceId: transfer.deviceId,
+      expiresAt: transfer.expiresAt,
+    );
+  }
+
+  Future<void> reject(PcConnection pc, CredentialTransfer transfer) async {
+    await _request(
+      pc,
+      'POST',
+      '/api/mobile/v1/credential-transfers/${transfer.transferId}/reject',
+      body: {'reason': 'rejected by recipient'},
+    );
+  }
+
+  Future<void> acknowledge(PcConnection pc, CredentialTransfer transfer) async {
+    await _request(
+      pc,
+      'POST',
+      '/api/mobile/v1/credential-transfers/${transfer.transferId}/ack',
+      body: const {},
+    );
+  }
+
+  Future<void> redeemAndStore(
+    PcConnection pc, {
+    required CredentialTransfer transfer,
+    required MobileDeviceStore deviceStore,
+    required ApiConfigStore configStore,
+  }) async {
+    final payload = await redeem(
+      pc,
+      transfer: transfer,
+      deviceStore: deviceStore,
+    );
+    if (payload['provider_id'] != transfer.providerId ||
+        payload['api_id'] != transfer.apiId ||
+        payload['expires_at'] != transfer.expiresAt) {
+      throw const CredentialTransferException(
+        '暗号化payloadの転送内容が一致しません。',
+      );
+    }
+    final apiKey = payload['api_key'] as String? ?? '';
+    if (apiKey.trim().isEmpty) {
+      throw const CredentialTransferException('credentialが空です。');
+    }
+    final existing = await configStore.loadProviderConfigs();
+    final previous = existing
+        .where((config) => config.providerId == transfer.providerId)
+        .firstOrNull;
+    final next = MobileProviderConfig(
+      providerId: transfer.providerId,
+      displayName: transfer.providerLabel,
+      label: payload['label'] as String? ?? transfer.providerLabel,
+      apiKey: apiKey,
+      baseUrl: payload['base_url'] as String? ?? previous?.baseUrl ?? '',
+      model: payload['default_model'] as String? ?? previous?.model ?? '',
+      openaiCompatible: previous?.openaiCompatible ?? true,
+      local: false,
+      catalogOnly: false,
+      apiCompatibility: previous?.apiCompatibility ?? 'openai',
+    );
+    await configStore.upsertProviderConfig(next);
+    payload.clear();
+    await acknowledge(pc, transfer);
+  }
+
+  Future<Map<String, dynamic>> _request(
+    PcConnection pc,
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
   }) async {
     if (!pc.isConfigured) {
       throw const CredentialTransferException('PC接続が設定されていません。');
@@ -104,19 +220,20 @@ class CredentialTransferClient {
     if (_closed) {
       throw const CredentialTransferException('クライアントは閉じられました。');
     }
-    final uri = _uri(
-      pc.baseUrl,
-      '/api/mobile/v1/credential-transfers/$transferId/ack',
-    );
-    final resp = await _http
-        .post(uri, headers: _headers(pc.token))
-        .timeout(const Duration(seconds: 15));
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+    final uri = _uri(pc.baseUrl, path);
+    final headers = _headers(pc.token);
+    final response = method == 'GET'
+        ? await _http.get(uri, headers: headers).timeout(const Duration(seconds: 15))
+        : await _http
+            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
+            .timeout(const Duration(seconds: 15));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw CredentialTransferException(
-        'ACK送信に失敗しました (HTTP ${resp.statusCode})',
-        statusCode: resp.statusCode,
+        'credential転送に失敗しました (HTTP ${response.statusCode})',
+        statusCode: response.statusCode,
       );
     }
+    return _decodeData(response.body);
   }
 
   Map<String, dynamic> _decodeData(String body) {
@@ -124,13 +241,15 @@ class CredentialTransferClient {
       final decoded = jsonDecode(body) as Map<String, dynamic>;
       if (decoded['status'] != 'ok') {
         final err = decoded['error'];
-        final msg = err is Map ? err['message'] as String? : null;
-        throw CredentialTransferException(msg ?? 'PCからエラーが返されました。');
+        final message = err is Map ? err['message'] as String? : null;
+        throw CredentialTransferException(
+          message ?? 'PCからエラーが返されました。',
+        );
       }
       return decoded['data'] as Map<String, dynamic>? ?? const {};
-    } catch (e) {
-      if (e is CredentialTransferException) rethrow;
-      throw CredentialTransferException('PC応答の解析に失敗しました: $e');
+    } catch (error) {
+      if (error is CredentialTransferException) rethrow;
+      throw const CredentialTransferException('PC応答の解析に失敗しました。');
     }
   }
 
@@ -139,3 +258,6 @@ class CredentialTransferClient {
     return path.endsWith('/') ? path.substring(0, path.length - 1) : path;
   }
 }
+
+String _hex(List<int> bytes) =>
+    bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();

@@ -264,6 +264,15 @@ String _hostFromBaseUrl(String baseUrl) {
   return Uri.tryParse(normalized)?.host ?? '';
 }
 
+bool _constantTimeEquals(List<int> left, List<int> right) {
+  if (left.length != right.length) return false;
+  var difference = 0;
+  for (var index = 0; index < left.length; index++) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference == 0;
+}
+
 bool _looksLikeIpAddress(String value) {
   return RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(value) ||
       value.contains(':');
@@ -497,6 +506,73 @@ class MobileDeviceStore {
     final decoded = jsonDecode(utf8.decode(clear));
     if (decoded is! Map) {
       throw FormatException('invalid token delivery payload');
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> decryptCredentialTransferEnvelope(
+    Map<String, dynamic> envelope, {
+    required String transferId,
+    required String deviceId,
+    required int expiresAt,
+  }) async {
+    final identity = await loadOrCreateIdentity();
+    if (!identity.canDecryptTokenDelivery) {
+      throw StateError('credential transfer decryption key is not available');
+    }
+    final version = envelope['version'] as int? ?? 0;
+    final alg = envelope['alg'] as String? ?? '';
+    if (version != 1 || alg != 'X25519-HKDF-SHA256-AES-256-GCM') {
+      throw FormatException('unsupported credential transfer envelope');
+    }
+    final remotePublicKey = SimplePublicKey(
+      _decodePrefixedPublicKey(
+        envelope['ephemeral_public_key'] as String? ?? '',
+        'x25519:',
+      ),
+      type: KeyPairType.x25519,
+    );
+    final localPublicKey = SimplePublicKey(
+      _decodePrefixedPublicKey(identity.encryptionPublicKey, 'x25519:'),
+      type: KeyPairType.x25519,
+    );
+    final localKeyPair = SimpleKeyPairData(
+      _decodeBase64Url(identity.encryptionPrivateKey),
+      publicKey: localPublicKey,
+      type: KeyPairType.x25519,
+    );
+    final sharedSecret = await X25519().sharedSecretKey(
+      keyPair: localKeyPair,
+      remotePublicKey: remotePublicKey,
+    );
+    final secretKey = await Hkdf(
+      hmac: Hmac.sha256(),
+      outputLength: 32,
+    ).deriveKey(
+      secretKey: sharedSecret,
+      nonce: utf8.encode('rumi-provider-credential-transfer-v1'),
+      info: utf8.encode('$transferId:$deviceId:$expiresAt'),
+    );
+    final expectedAad = utf8.encode(
+      'rumi-provider-credential-transfer:v1:$transferId:$deviceId:$expiresAt',
+    );
+    final aad = _decodeBase64Url(envelope['aad'] as String? ?? '');
+    if (!_constantTimeEquals(aad, expectedAad)) {
+      throw FormatException('credential transfer recipient binding mismatch');
+    }
+    final box = SecretBox(
+      _decodeBase64Url(envelope['ciphertext'] as String? ?? ''),
+      nonce: _decodeBase64Url(envelope['nonce'] as String? ?? ''),
+      mac: Mac(_decodeBase64Url(envelope['tag'] as String? ?? '')),
+    );
+    final clear = await AesGcm.with256bits().decrypt(
+      box,
+      secretKey: secretKey,
+      aad: aad,
+    );
+    final decoded = jsonDecode(utf8.decode(clear));
+    if (decoded is! Map) {
+      throw FormatException('invalid credential transfer payload');
     }
     return Map<String, dynamic>.from(decoded);
   }

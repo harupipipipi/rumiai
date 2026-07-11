@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
 import { cn } from "../../../lib/cn";
-import { allowCleartextMobileQr } from "../../../lib/mobileCleartextQr";
 import { buildApiKeySavePayload, collectApiProviderOptions } from "../../../features/apiKeys/apiKeySetup";
 import { settingsApiResources } from "../../../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../../../features/settings/resources/useModelAvailability";
@@ -39,14 +38,10 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
   const [credentialTransfer, setCredentialTransfer] = useState<{
     providerId: string;
     providerLabel?: string;
-    apiKey: string;
     apiId?: string;
-    baseUrl?: string;
-    defaultModel?: string;
   } | null>(null);
   const selectedProviderOption = providerOptions.find((option) => option.provider_id === providerId);
   const selectedKind = selectedProviderKind(providerId, providerOptions);
-  const credentialTransferEnabled = allowCleartextMobileQr();
   const feedback = saveState === "saved" ? availabilityCopy(availability) : null;
 
   const resetFeedback = () => {
@@ -76,8 +71,6 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
       const savedProviderId = payload.provider_id;
       const savedProviderLabel = selectedProviderOption?.label;
       const savedApiId = payload.options.apiId;
-      const savedBaseUrl = baseUrl.trim();
-      const savedDefaultModel = defaultModel.trim();
       setAvailability(result.model_availability ?? {
         status: "route_required",
         provider_id: payload.provider_id,
@@ -85,19 +78,11 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
         candidate_models: [],
         reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
       });
-      if (credentialTransferEnabled) {
-        setCredentialTransfer({
-          providerId: savedProviderId,
-          providerLabel: savedProviderLabel,
-          apiKey: payload.value,
-          apiId: savedApiId,
-          baseUrl: savedBaseUrl || undefined,
-          defaultModel: savedDefaultModel || undefined,
-        });
-      } else {
-        setCredentialTransfer(null);
-        onChange(sectionId, targetFieldId, { action: "oauth_refresh" });
-      }
+      setCredentialTransfer({
+        providerId: savedProviderId,
+        providerLabel: savedProviderLabel,
+        apiId: savedApiId,
+      });
       setSecret("");
       setBaseUrl("");
       setAllowedModels("");
@@ -211,15 +196,11 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
             {saveError}
           </div>
         )}
-        {credentialTransferEnabled && credentialTransfer && (
+        {credentialTransfer && (
           <CredentialTransferModal
-            enabled={credentialTransferEnabled}
             providerId={credentialTransfer.providerId}
             providerLabel={credentialTransfer.providerLabel}
-            apiKey={credentialTransfer.apiKey}
             apiId={credentialTransfer.apiId}
-            baseUrl={credentialTransfer.baseUrl}
-            defaultModel={credentialTransfer.defaultModel}
             onClose={() => {
               setCredentialTransfer(null);
               onChange(sectionId, targetFieldId, { action: "oauth_refresh" });

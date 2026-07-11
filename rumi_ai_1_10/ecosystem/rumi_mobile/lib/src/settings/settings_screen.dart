@@ -182,89 +182,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _scanApi({BuildContext? navigationContext}) async {
-    final result = await Navigator.of(
-      navigationContext ?? context,
-    ).push<(QrPayload, bool)>(
-      MaterialPageRoute(
-        builder: (_) => const QrScannerScreen(
-          purpose: QrScanPurpose.apiImport,
-          hint: 'PCの「アプリ」欄に表示されたAPI/モデルQRをスキャン',
-        ),
-      ),
-    );
-    if (result == null) return;
-    final (payload, mismatch) = result;
-    if (mismatch) {
-      _toast('このQRはAPI形式ではありません');
-      return;
-    }
-    if (payload is QrApiImport) {
-      final providerId = payload.providerId?.trim() ?? '';
-      if (providerId.isNotEmpty) {
-        await _importProviderApi(payload);
-        return;
-      }
-      setState(() {
-        _baseUrl.text = payload.baseUrl;
-        _apiKey.text = payload.apiKey;
-        if (payload.model != null && payload.model!.isNotEmpty) {
-          _model.text = payload.model!;
-        }
-        if (payload.label != null && payload.label!.isNotEmpty) {
-          _label.text = payload.label!;
-        }
-      });
-      _toast('API/モデルを取り込みました。保存してください。');
-    }
-  }
-
-  Future<void> _importProviderApi(QrApiImport payload) async {
-    final providerId = payload.providerId!.trim();
-    final existing = _providerConfigById(_providerConfigs, providerId);
-    final fallback =
-        _providerConfigById(defaultspackMobileProviderConfigs, providerId);
-    final source = existing ?? fallback;
-    if (source == null) {
-      setState(() {
-        _baseUrl.text = payload.baseUrl;
-        _apiKey.text = payload.apiKey;
-        if (payload.model?.isNotEmpty == true) _model.text = payload.model!;
-        if (payload.label?.isNotEmpty == true) _label.text = payload.label!;
-      });
-      _toast('未登録providerのAPIを取り込みました。高度な設定から保存してください。');
-      return;
-    }
-    final next = source.copyWith(
-      apiKey: payload.apiKey,
-      label: payload.label?.trim().isNotEmpty == true
-          ? payload.label!.trim()
-          : source.label,
-      baseUrl: payload.baseUrl.trim().isNotEmpty
-          ? payload.baseUrl.trim()
-          : source.baseUrl,
-      model: payload.model?.trim().isNotEmpty == true
-          ? payload.model!.trim()
-          : source.model,
-      apiCompatibility: payload.apiCompatibility?.trim().isNotEmpty == true
-          ? payload.apiCompatibility!.trim()
-          : source.apiCompatibility,
-    );
-    final nextProviders = [
-      for (final provider in _providerConfigs)
-        if (provider.providerId != providerId) provider,
-      next,
-    ]..sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
-    await widget.configStore.saveProviderConfigs(nextProviders);
-    if (!mounted) return;
-    setState(() => _providerConfigs = nextProviders);
-    if (next.isConfigured && _providerRunsOnMobile(next)) {
-      await _activateMobileProvider(next);
-    } else {
-      _toast('${next.effectiveLabel} のAPI Keyを取り込みました');
-    }
-  }
-
   Future<void> _scanPc() async {
     final result = await Navigator.of(context).push<(QrPayload, bool)>(
       MaterialPageRoute(
@@ -554,16 +471,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  MobileProviderConfig? _providerConfigById(
-    Iterable<MobileProviderConfig> configs,
-    String providerId,
-  ) {
-    for (final config in configs) {
-      if (config.providerId == providerId) return config;
-    }
-    return null;
   }
 
   List<MobileProviderConfig> _mergeDefaultProviderConfigs(
@@ -1073,9 +980,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               systemPrompt: _systemPrompt,
               isActiveProvider: _isActiveMobileProvider,
               providerRunsOnMobile: _providerRunsOnMobile,
-              onScanApi: () => refresh(
-                () => _scanApi(navigationContext: context),
-              ),
               onFetchPcCatalog: () => refresh(_fetchPcCatalog),
               onSaveDirectConfig: () => refresh(_save),
               onUseProvider: (provider) => refresh(
@@ -1523,7 +1427,6 @@ class _MobileApiSettingsPage extends StatefulWidget {
     required this.systemPrompt,
     required this.isActiveProvider,
     required this.providerRunsOnMobile,
-    required this.onScanApi,
     required this.onFetchPcCatalog,
     required this.onSaveDirectConfig,
     required this.onUseProvider,
@@ -1542,7 +1445,6 @@ class _MobileApiSettingsPage extends StatefulWidget {
   final TextEditingController systemPrompt;
   final bool Function(MobileProviderConfig provider) isActiveProvider;
   final bool Function(MobileProviderConfig provider) providerRunsOnMobile;
-  final Future<void> Function() onScanApi;
   final Future<void> Function() onFetchPcCatalog;
   final Future<void> Function() onSaveDirectConfig;
   final Future<void> Function(MobileProviderConfig provider) onUseProvider;
@@ -1611,32 +1513,18 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('QRで取り込む'),
-                      onPressed: () => unawaited(widget.onScanApi()),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton.tonalIcon(
-                      icon: widget.fetchingCatalog
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_download_outlined),
-                      label: const Text('PCから取得'),
-                      onPressed: widget.fetchingCatalog
-                          ? null
-                          : () => unawaited(widget.onFetchPcCatalog()),
-                    ),
-                  ),
-                ],
+              FilledButton.tonalIcon(
+                icon: widget.fetchingCatalog
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_download_outlined),
+                label: const Text('PCから安全に取得'),
+                onPressed: widget.fetchingCatalog
+                    ? null
+                    : () => unawaited(widget.onFetchPcCatalog()),
               ),
               if (widget.catalogError != null) ...[
                 const SizedBox(height: 8),

@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'qr_payload.dart';
 
-enum QrScanPurpose { apiImport, pcConnect, general }
+enum QrScanPurpose { pcConnect, general }
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key, required this.purpose, this.hint});
@@ -44,15 +44,12 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   String get _title => switch (widget.purpose) {
-        QrScanPurpose.apiImport => 'API/モデルをQRで取り込む',
         QrScanPurpose.pcConnect => 'PCにQRで接続',
         QrScanPurpose.general => 'QRスキャン',
       };
 
   bool _matchesPurpose(QrPayload payload) {
     switch (widget.purpose) {
-      case QrScanPurpose.apiImport:
-        return payload is QrApiImport;
       case QrScanPurpose.pcConnect:
         return payload is QrPcConnection || payload is QrPairingV2;
       case QrScanPurpose.general:

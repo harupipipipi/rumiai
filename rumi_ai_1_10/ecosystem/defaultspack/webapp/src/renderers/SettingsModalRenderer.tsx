@@ -9,7 +9,6 @@ import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
 import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { t } from "../lib/i18n";
-import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText } from "../lib/settingsSearch";
@@ -2011,10 +2010,7 @@ function SettingsField({
   const [credentialTransfer, setCredentialTransfer] = useState<{
     providerId: string;
     providerLabel?: string;
-    apiKey?: string;
     apiId?: string;
-    baseUrl?: string;
-    defaultModel?: string;
     refreshOnClose?: boolean;
   } | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
@@ -2035,7 +2031,6 @@ function SettingsField({
   const preferredRouteModel = field.type === "model_api_routes" ? String(sectionValues?.preferred_model ?? "").trim() : "";
   const [routeModel, setRouteModel] = useState(() => preferredRouteModel || String(routeOptions[0]?.value ?? ""));
   const [routeModelTouched, setRouteModelTouched] = useState(false);
-  const credentialTransferEnabled = allowCleartextMobileQr();
   useEffect(() => {
     if (field.type !== "model_api_routes") return;
     if (!routeOptions.length) {
@@ -2303,24 +2298,12 @@ function SettingsField({
           });
           const savedProviderId = apiProvider;
           const savedApiId = apiName;
-          const savedBaseUrl = apiBaseUrl.trim();
-          const savedDefaultModel = apiDefaultModel.trim();
-          if (credentialTransferEnabled) {
-            setCredentialTransfer({
-              providerId: savedProviderId,
-              providerLabel: selectedProviderOption?.label,
-              apiKey: apiSecret,
-              apiId: savedApiId,
-              baseUrl: savedBaseUrl || undefined,
-              defaultModel: savedDefaultModel || undefined,
-              refreshOnClose: true,
-            });
-          } else {
-            setCredentialTransfer(null);
-            onChange(sectionId, field.id, {
-              action: "oauth_refresh",
-            });
-          }
+          setCredentialTransfer({
+            providerId: savedProviderId,
+            providerLabel: selectedProviderOption?.label,
+            apiId: savedApiId,
+            refreshOnClose: true,
+          });
           setApiSecret("");
           setApiBaseUrl("");
           setApiAllowedModels("");
@@ -3063,15 +3046,11 @@ function SettingsField({
         {control}
       </div>
       {field.help && <p className="text-[11px] text-zinc-500">{field.help}</p>}
-      {credentialTransferEnabled && credentialTransfer && (
+      {credentialTransfer && (
         <CredentialTransferModal
-          enabled={credentialTransferEnabled}
           providerId={credentialTransfer.providerId}
           providerLabel={credentialTransfer.providerLabel}
-          apiKey={credentialTransfer.apiKey}
           apiId={credentialTransfer.apiId}
-          baseUrl={credentialTransfer.baseUrl}
-          defaultModel={credentialTransfer.defaultModel}
           onClose={() => {
             const shouldRefresh = credentialTransfer.refreshOnClose;
             setCredentialTransfer(null);

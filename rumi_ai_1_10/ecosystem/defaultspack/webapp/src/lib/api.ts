@@ -931,6 +931,7 @@ export type P2PStatusResponse = {
 
 export type MobileDevice = {
   device_id: string;
+  profile_id?: string;
   label: string;
   platform?: string;
   scopes?: string[];
@@ -938,6 +939,31 @@ export type MobileDevice = {
   last_seen_at?: string;
   created_at?: string;
   metadata?: Record<string, unknown>;
+  encryption_key_configured?: boolean;
+};
+
+export type CredentialTransferStatus =
+  | "awaiting_confirmation"
+  | "pending"
+  | "accepted"
+  | "completed"
+  | "rejected"
+  | "expired"
+  | "revoked"
+  | "cancelled";
+
+export type CredentialTransfer = {
+  transfer_id: string;
+  status: CredentialTransferStatus;
+  device_id: string;
+  device_label: string;
+  profile_id: string;
+  provider_id: string;
+  api_id: string;
+  provider_label: string;
+  created_at: number;
+  expires_at: number;
+  reason?: string;
 };
 
 export type MobileDevicesResponse = {
@@ -4163,6 +4189,41 @@ export const api = {
     return request<{ ok: boolean; device_id: string }>(
       `/api/mobile/v1/devices/${encodeURIComponent(deviceId)}`,
       { method: "DELETE" },
+    );
+  },
+
+  createCredentialTransfer(payload: { device_id: string; provider_id: string; api_id: string; provider_label?: string }) {
+    return request<{ transfer: CredentialTransfer }>("/api/mobile/v1/credential-transfers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  confirmCredentialTransfer(transferId: string, payload: { device_id: string; provider_id: string; api_id: string; user_confirmed: true }) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/confirm`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+
+  getCredentialTransferStatus(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  cancelCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/cancel`,
+      { method: "POST", body: JSON.stringify({ reason: "cancelled by PC user" }) },
+    );
+  },
+
+  revokeCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/revoke`,
+      { method: "POST", body: JSON.stringify({ reason: "revoked by PC user" }) },
     );
   },
 
