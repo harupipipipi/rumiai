@@ -13,6 +13,7 @@ import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambie
 import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
+import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
@@ -54,6 +55,7 @@ import {
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
+import { browserApprovalViewModel, runtimeApprovalViewModel } from "./lib/approvalPresentation";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
@@ -2462,7 +2464,6 @@ function ChatApp() {
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
-  const authorityApprovalWindowRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode === "chat") {
@@ -2715,18 +2716,6 @@ function ChatApp() {
       updatedAt: latestAssistantFinal.createdAt || Date.now(),
     });
   }, [activeConversationId, latestAssistantFinal]);
-
-  useEffect(() => {
-    if (!authorityApproval) {
-      authorityApprovalWindowRequestRef.current = null;
-      return;
-    }
-    if (authorityApprovalWindowRequestRef.current === authorityApproval.requestId) return;
-    authorityApprovalWindowRequestRef.current = authorityApproval.requestId;
-    void openAuthorityApprovalWindow(authorityApproval.requestId).catch(() => {
-      authorityApprovalWindowRequestRef.current = null;
-    });
-  }, [authorityApproval?.requestId]);
 
   const composerModelStatusIndicators = useMemo<ComposerModelStatusIndicator[]>(() => {
     if (ultraYoloMode) {
@@ -4583,7 +4572,8 @@ function ChatApp() {
         settleBrowserApproval(currentApproval);
         setError(staleMessage);
       } else {
-        setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+        console.error(approvalError);
+        setError("許可を保存できませんでした。リクエストの状態を更新して再試行してください。");
       }
     } finally {
       setIsGenerating(false);
@@ -4599,7 +4589,7 @@ function ChatApp() {
     setError(null);
     try {
       if (currentApproval.requestId) {
-        await api.denyCodingApproval(currentApproval.requestId, "Denied from chat approval card");
+        await api.denyCodingApproval(currentApproval.requestId, "User denied the request from the shared approval surface");
       }
       settleBrowserApproval(currentApproval);
       if (activeConversationId) {
@@ -4612,7 +4602,8 @@ function ChatApp() {
         settleBrowserApproval(currentApproval);
         setError(staleMessage);
       } else {
-        setError(approvalError instanceof Error ? approvalError.message : "browser/computer 承認の拒否に失敗しました。");
+        console.error(approvalError);
+        setError("拒否を保存できませんでした。リクエストの状態を更新して再試行してください。");
       }
     } finally {
       activeBrowserApprovalActionRef.current = null;
@@ -4687,7 +4678,8 @@ function ChatApp() {
         ));
         setError(staleMessage);
       } else {
-        setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
+        console.error(approvalError);
+        setError("許可を保存できませんでした。リクエストの状態を更新して再試行してください。");
       }
     } finally {
       activeRuntimeApprovalActionRef.current = null;
@@ -4709,7 +4701,8 @@ function ChatApp() {
       await loadConversation(activeConversationId, false);
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
-      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認の拒否に失敗しました。");
+      console.error(approvalError);
+      setError("拒否を保存できませんでした。リクエストの状態を更新して再試行してください。");
     } finally {
       activeRuntimeApprovalActionRef.current = null;
     }
@@ -4721,10 +4714,11 @@ function ChatApp() {
     try {
       const opened = await openAuthorityApprovalWindow(authorityApproval.requestId);
       if (!opened) {
-        setError("authority 承認は Rumi Viewer の専用ウィンドウで実行してください。");
+        setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer に戻り、ポップアップを許可して再試行してください。");
       }
     } catch (openError) {
-      setError(openError instanceof Error ? openError.message : "authority 承認ウィンドウを開けませんでした。");
+      console.error(openError);
+      setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer から再試行してください。");
     }
   };
 
@@ -6016,37 +6010,13 @@ function ChatApp() {
                   />
                 )}
                 {visibleBrowserApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
-                        <details className="mt-1 text-[11px] text-zinc-500">
-                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
-                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
-                            {JSON.stringify(visibleBrowserApproval.payload, null, 2)}
-                          </pre>
-                        </details>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={denyBrowserAction}
-                          aria-label="browser/computer の承認を拒否"
-                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
-                        >
-                          拒否 (2)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={approveBrowserAction}
-                          aria-label="browser/computer の承認を許可"
-                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
-                        >
-                          許可 (3)
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <ApprovalDecisionSurface
+                    approval={browserApprovalViewModel(visibleBrowserApproval)}
+                    onDeny={() => void denyBrowserAction()}
+                    onApprove={() => void approveBrowserAction()}
+                    keyboardShortcuts={{ deny: "2", approve: "3" }}
+                    className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
+                  />
                 )}
                 {!visibleBrowserApproval && authorityApproval && (
                   <AuthorityApprovalNotice
@@ -6056,60 +6026,15 @@ function ChatApp() {
                   />
                 )}
                 {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={cn(
-                            "shrink-0 rounded border px-1.5 py-0.5 text-[10px]",
-                            runtimeApproval.riskLevel === "high"
-                              ? "border-red-500/30 bg-red-500/10 text-red-200"
-                              : "border-amber-500/30 bg-amber-500/10 text-amber-200",
-                          )}>
-                            {runtimeApproval.riskLevel ?? "approval"}
-                          </span>
-                          <p className="truncate text-sm font-medium text-zinc-100">{runtimeApproval.operation} の承認が必要です</p>
-                        </div>
-                        {runtimeApproval.summary && (
-                          <p className="mt-1 truncate text-[11px] text-zinc-500">{runtimeApproval.summary}</p>
-                        )}
-                        <details className="mt-1 text-[11px] text-zinc-500">
-                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
-                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
-                            {approvalPayloadPreview(runtimeApproval.payload)}
-                          </pre>
-                        </details>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onPointerDown={(event) => {
-                            event.preventDefault();
-                            void denyCodingAction();
-                          }}
-                          onClick={denyCodingAction}
-                          aria-label="runtime 操作の承認を拒否"
-                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
-                        >
-                          拒否 (2)
-                        </button>
-                        <button
-                          type="button"
-                          onPointerDown={(event) => {
-                            event.preventDefault();
-                            void approveCodingAction();
-                          }}
-                          onClick={approveCodingAction}
-                          aria-label="runtime 操作の承認を許可"
-                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
-                        >
-                          許可 (3)
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <ApprovalDecisionSurface
+                    approval={runtimeApprovalViewModel(runtimeApproval)}
+                    onDeny={() => void denyCodingAction()}
+                    onApprove={() => void approveCodingAction()}
+                    keyboardShortcuts={{ deny: "2", approve: "3" }}
+                    className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
+                  />
                 )}
-                {!visibleBrowserApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!visibleBrowserApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">

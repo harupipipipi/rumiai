@@ -24,8 +24,8 @@ test("approval queue renders cockpit approval decisions", () => {
   );
 
   assert.match(html, /terminal\.exec/);
-  assert.match(html, /Approve/);
-  assert.match(html, /Deny/);
+  assert.match(html, /許可/);
+  assert.match(html, /拒否/);
 });
 
 test("approval queue separates expired pending approvals from active approvals", () => {
@@ -49,8 +49,8 @@ test("approval queue separates expired pending approvals from active approvals",
   assert.match(html, /No active approvals/);
   assert.match(html, /Recent approval history/);
   assert.match(html, /expired/);
-  assert.doesNotMatch(html, /Approve/);
-  assert.doesNotMatch(html, /Deny/);
+  assert.doesNotMatch(html, />許可</);
+  assert.doesNotMatch(html, />拒否</);
 });
 
 test("diff panel renders status and diff content", () => {
