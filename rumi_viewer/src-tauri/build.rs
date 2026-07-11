@@ -24,8 +24,43 @@ fn main() {
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
 
+    warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
     tauri_build::build()
+}
+
+fn warn_legacy_defaultspack_app_bundle() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let legacy_app = home.join("Applications").join("Rumi_Defaultspack.app");
+    if !legacy_app.exists() {
+        return;
+    }
+
+    let launch = fs::read_to_string(legacy_app.join("Contents").join("MacOS").join("launch"))
+        .unwrap_or_default();
+    let missing_markers = [
+        "--api-token",
+        "--port",
+        "RUMI_LOG_DIR",
+        "RUMI_DEFAULTSPACK_OPEN_BROWSER",
+    ]
+    .into_iter()
+    .filter(|marker| !launch.contains(marker))
+    .collect::<Vec<_>>();
+    if missing_markers.is_empty() {
+        println!(
+            "cargo:warning=legacy underscore-named Defaultspack app bundle detected at {}; re-register Defaultspack from Rumi Viewer to clean it up",
+            legacy_app.display()
+        );
+    } else {
+        println!(
+            "cargo:warning=legacy Defaultspack app bundle detected at {}; missing launch markers: {}; re-register Defaultspack from Rumi Viewer or remove the legacy bundle",
+            legacy_app.display(),
+            missing_markers.join(", ")
+        );
+    }
 }
 
 fn stage_runtime_bundle() -> io::Result<()> {

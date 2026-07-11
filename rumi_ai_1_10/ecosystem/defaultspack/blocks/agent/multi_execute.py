@@ -27,7 +27,7 @@ def run(input_data, context):
         store.ensure_company(
             company_id=company_id,
             name=DEFAULT_COMPANY_NAME,
-            description="Compatibility company workspace for legacy multi-agent requests.",
+            description="Compatibility team workspace for legacy multi-agent requests.",
             agents=agents or None,
             metadata={"compatibility": "agent.multi"},
         )
@@ -49,7 +49,7 @@ def run(input_data, context):
         context=context if isinstance(context, dict) else {},
     )
     if result is None:
-        return error("company workspace not found", "NOT_FOUND")
+        return error("team workspace not found", "NOT_FOUND")
 
     session_id = str((result.get("message") or {}).get("thread_id") or (result.get("message") or {}).get("message_id") or "")
     session = {

@@ -18,7 +18,7 @@ def sync_mimo_company_workspace(
     sync_observability: bool = True,
     include_desktop_monitoring: bool = False,
 ) -> dict[str, Any] | None:
-    """Best-effort MiMo schedule/activity sync for Company Workspace reads."""
+    """Best-effort optional MiMo profile sync for Team Workspace reads."""
     global _last_sync_at
 
     if str(company_id or "").strip() != MIMO_CODING_COMPANY_ID:

@@ -418,6 +418,7 @@ fn build_launch_script(
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
+    log_dir: &Path,
     venv_dir: &Path,
     kernel_port: u16,
     app_working_dir: &Path,
@@ -445,6 +446,7 @@ set -euo pipefail
 RUMI_HOME={rumi_home}
 RUMI_APP_DIR={app_dir}
 RUMI_USER_DATA={user_data_dir}
+RUMI_LOG_DIR={log_dir}
 VENV_DIR={venv_dir}
 PACK_SHELL={pack_shell}
 TOKEN_FILE={token_file}
@@ -457,6 +459,7 @@ export PATH="$VENV_DIR/bin:$PATH"
 export RUMI_HOME
 export RUMI_APP_DIR
 export RUMI_USER_DATA
+export RUMI_LOG_DIR
 {env_exports}
 
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
@@ -476,6 +479,7 @@ exec "$PACK_SHELL" run "defaultspack" \
         rumi_home = shell_quote_path(rumi_home),
         app_dir = shell_quote_path(app_dir),
         user_data_dir = shell_quote_path(user_data_dir),
+        log_dir = shell_quote_path(log_dir),
         venv_dir = shell_quote_path(venv_dir),
         pack_shell = shell_quote_path(pack_shell),
         token_file = shell_quote_path(token_file),
@@ -486,6 +490,76 @@ exec "$PACK_SHELL" run "defaultspack" \
         kernel_port = kernel_port,
         env_exports = env_exports,
     )
+}
+
+fn is_legacy_defaultspack_app_bundle(app_dir: &Path) -> bool {
+    if app_dir.file_name().and_then(|name| name.to_str()) != Some("Rumi_Defaultspack.app") {
+        return false;
+    }
+    let plist = fs::read_to_string(app_dir.join("Contents").join("Info.plist")).unwrap_or_default();
+    let launch = fs::read_to_string(app_dir.join("Contents").join("MacOS").join("launch"))
+        .unwrap_or_default();
+    let has_generated_legacy_plist = [
+        "<key>CFBundleExecutable</key>",
+        "<string>launch</string>",
+        "<key>CFBundleIdentifier</key>",
+        "<string>ai.rumi.pack.defaultspack</string>",
+        "<key>CFBundleName</key>",
+        "<string>Rumi Defaultspack</string>",
+        "<key>CFBundlePackageType</key>",
+        "<string>APPL</string>",
+    ]
+    .iter()
+    .all(|marker| plist.contains(marker));
+    let has_generated_legacy_launch = [
+        "set -euo pipefail",
+        "RUMI_HOME=",
+        "RUMI_APP_DIR=",
+        "RUMI_USER_DATA=",
+        "VENV_DIR=",
+        "PACK_SHELL=",
+        "TOKEN_FILE=",
+        "APP_WORKING_DIR=",
+        "DESKTOP_COMMAND=",
+        "KERNEL_COMMAND=",
+        "export RUMI_API_TOKEN",
+        "exec \"$PACK_SHELL\" run \"defaultspack\"",
+        "--command \"$DESKTOP_COMMAND\"",
+        "--port ",
+        "--kernel-cmd \"$KERNEL_COMMAND\"",
+        "--working-dir \"$APP_WORKING_DIR\"",
+        "--timeout 120",
+    ]
+    .iter()
+    .all(|marker| launch.contains(marker));
+    let is_pre_diagnostic_generated_launch =
+        !launch.contains("RUMI_LOG_DIR") && !launch.contains("RUMI_PANEL_BOOTSTRAP_SECRET");
+    has_generated_legacy_plist && has_generated_legacy_launch && is_pre_diagnostic_generated_launch
+}
+
+fn cleanup_legacy_defaultspack_app_bundles(apps_base: &Path, current_bundle_dir: &Path) {
+    let legacy_dir = apps_base.join("Rumi_Defaultspack.app");
+    if legacy_dir == current_bundle_dir || !legacy_dir.exists() {
+        return;
+    }
+    if !is_legacy_defaultspack_app_bundle(&legacy_dir) {
+        warn!(
+            "Skipping legacy Defaultspack bundle cleanup because {} does not look like a generated Rumi app",
+            legacy_dir.display()
+        );
+        return;
+    }
+    match fs::remove_dir_all(&legacy_dir) {
+        Ok(()) => warn!(
+            "Removed legacy Defaultspack app bundle {}. The current bundle is {}",
+            legacy_dir.display(),
+            current_bundle_dir.display()
+        ),
+        Err(error) => warn!(
+            "Failed to remove legacy Defaultspack app bundle {}: {error}",
+            legacy_dir.display()
+        ),
+    }
 }
 
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
@@ -500,6 +574,7 @@ fn create_macos_app_bundle(
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
+    log_dir: &Path,
     venv_dir: &Path,
     kernel_port: u16,
     app_working_dir: &Path,
@@ -512,6 +587,7 @@ fn create_macos_app_bundle(
         .with_context(|| format!("failed to create {}", apps_base.display()))?;
 
     let bundle_dir = apps_base.join(format!("{safe_name}.app"));
+    cleanup_legacy_defaultspack_app_bundles(&apps_base, &bundle_dir);
     let contents_dir = bundle_dir.join("Contents");
     let macos_dir = contents_dir.join("MacOS");
     fs::create_dir_all(&macos_dir)
@@ -554,6 +630,7 @@ fn create_macos_app_bundle(
         rumi_home,
         app_dir,
         user_data_dir,
+        log_dir,
         venv_dir,
         kernel_port,
         app_working_dir,
@@ -1058,6 +1135,7 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)
+        .env("RUMI_LOG_DIR", &config.log_dir)
         .env("RUMI_API_TOKEN", &api_token)
         .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
@@ -1100,6 +1178,7 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
         &config.rumi_home,
         &config.app_dir,
         &config.user_data_dir,
+        &config.log_dir,
         &config.venv_dir,
         config.kernel_port,
         &metadata.app_working_dir,
@@ -1130,6 +1209,64 @@ mod tests {
             kernel_port: 8765,
             dev_workspace_root: None,
         }
+    }
+
+    fn write_generated_legacy_defaultspack_bundle(app_dir: &Path) {
+        let macos_dir = app_dir.join("Contents").join("MacOS");
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::write(
+            app_dir.join("Contents").join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>launch</string>
+    <key>CFBundleIdentifier</key>
+    <string>ai.rumi.pack.defaultspack</string>
+    <key>CFBundleName</key>
+    <string>Rumi Defaultspack</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+</dict>
+</plist>"#,
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+set -euo pipefail
+
+RUMI_HOME='/tmp/rumi-home'
+RUMI_APP_DIR='/tmp/app-dir'
+RUMI_USER_DATA='/tmp/user-data'
+VENV_DIR='/tmp/venv'
+PACK_SHELL='/Applications/Rumi AI.app/Contents/Resources/app/bundled/pack-shell'
+TOKEN_FILE='/tmp/token'
+APP_WORKING_DIR='/tmp/defaultspack'
+DESKTOP_COMMAND='python -m defaultspack.desktop_app'
+KERNEL_COMMAND='python3 -m app'
+
+export PATH="$VENV_DIR/bin:$PATH"
+export RUMI_HOME
+export RUMI_APP_DIR
+export RUMI_USER_DATA
+
+RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
+export RUMI_API_TOKEN
+
+exec "$PACK_SHELL" run "defaultspack" \
+  --command "$DESKTOP_COMMAND" \
+  --port 8765 \
+  --kernel-cmd "$KERNEL_COMMAND" \
+  --working-dir "$APP_WORKING_DIR" \
+  --timeout 120
+"#,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1291,6 +1428,7 @@ mod tests {
             Path::new("/tmp/rumi home"),
             Path::new("/tmp/app dir"),
             Path::new("/tmp/user data"),
+            Path::new("/tmp/log dir"),
             Path::new("/tmp/venv dir"),
             8767,
             Path::new("/tmp/work $(bad)"),
@@ -1301,6 +1439,7 @@ mod tests {
         assert!(script.contains("PACK_SHELL='/tmp/Rumi'\\''s bin/pack-shell'"));
         assert!(script.contains("RUMI_APP_DIR='/tmp/app dir'"));
         assert!(script.contains("RUMI_USER_DATA='/tmp/user data'"));
+        assert!(script.contains("RUMI_LOG_DIR='/tmp/log dir'"));
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
         assert!(script.contains("PANEL_BOOTSTRAP_SECRET_FILE='/tmp/panel secret file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
@@ -1324,6 +1463,7 @@ mod tests {
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
+            Path::new("/tmp/log-dir"),
             Path::new("/tmp/venv"),
             8765,
             Path::new("/tmp/defaultspack"),
@@ -1350,6 +1490,7 @@ mod tests {
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
+            Path::new("/tmp/log-dir"),
             Path::new("/tmp/venv"),
             8765,
             Path::new("/tmp/defaultspack"),
@@ -1373,6 +1514,121 @@ mod tests {
             xml_escape("Rumi & <Default> \"Pack\""),
             "Rumi &amp; &lt;Default&gt; &quot;Pack&quot;"
         );
+    }
+
+    #[test]
+    fn legacy_defaultspack_bundle_detection_requires_generated_app_shape() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_legacy_detection");
+        let app_dir = dir.join("Rumi_Defaultspack.app");
+        fs::remove_dir_all(&dir).ok();
+        write_generated_legacy_defaultspack_bundle(&app_dir);
+
+        assert!(is_legacy_defaultspack_app_bundle(&app_dir));
+        assert!(!is_legacy_defaultspack_app_bundle(&dir.join("Other.app")));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_defaultspack_bundle_detection_rejects_manual_same_name_app() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_manual_legacy_reject");
+        let app_dir = dir.join("Rumi_Defaultspack.app");
+        let macos_dir = app_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::write(
+            app_dir.join("Contents").join("Info.plist"),
+            "<string>Manual Defaultspack Launcher</string>",
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+echo "manual defaultspack helper"
+"#,
+        )
+        .unwrap();
+
+        assert!(!is_legacy_defaultspack_app_bundle(&app_dir));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_defaultspack_bundle_detection_rejects_old_id_without_generated_shape() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_legacy_partial_reject");
+        let app_dir = dir.join("Rumi_Defaultspack.app");
+        let macos_dir = app_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::write(
+            app_dir.join("Contents").join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>launch</string>
+    <key>CFBundleIdentifier</key>
+    <string>ai.rumi.pack.defaultspack</string>
+    <key>CFBundleName</key>
+    <string>Manual Defaultspack Launcher</string>
+</dict>
+</plist>"#,
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+exec "/Applications/Rumi AI.app/Contents/Resources/app/bundled/pack-shell" run "defaultspack"
+"#,
+        )
+        .unwrap();
+
+        assert!(!is_legacy_defaultspack_app_bundle(&app_dir));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cleanup_legacy_defaultspack_bundle_removes_only_old_underscore_bundle() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_legacy_cleanup");
+        let legacy_dir = dir.join("Rumi_Defaultspack.app");
+        let current_dir = dir.join("Rumi Defaultspack.app");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&current_dir).unwrap();
+        write_generated_legacy_defaultspack_bundle(&legacy_dir);
+
+        cleanup_legacy_defaultspack_app_bundles(&dir, &current_dir);
+
+        assert!(!legacy_dir.exists());
+        assert!(current_dir.exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cleanup_legacy_defaultspack_bundle_keeps_manual_same_name_app() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_manual_legacy_cleanup");
+        let legacy_dir = dir.join("Rumi_Defaultspack.app");
+        let current_dir = dir.join("Rumi Defaultspack.app");
+        let macos_dir = legacy_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::create_dir_all(&current_dir).unwrap();
+        fs::write(
+            legacy_dir.join("Contents").join("Info.plist"),
+            "<string>Manual Defaultspack Launcher</string>",
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+echo "manual defaultspack helper"
+"#,
+        )
+        .unwrap();
+
+        cleanup_legacy_defaultspack_app_bundles(&dir, &current_dir);
+
+        assert!(legacy_dir.exists());
+        assert!(current_dir.exists());
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

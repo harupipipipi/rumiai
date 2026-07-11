@@ -1485,6 +1485,82 @@ def test_desktop_api_sees_desktop_created_by_external_tool_manager(tmp_path) -> 
     assert http_agent.desktop_inputs[0].action == "click"
 
 
+def test_desktop_api_sees_desktop_created_by_desktop_create_tool(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    if str(DEFAULTSPACK_ROOT) not in sys.path:
+        sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import (
+        seal_tool_context as domain_seal_tool_context,
+    )
+
+    capabilities = {
+        "sandbox.exec",
+        "sandbox.files",
+        "sandbox.resource_limits",
+        "sandbox.network_policy",
+        "sandbox.desktop",
+        "sandbox.desktop_input",
+        "sandbox.snapshot",
+    }
+    tool_registry = ProviderRegistry()
+    tool_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            sandbox_id_factory=lambda: "tool-created-seat",
+        )
+    )
+    tool_service = SimpleNamespace(
+        provider_registry=tool_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=tool_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+
+    http_registry = ProviderRegistry()
+    http_registry.register(
+        FakeRuntimeProvider(provider_id="fake-runtime", capabilities=capabilities)
+    )
+    http_service = SimpleNamespace(
+        provider_registry=http_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=http_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+
+    api._reset_service_for_tests(tool_service)
+    try:
+        created = desktop_tools.desktop_create(
+            {
+                "provider_id": "fake-runtime",
+                "template_id": "desktop.ubuntu",
+                "name": "Issue 416 QA desktop",
+            },
+            domain_seal_tool_context(
+                {"user_id": "local-user"},
+                {"action": "allow", "allowed": True},
+            ),
+        )
+
+        api._reset_service_for_tests(http_service)
+        listed = api.run({"_handler": "desktops_list"}, {})
+        fetched = api.run(
+            {"_handler": "desktop_get", "seat_id": "tool-created-seat"},
+            {"user_id": "local-user"},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["seat_id"] == "tool-created-seat"
+    assert listed["status"] == "ok"
+    assert [desktop["seat_id"] for desktop in listed["data"]["desktops"]] == ["tool-created-seat"]
+    assert fetched["status"] == "ok"
+    assert fetched["data"]["seat_id"] == "tool-created-seat"
+
+
 def test_sandbox_stop_and_delete_require_destructive_confirmation(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -2608,16 +2684,20 @@ def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
-def test_cancellable_subprocess_replaces_non_utf8_output() -> None:
+def test_cancellable_subprocess_replaces_non_utf8_and_nul_output() -> None:
     from ecosystem.defaultspack.backend.sandbox.cancellation import run_cancellable_subprocess
 
-    script = "import sys; sys.stderr.buffer.write(b'bad-\\\\xfc-byte')"
+    script = (
+        "import sys; "
+        "sys.stdout.buffer.write(b'frame-\\x89png\\x00tail'); "
+        "sys.stderr.buffer.write(b'bad-\\xfc-byte\\x00err')"
+    )
 
     completed = run_cancellable_subprocess((sys.executable, "-c", script), timeout=5)
 
     assert completed.returncode == 0
-    assert "bad-" in completed.stderr
-    assert "-byte" in completed.stderr
+    assert completed.stdout == "frame-\ufffdpng\x00tail"
+    assert completed.stderr == "bad-\ufffd-byte\x00err"
 
 
 def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:

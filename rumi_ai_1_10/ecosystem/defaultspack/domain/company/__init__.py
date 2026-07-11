@@ -1,4 +1,4 @@
-"""Company workspace domain."""
+"""Team workspace domain using compatibility company identifiers."""
 
 from .service import CompanyService
 from .store import CompanyStore

@@ -895,6 +895,56 @@ def test_non_stream_subagent_child_creates_durable_assistant_draft_before_model(
         events.close()
 
 
+def test_mimo_monitor_ignores_active_subagent_child_running_durable_draft(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "active child", "source": "subagent_tool"},
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "please finish"}],
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": SUBAGENT_PENDING_TEXT}],
+            "raw_text": SUBAGENT_PENDING_TEXT,
+            "finish_reason": "streaming",
+            "metadata": subagent_durable_draft_metadata("stub/default", {}),
+        },
+    )
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    monkeypatch.setattr(runtime, "_conversation_age_seconds", lambda conversation: 1.0)
+
+    result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
+
+    assert result["checked_ids"] == [child["id"]]
+    assert result["unanswered"] == []
+    assert result["failed"] == []
+    assert result["repaired"] == []
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assert child_after["messages"][-1]["finish_reason"] == "streaming"
+    assert child_after["messages"][-1]["metadata"]["status"] == "running"
+    assert "error_code" not in child_after["messages"][-1]["metadata"]
+
+
 def test_non_stream_subagent_child_starts_draft_before_tool_selection_events(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None

@@ -168,10 +168,25 @@ class DefaultsHttpServer:
                         pattern = entry.get("pattern")
                         handler = entry.get("handler")
                         flow_id = str(entry.get("flow_id") or "").strip()
+                        function_name = str(
+                            entry.get("function_name")
+                            or entry.get("qualified_name")
+                            or entry.get("function")
+                            or entry.get("function_id")
+                            or ""
+                        ).strip()
+                        block_module = str(entry.get("block_module") or "").strip()
                         fallback_block_module = str(
-                            entry.get("fallback_block_module") or ""
+                            entry.get("fallback_block_module")
+                            or entry.get("fallback_block")
+                            or block_module
+                            or ""
                         ).strip()
                         path_inject = entry.get("path_inject", {})
+                        defaults = entry.get("defaults")
+                        if not isinstance(defaults, dict):
+                            defaults = entry.get("default_args")
+                        route_defaults = dict(defaults) if isinstance(defaults, dict) else {}
                         route_authority = {
                             "permission_id": str(entry.get("permission_id") or "").strip(),
                             "owner_pack_id": str(entry.get("owner_pack_id") or entry.get("pack_id") or "defaultspack").strip(),
@@ -212,9 +227,11 @@ class DefaultsHttpServer:
                                 route_path_inject=dict(path_inject)
                                 if isinstance(path_inject, dict)
                                 else {},
+                                route_defaults=dict(route_defaults),
                                 route_method=str(method or "").upper(),
                             ):
                                 payload = dict(request_data or {})
+                                payload.update(route_defaults)
                                 payload["_method"] = route_method
                                 return self._invoke_flow_route(
                                     route_flow_id,
@@ -233,6 +250,41 @@ class DefaultsHttpServer:
                                 pass
                             route_entries.append(
                                 (method, pattern, _flow_handler, path_inject, index, route_authority)
+                            )
+                        elif method and pattern and function_name:
+
+                            def _function_handler(
+                                request_data,
+                                path_params,
+                                *,
+                                route_function_name=function_name,
+                                route_fallback_block_module=fallback_block_module,
+                                route_path_inject=dict(path_inject)
+                                if isinstance(path_inject, dict)
+                                else {},
+                                route_defaults=dict(route_defaults),
+                                route_method=str(method or "").upper(),
+                            ):
+                                payload = dict(request_data or {})
+                                payload.update(route_defaults)
+                                payload["_method"] = route_method
+                                return self._invoke_function_route(
+                                    route_function_name,
+                                    payload,
+                                    path_params,
+                                    route_path_inject,
+                                    fallback_block_module=route_fallback_block_module,
+                                )
+
+                            _function_handler._defaultspack_flow_route_handler = True
+                            try:
+                                setattr(_function_handler, "__rumi_route_sensitive__", route_sensitive)
+                                setattr(_function_handler, "__rumi_route_pre_auth__", route_pre_auth)
+                                setattr(_function_handler, "__rumi_route_local_only__", route_local_only)
+                            except Exception:
+                                pass
+                            route_entries.append(
+                                (method, pattern, _function_handler, path_inject, index, route_authority)
                             )
                         elif method and pattern and callable(handler):
                             try:

@@ -54,6 +54,7 @@ from ecosystem.defaultspack.backend.sandbox.providers import (
 )
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
+from ecosystem.defaultspack.domain.artifact.store import ArtifactStore
 
 
 RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
@@ -802,17 +803,22 @@ def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any], context
         }
     assert fetched.frame is not None
     frame = fetched.frame
+    artifact = _persist_desktop_frame_artifact(frame)
     return {
         "_binary": True,
         "status_code": 200,
         "content_type": frame.content_type,
         "body": frame.data,
+        "artifacts": [artifact],
+        "artifact_paths": [artifact["path"]],
         "headers": {
             "Cache-Control": "no-store",
             "X-Rumi-Frame-Seq": str(frame.frame_seq),
             "X-Rumi-Frame-Width": str(frame.width),
             "X-Rumi-Frame-Height": str(frame.height),
             "X-Rumi-Captured-At": str(frame.captured_at),
+            "X-Rumi-Artifact-Path": artifact["path"],
+            "X-Rumi-Artifact-Id": artifact["artifact_id"],
         },
     }
 
@@ -1235,6 +1241,47 @@ def _frame_bytes(screenshot: dict[str, Any]) -> tuple[bytes, str]:
         content_type = header[5:].split(";", 1)[0] or "image/png"
         return base64.b64decode(payload), content_type
     raise SandboxContractError("FRAME_NOT_FOUND", "Desktop screenshot did not include frame bytes", status_code=404)
+
+
+def _persist_desktop_frame_artifact(frame) -> dict[str, Any]:
+    extension = _frame_extension(frame.content_type)
+    captured_at = datetime.fromtimestamp(frame.captured_at, timezone.utc)
+    stamp = captured_at.strftime("%Y%m%dT%H%M%SZ")
+    path = f"desktop_frames/{frame.seat_id}/{stamp}-seq{frame.frame_seq}.{extension}"
+    artifact = ArtifactStore(_defaultspack_root()).create_binary(
+        "desktop_frame",
+        f"Desktop frame {frame.seat_id} #{frame.frame_seq}",
+        frame.data,
+        path=path,
+        mime_type=frame.content_type,
+        source_task="desktop_frame",
+        metadata={
+            "seat_id": frame.seat_id,
+            "frame_seq": frame.frame_seq,
+            "width": frame.width,
+            "height": frame.height,
+            "captured_at": frame.captured_at,
+            "source": frame.source,
+        },
+    )
+    return {
+        "artifact_id": artifact["artifact_id"],
+        "path": artifact["path"],
+        "mime_type": artifact.get("mime_type") or frame.content_type,
+        "size": artifact.get("size") or len(frame.data),
+        "type": artifact.get("type") or "desktop_frame",
+        "title": artifact.get("title") or "Desktop frame",
+        "content_ref": artifact.get("content_ref"),
+    }
+
+
+def _frame_extension(content_type: str) -> str:
+    normalized = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized == "image/jpeg":
+        return "jpg"
+    if normalized == "image/webp":
+        return "webp"
+    return "png"
 
 
 def _default_provider_id() -> str:
