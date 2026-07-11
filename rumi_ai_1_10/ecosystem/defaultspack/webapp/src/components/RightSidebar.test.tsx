@@ -136,6 +136,29 @@ test("right sidebar does not auto-open employees on initial render", () => {
   assert.doesNotMatch(html, /Employee workspace content/);
 });
 
+test("advanced usage commands can open context token details", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "__context_usage__:1",
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      contextUsage: { usedTokens: 1250, maxContext: 8000, ratio: 0.15625, label: "16%" },
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /data-testid="context-usage-panel"/);
+  assert.match(html, />1250</);
+  assert.match(html, />8000</);
+  assert.match(html, />16%</);
+});
+
 test("right sidebar keeps initial tool groups compact", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {

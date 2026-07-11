@@ -72,6 +72,12 @@ export function CompanyTree({
               }`}
             >
               <span className="block truncate text-[12px] font-medium text-zinc-200">{company.name || company.id}</span>
+              <span
+                className="mt-0.5 block truncate font-mono text-[9px] text-zinc-600"
+                title={company.id}
+              >
+                ID: {company.id}
+              </span>
               <span className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
                 <span>{company.agent_count ?? Object.keys(company.agents ?? {}).length} employees</span>
                 <span>{taskCount} tasks</span>

@@ -83,6 +83,7 @@ import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSys
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
@@ -2237,6 +2238,55 @@ function matchCommandName(body: string, candidate: string): string | null {
   return flexibleMatch ? flexibleMatch[0].trimEnd() : null;
 }
 
+function normalizeCommandText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseCommandRest(rest: string, specs: ComposerCommandItem["args"] = []): Record<string, unknown> {
+  if (!rest) return {};
+  const args: Record<string, unknown> = {};
+  let remaining = rest;
+
+  for (const spec of specs) {
+    const name = spec.name.trim();
+    if (!name) continue;
+    const optionPattern = new RegExp(`(^|\\s)${escapeRegExp(name)}=([^\\s]+)`, "gi");
+    remaining = remaining.replace(optionPattern, (_match, prefix: string, value: string) => {
+      args[name] = value;
+      return prefix ? " " : "";
+    });
+    const slashFlagPattern = new RegExp(`(^|\\s)/${escapeRegExp(name)}(?=\\s|$)`, "gi");
+    remaining = remaining.replace(slashFlagPattern, (_match, prefix: string) => {
+      args[name] = true;
+      return prefix ? " " : "";
+    });
+  }
+
+  const greedySpec = specs.find((spec) => spec.greedy === true);
+  const remainder = normalizeCommandText(remaining);
+  if (greedySpec) {
+    if (remainder) args[greedySpec.name] = remainder;
+    return args;
+  }
+
+  const positionalSpecs = specs.filter((spec) => args[spec.name] === undefined);
+  if (positionalSpecs.length === 1 && remainder) {
+    args[positionalSpecs[0].name] = remainder;
+  } else if (positionalSpecs.length > 1 && remainder) {
+    const tokens = remainder.split(/\s+/);
+    positionalSpecs.forEach((spec, index) => {
+      if (index === positionalSpecs.length - 1) {
+        const trailing = tokens.slice(index).join(" ");
+        if (trailing) args[spec.name] = trailing;
+      } else if (tokens[index]) {
+        args[spec.name] = tokens[index];
+      }
+    });
+  }
+
+  return args;
+}
+
 type ParsedSlashCommandInput = {
   command: ComposerCommandItem;
   args: Record<string, unknown>;
@@ -2268,21 +2318,7 @@ export function parseSlashCommandInput(
   if (!matchedCommand) return null;
 
   const rest = body.slice(matchedName.length).trim();
-  const args: Record<string, unknown> = {};
-  const specs = matchedCommand.args ?? [];
-  if (specs.length === 1 && rest) {
-    args[specs[0].name] = rest;
-  } else if (specs.length > 1 && rest) {
-    const tokens = rest.split(/\s+/);
-    specs.forEach((spec, index) => {
-      if (index === specs.length - 1) {
-        const remainder = tokens.slice(index).join(" ");
-        if (remainder) args[spec.name] = remainder;
-      } else if (tokens[index]) {
-        args[spec.name] = tokens[index];
-      }
-    });
-  }
+  const args = parseCommandRest(rest, matchedCommand.args ?? []);
   return { command: matchedCommand, args, raw: trimmed };
 }
 
@@ -2394,6 +2430,11 @@ function ChatApp() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const settingsValuesRef = useRef(settingsValues);
+  const pinnedPlacementSaveRevisionRef = useRef(0);
+  useEffect(() => {
+    settingsValuesRef.current = settingsValues;
+  }, [settingsValues]);
   const [desktopSystemInfo, setDesktopSystemInfo] = useState<DesktopSystemInfo | null>(null);
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -3648,8 +3689,34 @@ function ChatApp() {
     }
   };
 
+  const applySettingsValues = (next: Record<string, Record<string, unknown>>) => {
+    settingsValuesRef.current = next;
+    setSettingsValues(next);
+  };
+
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
-    setSettingsValues((current) => {
+    if (sectionId === "sidebar" && fieldId === "ui_placements") {
+      const previous = settingsValuesRef.current;
+      const previousPlacements = normalizePinnedPlacements(previous.sidebar?.ui_placements);
+      const next = withPinnedPlacements(previous, normalizePinnedPlacements(value));
+      const revision = ++pinnedPlacementSaveRevisionRef.current;
+      applySettingsValues(next);
+      void api.updateUiSettings(next)
+        .then((result) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const persisted = withCalendarSettingsValues(result.values);
+          applySettingsValues(persisted);
+        })
+        .catch((updateError) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const rolledBack = withPinnedPlacements(settingsValuesRef.current, previousPlacements);
+          applySettingsValues(rolledBack);
+          setError(updateError instanceof Error ? updateError.message : "Failed to save pinned widgets.");
+        });
+      return;
+    }
+    {
+      const current = settingsValuesRef.current;
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
       const fieldType = String(field?.type ?? "");
@@ -3821,10 +3888,10 @@ function ChatApp() {
         if (ambientRoutingKey) {
           void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
         }
-        void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
+        void api.updateUiSettings(next).then((result) => applySettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
-      return next;
-    });
+      applySettingsValues(next);
+    }
   };
 
   const updateModelSettings = (updates: Record<string, unknown>) => {
@@ -4114,6 +4181,11 @@ function ChatApp() {
         setError(
           `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
+        return;
+      case "open_context_viewer":
+      case "show_usage":
+        setActiveSidebarItemId("__context_usage__");
+        setSidebarSelectionTick((value) => value + 1);
         return;
       case "open_settings":
       case "open_permissions":
@@ -6373,6 +6445,7 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            contextUsage={contextUsage}
             promptUsage={activePromptUsage}
             promptProfileId={activePromptProfileId}
             conversationId={activeConversationId}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,7 +11,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
-from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF  # noqa: E402
+from domain.ai_client.rumi_process import (  # noqa: E402
+    RUMI_BASE_MODEL,
+    RUMI_INTENDED_BASE_MODEL,
+    RUMI_MODEL_PACK_REF,
+    resolve_rumi_base_model,
+)
 
 
 def _profile(
@@ -88,6 +94,108 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
 
 
+def test_simple_model_slots_sync_existing_runtime_settings(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+
+    settings = service.update_settings(
+        {
+            "main_model": "google/gemini-2.5-pro",
+            "lightweight_model": "google/gemini-2.5-flash",
+        }
+    )
+
+    assert settings["main_model"] == "google/gemini-2.5-pro"
+    assert settings["preferred_model"] == "google/gemini-2.5-pro"
+    assert settings["model_slots"] == {
+        "main": "google/gemini-2.5-pro",
+        "lightweight": "google/gemini-2.5-flash",
+    }
+    assert settings["utility_models"]["fast_reply"] == "google/gemini-2.5-flash"
+    assert settings["utility_models"]["subagent_default"] == "google/gemini-2.5-flash"
+
+
+def test_simple_model_slots_preserve_advanced_utility_roles_and_allow_override(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    service.update_settings(
+        {
+            "utility_models": {
+                "tool_selector": "custom/tools",
+                "vision_ocr": "custom/vision",
+            },
+            "lightweight_model": "custom/fast",
+        }
+    )
+
+    advanced = service.update_settings(
+        {
+            "utility_models": {
+                "tool_selector": "custom/tools",
+                "vision_ocr": "custom/vision",
+                "fast_reply": "custom/fast-v2",
+                "subagent_default": "custom/subagent",
+            }
+        }
+    )
+
+    assert advanced["utility_models"]["tool_selector"] == "custom/tools"
+    assert advanced["utility_models"]["vision_ocr"] == "custom/vision"
+    assert advanced["utility_models"]["fast_reply"] == "custom/fast-v2"
+    assert advanced["utility_models"]["subagent_default"] == "custom/subagent"
+    assert advanced["lightweight_model"] == "custom/fast-v2"
+
+    cleared = service.update_settings({"lightweight_model": ""})
+    assert cleared["utility_models"]["fast_reply"] == ""
+    assert cleared["utility_models"]["subagent_default"] == ""
+    assert cleared["model_slots"]["lightweight"] == ""
+
+
+def test_lightweight_model_sparse_update_preserves_unrelated_utility_roles(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    service.update_settings(
+        {
+            "utility_models": {
+                "tool_selector": "custom/tools",
+                "vision_ocr": "custom/vision",
+                "prompt_compactor": "custom/compactor",
+            }
+        }
+    )
+
+    updated = service.update_settings({"lightweight_model": "custom/fast"})
+
+    assert updated["utility_models"]["tool_selector"] == "custom/tools"
+    assert updated["utility_models"]["vision_ocr"] == "custom/vision"
+    assert updated["utility_models"]["prompt_compactor"] == "custom/compactor"
+    assert updated["utility_models"]["fast_reply"] == "custom/fast"
+    assert updated["utility_models"]["subagent_default"] == "custom/fast"
+
+
+def test_structured_model_slots_write_translates_and_persists_canonical_settings(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+
+    updated = service.update_settings(
+        {
+            "model_slots": {
+                "main": "openai/main-chat",
+                "lightweight": "google/fast-chat",
+            }
+        }
+    )
+
+    assert updated["preferred_model"] == "openai/main-chat"
+    assert updated["utility_models"]["fast_reply"] == "google/fast-chat"
+    assert updated["utility_models"]["subagent_default"] == "google/fast-chat"
+    settings_path = tmp_path / "user_data" / "shared" / "frontend_settings.json"
+    persisted = json.loads(settings_path.read_text(encoding="utf-8"))["models"]
+    assert persisted["preferred_model"] == "openai/main-chat"
+    assert persisted["utility_models"]["fast_reply"] == "google/fast-chat"
+    assert persisted["utility_models"]["subagent_default"] == "google/fast-chat"
+
+
 def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
@@ -142,6 +250,110 @@ def test_model_runtime_settings_materializes_builtin_rumi_against_available_prov
     assert rumi_profile["availability"]["status"] == "configured"
     assert rumi_profile["supports_tool_calling"] is True
     assert rumi_profile["supports_thinking"] is True
+
+
+def test_runtime_rumi_base_model_prefers_configured_default_profile(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "openai/default-chat",
+            display_name="Default Chat",
+            provider_id="openai",
+            model_id="default-chat",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+        _profile(
+            RUMI_INTENDED_BASE_MODEL,
+            display_name="MiMo",
+            provider_id="xiaomi-token-plan-sgp",
+            model_id="mimo-v2.5-pro",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+    ]
+    monkeypatch.setattr("domain.ai_client.providers.detect_available_providers", lambda: {})
+    monkeypatch.setattr("domain.ai_client.providers.get_all_known_models", lambda: [])
+
+    resolved = service._runtime_rumi_base_model({"preferred_model": "openai/default-chat"})
+
+    assert resolved == "openai/default-chat"
+    pack = service._ensure_rumi_model_packs([], settings={"preferred_model": "openai/default-chat"})[0]
+    assert [member["model"] for member in pack["members"]] == [
+        "openai/default-chat",
+        "openai/default-chat",
+    ]
+
+
+def test_runtime_rumi_base_model_rejects_stub_non_chat_and_synthetic_profiles(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    configured = {"configured": True, "active": True, "status": "configured"}
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "stub/default",
+            display_name="Stub",
+            provider_id="stub",
+            model_id="default",
+            availability=configured,
+        ),
+        _profile(
+            "google/image-only",
+            display_name="Image only",
+            provider_id="google",
+            model_id="image-only",
+            availability=configured,
+            profile_type="image",
+        ),
+        _profile(
+            "modelpack/rumi",
+            display_name="Rumi",
+            provider_id="modelpack",
+            model_id="rumi",
+            availability=configured,
+        ),
+        _profile(
+            "composite/review",
+            display_name="Review chain",
+            provider_id="composite",
+            model_id="review",
+            availability=configured,
+        ),
+        _profile(
+            "synthetic/generated",
+            display_name="Synthetic",
+            provider_id="synthetic",
+            model_id="generated",
+            availability=configured,
+        ),
+        _profile(
+            "openai/gpt-4o",
+            display_name="GPT-4o",
+            provider_id="openai",
+            model_id="gpt-4o",
+            availability=configured,
+        ),
+    ]
+    monkeypatch.setattr("domain.ai_client.providers.detect_available_providers", lambda: {})
+    monkeypatch.setattr("domain.ai_client.providers.get_all_known_models", lambda: [])
+
+    for preferred in (
+        "stub/default",
+        "google/image-only",
+        "modelpack/rumi",
+        "composite/review",
+        "synthetic/generated",
+    ):
+        assert service._runtime_rumi_base_model({"preferred_model": preferred}) == "openai/gpt-4o"
+
+
+def test_resolve_rumi_base_model_fallback_is_deterministic():
+    assert resolve_rumi_base_model([], available_providers=[]) == RUMI_INTENDED_BASE_MODEL
+    assert (
+        resolve_rumi_base_model(
+            ["google/gemini-2.5-flash", "openai/gpt-4o"],
+            available_providers={"google", "openai"},
+            default_profile_base_model="missing/default",
+        )
+        == "openai/gpt-4o"
+    )
 
 
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):
