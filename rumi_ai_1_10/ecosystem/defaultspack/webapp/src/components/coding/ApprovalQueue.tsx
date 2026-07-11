@@ -22,10 +22,12 @@ export function ApprovalQueue({
   initialApprovals,
   limit = 30,
   onApproved,
+  refreshSignal = 0,
 }: {
   initialApprovals?: CodingApprovalRequest[];
   limit?: number;
   onApproved?: (decision: CodingApprovalDecision, request: CodingApprovalRequest) => void;
+  refreshSignal?: number;
 }) {
   const [requests, setRequests] = useState<CodingApprovalRequest[]>(initialApprovals ?? []);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -44,7 +46,7 @@ export function ApprovalQueue({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshSignal]);
 
   const decide = async (requestId: string, decision: "approve" | "deny") => {
     const request = requests.find((item) => item.request_id === requestId);
