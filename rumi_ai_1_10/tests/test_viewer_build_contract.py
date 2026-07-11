@@ -10,6 +10,7 @@ TAURI_ROOT = ROOT / "rumi_viewer" / "src-tauri"
 TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 DEV_REQUIREMENTS = ROOT / "rumi_ai_1_10" / "requirements-dev.txt"
+DEV_PYPROJECT = ROOT / "rumi_ai_1_10" / "pyproject.toml"
 VIEWER_BUILD_WORKFLOWS = (
     ROOT / ".github" / "workflows" / "desktop-installers.yml",
     ROOT / ".github" / "workflows" / "release.yml",
@@ -70,6 +71,9 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
 
 def test_dev_uv_version_matches_release_bundle_pin():
     preparer = _load_resource_preparer()
+    pinned_requirement = f"uv=={preparer.UV_PINNED_VERSION}"
     requirements = DEV_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+    pyproject = DEV_PYPROJECT.read_text(encoding="utf-8")
 
-    assert f"uv=={preparer.UV_PINNED_VERSION}" in requirements
+    assert pinned_requirement in requirements
+    assert f'"{pinned_requirement}"' in pyproject
