@@ -98,10 +98,6 @@ jobs:
           npm run lint
           npm run audit
 
-      - name: Build panel frontend
-        working-directory: rumi_viewer/frontend
-        run: npm run build
-
       - name: Build defaultspack frontend
         working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
         run: npm run build
