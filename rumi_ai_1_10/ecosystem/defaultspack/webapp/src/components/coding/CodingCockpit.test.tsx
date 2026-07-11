@@ -9,7 +9,7 @@ import { ApprovalQueue } from "./ApprovalQueue";
 import { CheckpointPanel } from "./CheckpointPanel";
 import { CodingCockpit } from "./CodingCockpit";
 import { DiffPanel } from "./DiffPanel";
-import { TerminalPanel } from "./TerminalPanel";
+import { TERMINAL_HISTORY_POLICY, TerminalPanel } from "./TerminalPanel";
 import { codingApprovalRequestId } from "./CheckpointPanel";
 import {
   codingActionRequiresApproval,
@@ -135,6 +135,17 @@ test("terminal panel renders classification and risk reasons", () => {
   assert.match(html, /git push origin main/);
   assert.match(html, /approval/);
   assert.match(html, /network/);
+  assert.match(html, /Memory only/);
+  assert.match(html, /not saved to browser storage/);
+  assert.match(html, /aria-label="Clear terminal history from this private session"/);
+  assert.equal(TERMINAL_HISTORY_POLICY.durable, false);
+});
+
+test("terminal history never reads or writes raw browser storage", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "TerminalPanel.tsx"), "utf8");
+  assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/);
+  assert.doesNotMatch(source, /approval_request_id\s*===/);
+  assert.match(source, /sessionPendingApprovals\.current\.get/);
 });
 
 test("coding cockpit renders workspace and sidecar sections", () => {

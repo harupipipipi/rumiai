@@ -52,7 +52,6 @@ export function CodingCockpit({
   onWorkspaceCreate,
   onWorkspaceTrust,
   onWorkspacesRefresh,
-  consoleScopeKey,
   variant = "sidecar",
 }: {
   workspaces: CodingWorkspaceRecord[];
@@ -61,6 +60,7 @@ export function CodingCockpit({
   onWorkspaceCreate?: () => void;
   onWorkspaceTrust?: (workspaceId: string) => void;
   onWorkspacesRefresh?: () => void;
+  /** @deprecated Terminal history is intentionally private and memory-only. */
   consoleScopeKey?: string;
   variant?: "sidecar" | "sidebar";
 }) {
@@ -296,7 +296,6 @@ export function CodingCockpit({
             workspaceId={activeWorkspaceId}
             approvedDecision={approvedTerminalDecision}
             onActionResult={handleCodingActionResult}
-            storageKey={`rumi-terminal-logs:${consoleScopeKey ?? activeWorkspaceId ?? "default"}`}
           />
 
           <section className="border-b border-zinc-800/60 p-3" aria-label="Browser artifacts">
