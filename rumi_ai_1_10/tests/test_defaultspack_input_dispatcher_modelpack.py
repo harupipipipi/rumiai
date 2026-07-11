@@ -23,6 +23,8 @@ from domain.ai_client.model_pack_store import ModelPackStore  # noqa: E402
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 from domain.ai_client.model_router import ModelRoutingDecision, ModelRoutingRequest, route_model_request  # noqa: E402
 from domain.ai_client.client import AIClient  # noqa: E402
+from domain.ai_client.model_pack import ModelPack  # noqa: E402
+from domain.ai_client.rumi_process import default_rumi_model_pack  # noqa: E402
 
 
 def _configure_paths(monkeypatch, tmp_path: Path) -> None:
@@ -939,6 +941,46 @@ def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_p
     assert response["metadata"]["rumi_process"]["resolved_base_model"] == "google/gemini-2.5-flash"
     assert response["metadata"]["rumi_process"]["fallback_reason"] == "intended_base_model_unavailable_using_active_provider_fallback"
     assert [call["model"] for call in provider.calls] == ["gemini-2.5-flash"]
+
+
+def test_builtin_rumi_explicit_override_wins_for_review_chain_and_deepthink(monkeypatch):
+    client = AIClient()
+    captured = []
+
+    def fake_review_chain(self, composite, members, messages, tools=None, params=None):
+        captured.append(
+            {
+                "models": [member["model"] for member in members],
+                "deepthink_enabled": bool((params or {}).get("deepthink_enabled")),
+            }
+        )
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr(AIClient, "_complete_review_chain", fake_review_chain)
+    default_pack = ModelPack.from_dict(default_rumi_model_pack(base_model="openai/default-chat"))
+
+    for deepthink_enabled in (False, True):
+        response = client._complete_model_pack(
+            default_pack,
+            [{"role": "user", "content": "hello"}],
+            [],
+            {
+                "deepthink_enabled": deepthink_enabled,
+                "rumi_base_model_override": "anthropic/explicit-override",
+            },
+        )
+        assert response["content"][0]["text"] == "ok"
+
+    assert captured == [
+        {
+            "models": ["anthropic/explicit-override", "anthropic/explicit-override"],
+            "deepthink_enabled": False,
+        },
+        {
+            "models": ["anthropic/explicit-override", "anthropic/explicit-override"],
+            "deepthink_enabled": True,
+        },
+    ]
 
 
 def test_model_pack_store_materializes_builtin_rumi_with_runtime_base_model(monkeypatch):

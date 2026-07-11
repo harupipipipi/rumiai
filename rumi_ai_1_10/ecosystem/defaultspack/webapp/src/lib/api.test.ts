@@ -308,6 +308,68 @@ test("slash command parsing supports multi-word aliases without treating them as
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
 });
 
+test("slash command parsing supports greedy text and key-value options", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "goal",
+      name: "goal",
+      label: "Goal",
+      category: "tools",
+      visibility: "default",
+      risk: "medium",
+      args: [
+        { name: "goal", type: "string", required: true, greedy: true },
+        { name: "max_iterations", type: "string", required: false },
+        { name: "model", type: "string", required: false },
+        { name: "rich", type: "string", required: false },
+      ],
+      execution: { type: "pack_block", qualified_name: "defaultspack:goal.run" },
+    } as ComposerCommandItem,
+  ];
+
+  const rich = parseSlashCommandInput("/goal /rich Solve the long goal", commands);
+  assert.deepEqual(rich?.args, { rich: true, goal: "Solve the long goal" });
+
+  const keyed = parseSlashCommandInput("/goal Ship the approval window max_iterations=rich model=stub", commands);
+  assert.deepEqual(keyed?.args, {
+    max_iterations: "rich",
+    model: "stub",
+    goal: "Ship the approval window",
+  });
+});
+
+test("slash command parsing supports rule actions without free-form rule text", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "rule",
+      name: "rule",
+      label: "Rule",
+      category: "settings",
+      visibility: "default",
+      risk: "low",
+      args: [
+        { name: "rule", type: "string", required: false, greedy: true },
+        { name: "action", type: "string", required: false },
+        { name: "rule_id", type: "string", required: false },
+        { name: "priority", type: "string", required: false },
+      ],
+      execution: { type: "pack_block", qualified_name: "defaultspack:rule.run" },
+    } as ComposerCommandItem,
+  ];
+
+  const list = parseSlashCommandInput("/rule action=list", commands);
+  assert.deepEqual(list?.args, { action: "list" });
+
+  const disable = parseSlashCommandInput("/rule action=disable rule_id=rule_123", commands);
+  assert.deepEqual(disable?.args, { action: "disable", rule_id: "rule_123" });
+
+  const create = parseSlashCommandInput("/rule Keep the work in one PR priority=high", commands);
+  assert.deepEqual(create?.args, {
+    priority: "high",
+    rule: "Keep the work in one PR",
+  });
+});
+
 test("slash command parsing can be disabled by template feature flags", () => {
   const commands: ComposerCommandItem[] = [
     {

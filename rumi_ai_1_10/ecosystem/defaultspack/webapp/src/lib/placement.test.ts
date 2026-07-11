@@ -7,6 +7,7 @@ import {
   readPinnedPlacements,
   resolvePlacementHtmlRendering,
   togglePinnedPlacement,
+  withPinnedPlacements,
   writePinnedPlacements,
   type PlacementManifest,
 } from "./placement";
@@ -65,6 +66,30 @@ test("pinned placements persist through storage helpers", () => {
   writePinnedPlacements(storage, next);
 
   assert.deepEqual(readPinnedPlacements(storage), [{ id: "yolo-switch", surface: "right_sidebar" }]);
+});
+
+test("pinned placements update the sidebar without dropping other settings", () => {
+  const current = {
+    sidebar: {
+      pinned_item_ids: ["terminal"],
+      ui_placements: [{ id: "runtime-status", surface: "right_sidebar" }],
+    },
+    tools: { disabled_tool_ids: ["dangerous-tool"] },
+  };
+
+  const next = withPinnedPlacements(current, [
+    { id: "runtime-status", surface: "right_sidebar" },
+    { id: "tool-filter-log", surface: "right_sidebar" },
+  ]);
+
+  assert.deepEqual(next.sidebar.ui_placements, [
+    { id: "runtime-status", surface: "right_sidebar" },
+    { id: "tool-filter-log", surface: "right_sidebar" },
+  ]);
+  assert.deepEqual(next.sidebar.pinned_item_ids, ["terminal"]);
+  assert.deepEqual(next.tools, current.tools);
+  assert.notEqual(next, current);
+  assert.notEqual(next.sidebar, current.sidebar);
 });
 
 test("builtin placements include yolo switch and model manager", () => {

@@ -1581,6 +1581,7 @@ export type ComposerCommandArg = {
   type: "string" | "enum" | "boolean";
   required?: boolean;
   values?: string[];
+  greedy?: boolean;
 };
 
 export type ComposerCommandExecution =

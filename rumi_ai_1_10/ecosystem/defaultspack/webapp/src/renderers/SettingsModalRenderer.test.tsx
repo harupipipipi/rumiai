@@ -192,6 +192,66 @@ test("SettingsModalRenderer renders template model_select with searchable model 
   assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
 });
 
+test("SettingsModalRenderer shows simple main and lightweight model slots", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "main_model",
+              label: "Main Model",
+              type: "model_select",
+              options: [{ value: "provider/main", label: "Main Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "lightweight_model",
+              label: "Lightweight Model",
+              type: "model_select",
+              options: [{ value: "provider/fast", label: "Fast Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "utility_models",
+              label: "Utility Models",
+              type: "textarea",
+              advanced: true,
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          main_model: "provider/main",
+          lightweight_model: "provider/fast",
+          utility_models: { fast_reply: "provider/fast" },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Main Model/);
+  assert.match(html, /Lightweight Model/);
+  assert.match(html, /Main Choice/);
+  assert.match(html, /Fast Choice/);
+  assert.match(html, /Advanced/);
+  assert.match(html, /Utility Models/);
+  assert.equal((html.match(/data-settings-renderer="model_select"/g) ?? []).length, 2);
+});
+
 test("SettingsModalRenderer renders template slash command registration field", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {

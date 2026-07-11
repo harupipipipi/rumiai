@@ -1,0 +1,22 @@
+[
+  {
+    "id": "rule",
+    "name": "rule",
+    "label": "Rule",
+    "description": "Pin a persistent conversation instruction.",
+    "category": "settings",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "args": [
+      { "name": "rule", "type": "string", "required": false, "greedy": true },
+      { "name": "action", "type": "string", "required": false },
+      { "name": "rule_id", "type": "string", "required": false },
+      { "name": "priority", "type": "string", "required": false }
+    ],
+    "execution": {
+      "type": "pack_block",
+      "qualified_name": "defaultspack:rule.run"
+    }
+  }
+]
