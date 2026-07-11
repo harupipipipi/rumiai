@@ -26,6 +26,13 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
     if not action:
         action = "add" if rule_text else "list"
 
+    mutating_actions = {"add", "create", "set", "disable", "delete", "remove"}
+    if action in mutating_actions and _is_untrusted_external(context):
+        return error(
+            "external or P2P requests cannot mutate persistent conversation rules",
+            "FORBIDDEN",
+        )
+
     store = ConversationRuleStore()
 
     try:
@@ -115,3 +122,15 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return value != 0
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _is_untrusted_external(context: Any) -> bool:
+    if not isinstance(context, dict):
+        return False
+    if str(context.get("trusted_actor_id") or "").strip():
+        return False
+    source = " ".join(
+        str(context.get(key) or "").strip().lower()
+        for key in ("run_source", "source", "origin", "transport")
+    )
+    return any(token in source for token in ("p2p", "peer", "external", "remote", "webhook"))

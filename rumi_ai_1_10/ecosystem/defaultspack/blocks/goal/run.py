@@ -7,9 +7,9 @@ Drives a goal-pursuit loop with two roles:
   the goal has been achieved and otherwise emits the next instruction.
 
 Default /goal runs with a bounded iteration cap. ``/goal /rich ...`` (or
-``rich=true`` / ``max_iterations=rich``) switches to rich mode: the loop has no
-hard iteration cap and continues until the Evaluator marks the goal achieved or
-a worker/evaluator error occurs.
+``rich=true`` / ``max_iterations=rich``) switches to rich mode: the loop keeps
+going until completion under a deliberately high emergency budget of 200
+iterations / 30 minutes. Cancellation, deadline, and model errors stop it early.
 
 The block is invoked via the ``pack_block`` slash command execution type and
 runs model-only Worker/Evaluator turns; it does not execute tools directly.
@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import time
 from typing import Any
 
 # blocks/_common is colocated with this package; the parent imports here mirror
@@ -32,8 +33,10 @@ from domain.ai_client.model_call import call_model  # noqa: E402
 
 DEFAULT_MAX_ITERATIONS = 5
 HARD_MAX_ITERATIONS = 20
+RICH_EMERGENCY_MAX_ITERATIONS = 200
+RICH_DEFAULT_DEADLINE_SECONDS = 30 * 60
 RICH_ITERATION_SENTINELS = {"rich", "unlimited", "infinite", "forever", "none", "∞"}
-_RICH_COMMAND_RE = re.compile(r"(^|\s)/rich(?=\s|$)", re.IGNORECASE)
+_RICH_COMMAND_RE = re.compile(r"^\s*/rich(?=\s|$)", re.IGNORECASE)
 
 WORKER_SYSTEM_PROMPT = (
     "You are a Worker agent pursuing a user-defined goal. "
@@ -71,6 +74,12 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
         return error("goal is required", "MISSING_PARAM")
 
     max_iterations = None if rich_mode else _coerce_iterations(data.get("max_iterations"))
+    rich_deadline_seconds = (
+        _coerce_rich_deadline(data.get("rich_timeout_seconds") or data.get("timeout_seconds"))
+        if rich_mode
+        else None
+    )
+    deadline = time.monotonic() + rich_deadline_seconds if rich_deadline_seconds else None
     worker_model = str(data.get("worker_model") or data.get("model") or "").strip()
     evaluator_model = str(data.get("evaluator_model") or data.get("model") or "").strip()
 
@@ -84,8 +93,13 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
     achieved = False
     reason = ""
     index = 0
+    stopped_reason = ""
 
-    while rich_mode or index < int(max_iterations or 0):
+    iteration_budget = RICH_EMERGENCY_MAX_ITERATIONS if rich_mode else int(max_iterations or 0)
+    while index < iteration_budget:
+        stopped_reason = _stop_signal(context, deadline)
+        if stopped_reason:
+            break
         index += 1
         worker_response = _call_worker(
             goal,
@@ -113,6 +127,17 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
 
         worker_output = _response_text(worker_response)
         final_output = worker_output
+
+        stopped_reason = _stop_signal(context, deadline)
+        if stopped_reason:
+            iterations.append(
+                {
+                    "iteration": index,
+                    "worker_output": worker_output,
+                    "phase": stopped_reason,
+                }
+            )
+            break
 
         evaluator_response = _call_evaluator(
             goal,
@@ -152,15 +177,15 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
         )
 
         if achieved:
+            stopped_reason = "achieved"
             break
         if not next_instruction:
             next_instruction = (
                 "Continue working toward the goal. Produce more concrete progress."
             )
 
-    stopped_reason = "achieved" if achieved else "max_iterations_reached"
-    if rich_mode and not achieved:
-        stopped_reason = "rich_loop_interrupted"
+    if not stopped_reason:
+        stopped_reason = "emergency_iteration_cap_reached" if rich_mode else "max_iterations_reached"
 
     return ok(
         {
@@ -173,7 +198,8 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
             "max_iterations": max_iterations,
             "rich": rich_mode,
             "mode": "rich" if rich_mode else "bounded",
-            "hard_cap": None if rich_mode else HARD_MAX_ITERATIONS,
+            "hard_cap": RICH_EMERGENCY_MAX_ITERATIONS if rich_mode else HARD_MAX_ITERATIONS,
+            "deadline_seconds": rich_deadline_seconds,
             "stopped_reason": stopped_reason,
         }
     )
@@ -185,6 +211,32 @@ def _coerce_iterations(value: Any) -> int:
     except (TypeError, ValueError):
         parsed = DEFAULT_MAX_ITERATIONS
     return max(1, min(parsed, HARD_MAX_ITERATIONS))
+
+
+def _coerce_rich_deadline(value: Any) -> float:
+    try:
+        parsed = float(value) if value not in (None, "") else RICH_DEFAULT_DEADLINE_SECONDS
+    except (TypeError, ValueError):
+        parsed = RICH_DEFAULT_DEADLINE_SECONDS
+    return max(1.0, min(parsed, 24 * 60 * 60))
+
+
+def _is_cancelled(context: Any) -> bool:
+    checker = context.get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _stop_signal(context: Any, deadline: float | None) -> str:
+    if _is_cancelled(context):
+        return "cancelled"
+    if deadline is not None and time.monotonic() >= deadline:
+        return "deadline_reached"
+    return ""
 
 
 def _truthy(value: Any) -> bool:
