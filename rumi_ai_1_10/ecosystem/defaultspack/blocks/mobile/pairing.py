@@ -158,6 +158,7 @@ def approve(input_data, context=None):
             result["device_id"],
             label=result.get("device_label") or "",
             public_key=result.get("device_public_key") or "",
+            encryption_public_key=result.get("device_encryption_public_key") or "",
             scopes=result.get("scopes"),
             pairing_id=pairing_id,
             profile_id=profile_id,
@@ -348,6 +349,9 @@ def delete_device(input_data, context=None):
     device = store.revoke_device(device_id)
     if device is None:
         return error("device not found", "DEVICE_NOT_FOUND")
+    from domain.p2p.credential_transfer import CredentialTransferStore
+
+    CredentialTransferStore(s.store_path).revoke_for_device(device_id)
     return ok({"device": device.as_dict()})
 
 
