@@ -16,12 +16,11 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 class _FakeSseResponse:
     def __init__(self, chunks):
-        self._chunks = iter(chunks)
+        self._lines = iter(b"".join(chunks).splitlines(keepends=True))
         self.closed = False
 
-    def read(self, size):
-        del size
-        return next(self._chunks, b"")
+    def readline(self):
+        return next(self._lines, b"")
 
     def close(self):
         self.closed = True
@@ -198,6 +197,45 @@ def test_opencode_zen_stream_finalizes_once_after_finish_usage_tail_and_done():
         "finish_reason": "length",
         "usage": {"input_tokens": 2, "output_tokens": 4, "total_tokens": 6},
     }
+    assert response.closed is True
+
+
+def test_opencode_zen_stream_reads_each_sse_line_without_waiting_for_eof():
+    """A live SSE connection must expose deltas before the socket closes."""
+    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
+
+    provider = object.__new__(OpencodeZenProvider)
+
+    class OpenSseResponse:
+        def __init__(self):
+            self.lines = iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"ready"}}]}\n',
+                    b"\n",
+                ]
+            )
+            self.closed = False
+
+        def readline(self):
+            try:
+                return next(self.lines)
+            except StopIteration:
+                raise AssertionError("parser waited for connection EOF")
+
+        def read(self, _size):
+            raise AssertionError("buffered read delays small live SSE frames")
+
+        def close(self):
+            self.closed = True
+
+    response = OpenSseResponse()
+    stream = provider._stream_from_response(response)
+
+    assert next(stream) == {
+        "type": "content_delta",
+        "delta": {"type": "text", "text": "ready"},
+    }
+    stream.close()
     assert response.closed is True
 
 

@@ -204,6 +204,22 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
         resp = self._request_stream(self._CHAT_COMPLETIONS_PATH, body, **self._request_timeout_kwargs(params))
         yield from self._stream_from_response(resp)
 
+    @staticmethod
+    def _parse_sse_lines(resp):
+        """Yield Zen SSE payloads as soon as each event line arrives."""
+        while True:
+            raw_line = resp.readline()
+            if not raw_line:
+                return
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].lstrip()
+            if payload == "[DONE]":
+                return
+            if payload:
+                yield payload
+
     def _stream_from_response(self, resp):
         tool_call_state = {}
         finish_reason = ""
