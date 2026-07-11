@@ -10,6 +10,8 @@ const historyChatDropMime = "application/rumi-history-chat";
 type ApiMockOptions = {
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
+  conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
+  onApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
 };
 
 function ok(data: unknown) {
@@ -459,6 +461,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     const path = url.pathname;
     const method = request.method();
     const conversation = smokeConversation();
+    options.conversationMutator?.(conversation);
 
     if (path === "/api/health") {
       return fulfill(route, { status: "ok", pack: "defaultspack", ts: "2026-05-20T00:00:00Z" });
@@ -679,11 +682,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onApprovalDecision?.("approve", payload);
       return fulfill(route, {
         request_id: payload.approval_request_id,
         approved: true,
         token: "approved-mcp-token",
       });
+    }
+
+    if (path === "/api/coding/approvals/deny" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onApprovalDecision?.("deny", payload);
+      return fulfill(route, { request_id: payload.approval_request_id, approved: false, status: "denied" });
     }
 
     if (path === "/api/coding/approvals") {
@@ -831,6 +841,51 @@ test("composer approval menu opens action permissions while selection modes live
   await expect(page.getByText("Safety rules")).toBeVisible();
   await expect(page.getByText("Tool source → Tools & MCP")).toBeVisible();
   await expect(page.getByText("MCP servers can require a connection")).toBeVisible();
+});
+
+test("browser approval uses the shared user-first decision surface at narrow width", async ({ page }) => {
+  let denialPayload: Record<string, unknown> | null = null;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDefaultspack(page, "/static/chat", {
+    conversationMutator: (conversation) => {
+      conversation.messages[1].events.push({
+        type: "approval_requested",
+        phase: "approval_requested",
+        approval_required: true,
+        approval_request_id: "approval-browser-contract",
+        tool_name: "browser_computer",
+        action: "browser.open_url",
+        risk_level: "medium",
+        display_summary: "example.test を開き、ページ内容を外部サイトから読み込みます。",
+        payload: { url: "https://example.test/long/path" },
+        timestamp: now,
+      });
+    },
+    onApprovalDecision: (decision, payload) => {
+      if (decision === "deny") denialPayload = payload;
+    },
+  });
+
+  const surface = page.locator('[data-approval-source="browser"]');
+  await expect(surface).toBeVisible();
+  await expect(surface).toContainText("Rumi が許可を求めています");
+  await expect(surface).toContainText("https://example.test/long/path");
+  await expect(surface).toContainText("必要な理由");
+  await expect(surface).toContainText("許可範囲");
+  await expect(surface.getByText("技術的な詳細")).toBeVisible();
+  await expect(surface.locator("pre")).toBeHidden();
+  await expect(surface.getByRole("button", { name: "拒否（2）" })).toBeVisible();
+  await expect(surface.getByRole("button", { name: "許可（3）" })).toBeVisible();
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("2");
+  await page.keyboard.press("3");
+  await expect(composer).toHaveValue("23");
+  await expect(surface).toBeVisible();
+
+  await surface.getByRole("button", { name: "拒否（2）" }).click();
+  await expect(surface).toBeHidden();
+  expect(denialPayload).toMatchObject({ approval_request_id: "approval-browser-contract" });
 });
 
 test("tool hub service selections can be scoped to the conversation and survive reload", async ({ page }) => {

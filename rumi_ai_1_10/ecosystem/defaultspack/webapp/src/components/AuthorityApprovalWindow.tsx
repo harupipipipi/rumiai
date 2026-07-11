@@ -31,6 +31,8 @@ import {
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
 import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
+import { authorityApprovalViewModel } from "../lib/approvalPresentation";
+import { ApprovalDecisionSurface } from "./ApprovalDecisionSurface";
 
 type DecisionState =
   | { kind: "idle" }
@@ -644,6 +646,16 @@ export function AuthorityApprovalWindow() {
             </div>
           ) : request && approval ? (
             <>
+              <ApprovalDecisionSurface
+                approval={{
+                  ...authorityApprovalViewModel(approval, authorityApprovalTitle(approval)),
+                  status: displayedSettledStatus ?? (action === "approve" ? "approving" : action === "reject" ? "denying" : "pending"),
+                  trustedWindowRequired: false,
+                  scope: allowedScopes.map((scope) => SCOPE_LABELS[scope]).join(" / "),
+                  persistence: "下の選択内容とサーバーが発行する期限に従います。",
+                  auditText: request.display_metadata?.audit_text || "この許可操作だけをローカルに記録します。",
+                }}
+              />
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn(
