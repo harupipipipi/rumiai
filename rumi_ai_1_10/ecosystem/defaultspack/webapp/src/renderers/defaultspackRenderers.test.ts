@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
 import { CompanyChannelView, companyMessageChannelId, visibleCompanyMessagesForChannel } from "../components/company/CompanyChannelView";
+import { CompanyP2PPanel } from "../components/company/CompanyP2PPanel";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
 import { CompanyTree } from "../components/company/CompanyTree";
 import {
@@ -17,6 +18,7 @@ import {
   resolveCompanyWorkspaceHint,
   resolveCompanyWorkspaceHintFromGroup,
   resolveEffectiveCompanies,
+  loadEnabledP2PDetails,
   resolveSelectedCompanyId,
   resolveSelectedCompanyRecord,
 } from "../components/company/CompanyWorkspacePanel";
@@ -600,6 +602,54 @@ test("company tabs avoid empty configured states when card counts are known", ()
   assert.doesNotMatch(taskHtml, /No delegated tasks/);
   assert.match(agentHtml, /7 employees configured/);
   assert.doesNotMatch(agentHtml, /No employees configured/);
+});
+
+test("company p2p panel disables durable actions while p2p is disabled", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyP2PPanel, {
+      status: { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 },
+      peers: [{ peer_id: "peer-1", label: "Peer one", status: "approved" }],
+      onStartPairing: () => {},
+      onSendMessage: () => {},
+    }),
+  );
+
+  assert.match(html, /P2P is disabled/);
+  assert.match(html, /<button[^>]*disabled[^>]*title="Start pairing"/);
+  assert.match(html, /<button[^>]*disabled[^>]*title="Send P2P message"/);
+});
+
+test("company workspace does not create p2p identity details while disabled", async () => {
+  let calls = 0;
+  const details = await loadEnabledP2PDetails(
+    { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 },
+    {
+      getP2PIdentity: async () => {
+        calls += 1;
+        return { identity: { node_id: "node-1" }, p2p: { enabled: false } };
+      },
+      listP2PPeers: async () => {
+        calls += 1;
+        return { peers: [] };
+      },
+    },
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(details, { identity: null, peers: [] });
+});
+
+test("company workspace loads p2p identity details after p2p is enabled", async () => {
+  const details = await loadEnabledP2PDetails(
+    { p2p: { enabled: true }, peer_count: 1, approved_peer_count: 1 },
+    {
+      getP2PIdentity: async () => ({ identity: { node_id: "node-1" }, p2p: { enabled: true } }),
+      listP2PPeers: async () => ({ peers: [{ peer_id: "peer-1", status: "approved" }] }),
+    },
+  );
+
+  assert.equal(details.identity?.node_id, "node-1");
+  assert.deepEqual(details.peers.map((peer) => peer.peer_id), ["peer-1"]);
 });
 
 test("company task board renders agent run errors", () => {
