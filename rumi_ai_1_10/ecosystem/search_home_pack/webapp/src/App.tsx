@@ -12,6 +12,7 @@ import {
   type SearchHomeModel,
 } from "./api";
 import {
+  buildBrowserCompanionRouteMessage,
   normalizeSelectedIndex,
   persistRouteSessionState,
   reviewRouteDestination,
@@ -153,18 +154,22 @@ function loadDecisionFromSessionStorage(storage: Storage | null): HydratedRouteS
   if (!storage) {
     return null;
   }
-  try {
-    const full = storage.getItem(ROUTE_DECISION_STORAGE_KEY);
-    if (full) {
-      return coerceRouteDecision(JSON.parse(full));
-    }
-  } catch {
-    // Ignore malformed stored decisions.
-  }
+  storage.removeItem(ROUTE_DECISION_STORAGE_KEY);
   try {
     const session = storage.getItem(ROUTE_SESSION_STORAGE_KEY);
     if (session) {
-      return decisionFromSessionState(JSON.parse(session));
+      const parsed = JSON.parse(session) as Partial<RouteSessionState>;
+      const issuedAt = Date.parse(String(parsed.issued_at || ""));
+      const expiresAt = Date.parse(String(parsed.expires_at || ""));
+      const now = Date.now();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(parsed.state_id || "")) ||
+          !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) ||
+          issuedAt > now + 30_000 || expiresAt <= now ||
+          expiresAt - issuedAt > 6 * 60 * 60 * 1000) {
+        storage.removeItem(ROUTE_SESSION_STORAGE_KEY);
+        return null;
+      }
+      return decisionFromSessionState(parsed);
     }
   } catch {
     // Ignore malformed session payloads.
@@ -177,14 +182,7 @@ function saveDecisionToSessionStorage(storage: Storage | null, decision: RouteDe
     return null;
   }
   const session = persistRouteSessionState(storage, decision, selectedIndex);
-  storage.setItem(
-    ROUTE_DECISION_STORAGE_KEY,
-    JSON.stringify({
-      ...decision,
-      target_url: selectedCandidateUrl(decision, selectedIndex),
-      selected_index: selectedIndex,
-    }),
-  );
+  storage.removeItem(ROUTE_DECISION_STORAGE_KEY);
   return session;
 }
 
@@ -337,6 +335,10 @@ export default function App() {
     const session = saveDecisionToSessionStorage(storage, nextDecision, nextIndex);
     if (session) {
       persistRouteStateRemotely(session);
+      window.postMessage(
+        buildBrowserCompanionRouteMessage(nextDecision, nextIndex),
+        window.location.origin,
+      );
     }
   }, []);
 
@@ -718,7 +720,10 @@ export default function App() {
           onOpenFallback={() => navigate(currentDecision, -1, currentDecision.fallback_url)}
           onCopy={() => {
             const destination = reviewRouteDestination(selectedCandidateUrl(currentDecision, selectedIndex));
-            if (destination.ok) void navigator.clipboard.writeText(destination.url);
+            const details = destination.ok
+              ? destination.url
+              : `Search Home blocked destination: ${destination.code}. ${destination.message}`;
+            void navigator.clipboard.writeText(details);
           }}
           onCancel={() => {
             setDecision(null);

@@ -132,12 +132,17 @@ export function persistRouteStateRemotely(state: RouteSessionState): void {
 }
 
 export function clearRouteStateRemotely(): void {
+  const issuedAt = new Date();
+  const random = globalThis.crypto.getRandomValues(new Uint8Array(16));
   persistRouteStateRemotely({
     query: "",
     target_url: "",
     fallback_url: "",
     selected_index: -1,
     target_candidates: [],
-    updated_at: new Date().toISOString(),
+    updated_at: issuedAt.toISOString(),
+    state_id: Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    issued_at: issuedAt.toISOString(),
+    expires_at: new Date(issuedAt.getTime() + 5 * 60 * 1000).toISOString(),
   });
 }
