@@ -452,6 +452,30 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
+  let mcpApprovalStatus = "none";
+  const mcpApprovalRequest = () => ({
+    request_id: "apr-mcp-contract",
+    operation: "tool.mcp_connect",
+    risk_level: "high",
+    status: mcpApprovalStatus,
+    display_summary: "Connect MCP server: contract_digest",
+    details: {
+      review: {
+        executable: "/usr/bin/fake-python",
+        transport: "stdio",
+        args: ["digest_server.py"],
+        cwd: "/repo",
+        env: { FAKE_TOKEN: "<redacted>" },
+        server_source: "registry",
+        capabilities: [],
+        tools: [],
+        network: { access: "process-defined" },
+        filesystem: { access: "workspace-only" },
+        persistence: { registry: true },
+        consequences: ["Starts a fake MCP fixture."],
+      },
+    },
+  });
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -679,15 +703,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      mcpApprovalStatus = "approved";
       return fulfill(route, {
         request_id: payload.approval_request_id,
+        status: "approved",
         approved: true,
         token: "approved-mcp-token",
       });
     }
 
     if (path === "/api/coding/approvals") {
-      return fulfill(route, { requests: [], pending: [], count: 0 });
+      const requests = mcpApprovalStatus === "none" ? [] : [mcpApprovalRequest()];
+      const pending = mcpApprovalStatus === "pending" ? requests : [];
+      return fulfill(route, { requests, pending, count: requests.length });
     }
 
     if (path === "/api/coding/checkpoints") {
@@ -744,6 +772,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       const payload = request.postDataJSON() as Record<string, unknown>;
       const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
       if (!payload.approval_token) {
+        mcpApprovalStatus = "pending";
         return fulfill(route, {
           approval_required: true,
           approval_request_id: "apr-mcp-contract",
@@ -1248,13 +1277,19 @@ test("mocked coding cockpit renders MCP server state", async ({ page }) => {
   await expect(mcpServers).toContainText("approved");
 });
 
-test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
+test("mocked coding cockpit waits for explicit approval before connecting an MCP server", async ({ page }) => {
   await openCodingWidget(page);
 
   await page.getByLabel("MCP server id").fill("contract_digest");
   await page.getByLabel("MCP command").fill("python");
   await page.getByLabel("MCP args").fill("digest_server.py");
   await page.getByTitle("Connect MCP server").click();
+
+  await expect(page.getByText(/MCP approval required for contract_digest/)).toBeVisible();
+  await expect(page.getByText("tool.mcp_connect")).toBeVisible();
+  await expect(page.getByText("Environment (redacted)")).toBeVisible();
+  await expect(page.getByText("MCP connected: contract_digest (1 tools)")).not.toBeVisible();
+  await page.getByTitle("Approve").click();
 
   const mcpServers = page.getByLabel("MCP servers");
   await expect(mcpServers).toContainText("contract_digest");

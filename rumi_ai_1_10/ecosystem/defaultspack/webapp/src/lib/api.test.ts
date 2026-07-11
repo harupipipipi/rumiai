@@ -2084,6 +2084,37 @@ test("invokeTool calls generic tool endpoint with tool name and arguments", asyn
   }
 });
 
+test("MCP connect sends the authority-bound workspace and token without requester approval claims", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { server_id: "fixture-mcp", status: "connected", tools: [] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.connectMcpServer({
+      server_id: "fixture-mcp",
+      workspace_id: "ws-fixture",
+      approval_token: "fake-single-use-token",
+    });
+    assert.equal(requestUrl, "/api/tools/mcp/connect");
+    assert.deepEqual(requestBody, {
+      server_id: "fixture-mcp",
+      workspace_id: "ws-fixture",
+      approval_token: "fake-single-use-token",
+    });
+    assert.equal("approved" in requestBody, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("browser computer approvals use the browser-computer endpoint for computer_use", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl = "";

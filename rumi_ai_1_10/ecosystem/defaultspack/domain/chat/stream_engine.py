@@ -324,7 +324,9 @@ def _tool_identity_text_matches(left: Any, right: Any) -> bool:
         return False
     if left_text == right_text:
         return True
-    normalize = lambda value: re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
     return normalize(left_text) == normalize(right_text)
 
 
@@ -3256,7 +3258,11 @@ class ChatRunEngine:
                 "APPROVAL_REQUEST_MISSING",
             }:
                 try:
-                    refreshed = _approval_mod.approve(request_id)
+                    # This replay path is reached only for scheduler follow-ups
+                    # that already passed the scoped MiMo auto-approval policy.
+                    # Keep ordinary approve() single-settlement while allowing
+                    # this trusted path to replace an expired execution token.
+                    refreshed = _approval_mod.approve_with_extended_expiry(request_id)
                     refreshed_token = str(
                         (refreshed if isinstance(refreshed, dict) else {}).get("token") or ""
                     ).strip()
