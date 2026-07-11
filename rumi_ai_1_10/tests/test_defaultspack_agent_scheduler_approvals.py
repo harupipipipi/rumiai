@@ -1677,6 +1677,92 @@ def test_manual_trigger_fails_fast_when_conversation_is_busy_without_running_mar
         _reset_scheduler_singleton()
 
 
+def test_manual_mimo_trigger_clears_running_when_chat_fails_before_model(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+    schedule_id_ref: dict[str, str] = {}
+    observed_running: dict[str, object] = {}
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        persisted = load_schedule(schedule_id_ref["schedule_id"])
+        observed_running.update(persisted.get("running_execution") or {})
+        raise RuntimeError("provider setup failed before model.invoke")
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run scheduled MiMo desktop QA",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
+            "conversation_id": "conv-mimo-startup-failure",
+            "timeout": 30,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "desktop_qa",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+    schedule_id_ref["schedule_id"] = schedule["id"]
+
+    try:
+        history = scheduler.trigger_now(schedule["id"])
+
+        assert len(calls) == 1
+        assert observed_running["schedule_id"] == schedule["id"]
+        assert observed_running["trigger"] == "manual"
+        assert observed_running["execution_id"] == history["execution_id"]
+        assert history["status"] == "error"
+        assert history["trigger"] == "manual"
+        assert "provider setup failed before model.invoke" in history["error"]
+        assert history["conversation_id"] == "conv-mimo-startup-failure"
+
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert "running_started_at" not in saved
+        assert saved["execution_count"] == 1
+        assert saved["last_executed_at"] == history["completed_at"]
+
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["execution_id"] == history["execution_id"]
+        assert entries[0]["status"] == "error"
+        assert entries[0]["trigger"] == "manual"
+        assert "provider setup failed before model.invoke" in entries[0]["error"]
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_scheduled_conversation_lock_contention_skips_quickly_without_count_spam(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
