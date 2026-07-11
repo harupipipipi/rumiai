@@ -313,7 +313,20 @@ def test_key_edges_use_public_contracts_in_repository_policy():
     assert "domain/capability" not in policy["chat"]["may_import"]
     assert set(policy["chat"]["public_imports"]) == {
         "domain/capability/catalog",
+        "domain/mention",
         "domain/tool_policy/internal_context",
+    }
+    assert policy["mention"] == {
+        "may_import": [],
+        "path": "domain/mention.py",
+    }
+    for consumer in ("company", "subagent_team"):
+        assert "domain/mention" not in policy[consumer]["may_import"]
+        assert set(policy[consumer]["public_imports"]) == {"domain/mention"}
+    assert policy["share"]["may_import"] == []
+    assert set(policy["share"]["public_imports"]) == {
+        "domain/chat/store",
+        "domain/safety/audit",
     }
     assert "domain/capability" not in policy["frontend"]["may_import"]
     assert set(policy["frontend"]["public_imports"]) == {
