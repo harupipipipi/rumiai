@@ -48,10 +48,18 @@ _JWT_VALUE_RE = re.compile(
     r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*\b"
 )
 _AUTH_SCHEME_VALUE_RE = re.compile(
-    r"(?i)\b(?:bearer|basic|token)\s+"
-    r"(?!(?:authentication|authorization|credentials?|scheme)\b)"
-    r"(?=[^\s]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{8,}"
+    r"(?i)\b(?P<scheme>bearer|basic|token)(?P<separator>\s+)"
+    r"(?P<value>[A-Za-z0-9._~+/=-]{8,})"
 )
+_AUTH_PROSE_STOPWORDS = {
+    "authentication",
+    "authorization",
+    "credential",
+    "credentials",
+    "information",
+    "interoperability",
+    "scheme",
+}
 _SENSITIVE_ERROR_KEY_PATTERN = (
     r"(?:api[_-]?key|x-api[_-]?key|authorization|proxy-authorization|bearer|"
     r"credential|password|secret|access[_-]?token|refresh[_-]?token|token)"
@@ -235,12 +243,22 @@ def _redact_error_text(value):
         r"\g<prefix>[redacted]",
         text,
     )
-    text = _AUTH_SCHEME_VALUE_RE.sub("[redacted]", text)
+    text = _AUTH_SCHEME_VALUE_RE.sub(_redact_auth_scheme_value, text)
     text = _SENSITIVE_UNQUOTED_ASSIGNMENT_RE.sub(
         r"\g<prefix>[redacted]",
         text,
     )
     return text
+
+
+def _redact_auth_scheme_value(match):
+    candidate = match.group("value")
+    normalized = candidate.lower()
+    if normalized in _AUTH_PROSE_STOPWORDS:
+        return match.group(0)
+    if candidate.isalpha() and len(candidate) < 16:
+        return match.group(0)
+    return "[redacted]"
 
 
 def _clip_error_text(value, limit=900):

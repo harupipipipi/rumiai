@@ -2790,8 +2790,27 @@ class ChatRunEngine:
                 break
             except AuthorityApprovalRequired:
                 raise
+            except _ChatCancelled:
+                for event in self._discard_stream_attempt_tool_calls(
+                    attempt_started_calls,
+                    draft,
+                    attempt_context,
+                    cancelled=True,
+                ):
+                    yield event
+                raise
             except Exception as exc:
-                self._raise_if_cancelled()
+                try:
+                    self._raise_if_cancelled()
+                except _ChatCancelled:
+                    for event in self._discard_stream_attempt_tool_calls(
+                        attempt_started_calls,
+                        draft,
+                        attempt_context,
+                        cancelled=True,
+                    ):
+                        yield event
+                    raise
                 message_text = "AI request failed: " + str(exc)
                 safe_message_text = _clip_error_text(message_text, 1200)
                 attempt_visible_text = "".join(self._text_parts[attempt_text_start:])
@@ -2935,9 +2954,15 @@ class ChatRunEngine:
         started_calls: dict[str, str],
         draft: _AssistantDraft | None,
         attempt_context: dict[str, int | str],
+        *,
+        cancelled: bool = False,
     ) -> Iterator[dict[str, Any]]:
         for call_id, tool_name in started_calls.items():
-            summary = "provider 応答の中断により未実行の tool 入力を破棄しました"
+            summary = (
+                "キャンセルにより未実行の tool 入力を破棄しました"
+                if cancelled
+                else "provider 応答の中断により未実行の tool 入力を破棄しました"
+            )
             display_payload = _tool_display_payload(
                 tool_name or "tool",
                 {},
@@ -2952,6 +2977,7 @@ class ChatRunEngine:
                     "is_error": True,
                     "executed": False,
                     "provider_attempt_discarded": True,
+                    "cancelled": cancelled,
                     "result_summary": summary,
                     "summary": summary,
                     **attempt_context,
@@ -2964,6 +2990,7 @@ class ChatRunEngine:
                 is_error=True,
                 executed=False,
                 provider_attempt_discarded=True,
+                cancelled=cancelled,
                 **attempt_context,
             )
             self._started_tool_call_ids.discard(

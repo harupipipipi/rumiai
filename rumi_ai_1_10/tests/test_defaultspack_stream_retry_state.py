@@ -658,6 +658,86 @@ def test_cancel_after_tool_start_emits_terminal_completion_before_stopping() -> 
     assert completed["data"]["is_error"] is True
 
 
+def test_provider_stream_cancel_closes_started_tool_without_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    class CancelAfterToolStartGateway(ScriptedGateway):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.engine: ChatRunEngine | None = None
+
+        def stream(self, request: dict[str, Any]) -> Iterator[dict[str, Any]]:
+            del request
+            self.calls += 1
+            yield {
+                "type": "tool_call_start",
+                "id": "cancel-stream-call",
+                "name": "coding_file_read",
+            }
+            assert self.engine is not None
+            self.engine._cancel_event.set()
+            yield {
+                "type": "tool_call_delta",
+                "id": "cancel-stream-call",
+                "name": "coding_file_read",
+                "arguments_chunk": '{"path":"README.md"}',
+            }
+
+    executed: list[dict[str, Any]] = []
+    gateway = CancelAfterToolStartGateway()
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-test")
+    engine = ChatRunEngine(store=store, gateway=gateway)
+    gateway.engine = engine
+
+    def broken_external_cancel_checker() -> bool:
+        raise RuntimeError("cancel checker unavailable")
+
+    engine._external_cancel_checker = broken_external_cancel_checker
+    events = list(
+        engine.stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "read README"},
+                "tools": prepared_run().provider_tools,
+                "params": {"retry": {"max_attempts": 2, "delays": [0]}},
+            },
+            {"call_handler": lambda *_args: executed.append({})},
+            stream_mode=True,
+        )
+    )
+
+    started = [event for event in events if event["type"] == "tool_call_started"]
+    completed = [event for event in events if event["type"] == "tool_call_completed"]
+    assert executed == []
+    assert len(started) == len(completed) == 1
+    assert completed[0]["data"]["tool_call_id"] == "cancel-stream-call"
+    assert completed[0]["data"]["cancelled"] is True
+    assert completed[0]["data"]["executed"] is False
+    assert completed[0]["data"]["provider_attempt_discarded"] is True
+    assert completed[0]["data"]["provider_attempt_generation"] == 1
+    assert any(event["type"] == "cancelled" for event in events)
+
+    ChatStore._instance = None
+    reloaded = ChatStore().get_conversation(conversation["id"])
+    assistant = reloaded["messages"][-1]
+    stored_completed = [
+        event for event in assistant["events"] if event["type"] == "tool_call_completed"
+    ]
+    assert stored_completed[0]["tool_call_id"] == "cancel-stream-call"
+    assert stored_completed[0]["cancelled"] is True
+    assert stored_completed[0]["provider_attempt_generation"] == 1
+    ChatStore._instance = None
+
+
 def test_retry_discards_thinking_from_failed_attempt() -> None:
     from domain.chat.stream_engine import ChatRunEngine
 
@@ -946,11 +1026,73 @@ def test_error_redactor_preserves_quotes_and_does_not_redact_auth_prose() -> Non
     escaped_quote = _redact_error_text(
         f'{{"authorization": "Custom {secret}\\\"suffix"}}'
     )
-    prose = "Basic authentication is required; bearer capacity remains available."
+    prose = (
+        "Basic authentication is required; Bearer authentication and bearer "
+        "capacity remain available as diagnostic information."
+    )
 
     assert quoted == '{"authorization": "[redacted]"}'
     assert escaped_quote == '{"authorization": "[redacted]"}'
     assert _redact_error_text(prose) == prose
+
+
+def test_error_redactor_removes_standalone_alpha_bearer_credentials() -> None:
+    from blocks.chat.send import _redact_error_text
+
+    secret = "abcdefghijklmnop"
+    redacted = _redact_error_text(f"provider rejected Bearer {secret}")
+
+    assert secret not in redacted
+    assert redacted == "provider rejected [redacted]"
+
+
+def test_alpha_bearer_secret_is_redacted_across_stream_retry_and_persistence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    secret = "abcdefghijklmnop"
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    gateway = ScriptedGateway(
+        [
+            [RuntimeError(f"503 temporary: Bearer {secret}")],
+            [
+                {"type": "content_delta", "delta": {"text": "success"}},
+                {"type": "stream_end", "finish_reason": "stop"},
+            ],
+        ]
+    )
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-test")
+    events = list(
+        ChatRunEngine(store=store, gateway=gateway).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "answer this"},
+                "tools": [],
+                "params": {"retry": {"max_attempts": 2, "delays": [0]}},
+            },
+            {},
+            stream_mode=True,
+        )
+    )
+
+    final = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
+    assert gateway.calls == 2
+    assert final["raw_text"] == "success"
+    assert secret not in str(events)
+    assert secret not in str(final)
+    assert "[redacted]" in str(final["events"])
+
+    ChatStore._instance = None
+    reloaded = ChatStore().get_conversation(conversation["id"])
+    assert secret not in str(reloaded)
+    assert "[redacted]" in str(reloaded["messages"][-1]["events"])
+    ChatStore._instance = None
 
 
 def test_outer_stream_failure_redacts_activity_and_persisted_error(
