@@ -368,26 +368,18 @@ class MobileDeviceStore {
   final _uuid = const Uuid();
 
   Future<DeviceIdentity> loadOrCreateIdentity() async {
-    try {
-      final raw = await _storage.read(_identityKey);
-      if (raw != null && raw.trim().isNotEmpty) {
-        final identity = DeviceIdentity.fromJson(
-          jsonDecode(raw) as Map<String, dynamic>,
-        );
-        if (identity.deviceId.trim().isNotEmpty && identity.canSignApproval) {
-          return _ensureEncryptionKey(identity);
-        }
+    final raw = await _storage.read(_identityKey);
+    if (raw != null && raw.trim().isNotEmpty) {
+      final identity = DeviceIdentity.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
+      if (identity.deviceId.trim().isEmpty || !identity.canSignApproval) {
+        throw StateError('stored device identity is invalid');
       }
-    } catch (_) {
-      // fall through to create new
+      return _ensureEncryptionKey(identity);
     }
     final identity = await _createIdentity();
-    try {
-      await _storage.write(_identityKey, jsonEncode(identity.toJson()));
-    } catch (_) {
-      // ignore secure storage failures
-    }
-    return identity;
+    return _persistAndVerifyIdentity(identity);
   }
 
   Future<String> signApprovalPayloadHash(String payloadHash) async {
@@ -431,12 +423,29 @@ class MobileDeviceStore {
       encryptionPublicKey: encryption.publicKey,
       encryptionPrivateKey: encryption.privateKey,
     );
-    try {
-      await _storage.write(_identityKey, jsonEncode(upgraded.toJson()));
-    } catch (_) {
-      // ignore secure storage failures
+    return _persistAndVerifyIdentity(upgraded);
+  }
+
+  Future<DeviceIdentity> _persistAndVerifyIdentity(
+      DeviceIdentity identity) async {
+    await _storage.write(_identityKey, jsonEncode(identity.toJson()));
+    final persistedRaw = await _storage.read(_identityKey);
+    if (persistedRaw == null || persistedRaw.trim().isEmpty) {
+      throw StateError('device identity persistence could not be verified');
     }
-    return upgraded;
+    final persisted = DeviceIdentity.fromJson(
+      jsonDecode(persistedRaw) as Map<String, dynamic>,
+    );
+    if (persisted.deviceId != identity.deviceId ||
+        persisted.publicKey != identity.publicKey ||
+        persisted.privateKey != identity.privateKey ||
+        persisted.encryptionPublicKey != identity.encryptionPublicKey ||
+        persisted.encryptionPrivateKey != identity.encryptionPrivateKey ||
+        !persisted.canSignApproval ||
+        !persisted.canDecryptTokenDelivery) {
+      throw StateError('device identity persistence could not be verified');
+    }
+    return persisted;
   }
 
   Future<_EncryptionKeyPair> _createEncryptionKeyPair() async {

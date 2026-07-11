@@ -4,7 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
-import { CredentialTransferModal } from "../components/CredentialTransferModal";
+import {
+  CredentialTransferModal,
+  credentialTransferCanClose,
+  credentialTransferFocusTarget,
+} from "../components/CredentialTransferModal";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 import {
@@ -513,6 +517,24 @@ test("CredentialTransferModal never renders a cleartext credential or QR surface
   assert.doesNotMatch(html, /Rumi Mobile QR/);
   assert.doesNotMatch(html, /sk-ant-test/);
   assert.doesNotMatch(html, /data:image/);
+});
+
+test("CredentialTransferModal guards active transfers and allows delivered or terminal close", () => {
+  assert.equal(credentialTransferCanClose(null, false), true);
+  assert.equal(credentialTransferCanClose("awaiting_confirmation", false), false);
+  assert.equal(credentialTransferCanClose("pending", false), false);
+  assert.equal(credentialTransferCanClose("accepted", false), true);
+  assert.equal(credentialTransferCanClose("completed", false), true);
+  assert.equal(credentialTransferCanClose("completed", true), false);
+});
+
+test("CredentialTransferModal focus trap wraps Tab and Shift+Tab at dialog boundaries", () => {
+  assert.equal(credentialTransferFocusTarget(2, 3, false), 0);
+  assert.equal(credentialTransferFocusTarget(0, 3, true), 2);
+  assert.equal(credentialTransferFocusTarget(1, 3, false), 1);
+  assert.equal(credentialTransferFocusTarget(-1, 3, false), 0);
+  assert.equal(credentialTransferFocusTarget(-1, 3, true), 2);
+  assert.equal(credentialTransferFocusTarget(0, 0, false), null);
 });
 
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {

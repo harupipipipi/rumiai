@@ -1039,23 +1039,29 @@ def test_mobile_pairing_base_urls_can_allow_cleartext_for_debug():
     assert urls == ["http://192.168.1.44:8765"]
 
 
-def test_pairing_start_returns_mobile_reachable_base_urls(monkeypatch):
+def test_p2p_pairing_start_returns_only_pairing_secret_contract():
     from blocks.p2p import pairing_start
 
     tmp = tempfile.mkdtemp()
-    monkeypatch.setattr(
-        pairing_start,
-        "mobile_base_urls_from_headers",
-        lambda headers, **kwargs: ["https://rumi.example.com"],
-    )
-
     result = pairing_start.run({
         "store_path": tmp,
         "_headers": {"Host": "localhost:8765"},
     }, None)
 
     assert result["status"] == "ok"
-    assert result["data"]["pairing"]["base_urls"] == ["https://rumi.example.com"]
+    pairing = result["data"]["pairing"]
+    assert set(pairing) == {
+        "pairing_id",
+        "status",
+        "expires_at",
+        "code",
+        "pairing_code",
+        "pickup_secret",
+        "token_pickup_secret",
+    }
+    assert pairing["code"] == pairing["pairing_code"]
+    assert pairing["pickup_secret"] == pairing["token_pickup_secret"]
+    assert "base_urls" not in pairing
 
 
 def test_mobile_conversations_list_create_get():
@@ -1073,7 +1079,7 @@ def test_mobile_conversations_list_create_get():
     assert r["status"] == "ok"
 
 
-def test_mobile_credentials_create_get_ack(monkeypatch):
+def test_mobile_credentials_reject_client_supplied_encrypted_material(monkeypatch):
     from blocks.mobile.credentials import run
 
     monkeypatch.setenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", "1")
@@ -1084,22 +1090,9 @@ def test_mobile_credentials_create_get_ack(monkeypatch):
         "ciphertext": "encrypted-payload",
         "nonce": "nonce-1",
     }, None)
-    assert r["status"] == "ok"
-    tid = r["data"]["transfer"]["transfer_id"]
-    # Ciphertext must not be in the create response
-    assert "ciphertext" not in r["data"]["transfer"]
-
-    device_context = {"_authenticated_device_id": "d1"}
-    r = run({"action": "get", "transfer_id": tid}, device_context)
-    assert r["status"] == "ok"
-    assert "ciphertext" in r["data"]["transfer"]
-
-    r = run({"action": "ack", "transfer_id": tid}, device_context)
-    assert r["status"] == "ok"
-
-    # After ack, get should fail
-    r = run({"action": "get", "transfer_id": tid}, device_context)
     assert r["status"] == "error"
+    assert r["error"]["code"] == "INVALID_INPUT"
+    assert "encrypted-payload" not in json.dumps(r)
 
 
 def test_mobile_credentials_disabled_by_default(monkeypatch):
@@ -1132,21 +1125,44 @@ def test_mobile_credentials_reject_plaintext_fallback(monkeypatch):
     assert r["status"] == "error"
 
 
-def test_mobile_credentials_expired(monkeypatch):
-    import time
-    from blocks.mobile.credentials import run, _TRANSFER_TTL_SECONDS
+def test_mobile_credentials_expire_deterministically_and_discard_envelope(monkeypatch, tmp_path):
+    from cryptography.hazmat.primitives.asymmetric import ed25519
 
-    monkeypatch.setenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", "1")
-    r = run({
-        "action": "create",
-        "device_id": "d1",
-        "provider_id": "openai",
-        "ciphertext": "encrypted-payload",
-        "nonce": "nonce-1",
-    }, None)
-    tid = r["data"]["transfer"]["transfer_id"]
+    from domain.p2p import credential_transfer
+    from domain.p2p.credential_transfer import CredentialTransferStore
 
-    # Wait for expiry (TTL is 60s, so we test the path differently)
-    # Just verify the endpoint exists and returns properly
-    r = run({"action": "get", "transfer_id": tid}, {"_authenticated_device_id": "d1"})
-    assert r["status"] == "ok"
+    _, encryption_public = _x25519_keypair()
+    signing_public = "ed25519:" + _b64url(
+        ed25519.Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    )
+    store = CredentialTransferStore(tmp_path)
+    transfer = store.create(
+        device_id="device-fake",
+        device_label="Test Phone",
+        profile_id="default",
+        provider_id="fake-provider",
+        api_id="fake-account",
+        provider_label="Fake Provider",
+        recipient_public_key=encryption_public,
+        recipient_signing_key=signing_public,
+        ttl_seconds=1,
+    )
+    confirmed = store.confirm(
+        transfer["transfer_id"],
+        payload={"api_key": "fake-provider-key"},
+        expected={
+            "device_id": transfer["device_id"],
+            "provider_id": transfer["provider_id"],
+            "api_id": transfer["api_id"],
+        },
+    )
+    assert confirmed["status"] == "pending"
+
+    monkeypatch.setattr(credential_transfer, "_now_ms", lambda: transfer["expires_at"])
+    expired = store.get_admin(transfer["transfer_id"])
+
+    assert expired["status"] == "expired"
+    assert store.list_for_device("device-fake") == []
+    persisted = json.loads((tmp_path / "credential_transfers.json").read_text())
+    assert persisted["transfers"][transfer["transfer_id"]]["envelope"] == {}
+    assert "fake-provider-key" not in json.dumps(persisted)

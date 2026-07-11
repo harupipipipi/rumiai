@@ -1291,6 +1291,8 @@ const defaultspackToolAgentManifestCatalog =
         "access_key": <String, dynamic>{"type": "string"},
         "action": <String, dynamic>{
           "type": "string",
+          "description":
+              "Required. Use type_text with text to type; use key with key=Enter to press Enter. Do not send text without action.",
           "enum": <dynamic>[
             "move",
             "click",
@@ -1309,8 +1311,14 @@ const defaultspackToolAgentManifestCatalog =
           "type": "string",
           "enum": <dynamic>["left", "middle", "right"]
         },
-        "text": <String, dynamic>{"type": "string"},
-        "key": <String, dynamic>{"type": "string"},
+        "text": <String, dynamic>{
+          "type": "string",
+          "description": "Text to type when action is type_text."
+        },
+        "key": <String, dynamic>{
+          "type": "string",
+          "description": "Key to press when action is key, for example Enter."
+        },
         "delta_x": <String, dynamic>{"type": "integer"},
         "delta_y": <String, dynamic>{"type": "integer"}
       },
@@ -2106,7 +2114,15 @@ const defaultspackToolAgentManifestCatalog =
     aliases: <String>[],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["code"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["script_path"]
+        }
+      ],
       "properties": <String, dynamic>{
         "code": <String, dynamic>{"type": "string"},
         "script_path": <String, dynamic>{"type": "string"},
@@ -2244,7 +2260,15 @@ const defaultspackToolAgentManifestCatalog =
     aliases: <String>[],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["code"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["script_path"]
+        }
+      ],
       "properties": <String, dynamic>{
         "code": <String, dynamic>{"type": "string"},
         "script_path": <String, dynamic>{"type": "string"},
@@ -2289,7 +2313,15 @@ const defaultspackToolAgentManifestCatalog =
     aliases: <String>[],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["argv"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["command"]
+        }
+      ],
       "properties": <String, dynamic>{
         "argv": <String, dynamic>{
           "type": "array",
@@ -2298,6 +2330,14 @@ const defaultspackToolAgentManifestCatalog =
               "Preferred command argument vector. Public callers must use argv arrays, not shell strings."
         },
         "command": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{"type": "string", "minLength": 1},
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"},
+              "minItems": 1
+            }
+          ],
           "description":
               "Legacy compatibility input. Strings are parsed without shell syntax; arrays are treated as argv."
         },
@@ -3177,6 +3217,261 @@ const defaultspackToolAgentManifestCatalog =
     inputSchema: <String, dynamic>{
       "type": "object",
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_build_recursive",
+    description:
+        "Generate, inspect, select, compose, and verify a recursive UI build.",
+    tags: <String>[
+      "artifact",
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "subagent",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"},
+        "config": <String, dynamic>{"type": "object"},
+        "target": <String, dynamic>{"type": "object"},
+        "run_id": <String, dynamic>{
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\$",
+          "maxLength": 80
+        },
+        "idempotency_key": <String, dynamic>{"type": "string"},
+        "options": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_commit_plan",
+    description: "Commit a valid UI compiler plan into .rumi/ui.",
+    tags: <String>[
+      "artifact",
+      "frontend",
+      "planner",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{
+          "type": "object",
+          "description": "Root UI node with semantic children or splitHints."
+        },
+        "config": <String, dynamic>{
+          "type": "object",
+          "description":
+              "Optional request plan options. Trusted compiler policy cannot be overridden."
+        },
+        "run_id": <String, dynamic>{
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\$"
+        },
+        "idempotency_key": <String, dynamic>{
+          "type": "string",
+          "description":
+              "Optional idempotency key for retrying the same run commit."
+        }
+      },
+      "required": <dynamic>["ui_tree"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_compile_plan",
+    description: "Compile recursive UI tree and contracts without writes.",
+    tags: <String>[
+      "frontend",
+      "planner",
+      "recursive-ui-compiler",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{
+          "type": "object",
+          "description": "Root UI node with optional children or splitHints."
+        },
+        "config": <String, dynamic>{
+          "type": "object",
+          "description": "Optional recursive UI compiler config and budgets."
+        },
+        "run_id": <String, dynamic>{
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\$"
+        },
+        "persist": <String, dynamic>{
+          "type": "boolean",
+          "description":
+              "Rejected on this read-only compile tool; use tool_ui_commit_plan for approved writes."
+        }
+      },
+      "required": <dynamic>["ui_tree"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_compose_page",
+    description: "Compose accepted UI bundles.",
+    tags: <String>[
+      "composition",
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_generate_candidates",
+    description: "Generate isolated component candidates.",
+    tags: <String>[
+      "candidate",
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "subagent",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_generate_foundation",
+    description: "Generate UI foundation candidates.",
+    tags: <String>[
+      "foundation",
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_inspect_compression",
+    description: "Inspect UI compression gates.",
+    tags: <String>[
+      "compression",
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_render_matrix",
+    description: "Render candidate matrix evidence.",
+    tags: <String>[
+      "frontend",
+      "recursive-ui-compiler",
+      "render",
+      "requires_approval",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_select_candidates",
+    description: "Select accepted UI candidates.",
+    tags: <String>[
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "selection",
+      "tool_registry",
+      "ui"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tool_ui_verify_recursive_build",
+    description: "Verify recursive UI build.",
+    tags: <String>[
+      "frontend",
+      "recursive-ui-compiler",
+      "requires_approval",
+      "tool_registry",
+      "ui",
+      "verification"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "required": <dynamic>["ui_tree"],
+      "properties": <String, dynamic>{
+        "ui_tree": <String, dynamic>{"type": "object"}
+      }
     },
   ),
   DefaultspackToolAgentManifestEntry(

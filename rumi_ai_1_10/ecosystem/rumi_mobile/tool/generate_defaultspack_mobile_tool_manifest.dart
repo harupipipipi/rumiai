@@ -152,7 +152,7 @@ Map<String, dynamic> _map(Object? value) {
   return value.map((key, value) => MapEntry('$key', value));
 }
 
-String _dartString(String value) => jsonEncode(value);
+String _dartString(String value) => jsonEncode(value).replaceAll(r'$', r'\$');
 
 String _dartStringList(List<String> values) {
   return '<String>[${values.map(_dartString).join(', ')}]';
