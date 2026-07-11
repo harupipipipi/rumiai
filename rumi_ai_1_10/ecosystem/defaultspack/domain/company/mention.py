@@ -18,10 +18,10 @@ MENTION_ALIASES = {
 }
 
 
-def extract_mentions(text: str) -> list[str]:
+def extract_mentions(text: str, known_values: list[str] | None = None) -> list[str]:
     mentions: list[str] = []
     seen: set[str] = set()
-    for value in extract_mention_values(text):
+    for value in extract_mention_values(text, known_values):
         name = value.strip().lower()
         if name and name not in seen:
             seen.add(name)
@@ -37,10 +37,16 @@ class CompanyMentionService:
         company = self.store.get_company(company_id)
         if company is None:
             return None
-        mentions = extract_mentions(text_or_mentions) if isinstance(text_or_mentions, str) else [
-            str(item).strip().lstrip("@").lower() for item in text_or_mentions if str(item).strip()
-        ]
         agents = company.get("agents", {})
+        mentions = (
+            extract_mentions(text_or_mentions, self._known_mentions(agents))
+            if isinstance(text_or_mentions, str)
+            else [
+                str(item).strip().lstrip("@").lower()
+                for item in text_or_mentions
+                if str(item).strip()
+            ]
+        )
         resolved: list[dict[str, Any]] = []
         unresolved: list[str] = []
         seen_agents: set[str] = set()
@@ -69,6 +75,35 @@ class CompanyMentionService:
             "resolved_agent_ids": [agent["agent_id"] for agent in resolved],
             "unresolved": unresolved,
         }
+
+    @staticmethod
+    def _known_mentions(agents: dict[str, dict[str, Any]]) -> list[str]:
+        values = {*MENTION_ALIASES, "all", "channel", "team"}
+        for agent in agents.values():
+            metadata = (
+                agent.get("metadata")
+                if isinstance(agent.get("metadata"), dict)
+                else {}
+            )
+            team = (
+                metadata.get("subagent_team")
+                if isinstance(metadata.get("subagent_team"), dict)
+                else {}
+            )
+            values.update(
+                str(value or "").strip()
+                for value in (
+                    agent.get("agent_id"),
+                    agent.get("id"),
+                    agent.get("role_key"),
+                    metadata.get("short_id"),
+                    team.get("short_id"),
+                    team.get("legacy_short_id"),
+                    *(agent.get("aliases") or []),
+                )
+                if str(value or "").strip()
+            )
+        return sorted(values)
 
     def create_message_task(
         self,

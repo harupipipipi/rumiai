@@ -286,6 +286,13 @@ function uniqueMentionLookup(
   return lookup;
 }
 
+/** Return unambiguous catalog spellings that may override domain-like ambiguity. */
+export function composerKnownMentionValues(
+  items: Array<ComposerExtensionItem | ComposerSkillItem>,
+): string[] {
+  return [...uniqueMentionLookup(items).keys()];
+}
+
 export function composerMentionMetadataFromWidgets(
   widgets: DroppedWidget[],
 ): ComposerMentionMetadata[] {
@@ -533,7 +540,7 @@ export function toolMentionIdsFromText(text: string, items: ComposerExtensionIte
 
   const ids: string[] = [];
   const seen = new Set<string>();
-  for (const mention of extractMentionTokens(text)) {
+  for (const mention of extractMentionTokens(text, lookup.keys())) {
     const token = mention.value.toLowerCase();
     const id = lookup.get(token);
     if (!id || seen.has(id)) continue;
@@ -548,7 +555,7 @@ export function skillMentionIdsFromText(text: string, items: ComposerSkillItem[]
 
   const ids: string[] = [];
   const seen = new Set<string>();
-  for (const mention of extractMentionTokens(text)) {
+  for (const mention of extractMentionTokens(text, lookup.keys())) {
     const token = mention.value.toLowerCase();
     const id = lookup.get(token);
     if (!id || seen.has(id)) continue;

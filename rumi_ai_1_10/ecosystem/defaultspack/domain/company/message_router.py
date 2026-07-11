@@ -50,7 +50,17 @@ class CompanyMessageRouter:
         company = self.company_store.get_company(company_id)
         if company is None:
             return None
-        mentions = extract_mentions(content)
+        fallback_mentions = extract_mentions(content)
+        resolution = CompanyMentionService(self.company_store).resolve(
+            company_id,
+            content,
+        ) or {
+            "mentions": fallback_mentions,
+            "resolved_agents": [],
+            "resolved_agent_ids": [],
+            "unresolved": fallback_mentions,
+        }
+        mentions = list(resolution.get("mentions") or [])
         message = self.runtime_store.add_message(
             company_id,
             channel_id=channel_id,
@@ -60,12 +70,6 @@ class CompanyMessageRouter:
             mentions=mentions,
             metadata=metadata or {},
         )
-        resolution = CompanyMentionService(self.company_store).resolve(company_id, content) or {
-            "mentions": mentions,
-            "resolved_agents": [],
-            "resolved_agent_ids": [],
-            "unresolved": mentions,
-        }
         explicit_targets = [str(item) for item in (target_agent_ids or []) if str(item).strip()]
         target_ids = _dedupe([*list(resolution.get("resolved_agent_ids") or []), *explicit_targets])
         routes: list[dict[str, Any]] = []

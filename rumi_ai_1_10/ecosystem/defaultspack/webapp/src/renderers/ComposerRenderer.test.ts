@@ -45,6 +45,20 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
   });
 });
 
+test("composer known dotted mention keeps Japanese-adjacent cursor parity", () => {
+  const result = insertAtMentionText(
+    "確認@README.md",
+    "確認@README.md".length,
+    "README.md",
+    ["README.md"],
+  );
+
+  assert.deepEqual(result, {
+    value: "確認@README.md ",
+    cursor: "確認@README.md ".length,
+  });
+});
+
 test("composer tool mentions resolve searchable tools and JSON metadata", () => {
   const tools = [
     {
@@ -67,6 +81,20 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
   assert.deepEqual(filterComposerToolMentions(tools, "workspace").map((tool) => tool.id), ["coding_file_read"]);
   assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
   assert.deepEqual(toolMentionIdsFromText("Use @web_search then @Read_File.", tools), ["web_search", "coding_file_read"]);
+  assert.deepEqual(
+    toolMentionIdsFromText(
+      "お願い@mcp.server",
+      [...tools, { id: "mcp.server", label: "MCP Server" }],
+    ),
+    ["mcp.server"],
+  );
+  assert.deepEqual(
+    toolMentionIdsFromText(
+      "ユーザー@example.com",
+      [...tools, { id: "mcp.server", label: "MCP Server" }],
+    ),
+    [],
+  );
   assert.deepEqual(composerToolMentionWidget(tools[0]), {
     id: "web_search",
     type: "tool",

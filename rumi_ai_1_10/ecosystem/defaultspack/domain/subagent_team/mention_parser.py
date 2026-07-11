@@ -10,12 +10,18 @@ CHANNEL_RE = re.compile(r"(?<![\w.])#([A-Za-z0-9_][A-Za-z0-9_-]*)")
 COMMAND_RE = re.compile(r"(^|\s)/([A-Za-z0-9_][A-Za-z0-9_-]*)")
 
 
-def parse_mentions(text: str) -> dict[str, Any]:
+def parse_mentions(
+    text: str,
+    known_agent_ids: list[str] | None = None,
+) -> dict[str, Any]:
     content = str(text or "")
     agents = _dedupe(
         [
             *(match.group(1).lower() for match in ANGLE_AGENT_RE.finditer(content)),
-            *(value.lower() for value in extract_mention_values(content)),
+            *(
+                value.lower()
+                for value in extract_mention_values(content, known_agent_ids)
+            ),
         ]
     )
     channels = _dedupe(match.group(1).lower() for match in CHANNEL_RE.finditer(content))
