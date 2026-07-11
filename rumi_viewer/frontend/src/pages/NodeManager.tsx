@@ -15,6 +15,7 @@ import {
 import { Badge } from '@/src/components/ui/Badge';
 import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 import {
   cloneCapabilityProfile,
   compileCapabilityGraph,
@@ -68,6 +69,8 @@ export function NodeManager() {
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [preview, setPreview] = useState<CapabilityGraphCompileResponseData | null>(null);
+  const [initialError, setInitialError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const selectedProfile = profiles.find(profile => profile.profile_id === selectedProfileId) ?? null;
   const selectedNode = nodes.find(node => node.node_id === selectedNodeId) ?? null;
@@ -100,8 +103,11 @@ export function NodeManager() {
       const nextGraph = selectedGraphId || profileData.profiles[0]?.default_graph || graphData.graphs[0]?.graph_id || '';
       setSelectedProfileId(nextProfile);
       setSelectedGraphId(nextGraph);
+      setInitialError(null);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to load capability profiles', 'error');
+      const message = error instanceof Error ? error.message : 'Failed to load capability profiles';
+      setInitialError(message);
+      addToast(message, 'error');
     } finally {
       setLoading(false);
     }
@@ -133,10 +139,13 @@ export function NodeManager() {
         if (!selectedGraphId && normalized.profile?.default_graph) {
           setSelectedGraphId(normalized.profile.default_graph);
         }
+        setProfileError(null);
       })
       .catch(error => {
         if (!cancelled) {
-          addToast(error instanceof Error ? error.message : 'Failed to load profile nodes', 'error');
+          const message = error instanceof Error ? error.message : 'Failed to load profile nodes';
+          setProfileError(message);
+          addToast(message, 'error');
         }
       })
       .finally(() => {
@@ -196,6 +205,21 @@ export function NodeManager() {
     );
   }
 
+  if (initialError && profiles.length === 0 && graphs.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-bg-main p-6">
+        <div className="w-full max-w-xl">
+          <InlineLoadError
+            title="Node Manager could not be loaded"
+            message={initialError}
+            onRetry={() => void loadInitial()}
+            retrying={loading}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-bg-main p-6 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -212,6 +236,23 @@ export function NodeManager() {
           Refresh
         </Button>
       </div>
+
+      {initialError ? (
+        <InlineLoadError title="Refresh failed" message={initialError} onRetry={() => void loadInitial()} retrying={loading} stale />
+      ) : null}
+      {profileError ? (
+        <InlineLoadError
+          title="Profile nodes could not be refreshed"
+          message={profileError}
+          onRetry={() => {
+            const current = selectedProfileId;
+            setSelectedProfileId('');
+            queueMicrotask(() => setSelectedProfileId(current));
+          }}
+          retrying={profileLoading}
+          stale={nodes.length > 0}
+        />
+      ) : null}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(220px,280px)_1fr_minmax(280px,360px)]">
         <section className="rounded-lg border border-border bg-bg-card p-4">
@@ -255,13 +296,18 @@ export function NodeManager() {
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Badge variant="outline">{nodes.length} installed</Badge>
-            <Badge variant="default">{paletteNodes.length} palette</Badge>
-            <Badge variant="secondary">{nodes.filter(node => node.state?.status === 'disabled').length} disabled</Badge>
-          </div>
+          {profileError && nodes.length === 0 ? (
+            <div className="border border-dashed border-border p-6 text-center text-sm text-text-muted">
+              Node counts are unavailable until this profile loads successfully.
+            </div>
+          ) : <>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <Badge variant="outline">{nodes.length} installed</Badge>
+              <Badge variant="default">{paletteNodes.length} palette</Badge>
+              <Badge variant="secondary">{nodes.filter(node => node.state?.status === 'disabled').length} disabled</Badge>
+            </div>
 
-          <div className="grid gap-2 2xl:grid-cols-2">
+            <div className="grid gap-2 2xl:grid-cols-2">
             {filteredNodes.map(node => (
               <button
                 key={node.node_id}
@@ -289,7 +335,8 @@ export function NodeManager() {
                 </div>
               </button>
             ))}
-          </div>
+            </div>
+          </>}
         </section>
 
         <aside className="flex flex-col gap-3">
