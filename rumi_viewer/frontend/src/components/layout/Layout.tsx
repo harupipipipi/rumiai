@@ -1,11 +1,13 @@
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { ViewerVersionLabel } from './ViewerVersionLabel';
 import { useAppStore } from '@/src/store';
 import { describeRuntimeBanner } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 
 export function Layout() {
+  const location = useLocation();
   const isSetupDone = useAppStore(state => state.isSetupDone);
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
@@ -48,6 +50,7 @@ export function Layout() {
             </div>
           )}
           <Outlet />
+          {location.pathname === panelRoutes.home && <ViewerVersionLabel />}
         </main>
       </div>
     </div>
