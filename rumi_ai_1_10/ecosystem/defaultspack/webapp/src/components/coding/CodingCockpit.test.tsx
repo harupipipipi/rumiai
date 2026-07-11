@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -106,4 +108,11 @@ test("coding cockpit renders workspace and sidecar sections", () => {
   assert.match(html, /Browser/);
   assert.match(html, /MCP/);
   assert.match(html, /Agents/);
+});
+
+test("MCP requester never approves its own request", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "CodingCockpit.tsx"), "utf8");
+  assert.doesNotMatch(source, /codingResources\.approveCodingApproval/);
+  assert.match(source, /separate Approvals queue/);
+  assert.match(source, /requesting form cannot approve its own request/);
 });
