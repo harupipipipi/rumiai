@@ -74,7 +74,25 @@ export type PlacementFilterOptions = {
   availableSettings?: string[];
 };
 
+export type PlacementHtmlBlockReason =
+  | "empty_html"
+  | "oversized_html"
+  | "unverified_active_content";
+
+export type PlacementRenderingResolution =
+  | { kind: "component" }
+  | { kind: "template" }
+  | {
+      kind: "blocked_html";
+      reason: PlacementHtmlBlockReason;
+      sourceLabel: string;
+      byteLength: number;
+      message: string;
+    }
+  | { kind: "unsupported" };
+
 export const PINNED_PLACEMENTS_STORAGE_KEY = "rumi-ui-placements";
+export const PLACEMENT_HTML_MAX_SOURCE_BYTES = 64 * 1024;
 
 export function normalizePinnedPlacements(value: unknown): PinnedPlacement[] {
   if (!Array.isArray(value)) return [];
@@ -169,18 +187,48 @@ export function withPinnedPlacements(
   };
 }
 
-export function resolvePlacementHtmlRendering(manifest: PlacementManifest): {
-  kind: "component" | "template" | "html_iframe" | "unsupported";
-  html?: string;
-  sandbox?: string;
-} {
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function placementSourceLabel(manifest: PlacementManifest): string {
+  const sourceId = String(manifest.source.sourceId ?? "").trim();
+  return sourceId ? `${manifest.source.type}:${sourceId}` : manifest.source.type;
+}
+
+export function resolvePlacementHtmlRendering(
+  manifest: PlacementManifest,
+): PlacementRenderingResolution {
   if (manifest.renderer.kind === "component") return { kind: "component" };
   if (manifest.renderer.kind === "template") return { kind: "template" };
   if (manifest.renderer.kind === "html") {
+    const html = String(manifest.renderer.html ?? "");
+    const byteLength = utf8ByteLength(html);
+    const sourceLabel = placementSourceLabel(manifest);
+    if (!html.trim()) {
+      return {
+        kind: "blocked_html",
+        reason: "empty_html",
+        sourceLabel,
+        byteLength,
+        message: "This extension requested an empty HTML placement. Nothing was rendered.",
+      };
+    }
+    if (byteLength > PLACEMENT_HTML_MAX_SOURCE_BYTES) {
+      return {
+        kind: "blocked_html",
+        reason: "oversized_html",
+        sourceLabel,
+        byteLength,
+        message: `This extension requested ${byteLength} bytes of HTML, above the ${PLACEMENT_HTML_MAX_SOURCE_BYTES}-byte limit.`,
+      };
+    }
     return {
-      kind: "html_iframe",
-      html: String(manifest.renderer.html ?? ""),
-      sandbox: "allow-same-origin",
+      kind: "blocked_html",
+      reason: "unverified_active_content",
+      sourceLabel,
+      byteLength,
+      message: "Arbitrary HTML placements are disabled. Use a verified component or declarative template renderer instead.",
     };
   }
   return { kind: "unsupported" };
