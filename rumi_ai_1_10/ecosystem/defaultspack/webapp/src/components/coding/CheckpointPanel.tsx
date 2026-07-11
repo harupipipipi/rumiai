@@ -1,8 +1,9 @@
 import { RefreshCw, RotateCcw, Save, ShieldAlert } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { CodingCheckpoint, CodingDiffResponse } from "../../lib/api";
 import { codingResources } from "../../features/coding/resources/codingResources";
+import { codingActionRequiresApproval } from "./approvalQueueSync";
 
 function checkpointLabel(checkpoint: CodingCheckpoint): string {
   return String(checkpoint.snapshot_id || checkpoint.path || "checkpoint");
@@ -12,16 +13,35 @@ function checkpointIdentity(checkpoint: CodingCheckpoint): string {
   return String(checkpoint.snapshot_id || checkpoint.path || "");
 }
 
+export type ApprovedCheckpointDecision = {
+  request_id: string;
+  approved?: boolean;
+  token?: string;
+  nonce: number;
+};
+
+export function codingApprovalRequestId(result: unknown): string {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return "";
+  const record = result as Record<string, unknown>;
+  const nested = record.approval_request;
+  const request = nested && typeof nested === "object" && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : null;
+  return String(record.approval_request_id ?? request?.request_id ?? "").trim();
+}
+
 export function CheckpointPanel({
   workspaceId,
   initialCheckpoints,
   initialDiff,
   onActionResult,
+  approvedDecision,
 }: {
   workspaceId?: string | null;
   initialCheckpoints?: CodingCheckpoint[];
   initialDiff?: CodingDiffResponse;
   onActionResult?: (result: unknown) => void;
+  approvedDecision?: ApprovedCheckpointDecision | null;
 }) {
   const selectId = useId();
   const restoreTitleId = useId();
@@ -35,6 +55,12 @@ export function CheckpointPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingApprovedRestore, setPendingApprovedRestore] = useState<{
+    requestId: string;
+    snapshotId: string;
+    workspaceId: string | null;
+  } | null>(null);
+  const handledApprovalKeys = useRef<Set<string>>(new Set());
 
   const applyCheckpoints = useCallback((next: CodingCheckpoint[]) => {
     setCheckpoints(next);
@@ -91,6 +117,7 @@ export function CheckpointPanel({
 
   useEffect(() => {
     setPendingRestoreId(null);
+    setPendingApprovedRestore(null);
     setMessage(null);
     setError(null);
   }, [workspaceId]);
@@ -143,8 +170,14 @@ export function CheckpointPanel({
     try {
       const result = await codingResources.restoreCodingSnapshot(snapshotId, { workspace_id: workspaceId });
       onActionResult?.(result);
-      const approvalRequired = Boolean(result.approval_required || result.approval_request);
+      const approvalRequired = codingActionRequiresApproval(result);
       if (approvalRequired) {
+        const requestId = codingApprovalRequestId(result);
+        setPendingApprovedRestore(requestId ? {
+          requestId,
+          snapshotId,
+          workspaceId: workspaceId ?? null,
+        } : null);
         setMessage(`Approval required for ${snapshotId}. Review the pending request in Approvals.`);
         setPendingRestoreId(null);
         return;
@@ -158,12 +191,62 @@ export function CheckpointPanel({
           : `Restored ${snapshotId} and refreshed workspace state`,
       );
       setPendingRestoreId(null);
+      setPendingApprovedRestore(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!approvedDecision?.approved || !approvedDecision.token || !pendingApprovedRestore) return;
+    if (approvedDecision.request_id !== pendingApprovedRestore.requestId) return;
+    const key = `${approvedDecision.nonce}:${approvedDecision.request_id}`;
+    if (handledApprovalKeys.current.has(key)) return;
+    handledApprovalKeys.current.add(key);
+
+    const retryRestore = async () => {
+      setBusy(true);
+      setError(null);
+      setMessage(`Restoring ${pendingApprovedRestore.snapshotId}`);
+      try {
+        const result = await codingResources.restoreCodingSnapshot(
+          pendingApprovedRestore.snapshotId,
+          {
+            workspace_id: pendingApprovedRestore.workspaceId,
+            approval_token: approvedDecision.token,
+          },
+        );
+        onActionResult?.(result);
+        if (codingActionRequiresApproval(result)) {
+          const requestId = codingApprovalRequestId(result);
+          setPendingApprovedRestore(requestId ? {
+            requestId,
+            snapshotId: pendingApprovedRestore.snapshotId,
+            workspaceId: pendingApprovedRestore.workspaceId,
+          } : null);
+          setMessage(`Approval required for ${pendingApprovedRestore.snapshotId}. Review the pending request in Approvals.`);
+          return;
+        }
+        const refreshed = await Promise.allSettled([refreshCheckpoints(), refreshDiff()]);
+        const refreshFailed = refreshed.some((entry) => entry.status === "rejected");
+        setPendingApprovedRestore(null);
+        setMessage(
+          refreshFailed
+            ? `Restored ${pendingApprovedRestore.snapshotId}; workspace refresh could not be confirmed`
+            : `Restored ${pendingApprovedRestore.snapshotId} and refreshed workspace state`,
+        );
+      } catch (err) {
+        setMessage(null);
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    void retryRestore();
+  }, [approvedDecision, onActionResult, pendingApprovedRestore, refreshCheckpoints, refreshDiff]);
 
   return (
     <section className="border-b border-zinc-800/60 p-3" aria-label="Checkpoints" aria-busy={busy}>

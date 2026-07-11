@@ -10,6 +10,7 @@ import { CheckpointPanel } from "./CheckpointPanel";
 import { CodingCockpit } from "./CodingCockpit";
 import { DiffPanel } from "./DiffPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { codingApprovalRequestId } from "./CheckpointPanel";
 import {
   codingActionRequiresApproval,
   nextApprovalQueueRefreshSignal,
@@ -21,6 +22,15 @@ test("approval-required coding results advance the queue refresh signal", () => 
   assert.equal(codingActionRequiresApproval({ approval_required: false }), false);
   assert.equal(nextApprovalQueueRefreshSignal(3, { approval_required: true }), 4);
   assert.equal(nextApprovalQueueRefreshSignal(3, { ok: true }), 3);
+});
+
+test("checkpoint restore resolves approval request ids from both response shapes", () => {
+  assert.equal(codingApprovalRequestId({ approval_request_id: "apr_direct" }), "apr_direct");
+  assert.equal(
+    codingApprovalRequestId({ approval_request: { request_id: "apr_nested" } }),
+    "apr_nested",
+  );
+  assert.equal(codingApprovalRequestId({ restored: true }), "");
 });
 
 test("approval queue renders cockpit approval decisions", () => {
