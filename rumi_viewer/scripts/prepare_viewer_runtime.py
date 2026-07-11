@@ -26,7 +26,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--mode",
         choices=("dev", "release"),
         required=True,
-        help="Prepare a developer-managed uv for a checkout, or verified bundled tools for release.",
+        help=(
+            "Prepare a developer-managed uv for a checkout, or verified bundled tools "
+            "for release."
+        ),
     )
     parser.add_argument(
         "--repo-root",
@@ -48,7 +51,10 @@ def host_target() -> str:
     elif machine in {"arm64", "aarch64"}:
         arch = "aarch64"
     else:
-        raise RuntimeError(f"Unsupported host architecture for Rumi Viewer: {machine or '<unknown>'}")
+        raise RuntimeError(
+            "Unsupported host architecture for Rumi Viewer: "
+            f"{machine or '<unknown>'}"
+        )
 
     if sys.platform == "win32":
         return f"{arch}-pc-windows-msvc"
@@ -89,7 +95,10 @@ def resolve_dev_uv_source(
     configured = environ.get(UV_PATH_ENV)
     candidates: list[Path] = []
     if configured:
-        candidates.append(Path(configured).expanduser())
+        configured_path = Path(configured).expanduser()
+        if not configured_path.is_absolute():
+            configured_path = repo_root / configured_path
+        candidates.append(configured_path)
     candidates.append(repo_venv_uv_path(repo_root, target))
 
     for candidate in candidates:
@@ -119,8 +128,15 @@ def run_command(
 def verify_uv_binary(path: Path) -> str:
     try:
         result = run_command([path, "--version"], capture_output=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"uv binary exited with status {exc.returncode}: {path}{suffix}"
+        ) from exc
+    except OSError as exc:
         raise RuntimeError(f"uv binary is not executable: {path}: {exc}") from exc
+
     version = (result.stdout or "").strip()
     if not version:
         raise RuntimeError(f"uv binary did not report a version: {path}")
@@ -129,12 +145,23 @@ def verify_uv_binary(path: Path) -> str:
 
 def copy_dev_uv(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if source.resolve() != destination.resolve():
-        shutil.copy2(source, destination)
-    if os.name != "nt":
-        destination.chmod(
-            destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
+    if source.resolve() == destination.resolve():
+        return
+
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        shutil.copy2(source, temporary)
+        if os.name != "nt":
+            temporary.chmod(
+                temporary.stat().st_mode
+                | stat.S_IXUSR
+                | stat.S_IXGRP
+                | stat.S_IXOTH
+            )
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def prepare_dev(repo_root: Path, target: str) -> Path:
@@ -153,9 +180,15 @@ def prepare_dev(repo_root: Path, target: str) -> Path:
             "or install uv on PATH."
         )
 
-    version = verify_uv_binary(source)
+    source_version = verify_uv_binary(source)
     copy_dev_uv(source, destination)
-    print(f"Prepared development uv at {destination} from {source} ({version})")
+    staged_version = verify_uv_binary(destination)
+    if staged_version != source_version:
+        raise RuntimeError(
+            "Staged development uv reported a different version: "
+            f"source={source_version!r}, staged={staged_version!r}"
+        )
+    print(f"Prepared development uv at {destination} from {source} ({staged_version})")
     return destination
 
 
