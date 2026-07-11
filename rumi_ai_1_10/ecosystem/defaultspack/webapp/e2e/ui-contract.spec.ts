@@ -1499,6 +1499,14 @@ test("composer mention keyboard and ARIA contracts stay predictable at Unicode a
   await composer.fill("ユーザー@example.com https://example.com/日本@pm");
   await expect(mentions).toBeHidden();
 
+  await composer.fill("https://example.com。@web");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
+
+  await composer.fill("https://example.com)@web");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
+
   await composer.fill("@this_candidate_does_not_exist");
   await expect(mentions).toBeVisible();
   await expect(page.getByTestId("composer-at-mention-empty")).toBeVisible();
@@ -1532,11 +1540,11 @@ test("coding file mentions keep stable semantic metadata through submit", async 
   await composer.fill("/coding");
   await composer.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
-  await composer.fill("Review @REA");
+  await composer.fill("確認@README.md");
   const readmeOption = page.getByRole("option").filter({ hasText: "@README.md" });
   await expect(readmeOption).toBeVisible();
   await readmeOption.click();
-  await expect(composer).toHaveValue("Review @README.md ");
+  await expect(composer).toHaveValue("確認@README.md ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("README.md");
 
   await page.getByRole("button", { name: "メッセージを送信" }).click();

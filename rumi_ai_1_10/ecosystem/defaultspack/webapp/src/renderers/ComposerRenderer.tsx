@@ -43,7 +43,7 @@ import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
 import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
-import { composerFileMentionWidget, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+import { composerFileMentionWidget, composerKnownMentionValues, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { activeMentionAtCursor } from "../lib/mentionContract";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
@@ -1263,8 +1263,13 @@ export function filterAtMentionFiles(files: string[], query: string): string[] {
   return files.filter((file) => file.toLowerCase().includes(q)).slice(0, 20);
 }
 
-export function insertAtMentionText(input: string, cursorPos: number, label: string): { value: string; cursor: number } {
-  const activeMention = activeMentionAtCursor(input, cursorPos);
+export function insertAtMentionText(
+  input: string,
+  cursorPos: number,
+  label: string,
+  knownValues?: Iterable<string>,
+): { value: string; cursor: number } {
+  const activeMention = activeMentionAtCursor(input, cursorPos, knownValues);
   const insertAt = activeMention?.start ?? cursorPos;
   const before = input.slice(0, insertAt);
   const after = input.slice(cursorPos);
@@ -1706,6 +1711,12 @@ export function ComposerRenderer({
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
+  const atMentionKnownValues = useMemo(() => [
+    ...composerKnownMentionValues(toolItems),
+    ...composerKnownMentionValues(skillExtensions),
+    ...toolGroups.flatMap((service) => [service.id, service.label]),
+    ...(mode === "coding" ? codingContext?.files ?? [] : []),
+  ], [codingContext?.files, mode, skillExtensions, toolGroups, toolItems]);
   const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
     const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => {
       const display = composerToolMentionDisplay(item);
@@ -1993,7 +2004,7 @@ export function ComposerRenderer({
         return;
       }
       const cursorPos = textarea.selectionStart ?? value.length;
-      const activeMention = activeMentionAtCursor(value, cursorPos);
+      const activeMention = activeMentionAtCursor(value, cursorPos, atMentionKnownValues);
 
       if (activeMention && !isSteerMode) {
         setAtMentionOpen(true);
@@ -2006,7 +2017,7 @@ export function ComposerRenderer({
         setAtMentionStart(null);
       }
     },
-    [isSteerMode, suppressPopovers, templateAllowsAtMentions, updateComposerPopoverAnchor],
+    [atMentionKnownValues, isSteerMode, suppressPopovers, templateAllowsAtMentions, updateComposerPopoverAnchor],
   );
 
   useEffect(() => {
@@ -2033,7 +2044,7 @@ export function ComposerRenderer({
       const cursorPos = atMentionStart === null
         ? textarea.selectionStart
         : atMentionStart + atMentionQuery.length + 1;
-      const next = insertAtMentionText(input, cursorPos, candidate.label);
+      const next = insertAtMentionText(input, cursorPos, candidate.label, atMentionKnownValues);
 	      if (candidate.kind === "tool") {
 	        onDropWidget?.(composerToolMentionWidget(candidate.item));
 	      } else if (candidate.kind === "skill") {
@@ -2061,7 +2072,7 @@ export function ComposerRenderer({
         textarea.focus();
       }, 0);
     },
-	    [atMentionQuery.length, atMentionStart, input, mode, onAtFileAttach, onDropWidget, onInputChange],
+	    [atMentionKnownValues, atMentionQuery.length, atMentionStart, input, mode, onAtFileAttach, onDropWidget, onInputChange],
 	  );
 
   const attachFiles = useCallback(async (files: FileList | null) => {

@@ -2682,9 +2682,17 @@ def _tool_mention_ids_from_text(user_text: str) -> list[str]:
         registry = ToolRegistry()
     except Exception:
         return []
+    try:
+        known_tool_ids = [
+            str(tool.get("tool_id") or "").strip()
+            for tool in registry.list_tools()
+            if isinstance(tool, dict) and str(tool.get("tool_id") or "").strip()
+        ]
+    except (AttributeError, TypeError):
+        known_tool_ids = []
     tool_ids: list[str] = []
     seen: set[str] = set()
-    for value in extract_mention_values(user_text):
+    for value in extract_mention_values(user_text, known_tool_ids):
         tool_id = str(value or "").strip()
         if not tool_id or tool_id in seen:
             continue

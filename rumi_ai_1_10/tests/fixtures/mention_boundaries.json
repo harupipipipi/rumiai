@@ -101,6 +101,44 @@
     "active_query": null
   },
   {
+    "name": "mention after URL full width comma",
+    "text": "https://example.com、お願い@pm",
+    "tokens": ["pm"],
+    "active_query": "pm"
+  },
+  {
+    "name": "mention after URL full width period",
+    "text": "https://example.com。@web_search",
+    "tokens": ["web_search"],
+    "active_query": "web_search"
+  },
+  {
+    "name": "mention after URL closing parenthesis",
+    "text": "https://example.com)@pm",
+    "tokens": ["pm"],
+    "active_query": "pm"
+  },
+  {
+    "name": "known dotted file after Japanese text",
+    "text": "確認@README.md",
+    "known_values": ["README.md"],
+    "tokens": ["README.md"],
+    "active_query": "README.md"
+  },
+  {
+    "name": "known dotted tool after Japanese text",
+    "text": "お願い@mcp.server",
+    "known_values": ["mcp.server"],
+    "tokens": ["mcp.server"],
+    "active_query": "mcp.server"
+  },
+  {
+    "name": "unknown dotted value remains domain-like",
+    "text": "お願い@unknown.example",
+    "tokens": [],
+    "active_query": null
+  },
+  {
     "name": "double at",
     "text": "@@web_search",
     "tokens": [],

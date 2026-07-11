@@ -36,6 +36,7 @@ type BoundaryFixture = {
   active_start_utf16?: number;
   cursor_codepoint?: number;
   cursor_utf16?: number;
+  known_values?: string[];
   name: string;
   text: string;
   token_spans?: Array<[number, number]>;
@@ -51,19 +52,19 @@ const boundaryFixtures = JSON.parse(readFileSync(resolve(
 test("frontend follows the shared Unicode mention boundary fixtures", () => {
   for (const fixture of boundaryFixtures) {
     assert.deepEqual(
-      extractMentionTokens(fixture.text).map((mention) => mention.value),
+      extractMentionTokens(fixture.text, fixture.known_values).map((mention) => mention.value),
       fixture.tokens,
       fixture.name,
     );
     if (fixture.token_spans) {
       assert.deepEqual(
-        extractMentionTokens(fixture.text).map(({ start, end }) => [start, end]),
+        extractMentionTokens(fixture.text, fixture.known_values).map(({ start, end }) => [start, end]),
         fixture.token_spans,
         fixture.name,
       );
     }
     const cursor = fixture.cursor_utf16 ?? fixture.text.length;
-    const activeMention = activeMentionAtCursor(fixture.text, cursor);
+    const activeMention = activeMentionAtCursor(fixture.text, cursor, fixture.known_values);
     assert.equal(
       activeMention?.query ?? null,
       fixture.active_query,
