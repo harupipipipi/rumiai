@@ -160,7 +160,10 @@ export function CodingCockpit({
     setPendingMcp({ requestId, draft });
     setApprovalRefreshKey((value) => value + 1);
     setActiveCockpitTab("workspace");
-    setStatus(`MCP approval required for ${draft.serverId}. Review the shared approval request below.`);
+    setStatus(
+      `MCP approval required for ${draft.serverId}. Review it in the separate Approvals queue below; ` +
+        "the requesting form cannot approve its own request.",
+    );
   };
 
   const finishMcpConnection = async (serverId: string, tools: unknown[]) => {

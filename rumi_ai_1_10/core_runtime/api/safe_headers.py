@@ -13,6 +13,7 @@ SENSITIVE_FORWARDED_HEADERS = frozenset(
         "x-rumi-csrf",
         "x-rumi-approval",
         "x-rumi-approval-token",
+        "x-rumi-approval-browser-token",
         "x-rumi-principal",
         "x-rumi-profile",
         "x-rumi-client-principal",

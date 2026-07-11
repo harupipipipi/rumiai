@@ -105,7 +105,7 @@ class StartupProfileManager:
     def list_profiles_payload(self) -> Dict[str, Any]:
         catalog = self._build_catalog()
         state = self._load_state(catalog)
-        profiles = [self._profile_with_workspace_payload(profile) for profile in state["profiles"]]
+        profiles = [self._profile_with_workspace_reference_payload(profile) for profile in state["profiles"]]
         return {
             "profiles": profiles,
             "active_profile_id": state.get("active_profile_id"),
@@ -548,6 +548,12 @@ class StartupProfileManager:
     def _profile_with_workspace_payload(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         enriched = copy.deepcopy(profile)
         enriched["profile_workspace"] = self._sync_profile_workspace(enriched)
+        return enriched
+
+    def _profile_with_workspace_reference_payload(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = copy.deepcopy(profile)
+        profile_id = str(enriched.get("profile_id") or "")
+        enriched["profile_workspace"] = self._workspace_payload_for_profile_id(profile_id)
         return enriched
 
     def _sync_profile_workspace(self, profile: Dict[str, Any]) -> Dict[str, Any]:

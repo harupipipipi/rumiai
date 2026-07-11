@@ -6,59 +6,57 @@
   <title>Rumi AI Setup</title>
   <style>
     :root {
-      --bg: linear-gradient(140deg, #f5efe2 0%, #d9e5db 55%, #c6d6df 100%);
-      --ink: #1b2a2f;
-      --muted: #56666b;
-      --card: rgba(255, 252, 245, 0.88);
-      --line: rgba(27, 42, 47, 0.12);
-      --accent: #1f6d57;
-      --accent-2: #be6b3a;
-      --shadow: 0 20px 50px rgba(27, 42, 47, 0.12);
+      color-scheme: light dark;
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --surface-muted: #f3f4f6;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #4f46e5;
+      --accent-soft: #eef2ff;
+      --success: #15803d;
+      --success-soft: #f0fdf4;
+      --danger: #b91c1c;
+      --danger-soft: #fef2f2;
+      --warning: #a16207;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--ink);
       background: var(--bg);
-      padding: 24px;
-      overflow-x: hidden;
+      padding: 32px clamp(16px, 4vw, 48px) 48px;
+      overflow-x: clip;
     }
     main {
-      width: min(1120px, 100%);
+      width: min(1080px, 100%);
       margin: 0 auto;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(16px);
     }
     .hero {
-      padding: 28px 28px 12px;
-      border-bottom: 1px solid var(--line);
-      background:
-        radial-gradient(circle at top right, rgba(190, 107, 58, 0.16), transparent 32%),
-        radial-gradient(circle at left center, rgba(31, 109, 87, 0.14), transparent 28%);
+      padding: 0 0 20px;
     }
     h1 {
       margin: 0 0 8px;
-      font-size: clamp(32px, 5vw, 54px);
-      line-height: 0.95;
-      letter-spacing: -0.04em;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: 0;
     }
     p { margin: 0; color: var(--muted); }
     .grid {
       display: grid;
-      gap: 18px;
-      grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.82fr);
-      padding: 24px 28px 28px;
+      gap: 20px;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+      align-items: start;
     }
     .panel {
-      background: rgba(255,255,255,0.66);
+      min-width: 0;
+      background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 18px;
+      border-radius: 8px;
+      padding: 20px;
     }
     .panel h2 {
       margin: 0 0 12px;
@@ -70,22 +68,28 @@
       gap: 12px;
     }
     .pack {
+      position: relative;
       display: block;
       border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 14px;
-      background: rgba(255,255,255,0.7);
+      border-radius: 8px;
+      padding: 16px;
+      background: var(--surface);
       cursor: pointer;
-      transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+      overflow-wrap: anywhere;
     }
     .pack:hover {
-      transform: translateY(-1px);
-      border-color: rgba(31,109,87,0.28);
+      border-color: #a5b4fc;
+      background: #fafaff;
     }
-    .pack:focus-within,
+    .pack:has(input:focus-visible) {
+      outline: 3px solid rgba(79, 70, 229, 0.24);
+      outline-offset: 2px;
+    }
     .pack.selected {
-      border-color: rgba(31,109,87,0.42);
-      box-shadow: inset 0 0 0 1px rgba(31,109,87,0.2);
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+      background: var(--accent-soft);
     }
     .pack header {
       display: flex;
@@ -95,15 +99,15 @@
       margin-bottom: 8px;
     }
     .pill {
-      border-radius: 999px;
+      border-radius: 6px;
       padding: 4px 10px;
       font-size: 12px;
       border: 1px solid var(--line);
       color: var(--muted);
       white-space: nowrap;
     }
-    .recommended { color: var(--accent); border-color: rgba(31,109,87,0.25); }
-    .danger { color: var(--accent-2); border-color: rgba(190,107,58,0.25); }
+    .recommended { color: var(--accent); border-color: #c7d2fe; }
+    .danger { color: var(--danger); border-color: #fecaca; }
     .actions, .mini-actions {
       display: flex;
       gap: 10px;
@@ -113,15 +117,20 @@
     .mini-actions {
       align-items: center;
       min-height: 44px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
     }
     .mini-actions input {
-      min-width: 22px;
-      min-height: 22px;
+      width: 24px;
+      height: 24px;
+      margin: 0;
       accent-color: var(--accent);
     }
     button {
       border: 0;
-      border-radius: 999px;
+      min-height: 44px;
+      border-radius: 8px;
       padding: 10px 16px;
       font: inherit;
       cursor: pointer;
@@ -130,18 +139,21 @@
     }
     button.secondary {
       color: var(--ink);
-      background: rgba(27, 42, 47, 0.08);
+      background: var(--surface-muted);
     }
-    button.warn { background: var(--accent-2); }
+    button:focus-visible, summary:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.24);
+      outline-offset: 2px;
+    }
     button:disabled { opacity: 0.55; cursor: default; }
     .status {
       font-size: 13px;
       line-height: 1.45;
       color: var(--muted);
-      background: rgba(27,42,47,0.04);
-      border-radius: 16px;
+      background: var(--surface-muted);
+      border-radius: 8px;
       padding: 14px;
-      min-height: 140px;
+      min-height: 180px;
     }
     .status h3 {
       margin: 0 0 8px;
@@ -164,6 +176,16 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+    .status[data-tone="pending"] { background: var(--accent-soft); }
+    .status[data-tone="success"] { background: var(--success-soft); color: var(--success); }
+    .status[data-tone="error"] { background: var(--danger-soft); color: var(--danger); }
+    .progress {
+      width: 100%;
+      height: 6px;
+      margin-top: 12px;
+      accent-color: var(--accent);
+    }
+    .progress[hidden] { display: none; }
     .advanced-selection {
       margin-top: 14px;
       border-top: 1px solid var(--line);
@@ -193,9 +215,27 @@
       .grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 520px) {
-      body { padding: 12px; }
-      .hero { padding: 22px 18px 10px; }
-      .grid { padding: 18px; }
+      body { padding: 20px 12px 32px; }
+      .panel { padding: 16px; }
+      .pack header { align-items: flex-start; }
+      .pill { white-space: normal; }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a0a0a;
+        --surface: #161616;
+        --surface-muted: #202024;
+        --ink: #f5f5f5;
+        --muted: #a1a1aa;
+        --line: #2e2e33;
+        --accent: #818cf8;
+        --accent-soft: #20213a;
+        --success: #4ade80;
+        --success-soft: #11291a;
+        --danger: #f87171;
+        --danger-soft: #321717;
+      }
+      .pack:hover { background: #1c1c22; border-color: #6366f1; }
     }
   </style>
 </head>
@@ -203,15 +243,15 @@
   <main>
     <section class="hero">
       <h1>Choose setup packs.</h1>
-      <p>Checked setup packs are installed together. all OK permissions are granted only to setup packs that explicitly support all OK.</p>
+      <p>Select a setup that fits how you work. You can fine-tune individual packs in Advanced options; all OK permissions are granted only to setup packs that explicitly support all OK.</p>
     </section>
     <section class="grid">
       <div class="panel">
-        <h2>Available Setup Packs</h2>
-        <div class="actions">
-          <button id="install-selected">Install checked packs</button>
-        </div>
+        <h2>Setup choices</h2>
         <div id="pack-list" class="pack-list"></div>
+        <div class="actions">
+          <button id="install-selected" disabled>Install selected packs</button>
+        </div>
       </div>
       <div class="panel">
         <h2>Setup State</h2>
@@ -222,7 +262,8 @@
         <div class="actions">
           <button id="refresh" class="secondary">Refresh</button>
         </div>
-        <div id="status" class="status"></div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <progress id="install-progress" class="progress" aria-label="Setup installation progress" hidden></progress>
       </div>
     </section>
   </main>
@@ -233,7 +274,10 @@
     const migrationEl = document.getElementById("migration");
     const listEl = document.getElementById("pack-list");
     const installButton = document.getElementById("install-selected");
+    const installProgress = document.getElementById("install-progress");
     const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
+    const selectedPackIds = new Set();
+    let installInProgress = false;
     const PROFILE_CARDS = [
       {
         id: "recommended",
@@ -261,15 +305,16 @@
       },
       {
         id: "advanced",
-        title: "Advanced custom",
-        description: "Specialized or higher-risk setup packs for explicit opt-in.",
+        title: "Specialized packs",
+        description: "Other focused capabilities that do not fit the groups above.",
         match: () => true,
       },
     ];
 
-    function setStatus(label, payload, rows) {
+    function setStatus(label, payload, rows, tone = "neutral") {
       const items = rows && rows.length ? rows : ["Waiting for setup pack selection."];
       statusEl.innerHTML = "";
+      statusEl.dataset.tone = tone;
       const title = document.createElement("h3");
       title.textContent = label;
       const list = document.createElement("ul");
@@ -281,6 +326,14 @@
       statusEl.appendChild(title);
       statusEl.appendChild(list);
       renderDebugState(payload);
+    }
+
+    function setInstallProgress(state) {
+      installInProgress = state === "pending";
+      installButton.disabled = installInProgress || selectedPackIds.size === 0;
+      installButton.setAttribute("aria-busy", String(installInProgress));
+      installProgress.hidden = !installInProgress;
+      if (installInProgress) installProgress.removeAttribute("value");
     }
 
     function renderDebugState(payload) {
@@ -295,7 +348,7 @@
     }
 
     function renderInstallSummary(packs, migration) {
-      const selectedIds = packs.selected_setup_pack_ids || [];
+      const selectedIds = selectedSetupPackIds();
       const selectedNames = (packs.packs || [])
         .filter((pack) => selectedIds.includes(pack.pack_id))
         .map((pack) => pack.display_name || pack.pack_id);
@@ -400,11 +453,11 @@
         setStatus("No setup packs checked", {}, ["Choose at least one setup profile or advanced pack before installing."]);
         return;
       }
-      installButton.disabled = true;
+      setInstallProgress("pending");
       setStatus("Installing setup packs…", { setup_pack_ids: selected }, [
         "Sending " + selected.length + " setup pack id(s): " + selected.join(", "),
-        "The button is disabled until the install request completes.",
-      ]);
+        "Installation and any required migration are now running.",
+      ], "pending");
       let data;
       try {
         data = await getJson("/api/setup/packs/install", {
@@ -413,19 +466,26 @@
           body: JSON.stringify({ setup_pack_ids: selected })
         });
       } catch (error) {
-        installButton.disabled = false;
+        setInstallProgress("error");
         setStatus("Setup pack install failed", { setup_pack_ids: selected, error: errorMessage(error) }, [
           "The install request did not complete.",
           "Reason: " + errorMessage(error),
-        ]);
+          "Your previous setup selection was left unchanged.",
+        ], "error");
         return;
       }
-      await load();
-      installButton.disabled = false;
+      const refreshed = await load({ preserveStatus: true, redirect: false });
+      if (!refreshed) return;
+      setInstallProgress("success");
+      const migrationCount = Object.keys(data.migrations || {}).length;
       setStatus("Setup packs installed", { setup_pack_ids: selected, result: data }, [
         "Installed: " + selected.join(", "),
+        migrationCount
+          ? migrationCount + " required migration(s) completed."
+          : "No additional data migration was required.",
         "The setup state has been refreshed.",
-      ]);
+      ], "success");
+      if (returnTo) window.setTimeout(() => window.location.assign(returnTo), 500);
     }
 
     function uniquePackIds(packIds) {
@@ -433,33 +493,60 @@
     }
 
     function selectedSetupPackIds() {
-      const profileIds = Array.from(listEl.querySelectorAll("[data-profile-pack-ids]:checked"))
-        .flatMap((input) => {
-          try {
-            return JSON.parse(input.dataset.profilePackIds || "[]");
-          } catch {
-            return [];
-          }
-        });
-      const customIds = Array.from(listEl.querySelectorAll("[data-select-pack]:checked"))
-        .map((input) => input.dataset.selectPack);
-      return uniquePackIds([...profileIds, ...customIds]);
+      return Array.from(selectedPackIds);
     }
 
     function updateSelectionSummary() {
       const selected = selectedSetupPackIds();
-      selectionEl.textContent = selected.join(", ") || "none";
-      for (const input of listEl.querySelectorAll("[data-profile-pack-ids], [data-select-pack]")) {
+      selectionEl.textContent = selected.length
+        ? selected.length + " pack(s): " + selected.join(", ")
+        : "none";
+      for (const input of listEl.querySelectorAll("[data-profile-pack-ids]")) {
+        const packIds = parseProfilePackIds(input);
+        const selectedCount = packIds.filter((packId) => selectedPackIds.has(packId)).length;
+        input.checked = selectedCount === packIds.length && packIds.length > 0;
+        input.indeterminate = selectedCount > 0 && selectedCount < packIds.length;
+        input.setAttribute("aria-checked", input.indeterminate ? "mixed" : String(input.checked));
+        const card = input.closest(".pack");
+        if (card) card.classList.toggle("selected", selectedCount > 0);
+      }
+      for (const input of listEl.querySelectorAll("[data-select-pack]")) {
+        input.checked = selectedPackIds.has(input.dataset.selectPack || "");
         const card = input.closest(".pack");
         if (card) card.classList.toggle("selected", input.checked);
       }
+      installButton.disabled = installInProgress || selected.length === 0;
+    }
+
+    function parseProfilePackIds(input) {
+      try {
+        return uniquePackIds(JSON.parse(input.dataset.profilePackIds || "[]"));
+      } catch {
+        return [];
+      }
+    }
+
+    function handleSelectionChange(event) {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (input.matches("[data-profile-pack-ids]")) {
+        for (const packId of parseProfilePackIds(input)) {
+          if (input.checked) selectedPackIds.add(packId);
+          else selectedPackIds.delete(packId);
+        }
+      } else if (input.matches("[data-select-pack]")) {
+        const packId = input.dataset.selectPack || "";
+        if (input.checked) selectedPackIds.add(packId);
+        else selectedPackIds.delete(packId);
+      }
+      updateSelectionSummary();
     }
 
     function matchingPacks(profile, packs, assigned) {
       const matches = [];
       for (const pack of packs) {
         const packId = pack.pack_id || "";
-        if (profile.id !== "advanced" && assigned.has(packId)) continue;
+        if (assigned.has(packId)) continue;
         if (profile.match(pack)) matches.push(pack);
       }
       if (!matches.length && profile.id === "recommended" && packs.length) {
@@ -473,14 +560,20 @@
       listEl.innerHTML = "";
       const hasSelection = Boolean((payload.selected_setup_pack_ids || []).length);
       const packs = payload.packs || [];
+      selectedPackIds.clear();
+      for (const pack of packs) {
+        if (pack.selected || (!hasSelection && pack.recommended)) {
+          selectedPackIds.add(pack.pack_id || "");
+        }
+      }
+      selectedPackIds.delete("");
       const assigned = new Set();
       const visibleProfiles = PROFILE_CARDS.slice(0, 5);
       for (const profile of visibleProfiles) {
         const profilePacks = matchingPacks(profile, packs, assigned);
         const packIds = uniquePackIds(profilePacks.map((pack) => pack.pack_id));
         if (!packIds.length) continue;
-        const checked = profilePacks.some((pack) => pack.selected)
-          || (!hasSelection && profile.id === "recommended");
+        const checked = packIds.every((packId) => selectedPackIds.has(packId));
         const card = document.createElement("label");
         card.className = "pack" + (checked ? " selected" : "");
         const header = document.createElement("header");
@@ -507,6 +600,7 @@
         input.type = "checkbox";
         input.dataset.profilePackIds = JSON.stringify(packIds);
         input.checked = Boolean(checked);
+        input.setAttribute("aria-label", "Include " + profile.title);
         miniActions.appendChild(input);
         miniActions.appendChild(document.createTextNode(" Include this setup profile"));
 
@@ -514,11 +608,11 @@
         card.appendChild(miniActions);
         listEl.appendChild(card);
       }
-      renderAdvancedSelection(packs, hasSelection);
+      renderAdvancedSelection(packs);
       updateSelectionSummary();
     }
 
-    function renderAdvancedSelection(packs, hasSelection) {
+    function renderAdvancedSelection(packs) {
       const details = document.createElement("details");
       details.className = "advanced-selection";
       const summary = document.createElement("summary");
@@ -530,46 +624,62 @@
         const input = document.createElement("input");
         input.type = "checkbox";
         input.dataset.selectPack = pack.pack_id || "";
-        input.checked = Boolean(pack.selected || (!hasSelection && pack.recommended));
+        input.checked = selectedPackIds.has(pack.pack_id || "");
+        input.setAttribute("aria-label", "Include " + (pack.display_name || pack.pack_id || "pack"));
         const riskClass = pack.risk_level === "high" ? "danger" : "";
         const allOkText = pack.supports_all_ok
           ? "Supports selective all OK grants"
           : "Installs without all OK grants";
-        label.innerHTML = "<header><div><strong></strong><div></div><div></div></div><div class=\"pill\"></div></header>";
-        label.querySelector("strong").textContent = pack.display_name || pack.pack_id || "";
-        label.querySelector("header div div").textContent = pack.description || "";
-        label.querySelector("header div div + div").textContent = allOkText;
-        const pill = label.querySelector(".pill");
+        const header = document.createElement("header");
+        const packDetails = document.createElement("div");
+        const name = document.createElement("strong");
+        const description = document.createElement("div");
+        const allOk = document.createElement("div");
+        const pill = document.createElement("div");
+        name.textContent = pack.display_name || pack.pack_id || "";
+        description.textContent = pack.description || "";
+        allOk.textContent = allOkText;
+        packDetails.appendChild(name);
+        packDetails.appendChild(description);
+        packDetails.appendChild(allOk);
         pill.className = "pill" + (pack.recommended ? " recommended" : (riskClass ? " " + riskClass : ""));
         pill.textContent = pack.recommended ? "Recommended" : "Risk: " + pack.risk_level;
+        header.appendChild(packDetails);
+        header.appendChild(pill);
         const miniActions = document.createElement("div");
         miniActions.className = "mini-actions";
         miniActions.appendChild(input);
         miniActions.appendChild(document.createTextNode(" Include this individual pack"));
+        label.appendChild(header);
         label.appendChild(miniActions);
         details.appendChild(label);
       }
       listEl.appendChild(details);
     }
 
-    async function load() {
+    async function load(options = {}) {
       try {
         const packs = await getJson("/api/setup/packs");
         const migration = await getJson("/api/setup/migration/status");
         renderPacks(packs);
         migrationEl.textContent = setupMigrationLabel(migration);
-        setStatus("Setup loaded", { packs, migration }, renderInstallSummary(packs, migration));
-        redirectToReturnTarget(packs);
+        if (!options.preserveStatus) {
+          setStatus("Setup loaded", { packs, migration }, renderInstallSummary(packs, migration));
+        }
+        if (options.redirect !== false) redirectToReturnTarget(packs);
+        return true;
       } catch (error) {
+        setInstallProgress("error");
         setStatus("Setup failed", { error: errorMessage(error) }, [
           "The setup state could not be loaded.",
           "Reason: " + errorMessage(error),
-        ]);
+        ], "error");
+        return false;
       }
     }
 
     document.getElementById("refresh").addEventListener("click", load);
-    listEl.addEventListener("change", updateSelectionSummary);
+    listEl.addEventListener("change", handleSelectionChange);
     installButton.addEventListener("click", installSelectedPacks);
     load();
   </script>

@@ -2,6 +2,45 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
+    <script>
+      (() => {
+        const keys = ["browser_approval_token", "approval_browser_token", "browserApprovalToken"];
+        const storageKeys = ["rumi.authority.browserApprovalToken", ...keys];
+        let found = false;
+        for (const kind of ["sessionStorage", "localStorage"]) {
+          try {
+            for (const key of storageKeys) {
+              if (window[kind].getItem(key) !== null) found = true;
+              window[kind].removeItem(key);
+            }
+          } catch {}
+        }
+        try {
+          const url = new URL(window.location.href);
+          for (const key of keys) {
+            if (url.searchParams.has(key)) found = true;
+            url.searchParams.delete(key);
+          }
+          if (url.hash) {
+            const raw = url.hash.slice(1);
+            const index = raw.indexOf("?");
+            const prefix = index >= 0 ? raw.slice(0, index + 1) : "";
+            const hashParams = new URLSearchParams(index >= 0 ? raw.slice(index + 1) : raw);
+            let hashChanged = false;
+            for (const key of keys) {
+              if (hashParams.has(key)) hashChanged = found = true;
+              hashParams.delete(key);
+            }
+            if (hashChanged) {
+              const remaining = hashParams.toString();
+              url.hash = remaining ? `#${prefix}${remaining}` : (prefix ? `#${prefix.slice(0, -1)}` : "");
+            }
+          }
+          if (found) history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+        } catch {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>rumi DP</title>
   </head>

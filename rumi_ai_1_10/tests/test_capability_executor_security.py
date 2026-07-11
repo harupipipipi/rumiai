@@ -709,3 +709,49 @@ class TestSecureTmpDir:
             finally:
                 os.close(fd)
                 os.unlink(path)
+
+
+def test_runner_preserves_non_ascii_handler_paths_for_mimo_rumi_api(tmp_path):
+    """MiMo rumi_api handlers keep UTF-8 paths across the host runner boundary."""
+    executor = _make_test_executor()
+    handler_dir = tmp_path / "ユーザー" / "rumi_api_handler"
+    handler_dir.mkdir(parents=True)
+    main_py = handler_dir / "main.py"
+    main_py.write_text(
+        "\n".join(
+            [
+                "from pathlib import Path",
+                "",
+                "def run(context, args):",
+                "    return {",
+                "        'ok': True,",
+                "        'handler_parent': Path(__file__).parent.name,",
+                "        'workspace': context['workspace'],",
+                "        'tool': args['tool'],",
+                "    }",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = executor._build_runner_payload(
+        str(main_py),
+        "run",
+        {"workspace": str(handler_dir.parent)},
+        {"tool": "rumi_api"},
+    )
+    response = executor._run_runner_on_host(
+        payload=payload,
+        cwd=str(handler_dir.parent),
+        timeout=5,
+        start_time=time.time(),
+        failure_prefix="Handler execution failed",
+    )
+
+    assert response.success is True
+    assert response.output["handler_parent"] == "rumi_api_handler"
+    assert response.output["workspace"].endswith("ユーザー")
+    assert response.output["tool"] == "rumi_api"
+    assert executor._runner_env()["PYTHONIOENCODING"] == "utf-8"
+    assert executor._runner_env()["PYTHONUTF8"] == "1"

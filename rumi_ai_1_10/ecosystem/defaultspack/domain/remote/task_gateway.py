@@ -38,7 +38,7 @@ class RemoteTaskGatewayError(ValueError):
 
 
 class RemoteTaskGateway:
-    """Authenticated LAN/PC/mobile gateway over the existing company runtime."""
+    """Authenticated LAN/PC/mobile gateway over the existing team workspace runtime."""
 
     def __init__(
         self,

@@ -47,10 +47,188 @@ export type RouteSessionState = {
   updated_at: string;
 };
 
-export type RouteHotkeyAction = "next" | "prev" | "fallback";
+export type RouteDestinationBlockCode =
+  | "empty"
+  | "too_long"
+  | "whitespace"
+  | "control_characters"
+  | "relative_url"
+  | "malformed_url"
+  | "unsupported_scheme"
+  | "embedded_credentials"
+  | "missing_host"
+  | "private_network";
+
+export type RouteDestinationReview =
+  | {
+      ok: true;
+      input: string;
+      url: string;
+      host: string;
+      hostname: string;
+      protocol: "https:" | "http:";
+      warnings: string[];
+    }
+  | {
+      ok: false;
+      input: string;
+      code: RouteDestinationBlockCode;
+      message: string;
+    };
+
+export type BrowserCompanionRouteMessage = {
+  type: typeof ROUTE_BROWSER_MESSAGE_TYPE;
+  version: 1;
+  payload: {
+    target_url: string;
+    selected_index: number;
+    candidate_count: number;
+    updated_at: string;
+    expires_at: string;
+  };
+};
 
 export const ROUTE_SESSION_STORAGE_KEY = "rumi-search-home-route-state";
 export const ROUTE_BROWSER_MESSAGE_TYPE = "rumi:search-home-route-state";
+
+const MAX_ROUTE_URL_LENGTH = 4096;
+const MAX_ROUTE_QUERY_LENGTH = 2048;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const ABSOLUTE_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
+
+function parseIpv4(hostname: string): [number, number, number, number] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const values = parts.map((part) => {
+    if (!/^\d{1,3}$/.test(part)) {
+      return Number.NaN;
+    }
+    const value = Number(part);
+    return value >= 0 && value <= 255 ? value : Number.NaN;
+  });
+  if (values.some((value) => Number.isNaN(value))) {
+    return null;
+  }
+  return values as [number, number, number, number];
+}
+
+function isPrivateIpv4(hostname: string): boolean {
+  const address = parseIpv4(hostname);
+  if (!address) {
+    return false;
+  }
+  const [a, b] = address;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!normalized.includes(":")) {
+    return false;
+  }
+  if (normalized === "::" || normalized === "::1") {
+    return true;
+  }
+  if (/^f[cd][0-9a-f]{2}:/.test(normalized) || /^fe[89ab][0-9a-f]:/.test(normalized)) {
+    return true;
+  }
+  if (normalized.startsWith("::ffff:")) {
+    return true;
+  }
+  return false;
+}
+
+function isPrivateHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".lan") ||
+    normalized.endsWith(".home") ||
+    normalized.endsWith(".internal")
+  ) {
+    return true;
+  }
+  return isPrivateIpv4(normalized) || isPrivateIpv6(normalized);
+}
+
+function block(input: string, code: RouteDestinationBlockCode, message: string): RouteDestinationReview {
+  return { ok: false, input, code, message };
+}
+
+export function reviewRouteDestination(input: string): RouteDestinationReview {
+  if (!input) {
+    return block(input, "empty", "移動先がありません。検索結果を更新してください。");
+  }
+  if (input.length > MAX_ROUTE_URL_LENGTH) {
+    return block(input, "too_long", "移動先URLが長すぎるため開けません。");
+  }
+  if (input !== input.trim()) {
+    return block(input, "whitespace", "移動先URLの前後に空白が含まれています。");
+  }
+  if (CONTROL_CHARACTER_PATTERN.test(input)) {
+    return block(input, "control_characters", "移動先URLに制御文字が含まれています。");
+  }
+  if (!ABSOLUTE_SCHEME_PATTERN.test(input)) {
+    return block(input, "relative_url", "絶対URLではない移動先は開けません。");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return block(input, "malformed_url", "移動先URLを解析できません。");
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return block(input, "unsupported_scheme", `${parsed.protocol || "不明な"} URLは開けません。`);
+  }
+  if (parsed.username || parsed.password) {
+    return block(input, "embedded_credentials", "認証情報を含むURLは開けません。");
+  }
+  if (!parsed.hostname) {
+    return block(input, "missing_host", "移動先のホスト名がありません。");
+  }
+  if (isPrivateHostname(parsed.hostname)) {
+    return block(input, "private_network", "ローカルまたはプライベートネットワークの移動先は開けません。");
+  }
+
+  const warnings: string[] = [];
+  if (parsed.protocol === "http:") {
+    warnings.push("暗号化されていないHTTP接続です");
+  }
+  if (parsed.hostname.toLowerCase().includes("xn--")) {
+    warnings.push("国際化ドメイン（Punycode）を含みます");
+  }
+  if (parsed.port && !((parsed.protocol === "https:" && parsed.port === "443") || (parsed.protocol === "http:" && parsed.port === "80"))) {
+    warnings.push(`標準外ポート ${parsed.port} を使用します`);
+  }
+
+  parsed.hash = "";
+  return {
+    ok: true,
+    input,
+    url: parsed.toString(),
+    host: parsed.host,
+    hostname: parsed.hostname,
+    protocol: parsed.protocol,
+    warnings,
+  };
+}
 
 export function selectedCandidate(decision: RouteDecision, selectedIndex = decision.selected_index): RouteCandidate | null {
   if (!decision.target_candidates.length) {
@@ -88,41 +266,65 @@ export function cycleCandidateIndex(decision: RouteDecision, currentIndex: numbe
   return (start + delta + total) % total;
 }
 
-export function routeHotkeyActionFromKeyboardEvent(eventLike: { altKey?: boolean; key?: string }): RouteHotkeyAction | null {
-  if (!eventLike.altKey) {
+function safeSessionCandidate(candidate: RouteCandidate): RouteSessionCandidate | null {
+  const review = reviewRouteDestination(candidate.final_url || candidate.url);
+  if (!review.ok) {
     return null;
   }
-  if (eventLike.key === "ArrowRight") {
-    return "next";
-  }
-  if (eventLike.key === "ArrowLeft") {
-    return "prev";
-  }
-  if (eventLike.key === "Enter") {
-    return "fallback";
-  }
-  return null;
+  return {
+    url: review.url,
+    final_url: review.url,
+    title: candidate.title || "",
+    domain: review.host,
+  };
 }
 
 export function buildRouteSessionState(decision: RouteDecision, selectedIndex = decision.selected_index): RouteSessionState {
-  const normalizedIndex = normalizeSelectedIndex(decision, selectedIndex);
-  const candidates = decision.target_candidates.map((candidate) => ({
-    url: candidate.url,
-    final_url: candidate.final_url || candidate.url,
-    title: candidate.title || "",
-    domain: candidate.domain || "",
-  }));
+  const normalizedOriginalIndex = normalizeSelectedIndex(decision, selectedIndex);
+  const selectedRawUrl = selectedCandidateUrl(decision, normalizedOriginalIndex);
+  const selectedReview = reviewRouteDestination(selectedRawUrl);
+  const fallbackReview = reviewRouteDestination(decision.fallback_url);
+  const candidates = decision.target_candidates
+    .map((candidate) => safeSessionCandidate(candidate))
+    .filter((candidate): candidate is RouteSessionCandidate => candidate !== null);
+  const safeSelectedIndex = selectedReview.ok
+    ? candidates.findIndex((candidate) => candidate.final_url === selectedReview.url)
+    : -1;
+
   return {
-    query: decision.query,
-    target_url: selectedCandidateUrl(decision, normalizedIndex),
-    fallback_url: decision.fallback_url,
-    selected_index: normalizedIndex,
+    query: decision.query.slice(0, MAX_ROUTE_QUERY_LENGTH),
+    target_url: selectedReview.ok ? selectedReview.url : fallbackReview.ok ? fallbackReview.url : "",
+    fallback_url: fallbackReview.ok ? fallbackReview.url : "",
+    selected_index: safeSelectedIndex,
     target_candidates: candidates,
     updated_at: new Date().toISOString(),
   };
 }
 
-export function persistRouteSessionState(storage: Pick<Storage, "setItem"> | null | undefined, decision: RouteDecision, selectedIndex = decision.selected_index): RouteSessionState | null {
+export function sanitizeRouteDecisionForStorage(
+  decision: RouteDecision,
+  selectedIndex = decision.selected_index,
+): RouteDecision {
+  const session = buildRouteSessionState(decision, selectedIndex);
+  return {
+    route_type: decision.route_type,
+    query: session.query,
+    target_url: session.target_url,
+    target_candidates: session.target_candidates.map((candidate) => ({ ...candidate })),
+    selected_index: session.selected_index,
+    fallback_url: session.fallback_url,
+    resolution_reason: decision.resolution_reason,
+    used_ai_judge: Boolean(decision.used_ai_judge),
+    used_visual_judge: Boolean(decision.used_visual_judge),
+    metadata: {},
+  };
+}
+
+export function persistRouteSessionState(
+  storage: Pick<Storage, "setItem"> | null | undefined,
+  decision: RouteDecision,
+  selectedIndex = decision.selected_index,
+): RouteSessionState | null {
   if (!storage) {
     return null;
   }
@@ -131,27 +333,22 @@ export function persistRouteSessionState(storage: Pick<Storage, "setItem"> | nul
   return state;
 }
 
-export function buildBrowserCompanionRouteMessage(decision: RouteDecision, selectedIndex = decision.selected_index): { type: string; payload: RouteSessionState } {
+export function buildBrowserCompanionRouteMessage(
+  decision: RouteDecision,
+  selectedIndex = decision.selected_index,
+): BrowserCompanionRouteMessage {
+  const state = buildRouteSessionState(decision, selectedIndex);
+  const updatedAt = new Date(state.updated_at);
+  const expiresAt = new Date(updatedAt.getTime() + 5 * 60 * 1000);
   return {
     type: ROUTE_BROWSER_MESSAGE_TYPE,
-    payload: buildRouteSessionState(decision, selectedIndex),
-  };
-}
-
-export function routeNavigationForHotkey(decision: RouteDecision, currentIndex: number, action: RouteHotkeyAction): { url: string; nextIndex: number } | null {
-  if (action === "fallback") {
-    return {
-      url: decision.fallback_url,
-      nextIndex: normalizeSelectedIndex(decision, currentIndex),
-    };
-  }
-  const delta = action === "next" ? 1 : -1;
-  const nextIndex = cycleCandidateIndex(decision, currentIndex, delta);
-  if (nextIndex < 0) {
-    return null;
-  }
-  return {
-    url: selectedCandidateUrl(decision, nextIndex),
-    nextIndex,
+    version: 1,
+    payload: {
+      target_url: state.target_url,
+      selected_index: state.selected_index,
+      candidate_count: state.target_candidates.length,
+      updated_at: state.updated_at,
+      expires_at: expiresAt.toISOString(),
+    },
   };
 }

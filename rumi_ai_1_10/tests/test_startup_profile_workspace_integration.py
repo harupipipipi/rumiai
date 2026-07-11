@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -59,3 +60,41 @@ def test_list_profiles_payload_includes_workspace_paths(tmp_path: Path):
     profile = payload["profiles"][0]
     assert profile["profile_workspace"]["profile_id"] == "p1"
     assert Path(profile["profile_workspace"]["user_data_dir"]) == tmp_path / "user_data" / "profiles" / "p1" / "user_data"
+
+
+def test_list_profiles_payload_does_not_initialize_missing_workspace(tmp_path: Path):
+    manager, locations = _manager(tmp_path, tmp_path / "ecosystem")
+    state_path = tmp_path / "user_data" / "settings" / "startup_profiles.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "active_profile_id": "p1",
+                "last_launched_profile_id": None,
+                "profiles": [
+                    {
+                        "version": 3,
+                        "profile_id": "p1",
+                        "name": "Default",
+                        "base_pack": "defaultspack",
+                        "graph_id": "defaultspack.startup",
+                        "graph_ports": [],
+                        "packs": ["defaultspack"],
+                        "node_overrides": {},
+                        "created_at": 1,
+                        "updated_at": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        payload = manager.list_profiles_payload()
+
+    profile = payload["profiles"][0]
+    assert profile["profile_workspace"]["profile_id"] == "p1"
+    assert not (tmp_path / "user_data" / "profiles" / "p1" / "profile.yaml").exists()
+    assert not (tmp_path / "user_data" / "profiles" / "p1" / "database" / "rumi.sqlite").exists()

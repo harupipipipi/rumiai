@@ -1014,6 +1014,114 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_rebootstrap_pauses_state_external_duplicate_loop(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        SCHEDULE_LOOP_KEYS,
+        MimoCodingCompanyRuntime,
+    )
+    from domain.agent.schedule_store import append_history, load_history
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    first_by_loop = {
+        schedule["task"]["metadata"]["loop_key"]: schedule
+        for schedule in first["schedules"]
+    }
+    duplicate_qa = Scheduler().create_schedule(
+        "interval",
+        {
+            "message": "Stale duplicate QA loop should not keep firing.",
+            "model": "opencode-go/mimo-v2.5",
+            "conversation_id": first["conversation_id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api", "todo", "browser_use"],
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": first["conversation_id"],
+                "loop_key": "qa_loop",
+            },
+        },
+        {"value": 5, "unit": "minutes"},
+        name="MiMo Coding Company qa loop stale duplicate",
+    )
+    append_history(
+        duplicate_qa["id"],
+        {
+            "schedule_id": duplicate_qa["id"],
+            "execution_id": "exec-stale-duplicate-qa",
+            "trigger": "scheduled",
+            "status": "completed",
+            "started_at": "2026-06-28T23:50:00Z",
+            "completed_at": "2026-06-28T23:50:08Z",
+            "result": "stale duplicate history must be preserved",
+        },
+    )
+
+    second = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3001"],
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    second_by_loop = {
+        schedule["task"]["metadata"]["loop_key"]: schedule
+        for schedule in second["schedules"]
+    }
+    active_by_loop: dict[str, list[str]] = {loop_key: [] for loop_key in SCHEDULE_LOOP_KEYS}
+    for schedule in Scheduler().list_schedules():
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        if metadata.get("profile_id") != "defaultspack.mimo_coding_company":
+            continue
+        if metadata.get("company_id") != "mimo-coding-company":
+            continue
+        loop_key = str(metadata.get("loop_key") or "")
+        if loop_key in active_by_loop and schedule.get("status") == "active":
+            active_by_loop[loop_key].append(schedule["id"])
+
+    assert second_by_loop["qa_loop"]["id"] == first_by_loop["qa_loop"]["id"]
+    assert Scheduler().get_schedule(duplicate_qa["id"])["status"] == "paused"
+    assert active_by_loop["qa_loop"] == [second_by_loop["qa_loop"]["id"]]
+    assert all(len(schedule_ids) <= 1 for schedule_ids in active_by_loop.values())
+    entries, total = load_history(duplicate_qa["id"])
+    assert total == 1
+    assert entries[0]["execution_id"] == "exec-stale-duplicate-qa"
+
+    for schedule in second["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    Scheduler().delete_schedule(duplicate_qa["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_refresh(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
         MimoCodingCompanyRuntime,
@@ -1609,6 +1717,10 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
             "content": [{"type": "text", "text": "This subagent was just started and may still be running."}],
         },
     )
+    future_timestamp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp() * 1000)
+    chat_store._conversations[recent_child["id"]]["created_at"] = future_timestamp
+    chat_store._conversations[recent_child["id"]]["updated_at"] = future_timestamp
+    chat_store._save_conversations()
 
     observed = runtime.status(sync_observability=True, include_desktop_monitoring=True)
     observability = observed["harness"]["observability"]
@@ -1654,6 +1766,86 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_company_status_reports_scheduler_subagent_blocker_signals(tmp_path, monkeypatch):
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.service import CompanyService
+    from domain.company.store import CompanyStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+
+    store = CompanyStore()
+    store.ensure_company(
+        company_id="mimo-coding-company",
+        name="MiMo Coding Company",
+        description="MiMo harness workspace",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+        conversation_group_id="company:mimo-coding-company",
+    )
+    runtime_store = CompanyRuntimeStore()
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="scheduler",
+        content="**MiMo scheduler provider-health blocker**",
+        metadata={
+            "sync_source": "mimo_schedule_history",
+            "sync_key": "schedule:exec-provider-blocked",
+            "schedule_id": "schedule-heartbeat",
+            "execution_id": "exec-provider-blocked",
+            "signal": "provider_health_blocker",
+            "external_blocker": True,
+            "provider_health": {
+                "configured_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "reason": "credits_error",
+            },
+        },
+    )
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="subagent-monitor",
+        content="**MiMo subagent child conversation failed before a reply**",
+        metadata={
+            "sync_source": "mimo_subagent_monitor",
+            "sync_key": "subagent:child-1",
+            "child_conversation_id": "child-1",
+            "signal": "subagent_failed",
+        },
+    )
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="subagent-monitor",
+        content="**MiMo subagent child conversation recovered**",
+        metadata={
+            "sync_source": "mimo_subagent_monitor",
+            "sync_key": "subagent:child-1:repaired",
+            "child_conversation_id": "child-1",
+            "signal": "subagent_repaired",
+        },
+    )
+
+    status = CompanyService().status("mimo-coding-company")
+    blocker_signals = status["reporting"]["blocker_signals"]
+    company_blocker_signals = status["company"]["runtime_blocker_signals"]
+
+    assert status["runtime"]["messages"] == 3
+    assert blocker_signals["blocker_count"] == 2
+    assert [item["signal"] for item in blocker_signals["signals"]] == [
+        "subagent_failed",
+        "provider_health_blocker",
+    ]
+    assert blocker_signals["latest_signal"]["child_conversation_id"] == "child-1"
+    assert company_blocker_signals == blocker_signals
+    assert blocker_signals["signals"][1]["provider_health"]["reason"] == "credits_error"
+    assert all(item["signal"] != "subagent_repaired" for item in blocker_signals["signals"])
+
     _reset_defaultspack_singletons()
 
 

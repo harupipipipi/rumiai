@@ -3156,6 +3156,13 @@ legacy_routes:
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/ui/provider-health
+  legacy_block_module: blocks.ui.provider_health
+  replacement_function_id: ''
+  owner: ui
+  reason: sanitized provider key-source diagnostics for settings/model health
+  remove_after: v2.4
 - method: PUT
   pattern: /api/ui/settings
   legacy_block_module: blocks.ui.settings

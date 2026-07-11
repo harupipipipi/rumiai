@@ -22,7 +22,7 @@ from .models import (
 
 
 class CompanyStore:
-    """Durable JSON store for company workspaces."""
+    """Durable JSON store for team workspaces."""
 
     _instance = None
     _class_lock = threading.RLock()

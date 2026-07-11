@@ -1,17 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bot, ClipboardCheck, Copy, Cpu, KeyRound, Link2, ListChecks, Monitor, Network, PackageCheck, Shield, UserCheck } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+import { sandboxesApi } from "../../features/sandboxes/api";
 import type { DesktopInstance, RuntimeIsolationFacts } from "../../features/sandboxes/types";
 
 type DesktopInspectorProps = {
   desktop: DesktopInstance | null;
   hasLease: boolean;
-  accessKey?: string;
   leaseError?: string | null;
   actionError?: string | null;
   accessMessage?: string | null;
-  onAccessKeyChange?: (seatId: string, accessKey: string) => void;
   onRequestAccess?: (seatId: string) => void;
   onGrantAccess?: (seatId: string, requestId: string) => void;
 };
@@ -72,16 +71,15 @@ function desktopRole(desktop: DesktopInstance): string | null {
 export function DesktopInspector({
   desktop,
   hasLease,
-  accessKey = "",
   leaseError,
   actionError,
   accessMessage,
-  onAccessKeyChange,
   onRequestAccess,
   onGrantAccess,
 }: DesktopInspectorProps) {
   const [copiedAction, setCopiedAction] = useState<string | null>(null);
   const [grantRequestId, setGrantRequestId] = useState("");
+  const [grants, setGrants] = useState<Array<Record<string, unknown>>>([]);
   const shareLink = useMemo(() => {
     if (!desktop?.seat_id || typeof window === "undefined") return "";
     const url = new URL(window.location.href);
@@ -90,6 +88,29 @@ export function DesktopInspector({
     url.searchParams.delete("access_key");
     return url.toString();
   }, [desktop?.seat_id]);
+
+  useEffect(() => {
+    if (!desktop?.seat_id) {
+      setGrants([]);
+      return;
+    }
+    let active = true;
+    void sandboxesApi.listDesktopGrants(desktop.seat_id)
+      .then((result) => { if (active) setGrants(result.grants); })
+      .catch(() => { if (active) setGrants([]); });
+    return () => { active = false; };
+  }, [desktop?.seat_id]);
+
+  const revokeGrant = (grantId: string) => {
+    if (!desktop?.seat_id) return;
+    void sandboxesApi.revokeDesktopGrant(desktop.seat_id, grantId).then(() => {
+      setGrants((current) => current.map((grant) => (
+        grant.credential_id === grantId || grant.code_id === grantId
+          ? { ...grant, status: "revoked" }
+          : grant
+      )));
+    });
+  };
 
   const copyText = (label: string, text: string) => {
     if (!navigator.clipboard?.writeText) return;
@@ -199,21 +220,10 @@ export function DesktopInspector({
         </div>
         <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3">
           {factRow("Mode", desktop.access_policy?.mode || "owner_only")}
-          {factRow("Key", desktop.access_policy?.key_required ? desktop.access_policy.key_hint || "Required" : "Not required", desktop.access_policy?.key_required ? "warning" : "default")}
+          {factRow("Credential", "Scoped session (secret hidden)")}
           {factRow("Link", desktop.access_policy?.link_enabled ? "Enabled" : "No", desktop.access_policy?.link_enabled ? "warning" : "default")}
           {factRow("Request", desktop.access_policy?.request_required ? "Required" : "No")}
         </div>
-        {desktop.access_policy?.key_required && (
-          <label className="mt-2 grid gap-1 text-zinc-500">
-            <span>Access key</span>
-            <input
-              type="password"
-              value={accessKey}
-              onChange={(event) => onAccessKeyChange?.(desktop.seat_id, event.target.value)}
-              className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none focus:border-zinc-600"
-            />
-          </label>
-        )}
         {desktop.access_policy?.request_required && (
           <div className="mt-2 grid gap-2">
             <button
@@ -248,6 +258,29 @@ export function DesktopInspector({
           </div>
         )}
         {accessMessage && <p className="mt-2 text-[11px] text-emerald-300">{accessMessage}</p>}
+        <div className="mt-2 grid gap-2" aria-label="Scoped desktop access grants">
+          {grants.map((grant) => {
+            const grantId = String(grant.credential_id || grant.code_id || "");
+            const status = String(grant.status || "unknown");
+            return (
+              <div key={grantId} className="rounded-md border border-zinc-800 p-2">
+                <p className="truncate text-zinc-300">{String(grant.principal_id || "Unknown principal")}</p>
+                <p className="truncate text-[10px] text-zinc-500">
+                  Device {String(grant.device_id || "unknown")} · {status} · expires {String(grant.expires_at || "unknown")}
+                </p>
+                {status === "active" && (
+                  <button
+                    type="button"
+                    onClick={() => revokeGrant(grantId)}
+                    className="mt-1 rounded border border-red-500/30 px-2 py-1 text-[10px] text-red-200 hover:bg-red-500/10"
+                  >
+                    Revoke access
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section>

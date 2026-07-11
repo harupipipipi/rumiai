@@ -13,6 +13,19 @@ it. A client manager keeps the external thread coherent while project manager,
 coding engineer, research specialist, reviewer, operations monitor, and
 scheduler roles coordinate through internal state and channels.
 
+## Ownership Boundary
+
+The team workspace, worker runtime, and scheduled agent runtime are
+model-independent defaultspack infrastructure. They own durable coordination
+state, routing, execution handoff, scheduling, approval, audit, and workspace
+policy. They must not be described as a MiMo-only company or coding runtime.
+
+`ecosystem/rumi_operations_company_pack/` owns the optional MiMo Coding
+Company profile and harness. Concrete model/provider names, including MiMo
+model aliases and OpenCode Zen integrations, belong there or in provider
+configuration. Compatibility modules, ids, and routes may still use `company`;
+those transport names do not make the shared runtime MiMo-specific.
+
 ## Runtime Shape
 
 - The team workspace profile is optional and pack-owned, not a defaultspack

@@ -9,7 +9,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 DEFAULT_COMPANY_ID = "operations-company"
 DEFAULT_COMPANY_NAME = "Rumi Operations Company"
-DEFAULT_COMPANY_DESCRIPTION = "Persistent company workspace for coordinated AI roles."
+DEFAULT_COMPANY_DESCRIPTION = "Persistent team workspace for coordinated AI roles."
 DEFAULT_CONVERSATION_GROUP_ID = "company:operations-company"
 DEFAULT_CHANNEL_ID = "ops-company"
 DEFAULT_MODEL = "stub/default"
@@ -59,7 +59,7 @@ DEFAULT_AGENT_SPECS: list[dict[str, Any]] = [
         "context_limit": 96000,
         "aliases": ["ops_manager", "manager"],
         "system_prompt": (
-            "You operate the asynchronous company workspace. Triage open tasks, stale runs, "
+            "You operate the asynchronous team workspace. Triage open tasks, stale runs, "
             "blocked work, waiting approvals, unresolved mentions, and dirty summaries. "
             "Route work through AgentEngine delegation and never execute specialist tools directly."
         ),

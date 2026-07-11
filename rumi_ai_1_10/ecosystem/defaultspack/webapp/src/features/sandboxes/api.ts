@@ -231,7 +231,7 @@ export async function fetchDesktopFrame(
     method: "GET",
     headers: {
       Accept: "image/webp,image/jpeg,image/png",
-      ...(options.accessKey ? { "X-Rumi-Desktop-Access-Key": options.accessKey } : {}),
+      ...(options.accessKey ? { "X-Rumi-Desktop-Session-Credential": options.accessKey } : {}),
     },
     cache: "no-store",
     signal: options.signal,
@@ -318,7 +318,7 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/start`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         request_id: requestId("desktop-start"),
       }),
     }).then(normalizeDesktopInstance);
@@ -328,7 +328,7 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         request_id: requestId("desktop-stop"),
         confirm_destructive: true,
       }),
@@ -339,7 +339,7 @@ export const sandboxesApi = {
     return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/restart`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         request_id: requestId("desktop-restart"),
       }),
     }).then(normalizeDesktopInstance);
@@ -353,7 +353,7 @@ export const sandboxesApi = {
     return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}?${query.toString()}`, {
       method: "DELETE",
       headers: {
-        ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
+        ...(accessKey ? { "X-Rumi-Desktop-Session-Credential": accessKey } : {}),
       },
     });
   },
@@ -386,6 +386,40 @@ export const sandboxesApi = {
     });
   },
 
+  issueDesktopExchange(seatId: string, operations: string[]) {
+    return request<{ exchange_code: string }>(`/api/desktops/${encodeId(seatId)}/access-exchanges`, {
+      method: "POST",
+      body: JSON.stringify({ operations, request_id: requestId("desktop-exchange-issue") }),
+    });
+  },
+
+  redeemDesktopExchange(exchangeCode: string) {
+    return request<{ session_credential: string; credential_id: string; expires_at: number }>(
+      "/api/desktop-access/exchange",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          exchange_code: exchangeCode,
+          request_id: requestId("desktop-exchange-redeem"),
+        }),
+      },
+    );
+  },
+
+  listDesktopGrants(seatId: string) {
+    return request<{ grants: Array<Record<string, unknown>> }>(
+      `/api/desktops/${encodeId(seatId)}/access-grants`,
+      { cache: "no-store" },
+    );
+  },
+
+  revokeDesktopGrant(seatId: string, grantId: string) {
+    return request<{ revoked: boolean }>(
+      `/api/desktops/${encodeId(seatId)}/access-grants/${encodeId(grantId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   grantDesktopAccess(seatId: string, accessRequestId: string, approved = true) {
     return request<DesktopAccessRequest>(
       `/api/desktops/${encodeId(seatId)}/access-requests/${encodeId(accessRequestId)}/grant`,
@@ -405,7 +439,7 @@ export const sandboxesApi = {
     return request<DesktopControlLeaseGrant>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         request_id: requestId("desktop-control-acquire"),
       }),
     }).then(normalizeDesktopLeaseGrant);
@@ -415,7 +449,7 @@ export const sandboxesApi = {
     return request<DesktopControlLeaseRenewal>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-renew"),
       }),
@@ -426,7 +460,7 @@ export const sandboxesApi = {
     return request<{ released: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}/control/release`, {
       method: "POST",
       body: JSON.stringify({
-        access_key: accessKey || undefined,
+        desktop_session_credential: accessKey || undefined,
         lease_token: leaseToken,
         request_id: requestId("desktop-control-release"),
       }),

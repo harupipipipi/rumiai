@@ -121,6 +121,8 @@ ChecksumFetcher = Callable[[str], str]
 
 
 def _wsl_distribution_names(output: str) -> tuple[str, ...]:
+    # Some Windows WSL builds can return UTF-16-like text through subprocess
+    # decoding, leaving NUL separators in distro names such as R\0u\0m\0i...
     normalized = str(output or "").replace("\x00", "").replace("\ufeff", "")
     return tuple(line.strip() for line in normalized.splitlines() if line.strip())
 
@@ -1523,12 +1525,11 @@ def _desktop_start_script(
             "fi\n"
         )
     elif starter in {"browser", "browser_url"}:
-        quoted_url = shlex.quote(browser_url)
         if network_disabled and browser_url:
             script += f"echo 'browser_url starter skipped by sandbox network policy' >{runtime_dir}/starter-browser.log\n"
         else:
             script += (
-                f"BROWSER_URL={quoted_url}\n"
+                _browser_url_assignment_script(browser_url) +
                 "BROWSER_BIN=''\n"
                 "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'\n"
                 "if [ -n \"$BROWSER_URL\" ]; then BROWSER_CANDIDATES=\"$BROWSER_CANDIDATES xdg-open\"; fi\n"
@@ -1549,6 +1550,42 @@ def _desktop_start_script(
                 "fi\n"
             )
     return script
+
+
+def _browser_url_assignment_script(browser_url: str) -> str:
+    quoted_url = shlex.quote(str(browser_url or "").strip())
+    rewrite_script = (
+        "import sys\n"
+        "from urllib.parse import urlsplit, urlunsplit\n"
+        "raw = sys.argv[1]\n"
+        "host_alias = sys.argv[2].strip()\n"
+        "parsed = urlsplit(raw)\n"
+        "host = (parsed.hostname or '').lower()\n"
+        "if parsed.scheme in {'http', 'https'} and host in {'127.0.0.1', 'localhost'} and host_alias:\n"
+        "    if parsed.port:\n"
+        "        netloc = f'{host_alias}:{parsed.port}'\n"
+        "    else:\n"
+        "        netloc = host_alias\n"
+        "    raw = urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))\n"
+        "print(raw)\n"
+    )
+    return (
+        f"BROWSER_URL_ORIGINAL={quoted_url}\n"
+        "RUMI_HOST_LOOPBACK_ALIAS=''\n"
+        "for candidate in host.lima.internal host.docker.internal; do\n"
+        "  if command -v getent >/dev/null 2>&1 && getent hosts \"$candidate\" >/dev/null 2>&1; then\n"
+        "    RUMI_HOST_LOOPBACK_ALIAS=\"$candidate\"\n"
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        "if [ -z \"$RUMI_HOST_LOOPBACK_ALIAS\" ] && [ -r /etc/resolv.conf ]; then\n"
+        "  RUMI_HOST_LOOPBACK_ALIAS=\"$(awk '/^nameserver[[:space:]]+/ {print $2; exit}' /etc/resolv.conf)\"\n"
+        "fi\n"
+        "BROWSER_URL=\"$(python3 - \"$BROWSER_URL_ORIGINAL\" \"$RUMI_HOST_LOOPBACK_ALIAS\" <<'PY'\n"
+        f"{rewrite_script}"
+        "PY\n"
+        ")\"\n"
+    )
 
 
 def _guest_used_displays_script() -> str:

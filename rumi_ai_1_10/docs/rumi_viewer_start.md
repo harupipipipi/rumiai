@@ -141,27 +141,20 @@ pgrep -fl 'rumi-viewer|python.*-m app|python.*rumi_ai|pack-shell run defaultspac
 lsof -nP -iTCP:8766 -sTCP:LISTEN
 ```
 
-ブラウザから Authority approval を QA するときは、通常の local Bearer token ではなく、明示的なブラウザQAトークンを使います。viewer から defaultspack を開く前に同じ環境で token を渡してください。
+ブラウザから Authority approval を QA するときも、承認 credential を URL、fragment、
+`localStorage`、`sessionStorage` に入れてはいけません。`RUMI_AUTHORITY_BROWSER_TEST_TOKEN`
+と `browser_approval_token` を使う旧経路はサーバー全体で無効化され、旧値を送ると
+`LEGACY_BROWSER_APPROVAL_REVOKED` になります。旧 URL は credential を除いた同一 origin
+URL へ `303` で移行し、`Referrer-Policy: no-referrer` と `Cache-Control: no-store` を返します。
 
-```bash
-cd rumi_viewer/frontend
-RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa npm run tauri -- dev
-```
+通常の local Bearer は画面の閲覧/API利用資格であり、承認者資格ではありません。同一 origin
+script が自己申告した window/device 情報だけで承認者へ昇格することを防ぐため、HTTP の
+`browser-exchange` と `browser-ui-operator` は fail closed で無効です。ブラウザ画面は
+読み取り専用として使い、承認は Viewer の native approval window で行ってください。
 
-`pack-shell run defaultspack` を直接起動してブラウザQAする場合は、viewer が生成した署名secretも同じプロセスへ渡してください。tokenだけだと承認ページは開けても、承認操作に必要な `ui_operator` を署名できません。
-
-```bash
-export RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa
-export RUMI_PANEL_BOOTSTRAP_SECRET="$(tr -d '\n' < "$HOME/Library/Application Support/dev.rumiai.app/.rumi_panel_bootstrap_secret")"
-```
-
-ブラウザで開く URL には `browser_approval_token` を付けます。
-
-```text
-http://127.0.0.1:8766/approval?request_id=auth_xxx&browser_approval_token=ambient-browser-qa
-```
-
-`失敗: local auth token required` が出る場合は、まず `8766` を掴んでいる古い defaultspack がないかを確認してください。古い server はこの QA token を知らないため、正しい URL でも承認できません。
+`local auth token required` が出る場合は、`8766` を掴んでいる古い defaultspack がないか、
+viewer が生成した local auth と `RUMI_PANEL_BOOTSTRAP_SECRET` が同じプロセスに渡っているかを
+確認してください。
 
 ### `Open Defaultspack` が 403 で失敗する
 

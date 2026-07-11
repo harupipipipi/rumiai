@@ -15,6 +15,55 @@ function desktopResponse(status: "running" | "stopped") {
   };
 }
 
+test("ensureRuntime uses Defaultspack local auth and CSRF headers", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>([
+    ["rumi-defaultspack-local-auth", "local-token-1"],
+    ["rumi-panel-csrf", "panel-csrf-1"],
+  ]);
+
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        operation_id: "op-1",
+        provider_id: "windows_wsl",
+        status: "running",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.ensureRuntime("windows_wsl");
+    assert.equal(result.provider_id, "windows_wsl");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+
+  const headers = new Headers(requestInit?.headers);
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(requestUrl, "/api/runtime/ensure");
+  assert.equal(requestInit?.method, "POST");
+  assert.equal(headers.get("Authorization"), "Bearer local-token-1");
+  assert.equal(headers.get("X-Rumi-CSRF"), "panel-csrf-1");
+  assert.equal(body.provider_id, "windows_wsl");
+  assert.match(body.request_id, /^ensure-/);
+});
+
 test("createDesktop does not accept client-supplied owner authority", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;
@@ -314,7 +363,7 @@ test("listDesktops reports missing desktop arrays clearly", async () => {
   }
 });
 
-test("fetchDesktopFrame sends access key without caller-owned authority headers", async () => {
+test("fetchDesktopFrame sends scoped credential without legacy authority headers", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;
   const originalFetch = globalThis.fetch;
@@ -341,7 +390,8 @@ test("fetchDesktopFrame sends access key without caller-owned authority headers"
 
   assert.equal(requestUrl, "/api/desktops/seat-1/frame");
   const headers = new Headers(requestInit?.headers);
-  assert.equal(headers.get("X-Rumi-Desktop-Access-Key"), "key-1");
+  assert.equal(headers.get("X-Rumi-Desktop-Session-Credential"), "key-1");
+  assert.equal(headers.get("X-Rumi-Desktop-Access-Key"), null);
   assert.equal(headers.get("X-Rumi-Desktop-Owner"), null);
 });
 
@@ -369,12 +419,13 @@ test("stopDesktop confirms the destructive action after the UI confirmation flow
   assert.equal(requestInit?.method, "POST");
   const body = JSON.parse(String(requestInit?.body));
   assert.equal(body.owner_id, undefined);
-  assert.equal(body.access_key, "key-1");
+  assert.equal(body.desktop_session_credential, "key-1");
+  assert.equal(body.access_key, undefined);
   assert.equal(body.confirm_destructive, true);
   assert.match(body.request_id, /^desktop-stop-/);
 });
 
-test("startDesktop and restartDesktop forward the stored desktop access key", async () => {
+test("startDesktop and restartDesktop forward the scoped session credential", async () => {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -393,9 +444,10 @@ test("startDesktop and restartDesktop forward the stored desktop access key", as
   }
 
   assert.equal(calls[0].url, "/api/desktops/seat-1/start");
-  assert.equal(calls[0].body.access_key, "key-1");
+  assert.equal(calls[0].body.desktop_session_credential, "key-1");
+  assert.equal(calls[0].body.access_key, undefined);
   assert.equal(calls[1].url, "/api/desktops/seat-1/restart");
-  assert.equal(calls[1].body.access_key, "key-1");
+  assert.equal(calls[1].body.desktop_session_credential, "key-1");
 });
 
 test("deleteDesktop confirms the destructive action after the UI confirmation flow", async () => {
@@ -420,7 +472,8 @@ test("deleteDesktop confirms the destructive action after the UI confirmation fl
 
   assert.match(requestUrl, /^\/api\/desktops\/seat-1\?/);
   assert.equal(requestInit?.method, "DELETE");
-  assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Access-Key"), "key-1");
+  assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Session-Credential"), "key-1");
+  assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Access-Key"), null);
   assert.equal(new Headers(requestInit?.headers).get("X-Rumi-Desktop-Owner"), null);
   assert.equal(requestInit?.body, undefined);
   const query = new URLSearchParams(requestUrl.split("?", 2)[1]);

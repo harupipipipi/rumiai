@@ -11,7 +11,7 @@ from .summary_worker import CompanySummaryWorker
 
 
 class CompanySupervisor:
-    """Operations manager tick for company workspace health."""
+    """Operations manager tick for team workspace health."""
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ class CompanySupervisor:
                 company_id,
                 agent_id="operations_manager",
                 kind="supervisor_tick",
-                content="Supervisor found " + str(len(actions)) + " company workspace item(s).",
+                content="Supervisor found " + str(len(actions)) + " team workspace item(s).",
                 priority="normal",
                 metadata={"actions": actions},
             )

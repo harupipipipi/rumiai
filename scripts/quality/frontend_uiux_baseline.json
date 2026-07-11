@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "entries": [],
+  "entry_schema": {
+    "rule": "required rule id",
+    "path": "required repository-relative glob",
+    "fingerprint": "optional exact finding fingerprint",
+    "contains": "optional scoped source fragment; required when fingerprint is omitted",
+    "issue": "required GitHub issue number",
+    "expires": "required YYYY-MM-DD expiration date",
+    "reason": "required temporary-exception rationale"
+  },
+  "policy": {
+    "requires_issue": true,
+    "requires_expiry": true,
+    "broad_path_only_exemptions_forbidden": true
+  }
+}

@@ -71,6 +71,7 @@ _ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES = {
     "blocks.integrations.line",
     "blocks.integrations.slack",
     "blocks.ui.catalog",
+    "blocks.ui.provider_health",
 }
 
 
@@ -2178,6 +2179,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
     HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
     HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("GET", "/api/ui/provider-health", block_module="blocks.ui.provider_health"),
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
@@ -2338,9 +2340,12 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/desktops", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/calendar", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
+    HttpRouteSpec("POST", "/api/authority/browser-exchange", handler_name="_handle_authority_browser_exchange"),
+    HttpRouteSpec("POST", "/api/authority/browser-exchange/revoke", handler_name="_handle_authority_browser_exchange_revoke"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient-debug", handler_name="_handle_static"),

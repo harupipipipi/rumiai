@@ -18,6 +18,8 @@ ACTIVE_RUN_STATUSES = {"created", "queued", "running", "waiting_approval", "wait
 TERMINAL_RUN_STATUSES = {"completed", "done", "error", "failed", "cancelled", "canceled", "planned", "stale", "missing"}
 OPEN_TASK_STATUSES = {"queued", "assigned", "running", "waiting_approval", "blocked", "stale"}
 DONE_TASK_STATUSES = {"completed", "cancelled", "failed"}
+BLOCKER_SIGNAL_TOKENS = ("blocker", "failed", "timeout", "unanswered", "not_executed")
+NON_BLOCKER_SIGNALS = {"subagent_repaired"}
 
 
 def default_runtime_db_path() -> Path:
@@ -80,8 +82,50 @@ def _stable_sync_id(prefix: str, metadata: dict[str, Any] | None) -> str | None:
     return f"{prefix}{digest}"
 
 
+def _metadata_blocker_signal(metadata: Any) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    signal = str(metadata.get("signal") or "").strip()
+    normalized = signal.lower()
+    if not normalized or normalized in NON_BLOCKER_SIGNALS:
+        return None
+    if metadata.get("external_blocker") is True:
+        return signal
+    if any(token in normalized for token in BLOCKER_SIGNAL_TOKENS):
+        return signal
+    return None
+
+
+def _blocker_signal_item(message: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    signal = _metadata_blocker_signal(metadata)
+    if signal is None:
+        return None
+    item = {
+        "signal": signal,
+        "message_id": message.get("message_id") or message.get("id"),
+        "channel_id": message.get("channel_id"),
+        "thread_id": message.get("thread_id"),
+        "sender_id": message.get("sender_id"),
+        "created_at": message.get("created_at"),
+        "sync_source": metadata.get("sync_source"),
+    }
+    for key in (
+        "schedule_id",
+        "execution_id",
+        "child_conversation_id",
+        "parent_conversation_id",
+        "external_blocker",
+        "external_issue_policy",
+        "provider_health",
+    ):
+        if key in metadata:
+            item[key] = metadata.get(key)
+    return item
+
+
 class CompanyRuntimeStore:
-    """SQLite WAL store for Slack-like company runtime state."""
+    """SQLite WAL store for Slack-like team workspace runtime state."""
 
     _instance: Optional["CompanyRuntimeStore"] = None
     _class_lock = threading.RLock()
@@ -990,3 +1034,22 @@ class CompanyRuntimeStore:
             row = self.conn.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE company_id = ?", (str(company_id),)).fetchone()
             result[key] = int(row["count"] if row else 0)
         return result
+
+    def blocker_signal_summary(self, company_id: str, *, limit: int = 20) -> dict[str, Any]:
+        """Return latest scheduler/subagent blocker signals for visible status panes."""
+        messages, _total = self.list_messages(
+            company_id,
+            limit=max(int(limit), 1),
+            offset=0,
+            order="desc",
+        )
+        signals: list[dict[str, Any]] = []
+        for message in messages:
+            item = _blocker_signal_item(message)
+            if item is not None:
+                signals.append(item)
+        return {
+            "blocker_count": len(signals),
+            "latest_signal": signals[0] if signals else None,
+            "signals": signals,
+        }
