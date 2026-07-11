@@ -73,7 +73,7 @@ const TIMELINE_TAB_ID = '__timeline__';
 // Keep web preview documents in an opaque origin even when they are served from
 // the same loopback host as the panel. Combining allow-scripts with
 // allow-same-origin would let preview HTML escape the sandbox boundary.
-export const WEB_PREVIEW_IFRAME_SANDBOX = 'allow-forms allow-modals allow-popups allow-scripts';
+export const WEB_PREVIEW_IFRAME_SANDBOX = '';
 
 function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
   return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
@@ -172,20 +172,39 @@ function previewIcon(data: ToolPreviewData, size = 12) {
   return <Image size={size} className="text-blue-400" />;
 }
 
+function previewBaseUrl(): string {
+  try {
+    return typeof window === 'undefined' ? '' : window.location.href;
+  } catch {
+    return '';
+  }
+}
+
+export function safePreviewHref(url: string | undefined, baseUrl = previewBaseUrl()): string | undefined {
+  if (!url || !baseUrl) return undefined;
+  try {
+    const base = new URL(baseUrl);
+    const parsed = new URL(url, base);
+    if (parsed.origin !== base.origin) return undefined;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function safePreviewImageUrl(url: string | undefined, baseUrl = previewBaseUrl()): string | undefined {
+  if (!url) return undefined;
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(url)) return url;
+  return safePreviewHref(url, baseUrl);
+}
+
 function safeHref(url: string | undefined): string | undefined {
-  if (!url || url.startsWith('data:')) return undefined;
-  return url;
+  return safePreviewHref(url);
 }
 
 function localPreviewUrl(url: string | undefined): boolean {
-  if (!url) return false;
-  try {
-    const parsed = new URL(url, window.location.href);
-    const host = parsed.hostname.toLowerCase();
-    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
-  } catch {
-    return false;
-  }
+  return Boolean(safePreviewHref(url));
 }
 
 function looksLikeHtml(data: FilePreview, content?: string): boolean {
@@ -214,13 +233,17 @@ function escapeHtmlAttribute(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function htmlWithBase(content: string, url?: string): string {
-  if (!url || !content || /<base\s/i.test(content)) return content;
-  const baseTag = `<base href="${escapeHtmlAttribute(url)}">`;
-  if (/<head[^>]*>/i.test(content)) {
-    return content.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
-  }
-  return `${baseTag}${content}`;
+const HTML_PREVIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
+
+export function hardenedHtmlPreviewDocument(content: string): string {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(HTML_PREVIEW_CSP)}">`;
+  const metadata = `${csp}<meta name="referrer" content="no-referrer">`;
+  if (/<head[^>]*>/i.test(content)) return content.replace(/<head([^>]*)>/i, `<head$1>${metadata}`);
+  return `<!doctype html><html><head>${metadata}</head><body>${content}</body></html>`;
+}
+
+function htmlWithBase(content: string, _url?: string): string {
+  return hardenedHtmlPreviewDocument(content);
 }
 
 export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): ArtifactPreviewDialogItem {
@@ -247,7 +270,7 @@ export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): Artifa
       title: previewTitle(data),
       subtitle: data.path || data.prompt || 'image artifact',
       href: safeHref(data.url),
-      imageUrl: data.url,
+      imageUrl: safePreviewImageUrl(data.url),
       imageAlt: data.alt,
       details: [
         ...details,
@@ -262,7 +285,7 @@ export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): Artifa
       kind: 'file',
       title: previewTitle(data),
       subtitle: data.path || data.size,
-      href: data.url,
+      href: safeHref(data.url),
       content: data.content,
       language: data.filename.split('.').pop()?.toLowerCase() || 'text',
       details: [
@@ -292,8 +315,8 @@ export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): Artifa
     kind: 'tool',
     title: previewTitle(data),
     subtitle: data.url,
-    href: data.url,
-    imageUrl: data.screenshot,
+    href: safeHref(data.url),
+    imageUrl: safePreviewImageUrl(data.screenshot),
     imageAlt: data.title,
     content: [data.title, data.url, data.snippet].filter(Boolean).join('\n\n'),
     language: 'web',
@@ -596,7 +619,7 @@ function WebPreviewContent({ data }: { data: WebPreview }) {
           <span className="truncate">{data.url}</span>
         </div>
         <a
-          href={data.url}
+          href={safeHref(data.url)}
           target="_blank"
           rel="noreferrer"
           className="text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -609,14 +632,14 @@ function WebPreviewContent({ data }: { data: WebPreview }) {
       <div className="flex-1 overflow-hidden">
         {canEmbed ? (
           <iframe
-            src={data.url}
+            src={safeHref(data.url)}
             title={data.title || data.url}
             className="h-full w-full border-0 bg-white"
             sandbox={WEB_PREVIEW_IFRAME_SANDBOX}
           />
-        ) : data.screenshot ? (
+        ) : safePreviewImageUrl(data.screenshot) ? (
           <img
-            src={data.screenshot}
+            src={safePreviewImageUrl(data.screenshot)}
             alt={data.title}
             className="m-4 w-[calc(100%-2rem)] rounded border border-zinc-800"
           />
@@ -631,7 +654,7 @@ function WebPreviewContent({ data }: { data: WebPreview }) {
               )}
             </div>
             <a
-              href={data.url}
+              href={safeHref(data.url)}
               target="_blank"
               rel="noreferrer"
               className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-[11px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
@@ -711,8 +734,16 @@ function useRemotePreviewText(data: FilePreview) {
         cancelled = true;
       };
     }
-    setIsLoading(true);
-    void fetch(data.url, { cache: 'no-store' })
+    const fetchUrl = safeHref(data.url);
+  if (!fetchUrl) {
+    setIsLoading(false);
+    setError('Remote preview blocked by URL policy.');
+    return () => {
+      cancelled = true;
+    };
+  }
+  setIsLoading(true);
+  void fetch(fetchUrl, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.text();
@@ -759,7 +790,7 @@ function HtmlPreviewContent({
         </div>
         {data.url && (
           <a
-            href={data.url}
+            href={safeHref(data.url)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
@@ -780,7 +811,8 @@ function HtmlPreviewContent({
             title={data.filename}
             srcDoc={srcDoc}
             className="h-full w-full border-0 bg-white"
-            sandbox="allow-forms allow-modals allow-popups allow-scripts"
+            sandbox={WEB_PREVIEW_IFRAME_SANDBOX}
+            referrerPolicy="no-referrer"
           />
         ) : !isLoading ? (
           <div className="flex h-full items-center justify-center bg-zinc-950 px-4 text-center text-[11px] text-zinc-500">
@@ -822,7 +854,7 @@ function FilePreviewContent({ data }: { data: FilePreview }) {
         <div className="flex items-center gap-2">
           {data.url && (
             <a
-              href={data.url}
+              href={safeHref(data.url)}
               download={data.downloadName ?? data.filename}
               className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
             >
@@ -901,9 +933,9 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
         <span className="text-[11px] text-zinc-300">{data.alt}</span>
       </div>
       <div className="flex-1 p-4 flex items-center justify-center overflow-y-auto">
-        {data.url ? (
+        {safePreviewImageUrl(data.url) ? (
           <img
-            src={data.url}
+            src={safePreviewImageUrl(data.url)}
             alt={data.alt}
             className="max-w-full max-h-full rounded-lg border border-zinc-800"
           />
