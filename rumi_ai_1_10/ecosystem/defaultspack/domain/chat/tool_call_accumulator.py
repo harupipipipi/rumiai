@@ -47,19 +47,27 @@ class ToolCallAccumulator:
         blocks: list[dict[str, Any]] = []
         for call_id in self._order:
             current = self._calls.get(call_id) or {}
+            arguments = self._parsed_arguments(current)
+            if (
+                not current.get("started")
+                or not current.get("ended")
+                or not str(current.get("name") or "").strip()
+                or arguments is None
+            ):
+                continue
             blocks.append(
                 {
                     "type": "tool_use",
                     "id": call_id,
                     "name": str(current.get("name") or ""),
-                    "input": self._parsed_arguments(current),
+                    "input": arguments,
                 }
             )
         return blocks
 
     def arguments_for(self, call_id: str) -> dict[str, Any]:
         current = self._calls.get(str(call_id or "").strip()) or {}
-        return self._parsed_arguments(current)
+        return self._parsed_arguments(current) or {}
 
     def _ingest_complete_call(self, block: dict[str, Any]) -> None:
         call_id = self._call_id(block)
@@ -92,12 +100,12 @@ class ToolCallAccumulator:
         ).strip() or "tool_call_1"
 
     @staticmethod
-    def _parsed_arguments(current: dict[str, Any]) -> dict[str, Any]:
+    def _parsed_arguments(current: dict[str, Any]) -> dict[str, Any] | None:
         raw = "".join(str(part) for part in current.get("arguments_parts") or [])
         if not raw.strip():
             return {}
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
-            return {"value": raw}
-        return parsed if isinstance(parsed, dict) else {"value": parsed}
+            return None
+        return parsed if isinstance(parsed, dict) else None

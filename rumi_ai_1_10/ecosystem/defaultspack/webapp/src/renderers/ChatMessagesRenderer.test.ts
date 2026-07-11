@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, previewableToolActivityKeys, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, toolActivityPreviewId, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -220,6 +220,123 @@ test("empty response warning only appears for finalized agent messages without a
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, false), true);
   assert.equal(shouldShowEmptyResponseWarning(textCompleted, false), false);
   assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
+});
+
+test("interrupted assistant keeps partial content and shows an incomplete-state notice", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      rawText: "valuable partial answer",
+      content: [{ type: "text", text: "valuable partial answer" }],
+      metadata: {
+        thinkingLabel: "failed",
+        interrupted: true,
+        interruptionReason: "provider_stream_error",
+      },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /valuable partial answer/);
+  assert.match(html, /応答は途中で中断されました/);
+  assert.match(html, /role="status"/);
+});
+
+test("retried tool attempts render discard history beside the clean running attempt", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: true,
+    messages: [message({
+      id: "assistant-retry",
+      metadata: { thinkingLabel: "streaming" },
+      events: [
+        {
+          type: "tool_call_started",
+          seq: 1,
+          timestamp: 1_000,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 1,
+          provider_attempt_generation: 1,
+        },
+        {
+          type: "tool_call_completed",
+          seq: 2,
+          timestamp: 1_500,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 1,
+          provider_attempt_generation: 1,
+          provider_attempt_discarded: true,
+          is_error: true,
+          display_text: "provider 応答の中断により未実行の tool 入力を破棄しました",
+        },
+        {
+          type: "tool_call_started",
+          seq: 4,
+          timestamp: 2_000,
+          tool_call_id: "call_1",
+          tool_name: "coding_file_read",
+          provider_attempt: 2,
+          provider_attempt_generation: 2,
+          arguments: { path: "README.md" },
+        },
+      ],
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /未実行の tool 入力を破棄しました/);
+  assert.match(html, /README\.md/);
+  assert.match(html, /1件失敗/);
+  assert.match(html, /作業中/);
+});
+
+test("tool previews match retry generations while legacy events still use call ids", () => {
+  const keys = previewableToolActivityKeys([
+    {
+      type: "tool_call_completed",
+      tool_call_id: "call_1",
+      provider_attempt_generation: 1,
+      provider_attempt_discarded: true,
+    },
+    {
+      type: "tool_call_completed",
+      tool_call_id: "call_1",
+      provider_attempt_generation: 2,
+    },
+    {
+      type: "tool_call_completed",
+      tool_call_id: "legacy_call",
+    },
+  ]);
+
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "call_1",
+    providerAttemptGeneration: 1,
+  }, keys), undefined);
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "call_1",
+    providerAttemptGeneration: 2,
+  }, keys), "call_1");
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "legacy_call",
+  }, keys), "legacy_call");
 });
 
 test("authority approval followup is hidden while waiting response remains passive", () => {

@@ -1477,6 +1477,8 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
           thinkingLabel: String(thinking?.state ?? ""),
           thinkingDuration,
           thinkingTranscript: String(thinking?.transcript ?? ""),
+          interrupted: metadata.interrupted === true || message.finish_reason === "interrupted",
+          interruptionReason: String(metadata.interruption_reason ?? ""),
           attachedToolCount,
           pendingApproval: pendingApproval && typeof pendingApproval === "object" && !Array.isArray(pendingApproval)
             ? pendingApproval as Record<string, unknown>

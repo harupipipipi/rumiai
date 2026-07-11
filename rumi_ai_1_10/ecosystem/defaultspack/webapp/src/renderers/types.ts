@@ -28,6 +28,8 @@ export type ChatUiMessage = {
     thinkingLabel?: string;
     thinkingDuration?: string;
     thinkingTranscript?: string;
+    interrupted?: boolean;
+    interruptionReason?: string;
     attachedToolCount?: number;
     pendingApproval?: Record<string, unknown>;
     pendingAuthorityApproval?: Record<string, unknown>;

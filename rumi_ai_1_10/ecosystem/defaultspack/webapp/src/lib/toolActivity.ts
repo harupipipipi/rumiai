@@ -10,6 +10,8 @@ export type RunActivityItem = {
   kind: RunActivityKind;
   runId?: string;
   toolCallId?: string;
+  providerAttempt?: number | string;
+  providerAttemptGeneration?: number | string;
   startSeq?: number;
   endSeq?: number;
   startedAt?: number | string;
@@ -474,11 +476,9 @@ function timestampValue(value: unknown): number | string | undefined {
 
 function eventKey(event: ChatActivityEvent): string {
   const toolCallId = eventToolCallId(event);
-  if (toolCallId) {
-    return toolCallId;
-  }
   const args = eventArguments(event);
-  return `${eventToolName(event) || "tool"}:${JSON.stringify(args)}`;
+  const baseKey = toolCallId || `${eventToolName(event) || "tool"}:${JSON.stringify(args)}`;
+  return attemptScopedKey(baseKey, eventAttemptGeneration(event));
 }
 
 function eventData(event: ChatActivityEvent): Record<string, unknown> {
@@ -509,6 +509,32 @@ function eventToolName(event: ChatActivityEvent): string {
 
 function eventToolCallId(event: ChatActivityEvent): string {
   return pickEventString(event, ["tool_call_id", "toolCallId"]);
+}
+
+function attemptValue(value: unknown): number | string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return undefined;
+}
+
+function eventAttempt(event: ChatActivityEvent): number | string | undefined {
+  return attemptValue(eventValue(event, "provider_attempt"));
+}
+
+function eventAttemptGeneration(event: ChatActivityEvent): number | string | undefined {
+  return attemptValue(eventValue(event, "provider_attempt_generation"));
+}
+
+function logAttempt(log: ToolLogEntry): number | string | undefined {
+  return attemptValue(log.provider_attempt);
+}
+
+function logAttemptGeneration(log: ToolLogEntry): number | string | undefined {
+  return attemptValue(log.provider_attempt_generation);
+}
+
+function attemptScopedKey(baseKey: string, generation: number | string | undefined): string {
+  return generation === undefined ? baseKey : `${baseKey}::provider-attempt:${generation}`;
 }
 
 function eventArguments(event: ChatActivityEvent): Record<string, unknown> {
@@ -554,6 +580,23 @@ function eventRank(event: ChatActivityEvent): number {
   }
   if (event.type === "approval_requested" || event.phase === "approval_requested") return 1;
   return 0;
+}
+
+function activityStatusRank(status: ToolActivityStatus): number {
+  if (status === "failed" || status === "blocked") return 3;
+  if (status === "completed") return 2;
+  if (status === "waiting_approval") return 1;
+  return 0;
+}
+
+function monotonicActivityStatus(
+  current: ToolActivityStatus | undefined,
+  candidate: ToolActivityStatus,
+): ToolActivityStatus {
+  if (!current || activityStatusRank(candidate) >= activityStatusRank(current)) {
+    return candidate;
+  }
+  return current;
 }
 
 function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
@@ -676,6 +719,8 @@ type AccumulatedToolCall = {
   startedAt?: number | string;
   completedAt?: number | string;
   status?: ToolActivityStatus;
+  providerAttempt?: number | string;
+  providerAttemptGeneration?: number | string;
 };
 
 function eventStartedAt(event: ChatActivityEvent): number | string | undefined {
@@ -689,6 +734,8 @@ function eventCompletedAt(event: ChatActivityEvent): number | string | undefined
 function updateAccumulatedCallFromEvent(call: AccumulatedToolCall, event: ChatActivityEvent, index: number): void {
   const seq = seqValue(event.seq);
   call.orderIndex = Math.min(call.orderIndex, index);
+  call.providerAttempt = call.providerAttempt ?? eventAttempt(event);
+  call.providerAttemptGeneration = call.providerAttemptGeneration ?? eventAttemptGeneration(event);
   if (isStartEvent(event)) {
     call.startSeq = minDefined(call.startSeq, seq);
     call.startedAt = call.startedAt ?? eventStartedAt(event);
@@ -700,7 +747,7 @@ function updateAccumulatedCallFromEvent(call: AccumulatedToolCall, event: ChatAc
   if (call.startSeq === undefined && seq !== undefined && !call.event) {
     call.startSeq = seq;
   }
-  call.status = statusForEvent(event);
+  call.status = monotonicActivityStatus(call.status, statusForEvent(event));
   const existing = call.event;
   if (!existing || eventRank(event) >= eventRank(existing)) {
     call.event = existing ? mergeActivityEvents(existing, event) : event;
@@ -711,17 +758,20 @@ function updateAccumulatedCallFromEvent(call: AccumulatedToolCall, event: ChatAc
 
 function updateAccumulatedCallFromLog(call: AccumulatedToolCall, log: ToolLogEntry, index: number, eventCount: number): void {
   call.log = log;
+  call.providerAttempt = call.providerAttempt ?? logAttempt(log);
+  call.providerAttemptGeneration = call.providerAttemptGeneration ?? logAttemptGeneration(log);
   call.orderIndex = Math.min(call.orderIndex, eventCount + index);
   call.completedAt = call.completedAt ?? log.timestamp;
   call.endSeq = maxDefined(call.endSeq, seqValue(log.seq));
-  call.status = statusForLog(log);
+  call.status = monotonicActivityStatus(call.status, statusForLog(log));
   if (call.startSeq === undefined) call.startSeq = seqValue(log.seq);
   if (call.startedAt === undefined && !call.event) call.startedAt = log.timestamp;
 }
 
 function logKey(log: ToolLogEntry): string {
   const id = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
-  return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+  const baseKey = id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+  return attemptScopedKey(baseKey, logAttemptGeneration(log));
 }
 
 function statusForProgressEvent(event: ChatActivityEvent): ToolActivityStatus {
@@ -839,6 +889,8 @@ function toolItemFromCall(call: AccumulatedToolCall, options: { conversationId?:
     runId: typeof event?.run_id === "string" ? event.run_id : undefined,
     toolName,
     toolCallId: log?.tool_call_id ?? (event ? eventToolCallId(event) : undefined),
+    providerAttempt: call.providerAttempt,
+    providerAttemptGeneration: call.providerAttemptGeneration,
     startSeq: call.startSeq,
     endSeq: call.endSeq,
     startedAt,
