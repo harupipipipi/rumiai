@@ -5114,8 +5114,23 @@ function ChatApp() {
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
+      const requestFingerprint = JSON.stringify({
+        text: userText,
+        attachments: submittedAttachments.map(({ name, size, type, source, sourcePath }) => (
+          { name, size, type, source, sourcePath }
+        )),
+      });
+      const recoverablePending = pendingRequests[conversation.id];
+      const operationId = recoverablePending?.requestFingerprint === requestFingerprint
+        && recoverablePending.operationId
+        ? recoverablePending.operationId
+        : typeof globalThis.crypto?.randomUUID === "function"
+          ? globalThis.crypto.randomUUID()
+          : `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
       rememberPendingRequest({
         conversationId: conversation.id,
+        operationId,
+        requestFingerprint,
         startedAt: requestStartedAt,
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
         toolNames: [],
@@ -5409,6 +5424,7 @@ function ChatApp() {
       const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
+        idempotency_key: operationId,
         params: templateRequestPayload.params,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
