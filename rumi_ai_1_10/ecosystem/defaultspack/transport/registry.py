@@ -2338,6 +2338,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/desktops", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/calendar", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),

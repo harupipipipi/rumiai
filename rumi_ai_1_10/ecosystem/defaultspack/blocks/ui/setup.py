@@ -71,6 +71,7 @@ def run(context):
         ("GET", "/chat", _static_shell, {}),
         ("GET", "/defaultspack", _static_shell, {}),
         ("GET", "/pack/defaultspack", _static_shell, {}),
+        ("GET", "/desktops", _static_shell, {}),
         ("GET", "/approval", _static_shell, {}),
         ("POST", "/api/authority/browser-ui-operator", _authority_browser_ui_operator, {}),
         ("GET", "/ambient", _static_shell, {}),

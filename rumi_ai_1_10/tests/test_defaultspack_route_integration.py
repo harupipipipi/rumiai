@@ -130,6 +130,31 @@ def test_browser_companion_session_route_is_sensitive_local_only():
     assert route.local_only is True
 
 
+def test_desktops_spa_route_is_registered_as_defaultspack_shell():
+    from ecosystem.defaultspack.transport.registry import build_always_available_http_routes
+
+    class Server:
+        def __getattr__(self, name):
+            if name.startswith("_handle_"):
+                return self._handle_noop
+            raise AttributeError(name)
+
+        def _handle_noop(self, request_data, path_params):
+            return {"status": "ok"}
+
+        def _handle_static(self, request_data, path_params):
+            return {"_static": True}
+
+    routes = build_always_available_http_routes(Server())
+    by_pattern = {
+        (method, compiled.pattern): handler
+        for method, compiled, handler, _source, _path_inject in routes
+    }
+
+    assert ("GET", "^/desktops$") in by_pattern
+    assert by_pattern[("GET", "^/desktops$")].__name__ == "_handle_static"
+
+
 def test_tool_setup_registers_browser_companion_session_route_metadata():
     from blocks.tool.setup import run
 
