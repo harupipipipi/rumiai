@@ -16,7 +16,6 @@
     "defaultspack.ai.get_thinking_level",
     "defaults.ai.get.thinking.level",
     "defaultspack.ai.get.thinking.level",
-    "defaults.model_runtime.get_thinking_level",
     "defaultspack.model_runtime.get_thinking_level"
   ],
   "input_schema": {

@@ -80,6 +80,7 @@ domains:
     path: domain/chat
     public_imports:
     - domain/capability/catalog
+    - domain/mention
     - domain/tool_policy/internal_context
   change_request:
     may_import:
@@ -101,6 +102,8 @@ domains:
     - domain/chat
     - domain/input
     path: domain/company
+    public_imports:
+    - domain/mention
   components:
     may_import: []
     path: domain/components
@@ -228,6 +231,9 @@ domains:
   memory2:
     may_import: []
     path: domain/memory2
+  mention:
+    may_import: []
+    path: domain/mention.py
   mobile:
     may_import:
     - domain/tool
@@ -277,6 +283,9 @@ domains:
   share:
     may_import: []
     path: domain/share
+    public_imports:
+    - domain/chat/store
+    - domain/safety/audit
   skill_feedback:
     may_import:
     - domain/extensions
@@ -295,6 +304,8 @@ domains:
     - domain/coding
     - domain/company
     path: domain/subagent_team
+    public_imports:
+    - domain/mention
   template:
     may_import: []
     path: domain/template

@@ -9,9 +9,11 @@ from __future__ import annotations
 import sys
 
 from .audit import AuditLogger
+from .host_adapter import ComputerSeatHostAdapter
 from .platform_adapters import adapter_for_sys_platform
 from .registry import DriverRegistry
 from .service import ComputerSeatService
+from .tool_service import ComputerToolService
 
 
 def create_default_driver_registry() -> DriverRegistry:
@@ -37,3 +39,17 @@ def create_default_computer_seat_service(
     """Create a ComputerSeatService with all default drivers registered."""
     registry = create_default_driver_registry()
     return ComputerSeatService(registry, audit_logger=audit_logger)
+
+
+def create_default_computer_host(
+    audit_logger: AuditLogger | None = None,
+) -> ComputerSeatHostAdapter:
+    """Create the model-agnostic host adapter over the default native drivers."""
+    return ComputerSeatHostAdapter(create_default_computer_seat_service(audit_logger=audit_logger))
+
+
+def create_default_computer_tool_service(
+    audit_logger: AuditLogger | None = None,
+) -> ComputerToolService:
+    """Create the pack-owned service over the canonical native host boundary."""
+    return ComputerToolService(create_default_computer_host(audit_logger=audit_logger))

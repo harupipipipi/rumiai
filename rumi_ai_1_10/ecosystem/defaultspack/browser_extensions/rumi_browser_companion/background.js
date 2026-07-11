@@ -1,3 +1,5 @@
+import "./search_home_destination_policy.js";
+
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
@@ -16,6 +18,12 @@ const BRIDGE_POLL_PATH = "/api/tools/browser-companion/bridge/poll";
 const BRIDGE_RESULT_PATH = "/api/tools/browser-companion/bridge/result";
 const SEARCH_HOME_ROUTE_STATE_KEY = "rumiSearchHomeRouteStateByTab";
 const SEARCH_HOME_ROUTE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
+const SEARCH_HOME_MAX_CLOCK_SKEW_MS = 30_000;
+const SEARCH_HOME_TRUSTED_ORIGINS = Object.freeze(
+  Array.isArray(chrome.runtime.getManifest().x_rumi_search_home_origins)
+    ? chrome.runtime.getManifest().x_rumi_search_home_origins
+    : []
+);
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await ensureSettings();
@@ -69,7 +77,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true, tabs: await getTabsSummary() });
         return;
       case "rumi:search-home:set-route-state":
-        sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload));
+        sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload, {
+          senderUrl: sender?.url || sender?.tab?.url || "",
+          sourceOrigin: message.source_origin
+        }));
         return;
       case "rumi:search-home:get-route-state":
         sendResponse(await getSearchHomeRouteState(sender?.tab?.id));
@@ -748,15 +759,23 @@ async function clearSearchHomeRouteState(tabId) {
   await saveSearchHomeRouteStates(states);
 }
 
-async function setSearchHomeRouteState(tabId, payload) {
+async function setSearchHomeRouteState(tabId, payload, metadata = {}) {
   if (!Number.isInteger(tabId)) {
     return { ok: false, error: "Active tab is required for Search Home route state." };
   }
-  const normalized = normalizeSearchHomeRouteState(payload);
+  const sourceOrigin = trustedSearchHomeSourceOrigin(metadata.senderUrl, metadata.sourceOrigin);
+  if (!sourceOrigin) {
+    return { ok: false, error: "Search Home route state must come from a trusted Search Home origin." };
+  }
+  const normalized = normalizeSearchHomeRouteState(payload, { sourceOrigin });
   if (!normalized) {
     return { ok: false, error: "Invalid Search Home route payload." };
   }
   const states = await loadSearchHomeRouteStates();
+  const existing = states[String(tabId)];
+  if (existing?.state_id && existing.state_id === normalized.state_id) {
+    return { ok: false, error: "Search Home route state replay was rejected." };
+  }
   states[String(tabId)] = normalized;
   await saveSearchHomeRouteStates(states);
   return {
@@ -773,10 +792,11 @@ async function getSearchHomeRouteState(tabId) {
     return { ok: true, active: false };
   }
   const states = await loadSearchHomeRouteStates();
-  const current = normalizeSearchHomeRouteState(states[String(tabId)]);
-  if (!current || !isFreshSearchHomeRouteState(current)) {
-    if (current) {
-      delete states[String(tabId)];
+  const stateKey = String(tabId);
+  const current = normalizeSearchHomeRouteState(states[stateKey]);
+  if (!current || !isFreshSearchHomeRouteState(current) || !isTrustedStoredSearchHomeRouteState(current)) {
+    if (stateKey in states) {
+      delete states[stateKey];
       await saveSearchHomeRouteStates(states);
     }
     return { ok: true, active: false, tab_id: tabId };
@@ -796,7 +816,7 @@ async function advanceSearchHomeRouteState(tabId, action) {
   }
   const states = await loadSearchHomeRouteStates();
   const current = normalizeSearchHomeRouteState(states[String(tabId)]);
-  if (!current || !isFreshSearchHomeRouteState(current)) {
+  if (!current || !isFreshSearchHomeRouteState(current) || !isTrustedStoredSearchHomeRouteState(current)) {
     return { ok: false, error: "No fresh Search Home route state was found for this tab." };
   }
   let url = "";
@@ -816,12 +836,7 @@ async function advanceSearchHomeRouteState(tabId, action) {
   if (!url) {
     return { ok: false, error: "No destination URL was available for the requested Search Home action." };
   }
-  states[String(tabId)] = {
-    ...current,
-    target_url: url,
-    selected_index: nextIndex,
-    updated_at: new Date().toISOString()
-  };
+  delete states[String(tabId)];
   await saveSearchHomeRouteStates(states);
   await chrome.tabs.update(tabId, { url });
   return { ok: true, tab_id: tabId, url, selected_index: nextIndex };
@@ -841,24 +856,45 @@ function normalizeSearchHomeRouteAction(action) {
   return "next";
 }
 
-function normalizeSearchHomeRouteState(value) {
+function normalizeSearchHomeRouteState(value, options = {}) {
   if (!value || typeof value !== "object") {
     return null;
   }
-  const candidates = Array.isArray(value.target_candidates)
-    ? value.target_candidates
+  const rawCandidates = Array.isArray(value.target_candidates) ? value.target_candidates : [];
+  const candidates = rawCandidates.length
+    ? rawCandidates
         .map((candidate) => normalizeSearchHomeCandidate(candidate))
         .filter(Boolean)
     : [];
+  if (candidates.length !== rawCandidates.length) {
+    return null;
+  }
   const fallbackUrl = normalizeSearchHomeCandidateUrl(value.fallback_url);
   const selectedIndex = normalizeSearchHomeIndex({ target_candidates: candidates }, Number(value.selected_index));
+  const targetUrl = normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || "");
+  if (!targetUrl && !fallbackUrl && candidates.length === 0) {
+    return null;
+  }
+  const issuedAt = Date.parse(String(value.issued_at || ""));
+  const expiresAt = Date.parse(String(value.expires_at || ""));
+  const now = Date.now();
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) ||
+      issuedAt > now + SEARCH_HOME_MAX_CLOCK_SKEW_MS || expiresAt <= now ||
+      expiresAt - issuedAt > SEARCH_HOME_ROUTE_MAX_AGE_MS) {
+    return null;
+  }
+  const stateId = String(value.state_id || "");
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(stateId)) return null;
   return {
-    query: String(value.query || ""),
-    target_url: normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || ""),
+    query: sanitizeSearchHomeQuery(value.query),
+    target_url: targetUrl,
     fallback_url: fallbackUrl,
     selected_index: selectedIndex,
     target_candidates: candidates,
-    updated_at: typeof value.updated_at === "string" && value.updated_at ? value.updated_at : new Date().toISOString()
+    source_origin: String(options.sourceOrigin || value.source_origin || ""),
+    state_id: stateId,
+    issued_at: new Date(issuedAt).toISOString(),
+    expires_at: new Date(expiresAt).toISOString()
   };
 }
 
@@ -866,28 +902,36 @@ function normalizeSearchHomeCandidate(value) {
   if (!value || typeof value !== "object") {
     return null;
   }
-  const finalUrl = normalizeSearchHomeCandidateUrl(value.final_url || value.url);
-  if (!finalUrl) {
+  const policy = RumiSearchHomeDestinationPolicy.evaluateRedirect(
+    value.url || value.final_url,
+    value.final_url || value.url,
+    Boolean(value.redirected)
+  );
+  if (policy.verdict !== "allow") {
     return null;
   }
+  const initial = RumiSearchHomeDestinationPolicy.evaluate(value.url || value.final_url);
+  const initialUrl = RumiSearchHomeDestinationPolicy.safeForPersistence(initial.url || policy.url);
+  const finalUrl = RumiSearchHomeDestinationPolicy.safeForPersistence(policy.url);
+  if (!initialUrl || !finalUrl) return null;
   return {
-    url: normalizeSearchHomeCandidateUrl(value.url) || finalUrl,
+    url: initialUrl,
     final_url: finalUrl,
     title: String(value.title || ""),
-    domain: String(value.domain || "")
+    domain: policy.host,
+    redirected: Boolean(value.redirected)
   };
 }
 
 function normalizeSearchHomeCandidateUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return "";
-    }
-    return url.toString();
-  } catch {
-    return "";
-  }
+  const result = RumiSearchHomeDestinationPolicy.evaluate(value);
+  return result.verdict === "allow" ? RumiSearchHomeDestinationPolicy.safeForPersistence(result.url) : "";
+}
+
+function sanitizeSearchHomeQuery(value) {
+  const query = String(value || "");
+  if (!query.includes("://")) return query;
+  return RumiSearchHomeDestinationPolicy.safeForPersistence(query) ? query : "";
 }
 
 function normalizeSearchHomeIndex(state, value) {
@@ -908,22 +952,43 @@ function nextSearchHomeIndex(state, delta) {
 }
 
 function isFreshSearchHomeRouteState(state) {
-  if (!state || typeof state.updated_at !== "string" || !state.updated_at) {
+  if (!state || typeof state.issued_at !== "string" || typeof state.expires_at !== "string") {
     return false;
   }
-  const updatedAt = Date.parse(state.updated_at);
-  if (!Number.isFinite(updatedAt)) {
+  const issuedAt = Date.parse(state.issued_at);
+  const expiresAt = Date.parse(state.expires_at);
+  const now = Date.now();
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) {
     return false;
   }
-  return Date.now() - updatedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
+  return issuedAt <= now + SEARCH_HOME_MAX_CLOCK_SKEW_MS && expiresAt > now &&
+    expiresAt - issuedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
 }
 
 function searchHomeRouteStateExpiresAt(state) {
-  const updatedAt = Date.parse(state?.updated_at || "");
-  if (!Number.isFinite(updatedAt)) {
+  const expiresAt = Date.parse(state?.expires_at || "");
+  if (!Number.isFinite(expiresAt)) {
     return 0;
   }
-  return updatedAt + SEARCH_HOME_ROUTE_MAX_AGE_MS;
+  return expiresAt;
+}
+
+function isTrustedStoredSearchHomeRouteState(state) {
+  return RumiSearchHomeDestinationPolicy.isTrustedSearchHomeOrigin(state?.source_origin, SEARCH_HOME_TRUSTED_ORIGINS);
+}
+
+function trustedSearchHomeSourceOrigin(senderUrl, claimedOrigin) {
+  let senderOrigin = "";
+  try {
+    senderOrigin = new URL(String(senderUrl || "")).origin;
+  } catch (_error) {
+    return "";
+  }
+  const sourceOrigin = String(claimedOrigin || "");
+  if (!sourceOrigin || senderOrigin !== sourceOrigin) {
+    return "";
+  }
+  return RumiSearchHomeDestinationPolicy.isTrustedSearchHomeOrigin(sourceOrigin, SEARCH_HOME_TRUSTED_ORIGINS) ? sourceOrigin : "";
 }
 
 function tabSummary(tab) {

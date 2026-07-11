@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## Implemented
 
@@ -12,12 +12,13 @@ Last updated: 2026-06-06
 - `api_routes` table dispatch is already live for control-panel and pack-defined API endpoints.
 - Builtin core API routes now also include `core_system_api`, so shared system GET routes load from manifest data instead of handwritten `do_GET` branches.
 - Pack function invocation now runs through explicit execution policy checks before dispatch.
+- Compatibility alias use is locally audited without payload data, and non-internal `defaults.*` callers receive structured migration warnings.
 
 ## Partial / In Progress
 
 - `PackAPIHandler` is mostly decomposed into mixins, but the verb methods still coordinate multiple fallback paths in one file.
 - defaultspack HTTP routes are in migration: many now resolve through functions or flows first, but legacy block fallbacks still exist and are now tracked explicitly.
-- compatibility aliases under `defaults.*` still exist broadly for stability; they are tracked as compatibility, not canonical naming.
+- allowlisted compatibility aliases under `defaults.*` remain for documented callers and are moving through staged warning and removal.
 - defaultspack domain boundaries are now declared, but the current YAML largely reflects the repo's existing dependency graph and will tighten over time.
 
 ## Planned Next Tightening

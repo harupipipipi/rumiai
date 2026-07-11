@@ -42,7 +42,14 @@ def sheet_create(arguments: dict[str, Any], context: dict[str, Any] | None = Non
         ws = workspace(context)
         output = ws.resolve(output_path)
         _write_rows(output, rows or [["value"]])
-        return ok({"path": ws.relative(output), "rows": len(rows or [["value"]]), "size": output.stat().st_size})
+        return ok(
+            {
+                "path": ws.relative(output),
+                "workspace_path": ws.workspace_relative(output),
+                "rows": len(rows or [["value"]]),
+                "size": output.stat().st_size,
+            }
+        )
     except Exception as exc:
         return err(str(exc), "SHEET_CREATE_FAILED")
 
@@ -56,7 +63,14 @@ def sheet_read(arguments: dict[str, Any], context: dict[str, Any] | None = None)
         target = ws.resolve(path, must_exist=True)
         rows = _rows_from_file(target)
         limit = int(arguments.get("limit") or 200)
-        return ok({"path": ws.relative(target), "rows": rows[:limit], "row_count": len(rows)})
+        return ok(
+            {
+                "path": ws.relative(target),
+                "workspace_path": ws.workspace_relative(target),
+                "rows": rows[:limit],
+                "row_count": len(rows),
+            }
+        )
     except Exception as exc:
         return err(str(exc), "SHEET_READ_FAILED")
 
@@ -70,7 +84,14 @@ def sheet_update(arguments: dict[str, Any], context: dict[str, Any] | None = Non
         ws = workspace(context)
         target = ws.resolve(path)
         _write_rows(target, rows)
-        return ok({"path": ws.relative(target), "rows": len(rows), "size": target.stat().st_size})
+        return ok(
+            {
+                "path": ws.relative(target),
+                "workspace_path": ws.workspace_relative(target),
+                "rows": len(rows),
+                "size": target.stat().st_size,
+            }
+        )
     except Exception as exc:
         return err(str(exc), "SHEET_UPDATE_FAILED")
 
@@ -101,7 +122,16 @@ def sheet_analyze(arguments: dict[str, Any], context: dict[str, Any] | None = No
                 "min": min(numeric_values),
                 "max": max(numeric_values),
             }
-        return ok({"path": ws.relative(target), "headers": headers, "row_count": len(rows), "missing_values": missing, "numeric": stats})
+        return ok(
+            {
+                "path": ws.relative(target),
+                "workspace_path": ws.workspace_relative(target),
+                "headers": headers,
+                "row_count": len(rows),
+                "missing_values": missing,
+                "numeric": stats,
+            }
+        )
     except Exception as exc:
         return err(str(exc), "SHEET_ANALYZE_FAILED")
 

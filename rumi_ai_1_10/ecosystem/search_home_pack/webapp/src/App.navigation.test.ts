@@ -22,4 +22,29 @@ test("route shortcuts are not installed globally and sensitive route data is not
   assert.doesNotMatch(appSource, /routeHotkeyActionFromKeyboardEvent/);
   assert.doesNotMatch(appSource, /routeNavigationForHotkey/);
   assert.doesNotMatch(appSource, /postMessage\([\s\S]*?,\s*["']\*["']\s*\)/);
+  assert.match(appSource, /window\.location\.origin/);
+});
+
+test("390px layout wraps the heading, input actions, and action descriptions", () => {
+  const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const headingRules = [...styles.matchAll(/\.hero-header h1 \{([^}]*)\}/g)].map(
+    ([, declarations]) => declarations,
+  );
+  const mobileHeadingRule = headingRules[headingRules.length - 1] ?? "";
+
+  assert.equal(headingRules.length, 3);
+  assert.doesNotMatch(headingRules.join("\n"), /font-size:\s*(?:clamp\(|[^;]*vw)/);
+  assert.match(mobileHeadingRule, /font-size:\s*2\.25rem/);
+  assert.match(mobileHeadingRule, /overflow:\s*visible/);
+  assert.match(mobileHeadingRule, /overflow-wrap:\s*anywhere/);
+  assert.match(mobileHeadingRule, /text-overflow:\s*clip/);
+  assert.match(mobileHeadingRule, /white-space:\s*normal/);
+  assert.match(styles, /\.search-row \{[\s\S]*?minmax\(0, 1fr\)/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.action-row small \{[\s\S]*?white-space: normal/);
+});
+
+test("blocked destinations retain a safe copy-details action", () => {
+  assert.match(reviewSource, /ブロック詳細をコピー/);
+  assert.match(appSource, /Search Home blocked destination:/);
+  assert.doesNotMatch(appSource, /blocked destination:.*destination\.input/);
 });

@@ -8,6 +8,7 @@ import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
 import { ArrowLeft, Play, Loader2 } from 'lucide-react';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 export function PackDetail() {
   const t = useT();
@@ -15,6 +16,7 @@ export function PackDetail() {
   const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
   const isLoading = useAppStore(state => state.isLoading);
+  const apiError = useAppStore(state => state.apiError);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
@@ -36,10 +38,28 @@ export function PackDetail() {
     );
   }
 
+  if (apiError && !pack) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-xl">
+          <InlineLoadError
+            title="Pack details could not be loaded"
+            message={apiError}
+            onRetry={() => void loadPacks()}
+            retrying={isLoading}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (!pack) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-text-muted">Pack not found</p>
+        <div className="text-center">
+          <p className="text-sm font-medium text-text-main">Pack not found</p>
+          <Button className="mt-3" variant="outline" onClick={() => navigate(panelRoutes.packs)}>Back to packs</Button>
+        </div>
       </div>
     );
   }

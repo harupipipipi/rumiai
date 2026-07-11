@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Hand, Loader2 } from "lucide-react";
+import { Cloud, Copy, Download, Hand, Link, Loader2, X } from "lucide-react";
 
 import {
   CompanyWorkspacePanel,
@@ -39,6 +39,7 @@ import {
 } from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
+import { ConversationShareLanding, ImportedConversationNotice } from "./pages/ConversationShareLanding";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -59,7 +60,25 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
+import {
+  canExecuteComposerEndpointAction,
+  composerMentionMetadataFromWidgets,
+  composerMentionSyntaxesForToolId,
+  composerMentionToolIdsFromWidgets,
+  composerSkillMentionWidget,
+  composerToolMentionWidget,
+  isSafeLocalEndpoint,
+  normalizeComposerMentionMetadata,
+  publicComposerWidgetMetadata,
+  reconcileComposerSemanticDraft,
+  skillMentionIdsFromText,
+  toolMentionIdsFromText,
+  trustedComposerActionForWidget,
+  withComposerMentionSelectionOwnership,
+} from "./lib/composerWidgets";
+import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
+import { toolGroupFor } from "./lib/toolUi";
+import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
@@ -75,6 +94,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
@@ -88,6 +108,11 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type BackendConnectionState = "online" | "degraded" | "offline";
+
+type PendingMentionAttachmentRequest = {
+  generation: number;
+  token: number;
+};
 
 const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
   "ambient.routing.mode": "mode",
@@ -157,6 +182,13 @@ function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
     if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
   }
   return [...new Set(ids)];
+}
+
+function semanticAttachmentPaths(files: AttachedFile[]): string[] {
+  return files.flatMap((file) => {
+    if (file.sourcePath) return [file.sourcePath];
+    return file.source === "workspace" && file.name ? [file.name] : [];
+  });
 }
 
 function parseConversationToolPreferences(metadata: unknown): ConversationToolPreferences {
@@ -1458,7 +1490,14 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
     ...(authorityFollowup ? { authorityFollowup } : {}),
     ...(chatDisplay ? { chatDisplay } : {}),
   };
-  const userMetadata = Object.keys(displayMetadata).length > 0 ? displayMetadata : undefined;
+  const explicitMentions = normalizeComposerMentionMetadata(metadata.mentions);
+  const fallbackMentions = explicitMentions.length === 0 && Array.isArray(metadata.dropped_widgets)
+    ? composerMentionMetadataFromWidgets(metadata.dropped_widgets as DroppedWidget[])
+    : [];
+  const mentions = explicitMentions.length > 0 ? explicitMentions : fallbackMentions;
+  const userMetadata = Object.keys(displayMetadata).length > 0 || mentions.length > 0
+    ? { ...displayMetadata, ...(mentions.length > 0 ? { mentions } : {}) }
+    : undefined;
   return {
     id: message.id,
     conversationId: message.conversation_id,
@@ -1490,7 +1529,11 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   };
 }
 
-function optimisticUserMessage(conversationId: string, text: string): ChatMessage {
+function optimisticUserMessage(
+  conversationId: string,
+  text: string,
+  metadata?: Record<string, unknown>,
+): ChatMessage {
   return {
     id: `optimistic-${Date.now()}`,
     role: "user",
@@ -1504,6 +1547,7 @@ function optimisticUserMessage(conversationId: string, text: string): ChatMessag
     finish_reason: null,
     usage: null,
     widget: null,
+    metadata,
   };
 }
 
@@ -2401,6 +2445,10 @@ function ChatApp() {
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const widgetContext = useMemo(
+    () => createWidgetConversationContext(activeConversationId),
+    [activeConversationId],
+  );
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
@@ -2417,6 +2465,14 @@ function ChatApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCreatedUrl, setShareCreatedUrl] = useState<string | null>(null);
+  const [shareCreatedToken, setShareCreatedToken] = useState<string | null>(null);
+  const [shareExpiryHours, setShareExpiryHours] = useState("24");
+  const [shareRevoked, setShareRevoked] = useState(false);
+  const [shareDialogError, setShareDialogError] = useState<string | null>(null);
+  const [provenanceDismissedFor, setProvenanceDismissedFor] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
@@ -2452,7 +2508,9 @@ function ChatApp() {
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [pendingMentionAttachmentPaths, setPendingMentionAttachmentPaths] = useState<string[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
+  const [composerEntityReferences, setComposerEntityReferences] = useState<ComposerEntityReference[]>([]);
   const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
@@ -2465,12 +2523,53 @@ function ChatApp() {
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
+  const authorityApprovalWindowRequestRef = useRef<string | null>(null);
+  const dismissedComposerMentionToolsRef = useRef<Map<string, string[]>>(
+    new Map(),
+  );
+  const composerDraftGenerationRef = useRef(0);
+  const mentionAttachmentTokenRef = useRef(0);
+  const pendingMentionAttachmentRequestsRef = useRef<
+    Map<string, PendingMentionAttachmentRequest>
+  >(new Map());
+
+  const syncPendingMentionAttachmentPaths = () => {
+    setPendingMentionAttachmentPaths([
+      ...pendingMentionAttachmentRequestsRef.current.keys(),
+    ]);
+  };
+
+  const cancelPendingMentionAttachments = (path?: string) => {
+    if (path) {
+      pendingMentionAttachmentRequestsRef.current.delete(path);
+    } else {
+      composerDraftGenerationRef.current += 1;
+      pendingMentionAttachmentRequestsRef.current.clear();
+    }
+    syncPendingMentionAttachmentPaths();
+  };
+
+  const semanticAttachmentPathsIncludingPending = (files: AttachedFile[]) => [
+    ...new Set([
+      ...semanticAttachmentPaths(files),
+      ...pendingMentionAttachmentRequestsRef.current.keys(),
+    ]),
+  ];
 
   useEffect(() => {
     if (mode === "chat") {
       setMode("agent");
     }
   }, [mode, setMode]);
+
+  useEffect(() => {
+    if (!shareDialogOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setShareDialogOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [shareDialogOpen]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -2557,7 +2656,7 @@ function ChatApp() {
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
-  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
+  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, true);
   const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
@@ -2669,6 +2768,26 @@ function ChatApp() {
     setSelectedToolIds: setStoredSelectedToolIds,
     conversationPreferences: activeConversationToolPreferences,
   });
+  useEffect(() => {
+    if (isGenerating) return;
+    const reconciled = reconcileComposerSemanticDraft({
+      droppedWidgets,
+      selectedToolIds,
+      text: input,
+    });
+    if (
+      reconciled.droppedWidgets.length !== droppedWidgets.length
+      || reconciled.droppedWidgets.some((widget, index) => widget !== droppedWidgets[index])
+    ) {
+      setDroppedWidgets(reconciled.droppedWidgets);
+    }
+    if (
+      reconciled.selectedToolIds.length !== selectedToolIds.length
+      || reconciled.selectedToolIds.some((toolId, index) => toolId !== selectedToolIds[index])
+    ) {
+      setStoredSelectedToolIds(reconciled.selectedToolIds);
+    }
+  }, [droppedWidgets, input, isGenerating, selectedToolIds, setStoredSelectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
@@ -3499,8 +3618,11 @@ function ChatApp() {
     setPreviews([]);
     setError(null);
     setIsGenerating(false);
+    cancelPendingMentionAttachments();
     setAttachedFiles([]);
     setDroppedWidgets([]);
+    dismissedComposerMentionToolsRef.current.clear();
+    setComposerEntityReferences([]);
     replaceChatIdInUrl(null, false);
   };
 
@@ -3933,6 +4055,17 @@ function ChatApp() {
       setError(`${item.label || item.id} は機能と接続の権限設定でブロックされています。`);
       return;
     }
+    const semanticMentionToolIds = new Set(
+      composerMentionToolIdsFromWidgets(droppedWidgets),
+    );
+    if (selectedToolIdSet.has(item.id) && semanticMentionToolIds.has(item.id)) {
+      dismissedComposerMentionToolsRef.current.set(
+        item.id,
+        composerMentionSyntaxesForToolId(droppedWidgets, item.id),
+      );
+    } else if (!selectedToolIdSet.has(item.id)) {
+      dismissedComposerMentionToolsRef.current.delete(item.id);
+    }
     toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (current.includes(item.id)) {
@@ -4012,8 +4145,11 @@ function ChatApp() {
         return;
       case "clear_composer_state":
         setInput("");
+        cancelPendingMentionAttachments();
         setAttachedFiles([]);
         setDroppedWidgets([]);
+        dismissedComposerMentionToolsRef.current.clear();
+        setComposerEntityReferences([]);
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -4223,6 +4359,13 @@ function ChatApp() {
   };
 
   const handleComposerInputChange = (value: string) => {
+    if (value !== input) {
+      for (const [toolId, syntaxes] of dismissedComposerMentionToolsRef.current) {
+        if (!syntaxes.some((syntax) => hasUnescapedMentionSyntax(value, syntax))) {
+          dismissedComposerMentionToolsRef.current.delete(toolId);
+        }
+      }
+    }
     setInput(value);
     if (isGenerating || isConversationPending) {
       setComposerCandidateMenu(null);
@@ -4235,6 +4378,7 @@ function ChatApp() {
   };
 
   const handleModeChange = (newMode: AppMode, updateRoute = true) => {
+    if (newMode !== "coding") cancelPendingMentionAttachments();
     setMode(newMode);
     if (!updateRoute) return;
     if (newMode === "coding" && window.location.pathname !== "/coding") {
@@ -4320,22 +4464,80 @@ function ChatApp() {
   };
 
   const handleAtFileAttach = (path: string) => {
-    if (mode !== "coding") return;
-    if (hasWorkspaceAttachment(attachedFiles, path)) return;
+    const normalizedPath = path.trim();
+    if (mode !== "coding" || !normalizedPath) return;
+    if (hasWorkspaceAttachment(attachedFiles, normalizedPath)) return;
+    if (pendingMentionAttachmentRequestsRef.current.has(normalizedPath)) return;
 
-    void api.readWorkspaceFile(path, { workspace_id: effectiveWorkspaceId })
+    const request: PendingMentionAttachmentRequest = {
+      generation: composerDraftGenerationRef.current,
+      token: mentionAttachmentTokenRef.current + 1,
+    };
+    mentionAttachmentTokenRef.current = request.token;
+    pendingMentionAttachmentRequestsRef.current.set(normalizedPath, request);
+    syncPendingMentionAttachmentPaths();
+
+    void api.readWorkspaceFile(normalizedPath, {
+      workspace_id: effectiveWorkspaceId,
+    })
       .then((result) => {
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (
+          !currentRequest
+          || currentRequest.token !== request.token
+          || currentRequest.generation !== request.generation
+          || composerDraftGenerationRef.current !== request.generation
+        ) return;
         setAttachedFiles((prev) => {
-          if (hasWorkspaceAttachment(prev, path)) return prev;
-          return [...prev, workspaceFileToAttachment(result.path || path, result.content, result.size)];
+          if (hasWorkspaceAttachment(prev, normalizedPath)) return prev;
+          return [
+            ...prev,
+            workspaceFileToAttachment(
+              result.path || normalizedPath,
+              result.content,
+              result.size,
+            ),
+          ];
         });
       })
       .catch((readError) => {
-        setError(readError instanceof Error ? readError.message : "workspace file の添付に失敗しました。");
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (currentRequest?.token !== request.token) return;
+        setError(
+          readError instanceof Error
+            ? readError.message
+            : "workspace file の添付に失敗しました。",
+        );
+      })
+      .finally(() => {
+        const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
+          normalizedPath,
+        );
+        if (currentRequest?.token !== request.token) return;
+        pendingMentionAttachmentRequestsRef.current.delete(normalizedPath);
+        syncPendingMentionAttachmentPaths();
       });
   };
 
+  const handlePendingMentionAttachmentRemove = (path: string) => {
+    cancelPendingMentionAttachments(path);
+    const reconciled = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPathsIncludingPending(attachedFiles),
+      droppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds,
+      text: input,
+    });
+    setDroppedWidgets(reconciled.droppedWidgets);
+    setStoredSelectedToolIds(reconciled.selectedToolIds);
+  };
+
   const handleCodingWorkspaceSelect = (workspaceId: string) => {
+    cancelPendingMentionAttachments();
     handleModeChange("coding");
     setSelectedCodingWorkspaceId(workspaceId);
     void api.selectCodingWorkspace(workspaceId)
@@ -4389,20 +4591,44 @@ function ChatApp() {
   };
 
   const handleFileRemove = (fileId: string) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
+    const remainingFiles = attachedFiles.filter((file) => file.id !== fileId);
+    const reconciled = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPathsIncludingPending(remainingFiles),
+      droppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds,
+      text: input,
+    });
+    setAttachedFiles(remainingFiles);
+    setDroppedWidgets(reconciled.droppedWidgets);
+    setStoredSelectedToolIds(reconciled.selectedToolIds);
   };
 
   const handleDropWidget = (widget: DroppedWidget) => {
+    const ownedWidget = withComposerMentionSelectionOwnership(widget, selectedToolIds);
+    for (const toolId of composerMentionToolIdsFromWidgets([ownedWidget])) {
+      dismissedComposerMentionToolsRef.current.delete(toolId);
+    }
     setDroppedWidgets((prev) => {
-      if (prev.some((w) => w.id === widget.id)) return prev;
-      return [...prev, { ...widget, enabled: widget.enabled ?? true }];
+      if (prev.some((w) => w.id === ownedWidget.id)) return prev;
+      return [...prev, { ...ownedWidget, enabled: ownedWidget.enabled ?? true }];
     });
-    if ((widget.widgetKind === "tool_toggle" || widget.type === "tool") && widget.enabled !== false) {
-      const toolId = widget.sourceItemId || widget.id;
+    if ((ownedWidget.widgetKind === "tool_toggle" || ownedWidget.type === "tool") && ownedWidget.enabled !== false) {
+      const toolId = ownedWidget.sourceItemId || ownedWidget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
         toolSelectionController.setTurnMode("manual");
         setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+      }
+    }
+    if (ownedWidget.type === "service" && ownedWidget.metadata?.source === "composer_at_mention") {
+      const serviceId = ownedWidget.sourceItemId || ownedWidget.id.replace(/^mention-service:/, "");
+      const serviceToolIds = composerExtensions
+        .filter((item) => !item.disabled && toolGroupFor(item).id === serviceId)
+        .map((item) => item.id);
+      if (serviceToolIds.length > 0) {
+        toolSelectionController.setTurnMode("manual");
+        setStoredSelectedToolIds((current) => [...new Set([...current, ...serviceToolIds])]);
       }
     }
   };
@@ -4424,12 +4650,37 @@ function ChatApp() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
+    const semanticMentionToolIds = new Set(
+      composerMentionToolIdsFromWidgets(droppedWidgets),
+    );
+    for (const toolId of requestedIds) {
+      if (enabled) dismissedComposerMentionToolsRef.current.delete(toolId);
+      else if (semanticMentionToolIds.has(toolId)) {
+        dismissedComposerMentionToolsRef.current.set(
+          toolId,
+          composerMentionSyntaxesForToolId(droppedWidgets, toolId),
+        );
+      }
+    }
     toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (enabled) return [...new Set([...current, ...requestedIds])];
       const requestedIdSet = new Set(requestedIds);
       return current.filter((toolId) => !requestedIdSet.has(toolId));
     });
+  };
+
+  const handleToolSelectionTargetRemove = (target: ToolTarget) => {
+    if (
+      target.kind === "tool"
+      && composerMentionToolIdsFromWidgets(droppedWidgets).includes(target.id)
+    ) {
+      dismissedComposerMentionToolsRef.current.set(
+        target.id,
+        composerMentionSyntaxesForToolId(droppedWidgets, target.id),
+      );
+    }
+    toolSelectionController.removeTarget(target);
   };
 
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
@@ -4891,17 +5142,23 @@ function ChatApp() {
       let result: unknown;
       if (action.id === "conversation.export") {
         if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
-        result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
+        const exported = await api.exportConversation(activeConversationId, "json");
+        const blob = new Blob([exported.content], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "history.json";
+        anchor.click();
+        URL.revokeObjectURL(url);
+        result = { exported: true, format: "json" };
       } else if (action.id === "conversation.share") {
         if (!activeConversationId) throw new Error("共有する会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "markdown");
-        result = await api.createShare({
-          target_type: "conversation",
-          target_id: activeConversationId,
-          title: activeChatTitle,
-          content: exported.content,
-          visibility: "local",
-        });
+        setShareCreatedUrl(null);
+        setShareCreatedToken(null);
+        setShareRevoked(false);
+        setShareDialogError(null);
+        setShareDialogOpen(true);
+        result = { dialog_opened: true };
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -4975,11 +5232,41 @@ function ChatApp() {
     }
   };
 
+  const createConversationShare = async (visibility: "local" | "tunnel") => {
+    if (!activeConversationId) return;
+    setShareBusy(true);
+    setShareDialogError(null);
+    try {
+      const created = await api.createShare({
+        target_type: "conversation",
+        target_id: activeConversationId,
+        title: activeChatTitle,
+        visibility,
+        expires_at: shareExpiryHours === "never" ? null : new Date(Date.now() + Number(shareExpiryHours) * 60 * 60 * 1000).toISOString(),
+      });
+      setShareCreatedUrl(String(created.share_url || ""));
+      setShareCreatedToken(String(created.token || ""));
+      setShareRevoked(false);
+    } catch (reason) {
+      setShareDialogError(reason instanceof Error ? reason.message : "共有リンクを作成できませんでした。");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
     event?.preventDefault();
+    if (activeConversation?.metadata?.shared_read_only === true) {
+      setError("This imported conversation is read-only. Import a continue copy to send messages.");
+      return;
+    }
+    if (pendingMentionAttachmentRequestsRef.current.size > 0) {
+      setError("workspace file の読み込みが終わるまでお待ちください。");
+      return;
+    }
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
-    const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
+    const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
     if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
     const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
@@ -4993,10 +5280,31 @@ function ChatApp() {
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
     const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
-    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const selectionToolIdsForReconciliation = override?.toolSelectionRequest
+      ? toolIdsFromSelectionRequest(override.toolSelectionRequest)
+      : selectedToolIds;
+    const reconciledDraft = reconcileComposerSemanticDraft({
+      attachmentPaths: semanticAttachmentPaths(submittedAttachments),
+      droppedWidgets: requestedDroppedWidgets,
+      requireFileAttachment: true,
+      selectedToolIds: selectionToolIdsForReconciliation,
+      text: userText,
+    });
+    const droppedWidgetsForSubmit = reconciledDraft.droppedWidgets;
+    const selectedToolIdsForSubmit = reconciledDraft.selectedToolIds;
+    const semanticMentionToolIds = new Set(composerMentionToolIdsFromWidgets(requestedDroppedWidgets));
+    const explicitToolReferenceIds = composerEntityReferences
+      .filter((reference) => reference.kind === "tool")
+      .map((reference) => reference.id);
+    const explicitSkillReferenceIds = composerEntityReferences
+      .filter((reference) => reference.kind === "skill")
+      .map((reference) => reference.id);
+    const mentionedToolIds = [...new Set([...explicitToolReferenceIds, ...toolMentionIdsFromText(userText, composerExtensions)
+      .filter((toolId) => !semanticMentionToolIds.has(toolId))
+      .filter((toolId) => !dismissedComposerMentionToolsRef.current.has(toolId))])];
+    const mentionedSkillIdsFromText = [...new Set([...explicitSkillReferenceIds, ...skillMentionIdsFromText(userText, composerSkills)])];
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
-      toolIds: selectedToolIds,
+      toolIds: selectedToolIdsForSubmit,
       mentionedToolIds,
     });
     if (!override?.skipReview && toolSelectionRequest.mode === "review") {
@@ -5015,6 +5323,7 @@ function ChatApp() {
           },
         });
         setInput("");
+        cancelPendingMentionAttachments();
         setAttachedFiles([]);
         setDroppedWidgets([]);
       } catch (previewError) {
@@ -5023,15 +5332,17 @@ function ChatApp() {
       return;
     }
     setIsGenerating(true);
+    cancelPendingMentionAttachments();
     setError(null);
     if (wasNewConversation) {
       setIsNewChatLaunching(true);
     }
     setInput("");
+    setComposerEntityReferences([]);
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const requestedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
+    const requestedToolIds = [...new Set([...selectedToolIdsForSubmit, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
     const submittedToolIds = toolSelectionRequest.mode === "none" ? [] : requestedToolIds;
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
@@ -5054,6 +5365,7 @@ function ChatApp() {
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
     const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedMentions = composerMentionMetadataFromWidgets(submittedDroppedWidgets);
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -5141,7 +5453,14 @@ function ChatApp() {
         ...conversation,
         title,
         updated_at: Date.now(),
-        messages: [...conversation.messages, optimisticUserMessage(conversation.id, userText)],
+        messages: [
+          ...conversation.messages,
+          optimisticUserMessage(
+            conversation.id,
+            userText,
+            submittedMentions.length > 0 ? { mentions: submittedMentions } : undefined,
+          ),
+        ],
       };
       setActiveConversation(optimisticConversation);
       setConversations((current) => {
@@ -5462,9 +5781,17 @@ function ChatApp() {
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
+          ...(submittedMentions.length ? { mentions: submittedMentions } : {}),
           dropped_widgets: submittedDroppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
-            .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
+            .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({
+              id,
+              type,
+              label,
+              widgetKind,
+              sourceItemId,
+              metadata: publicComposerWidgetMetadata(metadata),
+            })),
         },
       }, {
         onEvent: updateStreamingActivity,
@@ -5475,6 +5802,7 @@ function ChatApp() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
+      dismissedComposerMentionToolsRef.current.clear();
       toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
@@ -5524,6 +5852,7 @@ function ChatApp() {
             ? "応答ストリームが途中で切れたため、ここまで届いた内容を保護して着地しました。"
             : "応答ストリームが途中で切れました。画面は保護したまま、再接続の余地を残しています。",
         );
+        dismissedComposerMentionToolsRef.current.clear();
         setIsNewChatLaunching(false);
         return;
       }
@@ -5702,8 +6031,12 @@ function ChatApp() {
     if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
     window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
-  const renderComposer = (isCentered = false) => (
-    <Renderers.composer
+  const renderComposer = (isCentered = false) => {
+    if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
+      return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
+    }
+    return <Renderers.composer
+      widgetContext={widgetContext}
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
@@ -5729,7 +6062,9 @@ function ChatApp() {
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
+      pendingMentionAttachmentPaths={pendingMentionAttachmentPaths}
       droppedWidgets={activeDroppedWidgets}
+      entityReferences={composerEntityReferences}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
@@ -5743,7 +6078,7 @@ function ChatApp() {
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onActionApprovalModeChange={handleActionApprovalModeChange}
-      onToolSelectionTargetRemove={toolSelectionController.removeTarget}
+      onToolSelectionTargetRemove={handleToolSelectionTargetRemove}
       onToolSelectionReviewApprove={handleToolReviewApprove}
       onToolSelectionReviewEdit={handleToolReviewEdit}
       onToolSelectionReviewNoTools={handleToolReviewNoTools}
@@ -5763,8 +6098,10 @@ function ChatApp() {
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
+      onPendingMentionAttachmentRemove={handlePendingMentionAttachmentRemove}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
+      onEntityReferencesChange={setComposerEntityReferences}
       onWidgetAction={handleWidgetAction}
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}
@@ -5774,8 +6111,8 @@ function ChatApp() {
       onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
       onCodingWorkspacesRefresh={() => void loadCodingWorkspaces()}
       onCodingContextRefresh={loadCodingContext}
-    />
-  );
+    />;
+  };
 
   return (
     <RendererBoundary>
@@ -5904,6 +6241,10 @@ function ChatApp() {
               </div>
             )}
 
+            {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
+              <ImportedConversationNotice importMode={activeConversation.metadata?.shared_import_mode} onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
+            )}
+
             {isDesktopsWorkspace ? (
               <DesktopMonitorWorkspace />
             ) : isKanbanMode ? (
@@ -5958,6 +6299,7 @@ function ChatApp() {
               <div className="flex min-h-0 flex-1 p-1.5">
                 <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
                   <Renderers.toolPreviewPanel
+                    widgetContext={widgetContext}
                     previews={canvasPreviews}
                     showPreview
                     onClose={() => {
@@ -6090,6 +6432,7 @@ function ChatApp() {
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
+                widgetContext={widgetContext}
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
                 onClose={() => setShowPreview(false)}
@@ -6106,6 +6449,7 @@ function ChatApp() {
         {showRegion("right_sidebar") && (
           <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
+            widgetContext={widgetContext}
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
@@ -6192,6 +6536,35 @@ function ChatApp() {
       )}
 
       <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
+      {shareDialogOpen && (
+        <LayerPortal layer="globalOverlay">
+          <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShareDialogOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="share-dialog-title" className="w-full max-w-lg border border-zinc-700 bg-zinc-950 p-5 shadow-2xl">
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="share-dialog-title" className="text-lg font-semibold text-zinc-100">Share conversation</h2>
+                <button autoFocus type="button" title="Close" aria-label="Close share dialog" onClick={() => setShareDialogOpen(false)} className="inline-flex h-8 w-8 items-center justify-center text-zinc-400 hover:bg-zinc-900 hover:text-white"><X size={17} /></button>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">The transcript is redacted before sharing. Attachments and executable permissions are never included.</p>
+              <label className="mt-4 block text-xs font-medium text-zinc-400">Link expiry
+                <select value={shareExpiryHours} onChange={(event) => setShareExpiryHours(event.target.value)} className="mt-2 h-10 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100">
+                  <option value="1">1 hour</option>
+                  <option value="24">24 hours</option>
+                  <option value="168">7 days</option>
+                  <option value="never">No expiry</option>
+                </select>
+              </label>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("local")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Link size={18} className="mt-0.5 text-emerald-300" /><span><strong className="block text-sm text-zinc-100">Local share link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Private to this defaultspack host.</span></span></button>
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
+              </div>
+              {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
+              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
+              {shareCreatedUrl && <div className={`mt-4 border p-3 ${shareRevoked ? "border-red-500/25 bg-red-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}><p className={`break-all text-sm ${shareRevoked ? "text-red-100 line-through" : "text-emerald-100"}`}>{shareCreatedUrl}</p><div className="mt-3 flex flex-wrap gap-2">{!shareRevoked && <button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button>}{shareCreatedToken && !shareRevoked && <button type="button" onClick={() => void api.revokeShare(shareCreatedToken).then(() => setShareRevoked(true)).catch((reason) => setShareDialogError(reason instanceof Error ? reason.message : "Could not revoke link."))} className="inline-flex h-9 items-center gap-2 border border-red-400/25 px-3 text-xs font-semibold text-red-200 hover:bg-red-500/10"><X size={14} /> Revoke link</button>}</div>{shareRevoked && <p role="status" className="mt-2 text-xs text-red-200">Revoked. This link can no longer be viewed or imported.</p>}</div>}
+              <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
+            </section>
+          </div>
+        </LayerPortal>
+      )}
     </div>
     </RendererBoundary>
   );
@@ -6263,6 +6636,9 @@ export default function App() {
   }
   if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
     return <UiPrecisionComparator />;
+  }
+  if (pathname.startsWith("/share/")) {
+    return <ConversationShareLanding />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
