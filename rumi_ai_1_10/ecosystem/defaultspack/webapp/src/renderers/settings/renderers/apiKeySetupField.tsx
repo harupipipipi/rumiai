@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
 import { cn } from "../../../lib/cn";
 import { buildApiKeySavePayload, collectApiProviderOptions } from "../../../features/apiKeys/apiKeySetup";
 import { settingsApiResources } from "../../../features/settings/resources/settingsApiResources";
@@ -34,6 +35,12 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [saveError, setSaveError] = useState("");
   const [availability, setAvailability] = useState<ModelAvailabilityAfterKeySave | null>(null);
+  const [credentialTransfer, setCredentialTransfer] = useState<{
+    providerId: string;
+    providerLabel?: string;
+    apiId?: string;
+  } | null>(null);
+  const selectedProviderOption = providerOptions.find((option) => option.provider_id === providerId);
   const selectedKind = selectedProviderKind(providerId, providerOptions);
   const feedback = saveState === "saved" ? availabilityCopy(availability) : null;
 
@@ -61,12 +68,20 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
     setAvailability(null);
     try {
       const result = await settingsApiResources.saveProviderApiKey(payload.provider_id, payload.value, payload.options);
+      const savedProviderId = payload.provider_id;
+      const savedProviderLabel = selectedProviderOption?.label;
+      const savedApiId = payload.options.apiId;
       setAvailability(result.model_availability ?? {
         status: "route_required",
         provider_id: payload.provider_id,
         api_id: payload.options.apiId,
         candidate_models: [],
         reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
+      });
+      setCredentialTransfer({
+        providerId: savedProviderId,
+        providerLabel: savedProviderLabel,
+        apiId: savedApiId,
       });
       setSecret("");
       setBaseUrl("");
@@ -75,7 +90,6 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
       setQuotaLabel("");
       setNotes("");
       setSaveState("saved");
-      onChange(sectionId, targetFieldId, { action: "oauth_refresh" });
     } catch (saveErrorValue) {
       setSaveState("idle");
       setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : "API key save failed.");
@@ -181,6 +195,17 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
           <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
             {saveError}
           </div>
+        )}
+        {credentialTransfer && (
+          <CredentialTransferModal
+            providerId={credentialTransfer.providerId}
+            providerLabel={credentialTransfer.providerLabel}
+            apiId={credentialTransfer.apiId}
+            onClose={() => {
+              setCredentialTransfer(null);
+              onChange(sectionId, targetFieldId, { action: "oauth_refresh" });
+            }}
+          />
         )}
       </div>
     </SettingsFieldShell>

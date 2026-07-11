@@ -379,22 +379,6 @@ export type AuthorityApprovalContext = {
   ui_operator: AuthorityUiOperator;
 };
 
-export type AuthorityBrowserExchangeBinding = {
-  request_id: string;
-  device_id: string;
-  window_id: string;
-  nonce: string;
-  origin: string;
-};
-
-export type AuthorityBrowserExchange = {
-  request_id: string;
-  exchange_code: string;
-  exchange_id: string;
-  server_nonce?: string;
-  expires_at: number | string;
-};
-
 export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
@@ -792,137 +776,6 @@ export type CompanyInboxItem = {
   updated_at?: string;
 };
 
-export type SubagentTeamFileTreeEntry = {
-  id?: string;
-  node_id?: string;
-  nodeId?: string;
-  name?: string;
-  label?: string;
-  title?: string;
-  path?: string;
-  file_path?: string;
-  relative_path?: string;
-  is_dir?: boolean;
-  is_directory?: boolean;
-  kind?: string;
-  type?: string;
-  depth?: number;
-  size?: number;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamFileTreeResponse = {
-  workspace_id?: string;
-  workspaceId?: string;
-  workspace_hash?: string;
-  root?: string;
-  directory?: string;
-  files?: SubagentTeamFileTreeEntry[];
-  file_tree?: SubagentTeamFileTreeEntry[];
-  tree?: SubagentTeamFileTreeEntry[];
-  nodes?: SubagentTeamFileTreeEntry[];
-  items?: SubagentTeamFileTreeEntry[];
-  history?: SubagentTeamFileTreeEntry[];
-  history_tree?: SubagentTeamFileTreeEntry[];
-  events?: SubagentTeamFileTreeEntry[];
-  clipped?: boolean;
-  status?: Record<string, unknown>;
-  policy?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamFileTreeOpenResponse = {
-  id?: string;
-  node_id?: string;
-  nodeId?: string;
-  title?: string;
-  label?: string;
-  name?: string;
-  path?: string;
-  file_path?: string;
-  content?: string;
-  file_content?: string;
-  text?: string;
-  preview?: string;
-  body?: string;
-  markdown?: string;
-  messages?: Array<Record<string, unknown>>;
-  history?: Array<Record<string, unknown>>;
-  conversation?: Array<Record<string, unknown>>;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamRichSettings = {
-  rich_enabled?: boolean;
-  enabled?: boolean;
-  max_subagents?: number;
-  maxSubagents?: number;
-  active_subagents?: number;
-  activeSubagents?: number;
-  current_subagents?: number;
-  currentSubagents?: number;
-  can_user_toggle?: boolean;
-  canUserToggle?: boolean;
-  can_creator_enable_rich?: boolean;
-  canCreatorEnableRich?: boolean;
-  creator_can_enable_rich?: boolean;
-  reason?: string;
-  status?: string;
-  policy?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamRichSettingsResponse = SubagentTeamRichSettings & {
-  settings?: SubagentTeamRichSettings;
-  rich?: SubagentTeamRichSettings;
-};
-
-export type SubagentTeamCreatorSettings = {
-  enabled?: boolean;
-  model?: string;
-  lifecycle_only?: boolean;
-  lifecycleOnly?: boolean;
-  can_manage_agents?: boolean;
-  canManageAgents?: boolean;
-  can_enable_rich?: boolean;
-  canEnableRich?: boolean;
-  rich_gate_message?: string;
-  richGateMessage?: string;
-  status?: string;
-  policy?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamCreatorSettingsResponse = SubagentTeamCreatorSettings & {
-  settings?: SubagentTeamCreatorSettings;
-  creator?: SubagentTeamCreatorSettings;
-};
-
-export type SubagentTeamCreatorTestResponse = {
-  ok?: boolean;
-  status?: string;
-  message?: string;
-  summary?: string;
-  result?: Record<string, unknown> | string;
-  [key: string]: unknown;
-};
-
-export type SubagentTeamDecisionPreviewResponse = {
-  task?: Partial<CompanyTask>;
-  decision?: Record<string, unknown>;
-  approval?: Record<string, unknown>;
-  preview?: Record<string, unknown>;
-  status?: string;
-  title?: string;
-  summary?: string;
-  target_agent_ids?: string[];
-  [key: string]: unknown;
-};
-
 export type CompanyInboundRoute = {
   id: string;
   provider?: string;
@@ -1050,7 +903,7 @@ export type P2PPeer = {
 export type P2PPairing = {
   pairing_id: string;
   code: string;
-  status: "pending" | "accepted" | "rejected" | "expired" | string;
+  status: "pending" | "claimed" | "approved" | "rejected" | "expired" | string;
   expires_at: number;
   created_at: number;
   peer_id?: string;
@@ -1059,7 +912,14 @@ export type P2PPairing = {
   capabilities?: string[];
   allowed_company_ids?: string[];
   accepted_at?: number;
+  approved_at?: number;
   rejected_at?: number;
+  claimed_device_id?: string;
+  claimed_device_label?: string;
+  confirmation_code?: string;
+  requested_scopes?: string[];
+  base_urls?: string[];
+  pickup_secret?: string;
   reason?: string;
 };
 
@@ -1067,6 +927,84 @@ export type P2PStatusResponse = {
   p2p: P2PSettings;
   peer_count: number;
   approved_peer_count: number;
+};
+
+export type MobileDevice = {
+  device_id: string;
+  profile_id?: string;
+  label: string;
+  platform?: string;
+  scopes?: string[];
+  status?: string;
+  last_seen_at?: string;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+  encryption_key_configured?: boolean;
+};
+
+export type CredentialTransferStatus =
+  | "awaiting_confirmation"
+  | "pending"
+  | "accepted"
+  | "completed"
+  | "rejected"
+  | "expired"
+  | "revoked"
+  | "cancelled";
+
+export type CredentialTransfer = {
+  transfer_id: string;
+  status: CredentialTransferStatus;
+  device_id: string;
+  device_label: string;
+  profile_id: string;
+  provider_id: string;
+  api_id: string;
+  provider_label: string;
+  created_at: number;
+  expires_at: number;
+  reason?: string;
+};
+
+export type MobileDevicesResponse = {
+  devices: MobileDevice[];
+};
+
+export type MobilePairingStatus = {
+  pairing_id: string;
+  status: string;
+  expires_at?: number;
+  token_pickup_consumed_at?: number;
+};
+
+export type MobilePairingReview = {
+  pairing: {
+    pairing_id: string;
+    status: string;
+    expires_at: number;
+    claimed_at?: number;
+  };
+  claim: {
+    device_label: string;
+    device_id_preview?: string;
+    requested_scopes: string[];
+    allowed_scopes: string[];
+    denied_scopes?: string[];
+    signing_key_fingerprint?: string;
+    encryption_key_fingerprint?: string;
+    verification_code?: string;
+  };
+  security?: {
+    token_delivery?: string;
+    pickup?: string;
+    public_status_minimized?: boolean;
+  };
+  claim_hash: string;
+};
+
+export type MobilePairingApprovePayload = {
+  claim_hash: string;
+  scopes?: string[];
 };
 
 export type ConversationListOptions = {
@@ -1141,9 +1079,7 @@ export type OperationsCompanyStatus = {
   };
 };
 
-export type MimoCodingCompanyStatus = OperationsCompanyStatus & {
-  company?: CompanyRecord | null;
-};
+export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
@@ -1158,8 +1094,6 @@ export type ChatActivityEvent = {
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
-  provider_attempt?: number | string;
-  provider_attempt_generation?: number | string;
   model?: string;
   [key: string]: unknown;
 };
@@ -1167,8 +1101,6 @@ export type ChatActivityEvent = {
 export type ToolLogEntry = {
   tool_name?: string;
   tool_call_id?: string;
-  provider_attempt?: number | string;
-  provider_attempt_generation?: number | string;
   arguments?: Record<string, unknown>;
   result?: unknown;
   timestamp?: number | string;
@@ -1314,48 +1246,6 @@ export type Conversation = {
   is_archived: boolean;
   current_node_id?: string | null;
   messages: ChatMessage[];
-};
-
-export type ConversationShareBundle = {
-  schema_version: number;
-  kind: "rumi.defaultspack.conversation_share";
-  created_at: number;
-  source: { pack_id?: string; conversation_id?: string; title?: string; share_token?: string };
-  conversation: { schema_version?: number; updated_at?: number; conversation: Conversation };
-  assets: { included?: unknown[]; omitted?: Array<Record<string, unknown>>; missing_policy?: string };
-  preview?: { target_type?: string; message_count?: number; role_counts?: Record<string, number>; content_trust?: string };
-  provenance?: {
-    source_pack?: string;
-    source_conversation_id?: string;
-    created_at?: number;
-    target_type?: string;
-    model?: { source_model?: string | null; source_provider?: string | null; policy?: string; import_model?: string };
-  };
-  security: {
-    redacted?: boolean;
-    permissions?: Record<string, boolean>;
-    expires_at?: string | number | null;
-    visibility?: string;
-    import_modes?: Array<"read_only" | "continue_copy">;
-    copy_policy?: string;
-    secret_policy?: string;
-    attachment_policy?: string;
-    malicious_content_policy?: string;
-    tool_policy?: string;
-  };
-};
-
-export type ConversationShareRecord = {
-  token: string;
-  target_type: string;
-  title?: string;
-  visibility?: string;
-  expires_at?: string | number | null;
-  share_url?: string;
-  api_url?: string;
-  created_at?: string;
-  audit?: Array<{ operation: string; timestamp: string; result: string; mode?: string }>;
-  content: ConversationShareBundle;
 };
 
 export type ConversationSearchMatch = {
@@ -1639,7 +1529,6 @@ export type ComposerCommandArg = {
   type: "string" | "enum" | "boolean";
   required?: boolean;
   values?: string[];
-  greedy?: boolean;
 };
 
 export type ComposerCommandExecution =
@@ -2024,7 +1913,6 @@ export type ToolSelectionPreviewResponse = {
 };
 
 type SendMessageOptions = {
-  idempotency_key?: string;
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
@@ -2312,13 +2200,13 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
 
 function defaultspackApiCodeHint(code: string | undefined): string | null {
   if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
-    return "ブラウザ承認は、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウから開き直してください。";
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
   }
   if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
-    return "旧式のブラウザ承認情報は使用できません。承認ページを安全な経路から開き直してください。";
+    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
   }
   if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
-    return "旧式のブラウザ承認情報は無効化されました。承認ページを安全な経路から開き直してください。";
+    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
   }
   if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
     return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
@@ -2440,7 +2328,6 @@ function messageRequestBody(
   options?: SendMessageOptions,
 ): Record<string, unknown> {
   return {
-    idempotency_key: options?.idempotency_key ?? createChatOperationId(),
     message: {
       role: "user",
       content: text,
@@ -2458,13 +2345,6 @@ function messageRequestBody(
       tool_selection: options?.tool_selection ?? undefined,
     },
   };
-}
-
-function createChatOperationId(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-  return `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
 async function readStreamEvents(
@@ -3104,22 +2984,9 @@ export const api = {
     });
   },
 
-  providerOAuthStatus(providerId?: string, options: { activeDiagnostics?: boolean } = {}) {
-    const params = new URLSearchParams();
-    if (providerId) params.set("provider_id", providerId);
-    if (options.activeDiagnostics) params.set("active_diagnostics", "true");
-    const suffix = params.toString() ? `?${params.toString()}` : "";
+  providerOAuthStatus(providerId?: string) {
+    const suffix = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : "";
     return request<{ provider?: Record<string, unknown>; providers?: Record<string, Record<string, unknown>> }>(`/api/ai/oauth${suffix}`, { cache: "no-store" });
-  },
-
-  runProviderOAuthDiagnostics(providerId: string) {
-    return request<{ provider_id: string; provider?: Record<string, unknown> }>("/api/ai/oauth", {
-      method: "POST",
-      body: JSON.stringify({
-        action: "cloudflare_diagnostics",
-        provider_id: providerId,
-      }),
-    });
   },
 
   saveProviderOAuthClientConfig(providerId: string, clientConfig: string) {
@@ -3327,7 +3194,7 @@ export const api = {
   },
 
   exportConversation(conversationId: string, format = "markdown") {
-    return request<{ conversation_id: string; content: string; format: "markdown" | "json" }>(
+    return request<{ content: string; format?: string }>(
       `/api/chat/conversations/${conversationId}/export`,
       {
         method: "POST",
@@ -3584,15 +3451,7 @@ export const api = {
     });
   },
 
-  listCompanyMessages(companyId: string, options?: {
-    channel_id?: string;
-    thread_id?: string;
-    limit?: number;
-    offset?: number;
-    tail?: boolean;
-    latest?: boolean;
-    order?: "asc" | "desc" | string;
-  }) {
+  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number }) {
     return request<{ messages: CompanyMessage[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/messages`, { company_id: companyId, ...options }),
       { cache: "no-store" },
@@ -3640,13 +3499,6 @@ export const api = {
     });
   },
 
-  deleteCompanyTask(companyId: string, taskId: string) {
-    return request<{ deleted: boolean; task_id: string }>(
-      `/api/company/${encodeURIComponent(companyId)}/tasks/${encodeURIComponent(taskId)}`,
-      { method: "DELETE" },
-    );
-  },
-
   dispatchCompanyTask(companyId: string, taskId: string, policy?: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/api/company/${encodeURIComponent(companyId)}/dispatch`, {
       method: "POST",
@@ -3654,7 +3506,7 @@ export const api = {
     });
   },
 
-  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number; offset?: number }) {
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
     return request<{ runs: CompanyRunLink[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
       { cache: "no-store" },
@@ -3793,175 +3645,6 @@ export const api = {
     );
   },
 
-  bootstrapSubagentTeamWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
-    return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/subagent-team/bootstrap", {
-      method: "POST",
-      body: JSON.stringify({
-        ...(metadata ? { metadata } : {}),
-        ...(options?.conversationId ? { conversation_id: options.conversationId } : {}),
-        ...(options?.scope ? { scope: options.scope } : {}),
-      }),
-    });
-  },
-
-  updateSubagentTeamWorkspaceMetadata(options: {
-    companyId?: string | null;
-    conversationId?: string | null;
-    metadata: Record<string, unknown>;
-  }) {
-    return request<CompanyRecord>("/api/subagent-team/workspace/metadata", {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: options.companyId,
-        conversation_id: options.conversationId,
-        metadata: options.metadata,
-      }),
-    });
-  },
-
-  sendSubagentTeamMessage(payload: {
-    companyId?: string | null;
-    conversationId?: string | null;
-    content: string;
-    channel_id?: string;
-    sender_id?: string;
-    mentions?: string[];
-    task_ids?: string[];
-    client_message_id?: string;
-    metadata?: Record<string, unknown>;
-  }) {
-    return request<CompanyMessage>("/api/subagent-team/messages", {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: payload.companyId,
-        conversation_id: payload.conversationId,
-        content: payload.content,
-        channel_id: payload.channel_id,
-        sender_id: payload.sender_id,
-        mentions: payload.mentions,
-        task_ids: payload.task_ids,
-        client_message_id: payload.client_message_id,
-        metadata: payload.metadata,
-      }),
-    });
-  },
-
-  getSubagentTeamRichSettings(options?: { companyId?: string | null; conversationId?: string | null }) {
-    return request<SubagentTeamRichSettingsResponse>(
-      withQuery("/api/subagent-team/rich", {
-        company_id: options?.companyId,
-        conversation_id: options?.conversationId,
-      }),
-      { cache: "no-store" },
-    );
-  },
-
-  updateSubagentTeamRichSettings(payload: Partial<SubagentTeamRichSettings> & {
-    companyId?: string | null;
-    conversationId?: string | null;
-  }) {
-    const { companyId, conversationId, ...settings } = payload;
-    return request<SubagentTeamRichSettingsResponse>("/api/subagent-team/rich", {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: companyId,
-        conversation_id: conversationId,
-        ...settings,
-      }),
-    });
-  },
-
-  getSubagentTeamCreatorSettings(options?: { companyId?: string | null; conversationId?: string | null }) {
-    return request<SubagentTeamCreatorSettingsResponse>(
-      withQuery("/api/subagent-team/creator/settings", {
-        company_id: options?.companyId,
-        conversation_id: options?.conversationId,
-      }),
-      { cache: "no-store" },
-    );
-  },
-
-  updateSubagentTeamCreatorSettings(payload: Partial<SubagentTeamCreatorSettings> & {
-    companyId?: string | null;
-    conversationId?: string | null;
-  }) {
-    const { companyId, conversationId, ...settings } = payload;
-    return request<SubagentTeamCreatorSettingsResponse>("/api/subagent-team/creator/settings", {
-      method: "PATCH",
-      body: JSON.stringify({
-        company_id: companyId,
-        conversation_id: conversationId,
-        settings,
-      }),
-    });
-  },
-
-  testSubagentTeamCreator(payload?: {
-    companyId?: string | null;
-    conversationId?: string | null;
-    prompt?: string;
-    channel_id?: string;
-    agent_id?: string;
-    metadata?: Record<string, unknown>;
-  }) {
-    return request<SubagentTeamCreatorTestResponse>("/api/subagent-team/creator/test", {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: payload?.companyId,
-        conversation_id: payload?.conversationId,
-        prompt: payload?.prompt,
-        channel_id: payload?.channel_id,
-        agent_id: payload?.agent_id,
-        metadata: payload?.metadata,
-      }),
-    });
-  },
-
-  getSubagentTeamCreatorDecisionPreview(options?: { companyId?: string | null; conversationId?: string | null; channelId?: string | null }) {
-    return request<SubagentTeamDecisionPreviewResponse>(
-      withQuery("/api/subagent-team/creator/decision-preview", {
-        company_id: options?.companyId,
-        conversation_id: options?.conversationId,
-        channel_id: options?.channelId,
-      }),
-      { cache: "no-store" },
-    );
-  },
-
-  getSubagentTeamFileTree(options?: {
-    companyId?: string | null;
-    conversationId?: string | null;
-    directory?: string;
-    limit?: number;
-    includeGit?: boolean;
-  }) {
-    return request<SubagentTeamFileTreeResponse>(
-      withQuery("/api/subagent-team/file-tree", {
-        company_id: options?.companyId,
-        conversation_id: options?.conversationId,
-        directory: options?.directory,
-        limit: options?.limit,
-        include_git: options?.includeGit,
-      }),
-      { cache: "no-store" },
-    );
-  },
-
-  openSubagentTeamFileTreeNode(options: {
-    nodeId: string;
-    companyId?: string | null;
-    conversationId?: string | null;
-  }) {
-    return request<SubagentTeamFileTreeOpenResponse>(
-      withQuery("/api/subagent-team/file-tree/open", {
-        node_id: options.nodeId,
-        company_id: options.companyId,
-        conversation_id: options.conversationId,
-      }),
-      { cache: "no-store" },
-    );
-  },
-
   upsertCompanyInboundRoute(companyId: string, route: Partial<CompanyInboundRoute>) {
     return request<CompanyInboundRoute>(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, {
       method: "POST",
@@ -4095,34 +3778,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
-  },
-
-  getShare(token: string) {
-    return request<ConversationShareRecord>(`/api/share/${encodeURIComponent(token)}`, { cache: "no-store" });
-  },
-
-  importShare(token: string, sourceUrl?: string, importMode: "read_only" | "continue_copy" = "continue_copy") {
-    return request<{ conversation: Conversation; conversation_id: string; import_mode: string; audit?: Record<string, unknown> }>(
-      `/api/share/${encodeURIComponent(token)}/import`,
-      { method: "POST", body: JSON.stringify({ source_url: sourceUrl, import_mode: importMode }) },
-    );
-  },
-
-  revokeShare(token: string) {
-    return request<{ revoked: boolean }>(`/api/share/${encodeURIComponent(token)}`, { method: "DELETE" });
-  },
-
-  exportShare(token: string) {
-    return request<{ conversation: ConversationShareBundle["conversation"]; audit?: Record<string, unknown> }>(
-      `/api/share/${encodeURIComponent(token)}/export`, { method: "POST", body: "{}" },
-    );
-  },
-
-  importConversationBundle(bundle: Record<string, unknown>, sourceUrl?: string) {
-    return request<{ conversation: Conversation; conversation_id: string }>(
-      "/api/packs/defaultspack/chat/conversations/import",
-      { method: "POST", body: JSON.stringify({ bundle, source_url: sourceUrl }) },
-    );
   },
 
   compactConversation(conversationId: string, options?: CompactConversationOptions) {
@@ -4309,22 +3964,19 @@ export const api = {
     );
   },
 
-  async createBrowserAuthorityExchange(_binding: AuthorityBrowserExchangeBinding) {
-    throw new Error("AUTHORITY_BROWSER_TEST_DISABLED");
-  },
-
-  async browserAuthorityUiOperator(
-    _binding: AuthorityBrowserExchangeBinding,
-    _exchangeCode: string,
-  ) {
-    throw new Error("AUTHORITY_BROWSER_TEST_DISABLED");
-  },
-
-  async revokeBrowserAuthorityExchange(
-    _binding: AuthorityBrowserExchangeBinding,
-    _exchangeId: string,
-  ) {
-    throw new Error("AUTHORITY_BROWSER_TEST_DISABLED");
+  browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
+    return request<AuthorityApprovalContext>(withQuery("/api/authority/browser-ui-operator", {
+      browser_approval_token: browserApprovalToken,
+    }), {
+      method: "POST",
+      headers: {
+        "X-Rumi-Approval-Browser-Token": browserApprovalToken,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        browser_approval_token: browserApprovalToken,
+      }),
+    });
   },
 
   approveAuthorityApproval(
@@ -4500,4 +4152,79 @@ export const api = {
       { cache: "no-store" },
     );
   },
+
+  getMobilePairingStatus(pairingId: string) {
+    return request<MobilePairingStatus>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  getMobilePairingReview(pairingId: string) {
+    return request<MobilePairingReview>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/review`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveMobilePairing(pairingId: string, payload: MobilePairingApprovePayload) {
+    return request<{ ok: boolean; token_delivery?: string; device?: MobileDevice }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+
+  rejectMobilePairing(pairingId: string, reason?: string) {
+    return request<{ ok: boolean }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    );
+  },
+
+  listMobileDevices() {
+    return request<MobileDevicesResponse>("/api/mobile/v1/devices", { cache: "no-store" });
+  },
+
+  revokeMobileDevice(deviceId: string) {
+    return request<{ ok: boolean; device_id: string }>(
+      `/api/mobile/v1/devices/${encodeURIComponent(deviceId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  createCredentialTransfer(payload: { device_id: string; provider_id: string; api_id: string; provider_label?: string }) {
+    return request<{ transfer: CredentialTransfer }>("/api/mobile/v1/credential-transfers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  confirmCredentialTransfer(transferId: string, payload: { device_id: string; provider_id: string; api_id: string; user_confirmed: true }) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/confirm`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+
+  getCredentialTransferStatus(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  cancelCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/cancel`,
+      { method: "POST", body: JSON.stringify({ reason: "cancelled by PC user" }) },
+    );
+  },
+
+  revokeCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(
+      `/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/revoke`,
+      { method: "POST", body: JSON.stringify({ reason: "revoked by PC user" }) },
+    );
+  },
+
 };
