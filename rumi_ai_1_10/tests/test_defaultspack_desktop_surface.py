@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -65,12 +66,85 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_OPEN_BROWSER": "1", "RUMI_DEFAULTSPACK_SURFACE": "webview"}, clear=True):
             with patch("transport.http.DefaultsHttpServer", return_value=fake_server):
                 with patch.object(desktop_app, "_wait_until_ready", return_value=True):
-                    with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
-                        result = desktop_app.main()
+                    with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
+                        with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
+                            result = desktop_app.main()
 
         self.assertEqual(result, 0)
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
+
+    def test_desktop_app_main_logs_and_exits_when_existing_server_is_reused(self):
+        from defaultspack import desktop_app
+
+        class PortBusyServer:
+            def __init__(self, facade=None):
+                self.stopped = False
+
+            def start(self):
+                raise OSError("address already in use")
+
+            def stop(self):
+                self.stopped = True
+
+        fake_server = PortBusyServer()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "defaultspack-launch.jsonl"
+            env = {
+                "DEFAULTS_HTTP_PORT": "8766",
+                "RUMI_DEFAULTSPACK_LAUNCH_LOG": str(log_path),
+                "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
+                "RUMI_DEFAULTSPACK_PORT": "8766",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                with patch("transport.http.DefaultsHttpServer", return_value=fake_server):
+                    with patch.object(desktop_app, "_wait_until_ready", return_value=True):
+                        with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
+                            with patch.object(
+                                desktop_app,
+                                "_port_owner_snapshot",
+                                return_value=[{"pid": "123", "command": "python3"}],
+                            ):
+                                with patch("defaultspack.native_webview.open_desktop_surface", return_value="browser"):
+                                    result = desktop_app.main()
+
+            self.assertEqual(result, 0)
+            self.assertFalse(fake_server.stopped)
+            events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+        event_names = [event["event"] for event in events]
+        self.assertIn("server_start_oserror", event_names)
+        self.assertIn("duplicate_launcher_exit", event_names)
+        busy_event = next(event for event in events if event["event"] == "server_start_oserror")
+        self.assertTrue(busy_event["existing_ready"])
+        self.assertEqual(busy_event["port_owners"], [{"pid": "123", "command": "python3"}])
+        self.assertNotIn("RUMI_API_TOKEN", events[0]["env"])
+
+    def test_wait_until_chat_ready_sleeps_after_unmatched_200_response(self):
+        from defaultspack import desktop_app
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, _limit):
+                return b"still warming"
+
+        sleeps = []
+
+        with patch.object(desktop_app.urllib.request, "urlopen", return_value=FakeResponse()):
+            with patch.object(desktop_app.time, "time", side_effect=[0.0, 0.0, 0.1, 0.3]):
+                with patch.object(desktop_app.time, "sleep", side_effect=sleeps.append):
+                    result = desktop_app._wait_until_chat_ready("http://localhost:8766/chat", timeout=0.25)
+
+        self.assertFalse(result)
+        self.assertEqual(sleeps, [0.2, 0.2])
 
     def test_managed_pack_root_alias_supports_ecosystem_defaultspack_imports(self):
         from defaultspack import desktop_app

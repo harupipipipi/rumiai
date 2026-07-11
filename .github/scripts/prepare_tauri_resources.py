@@ -358,6 +358,40 @@ def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | 
         raise RuntimeError("Forbidden generated bundle directories: " + ", ".join(forbidden[:20]))
 
 
+def warn_legacy_defaultspack_app_bundle() -> None:
+    legacy_app = Path.home() / "Applications" / "Rumi_Defaultspack.app"
+    if not legacy_app.exists():
+        return
+
+    launch_script = legacy_app / "Contents" / "MacOS" / "launch"
+    script_text = ""
+    try:
+        script_text = launch_script.read_text(encoding="utf-8")
+    except OSError:
+        pass
+
+    missing_markers = [
+        marker
+        for marker in ("--api-token", "--port", "RUMI_LOG_DIR", "RUMI_DEFAULTSPACK_OPEN_BROWSER")
+        if marker not in script_text
+    ]
+    if missing_markers:
+        print(
+            "warning: legacy Defaultspack app bundle detected at "
+            f"{legacy_app}. It is missing current launch markers: "
+            f"{', '.join(missing_markers)}. Re-register Defaultspack from Rumi Viewer "
+            "or remove the legacy bundle to avoid stale launch/load-failed behavior.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "warning: legacy underscore-named Defaultspack app bundle detected at "
+            f"{legacy_app}. Current builds generate 'Rumi Defaultspack.app'; "
+            "re-registering from Rumi Viewer will clean up old launch services entries.",
+            file=sys.stderr,
+        )
+
+
 def directory_size(path: Path) -> int:
     total = 0
     for item in path.rglob("*"):
@@ -404,6 +438,7 @@ def main() -> int:
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
 
     validate_bundle(dest_root, args.require_runtime_tools, args.target)
+    warn_legacy_defaultspack_app_bundle()
     print(
         "Prepared "
         f"{APP_RESOURCE_DIR} "
