@@ -200,6 +200,59 @@ def test_opencode_zen_stream_finalizes_once_after_finish_usage_tail_and_done():
     assert response.closed is True
 
 
+def test_opencode_zen_stream_promotes_reasoning_only_mimo_response_to_content():
+    """MiMo sometimes returns its complete answer only as reasoning_content."""
+    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
+
+    provider = object.__new__(OpencodeZenProvider)
+    response = _FakeSseResponse(
+        [
+            b'data: {"choices":[{"delta":{"reasoning_content":"{\\"text\\":"},'
+            b'"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{"reasoning_content":"\\"ready\\"}"},'
+            b'"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+            b'"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}\n\n'
+            b'data: [DONE]\n\n',
+        ]
+    )
+
+    events = list(provider._stream_from_response(response))
+
+    assert [event["type"] for event in events] == [
+        "reasoning_delta",
+        "reasoning_delta",
+        "content_delta",
+        "stream_end",
+    ]
+    assert events[-2]["delta"] == {"type": "text", "text": '{"text":"ready"}'}
+    assert events[-1]["finish_reason"] == "stop"
+
+
+def test_opencode_zen_stream_does_not_promote_reasoning_when_content_exists():
+    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
+
+    provider = object.__new__(OpencodeZenProvider)
+    response = _FakeSseResponse(
+        [
+            b'data: {"choices":[{"delta":{"reasoning_content":"plan"},'
+            b'"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"answer"},'
+            b'"finish_reason":"stop"}]}\n\n'
+            b'data: [DONE]\n\n',
+        ]
+    )
+
+    events = list(provider._stream_from_response(response))
+
+    assert [event["type"] for event in events] == [
+        "reasoning_delta",
+        "content_delta",
+        "stream_end",
+    ]
+    assert events[1]["delta"]["text"] == "answer"
+
+
 def test_opencode_zen_stream_reads_each_sse_line_without_waiting_for_eof():
     """A live SSE connection must expose deltas before the socket closes."""
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider

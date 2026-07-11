@@ -223,6 +223,8 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
     def _stream_from_response(self, resp):
         tool_call_state = {}
         finish_reason = ""
+        saw_content = False
+        reasoning_parts: List[str] = []
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:
             for payload in self._parse_sse_lines(resp):
@@ -243,10 +245,16 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
                 delta = choices[0].get("delta", {})
                 text = delta.get("content")
                 if text:
+                    saw_content = True
                     yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
                 reasoning_text = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking")
                 if reasoning_text:
-                    yield {"type": "reasoning_delta", "delta": {"type": "text", "text": str(reasoning_text)}}
+                    normalized_reasoning = str(reasoning_text)
+                    reasoning_parts.append(normalized_reasoning)
+                    yield {
+                        "type": "reasoning_delta",
+                        "delta": {"type": "text", "text": normalized_reasoning},
+                    }
                 yield from self._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
@@ -260,6 +268,11 @@ class OpencodeZenProvider(OpenAICompatibleProvider):
                         "id": current.get("id", ""),
                         "name": current.get("name", ""),
                     }
+            if not saw_content and reasoning_parts:
+                yield {
+                    "type": "content_delta",
+                    "delta": {"type": "text", "text": "".join(reasoning_parts)},
+                }
             yield {
                 "type": "stream_end",
                 "finish_reason": finish_reason or "stop",
