@@ -2126,6 +2126,23 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "GET", "/api/share/{token}", block_module="blocks.share.get", path_inject={"token": "token"}
     ),
     HttpRouteSpec(
+        "POST",
+        "/api/share/{token}/export",
+        block_module="blocks.share.export_bundle",
+        path_inject={"token": "token"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/share/{token}/import",
+        block_module="blocks.share.import_conversation",
+        path_inject={"token": "token"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/packs/defaultspack/chat/conversations/import",
+        block_module="blocks.share.import_bundle",
+    ),
+    HttpRouteSpec(
         "DELETE",
         "/api/share/{token}",
         block_module="blocks.share.revoke",
@@ -2346,6 +2363,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-exchange", handler_name="_handle_authority_browser_exchange"),
     HttpRouteSpec("POST", "/api/authority/browser-exchange/revoke", handler_name="_handle_authority_browser_exchange_revoke"),
+    HttpRouteSpec("GET", "/share/{token}", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient-debug", handler_name="_handle_static"),

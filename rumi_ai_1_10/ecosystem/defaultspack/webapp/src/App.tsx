@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Hand, Loader2 } from "lucide-react";
+import { Cloud, Copy, Download, Hand, Link, Loader2, X } from "lucide-react";
 
 import {
   CompanyWorkspacePanel,
@@ -39,6 +39,7 @@ import {
 } from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
+import { ConversationShareLanding, ImportedConversationNotice } from "./pages/ConversationShareLanding";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -2417,6 +2418,14 @@ function ChatApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCreatedUrl, setShareCreatedUrl] = useState<string | null>(null);
+  const [shareCreatedToken, setShareCreatedToken] = useState<string | null>(null);
+  const [shareExpiryHours, setShareExpiryHours] = useState("24");
+  const [shareRevoked, setShareRevoked] = useState(false);
+  const [shareDialogError, setShareDialogError] = useState<string | null>(null);
+  const [provenanceDismissedFor, setProvenanceDismissedFor] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
@@ -2471,6 +2480,15 @@ function ChatApp() {
       setMode("agent");
     }
   }, [mode, setMode]);
+
+  useEffect(() => {
+    if (!shareDialogOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setShareDialogOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [shareDialogOpen]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -4891,17 +4909,23 @@ function ChatApp() {
       let result: unknown;
       if (action.id === "conversation.export") {
         if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
-        result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
+        const exported = await api.exportConversation(activeConversationId, "json");
+        const blob = new Blob([exported.content], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "history.json";
+        anchor.click();
+        URL.revokeObjectURL(url);
+        result = { exported: true, format: "json" };
       } else if (action.id === "conversation.share") {
         if (!activeConversationId) throw new Error("共有する会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "markdown");
-        result = await api.createShare({
-          target_type: "conversation",
-          target_id: activeConversationId,
-          title: activeChatTitle,
-          content: exported.content,
-          visibility: "local",
-        });
+        setShareCreatedUrl(null);
+        setShareCreatedToken(null);
+        setShareRevoked(false);
+        setShareDialogError(null);
+        setShareDialogOpen(true);
+        result = { dialog_opened: true };
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -4975,8 +4999,34 @@ function ChatApp() {
     }
   };
 
+  const createConversationShare = async (visibility: "local" | "tunnel") => {
+    if (!activeConversationId) return;
+    setShareBusy(true);
+    setShareDialogError(null);
+    try {
+      const created = await api.createShare({
+        target_type: "conversation",
+        target_id: activeConversationId,
+        title: activeChatTitle,
+        visibility,
+        expires_at: shareExpiryHours === "never" ? null : new Date(Date.now() + Number(shareExpiryHours) * 60 * 60 * 1000).toISOString(),
+      });
+      setShareCreatedUrl(String(created.share_url || ""));
+      setShareCreatedToken(String(created.token || ""));
+      setShareRevoked(false);
+    } catch (reason) {
+      setShareDialogError(reason instanceof Error ? reason.message : "共有リンクを作成できませんでした。");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
     event?.preventDefault();
+    if (activeConversation?.metadata?.shared_read_only === true) {
+      setError("This imported conversation is read-only. Import a continue copy to send messages.");
+      return;
+    }
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
     const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
@@ -5702,8 +5752,11 @@ function ChatApp() {
     if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
     window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
-  const renderComposer = (isCentered = false) => (
-    <Renderers.composer
+  const renderComposer = (isCentered = false) => {
+    if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
+      return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
+    }
+    return <Renderers.composer
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
@@ -5774,8 +5827,8 @@ function ChatApp() {
       onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
       onCodingWorkspacesRefresh={() => void loadCodingWorkspaces()}
       onCodingContextRefresh={loadCodingContext}
-    />
-  );
+    />;
+  };
 
   return (
     <RendererBoundary>
@@ -5902,6 +5955,10 @@ function ChatApp() {
                   </button>
                 </div>
               </div>
+            )}
+
+            {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
+              <ImportedConversationNotice importMode={activeConversation.metadata?.shared_import_mode} onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
             )}
 
             {isDesktopsWorkspace ? (
@@ -6192,6 +6249,35 @@ function ChatApp() {
       )}
 
       <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
+      {shareDialogOpen && (
+        <LayerPortal layer="globalOverlay">
+          <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShareDialogOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="share-dialog-title" className="w-full max-w-lg border border-zinc-700 bg-zinc-950 p-5 shadow-2xl">
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="share-dialog-title" className="text-lg font-semibold text-zinc-100">Share conversation</h2>
+                <button autoFocus type="button" title="Close" aria-label="Close share dialog" onClick={() => setShareDialogOpen(false)} className="inline-flex h-8 w-8 items-center justify-center text-zinc-400 hover:bg-zinc-900 hover:text-white"><X size={17} /></button>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">The transcript is redacted before sharing. Attachments and executable permissions are never included.</p>
+              <label className="mt-4 block text-xs font-medium text-zinc-400">Link expiry
+                <select value={shareExpiryHours} onChange={(event) => setShareExpiryHours(event.target.value)} className="mt-2 h-10 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100">
+                  <option value="1">1 hour</option>
+                  <option value="24">24 hours</option>
+                  <option value="168">7 days</option>
+                  <option value="never">No expiry</option>
+                </select>
+              </label>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("local")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Link size={18} className="mt-0.5 text-emerald-300" /><span><strong className="block text-sm text-zinc-100">Local share link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Private to this defaultspack host.</span></span></button>
+                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
+              </div>
+              {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
+              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
+              {shareCreatedUrl && <div className={`mt-4 border p-3 ${shareRevoked ? "border-red-500/25 bg-red-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}><p className={`break-all text-sm ${shareRevoked ? "text-red-100 line-through" : "text-emerald-100"}`}>{shareCreatedUrl}</p><div className="mt-3 flex flex-wrap gap-2">{!shareRevoked && <button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button>}{shareCreatedToken && !shareRevoked && <button type="button" onClick={() => void api.revokeShare(shareCreatedToken).then(() => setShareRevoked(true)).catch((reason) => setShareDialogError(reason instanceof Error ? reason.message : "Could not revoke link."))} className="inline-flex h-9 items-center gap-2 border border-red-400/25 px-3 text-xs font-semibold text-red-200 hover:bg-red-500/10"><X size={14} /> Revoke link</button>}</div>{shareRevoked && <p role="status" className="mt-2 text-xs text-red-200">Revoked. This link can no longer be viewed or imported.</p>}</div>}
+              <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
+            </section>
+          </div>
+        </LayerPortal>
+      )}
     </div>
     </RendererBoundary>
   );
@@ -6263,6 +6349,9 @@ export default function App() {
   }
   if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
     return <UiPrecisionComparator />;
+  }
+  if (pathname.startsWith("/share/")) {
+    return <ConversationShareLanding />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;

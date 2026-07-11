@@ -1350,6 +1350,48 @@ export type Conversation = {
   messages: ChatMessage[];
 };
 
+export type ConversationShareBundle = {
+  schema_version: number;
+  kind: "rumi.defaultspack.conversation_share";
+  created_at: number;
+  source: { pack_id?: string; conversation_id?: string; title?: string; share_token?: string };
+  conversation: { schema_version?: number; updated_at?: number; conversation: Conversation };
+  assets: { included?: unknown[]; omitted?: Array<Record<string, unknown>>; missing_policy?: string };
+  preview?: { target_type?: string; message_count?: number; role_counts?: Record<string, number>; content_trust?: string };
+  provenance?: {
+    source_pack?: string;
+    source_conversation_id?: string;
+    created_at?: number;
+    target_type?: string;
+    model?: { source_model?: string | null; source_provider?: string | null; policy?: string; import_model?: string };
+  };
+  security: {
+    redacted?: boolean;
+    permissions?: Record<string, boolean>;
+    expires_at?: string | number | null;
+    visibility?: string;
+    import_modes?: Array<"read_only" | "continue_copy">;
+    copy_policy?: string;
+    secret_policy?: string;
+    attachment_policy?: string;
+    malicious_content_policy?: string;
+    tool_policy?: string;
+  };
+};
+
+export type ConversationShareRecord = {
+  token: string;
+  target_type: string;
+  title?: string;
+  visibility?: string;
+  expires_at?: string | number | null;
+  share_url?: string;
+  api_url?: string;
+  created_at?: string;
+  audit?: Array<{ operation: string; timestamp: string; result: string; mode?: string }>;
+  content: ConversationShareBundle;
+};
+
 export type ConversationSearchMatch = {
   message_id?: string;
   role?: string;
@@ -4080,6 +4122,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+
+  getShare(token: string) {
+    return request<ConversationShareRecord>(`/api/share/${encodeURIComponent(token)}`, { cache: "no-store" });
+  },
+
+  importShare(token: string, sourceUrl?: string, importMode: "read_only" | "continue_copy" = "continue_copy") {
+    return request<{ conversation: Conversation; conversation_id: string; import_mode: string; audit?: Record<string, unknown> }>(
+      `/api/share/${encodeURIComponent(token)}/import`,
+      { method: "POST", body: JSON.stringify({ source_url: sourceUrl, import_mode: importMode }) },
+    );
+  },
+
+  revokeShare(token: string) {
+    return request<{ revoked: boolean }>(`/api/share/${encodeURIComponent(token)}`, { method: "DELETE" });
+  },
+
+  exportShare(token: string) {
+    return request<{ conversation: ConversationShareBundle["conversation"]; audit?: Record<string, unknown> }>(
+      `/api/share/${encodeURIComponent(token)}/export`, { method: "POST", body: "{}" },
+    );
+  },
+
+  importConversationBundle(bundle: Record<string, unknown>, sourceUrl?: string) {
+    return request<{ conversation: Conversation; conversation_id: string }>(
+      "/api/packs/defaultspack/chat/conversations/import",
+      { method: "POST", body: JSON.stringify({ bundle, source_url: sourceUrl }) },
+    );
   },
 
   compactConversation(conversationId: string, options?: CompactConversationOptions) {
