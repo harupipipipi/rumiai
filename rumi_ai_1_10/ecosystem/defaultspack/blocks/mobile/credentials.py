@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Any
 
@@ -15,6 +16,9 @@ from domain.ai_client.api_key_store import provider_api_metadata, read_provider_
 from domain.mobile.contract import mobile_feature_enabled
 from domain.p2p.credential_transfer import CredentialTransferStore
 from domain.p2p.device_store import DeviceStore
+
+
+_TRANSFER_ID_RE = re.compile(r"^ctr_[0-9a-f]{32}$")
 
 
 def _merged(input_data: dict) -> dict:
@@ -62,20 +66,46 @@ def _audit(context, action: str, record: dict[str, Any], *, success: bool = True
         "profile_id": record.get("profile_id"),
         "provider_id": record.get("provider_id"),
         "api_id": record.get("api_id"),
-        "reason": record.get("reason"),
     })
+
+
+def _audit_failure(context, action: str, args: dict[str, Any], exc: Exception) -> None:
+    """Audit an attempt without copying attacker-controlled text or secrets."""
+    if isinstance(exc, KeyError):
+        outcome = "not_found"
+    elif "recipient proof" in str(exc).lower():
+        outcome = "recipient_proof_rejected"
+    elif isinstance(exc, PermissionError):
+        outcome = "forbidden"
+    elif "expired" in str(exc).lower():
+        outcome = "expired"
+    else:
+        outcome = "invalid_state"
+    fields: dict[str, Any] = {
+        "success": False,
+        "outcome": outcome,
+    }
+    transfer_id = str(args.get("transfer_id") or args.get("id") or "")
+    if _TRANSFER_ID_RE.fullmatch(transfer_id):
+        fields["transfer_id"] = transfer_id
+    audit_event(context, action, fields)
+
+
+def _audit_claimed_expiries(context, store: CredentialTransferStore, **scope: str) -> None:
+    for record in store.claim_expiry_audits(**scope):
+        _audit(context, "credential_transfer.expired", record)
 
 
 def _failure(exc: Exception):
     if isinstance(exc, KeyError):
         return error("transfer not found", "NOT_FOUND")
-    if isinstance(exc, PermissionError):
-        return error(str(exc), "FORBIDDEN")
     message = str(exc)
-    if "expired" in message:
-        return error("transfer expired", "EXPIRED")
     if "recipient proof" in message:
         return error("recipient proof rejected", "RECIPIENT_PROOF_REJECTED")
+    if isinstance(exc, PermissionError):
+        return error("credential transfer is forbidden", "FORBIDDEN")
+    if "expired" in message:
+        return error("transfer expired", "EXPIRED")
     return error(message or "credential transfer failed", "INVALID_STATE")
 
 
@@ -118,6 +148,7 @@ def create_transfer(input_data, context=None):
             ttl_seconds=int(args.get("ttl_seconds") or 90),
         )
     except Exception as exc:
+        _audit_failure(context, "credential_transfer.create_failed", args, exc)
         return _failure(exc)
     _audit(context, "credential_transfer.created", record)
     return ok({"transfer": record})
@@ -150,6 +181,7 @@ def confirm_transfer(input_data, context=None):
         payload.clear()
         secret = ""
     except Exception as exc:
+        _audit_failure(context, "credential_transfer.confirm_failed", args, exc)
         return _failure(exc)
     _audit(context, "credential_transfer.confirmed", record)
     return ok({"transfer": record})
@@ -159,7 +191,10 @@ def list_transfers(input_data, context=None):
     device_id = _authenticated_device_id(context)
     if not device_id:
         return error("device authentication is required", "FORBIDDEN")
-    return ok({"transfers": _store(input_data, context).list_for_device(device_id)})
+    store = _store(input_data, context)
+    transfers = store.list_for_device(device_id)
+    _audit_claimed_expiries(context, store, device_id=device_id)
+    return ok({"transfers": transfers})
 
 
 def get_status(input_data, context=None):
@@ -167,8 +202,12 @@ def get_status(input_data, context=None):
         return error("transfer status is only available on the PC", "FORBIDDEN")
     args = _merged(input_data)
     try:
-        record = _store(input_data, context).get_admin(str(args.get("transfer_id") or args.get("id") or ""))
+        store = _store(input_data, context)
+        transfer_id = str(args.get("transfer_id") or args.get("id") or "")
+        record = store.get_admin(transfer_id)
+        _audit_claimed_expiries(context, store, transfer_id=transfer_id)
     except Exception as exc:
+        _audit_failure(context, "credential_transfer.status_failed", args, exc)
         return _failure(exc)
     return ok({"transfer": record})
 
@@ -185,6 +224,7 @@ def redeem_transfer(input_data, context=None):
             signature=str(args.get("signature") or ""),
         )
     except Exception as exc:
+        _audit_failure(context, "credential_transfer.redeem_failed", args, exc)
         return _failure(exc)
     _audit(context, "credential_transfer.accepted", result["transfer"])
     return ok(result)
@@ -205,6 +245,7 @@ def _transition(input_data, context, status: str):
             reason=str(args.get("reason") or status),
         )
     except Exception as exc:
+        _audit_failure(context, f"credential_transfer.{status}_failed", args, exc)
         return _failure(exc)
     _audit(context, f"credential_transfer.{status}", record)
     return ok({"transfer": record})

@@ -24,6 +24,13 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
   }
 }
 
+class _FailingSecureStorage extends _FakeSecureStorage {
+  @override
+  Future<void> write(String key, String? value) async {
+    throw StateError('fake secure storage failure');
+  }
+}
+
 void main() {
   test('mobile notification settings default PC task finish notifications on',
       () async {
@@ -79,6 +86,24 @@ void main() {
     expect(configs.single.label, 'Router 2');
     expect(configs.single.apiKey, 'sk-two');
     expect(configs.single.apiCompatibility, 'openai');
+  });
+
+  test('verified provider persistence propagates secure storage failure',
+      () async {
+    final store = ApiConfigStore(storage: _FailingSecureStorage());
+    await expectLater(
+      store.upsertProviderConfigVerified(
+        const MobileProviderConfig(
+          providerId: 'fake-provider',
+          displayName: 'Fake Provider',
+          label: 'Fake',
+          apiKey: 'fake-key-for-tests-only',
+          baseUrl: 'https://invalid.example.test/v1',
+          model: 'fake-model',
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
   });
 
   test('api config persists anthropic-compatible provider mode', () async {

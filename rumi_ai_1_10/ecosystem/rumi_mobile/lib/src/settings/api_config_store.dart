@@ -513,6 +513,47 @@ class ApiConfigStore {
     await saveProviderConfigs(next);
   }
 
+  /// Persists a transferred credential and verifies the exact value can be
+  /// read back before the transfer client acknowledges delivery to the PC.
+  Future<void> upsertProviderConfigVerified(MobileProviderConfig config) async {
+    final providerId = config.providerId.trim();
+    if (providerId.isEmpty || config.apiKey.trim().isEmpty) {
+      throw StateError('provider credential is incomplete');
+    }
+    final raw = await _storage.read(_providerConfigsKey);
+    final existing = <MobileProviderConfig>[];
+    if (raw != null && raw.trim().isNotEmpty) {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        throw const FormatException('invalid provider configuration store');
+      }
+      existing.addAll(decoded.whereType<Map>().map((entry) =>
+          MobileProviderConfig.fromJson(Map<String, dynamic>.from(entry))));
+    }
+    final next = [
+      for (final value in existing)
+        if (value.providerId != providerId) value,
+      config,
+    ];
+    await _storage.write(
+      _providerConfigsKey,
+      jsonEncode(next.map((value) => value.toJson()).toList()),
+    );
+    final persistedRaw = await _storage.read(_providerConfigsKey);
+    if (persistedRaw == null || persistedRaw.trim().isEmpty) {
+      throw StateError('provider credential persistence could not be verified');
+    }
+    final persisted = (jsonDecode(persistedRaw) as List)
+        .whereType<Map>()
+        .map((entry) =>
+            MobileProviderConfig.fromJson(Map<String, dynamic>.from(entry)))
+        .where((value) => value.providerId == providerId)
+        .firstOrNull;
+    if (persisted == null || persisted.apiKey != config.apiKey) {
+      throw StateError('provider credential persistence could not be verified');
+    }
+  }
+
   Future<void> deleteProviderConfig(String providerId) async {
     final normalized = providerId.trim();
     if (normalized.isEmpty) return;

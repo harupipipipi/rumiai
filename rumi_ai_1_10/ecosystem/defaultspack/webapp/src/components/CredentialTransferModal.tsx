@@ -15,6 +15,22 @@ type CredentialTransferModalProps = {
 
 const terminalStates = new Set(["completed", "rejected", "expired", "revoked", "cancelled"]);
 
+export function credentialTransferCanClose(status: string | null, busy: boolean): boolean {
+  return !busy && !["awaiting_confirmation", "pending"].includes(status ?? "");
+}
+
+export function credentialTransferFocusTarget(
+  currentIndex: number,
+  focusableCount: number,
+  backwards: boolean,
+): number | null {
+  if (focusableCount <= 0) return null;
+  if (currentIndex < 0) return backwards ? focusableCount - 1 : 0;
+  if (backwards && currentIndex <= 0) return focusableCount - 1;
+  if (!backwards && currentIndex >= focusableCount - 1) return 0;
+  return currentIndex;
+}
+
 export function CredentialTransferModal({
   providerId,
   providerLabel,
@@ -28,18 +44,53 @@ export function CredentialTransferModal({
   const [error, setError] = useState("");
   const [transfer, setTransfer] = useState<CredentialTransfer | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const displayName = providerLabel || providerId;
   const selectedDevice = devices.find((device) => device.device_id === selectedId);
 
+  const requestClose = () => {
+    if (busy) return;
+    if (!credentialTransferCanClose(transfer?.status ?? null, busy)) {
+      setError("有効な転送があります。先に転送をキャンセルしてください。");
+      return;
+    }
+    onClose();
+  };
+
   useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     headingRef.current?.focus();
+    return () => previousFocusRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        requestClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? []).filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) {
+        event.preventDefault();
+        headingRef.current?.focus();
+        return;
+      }
+      const currentIndex = focusable.findIndex((element) => element === document.activeElement);
+      const target = credentialTransferFocusTarget(currentIndex, focusable.length, event.shiftKey);
+      if (target !== null && target !== currentIndex) {
+        event.preventDefault();
+        focusable[target].focus();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose]);
+  }, [busy, onClose, transfer]);
 
   useEffect(() => {
     let disposed = false;
@@ -139,8 +190,8 @@ export function CredentialTransferModal({
   return (
     <AnimatePresence>
       <motion.div className="fixed inset-0 rumi-layer-modal flex items-center justify-center bg-black/60 p-3 sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <motion.div role="dialog" aria-modal="true" aria-labelledby="credential-transfer-title" className="relative max-h-[calc(100dvh-24px)] w-full max-w-lg overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl" initial={{ scale: 0.97, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.97, opacity: 0 }}>
-          <button type="button" aria-label="転送画面を閉じる" onClick={onClose} disabled={busy} className="absolute right-3 top-3 rounded p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-40"><X size={18} /></button>
+        <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="credential-transfer-title" aria-describedby="credential-transfer-security-note" className="relative max-h-[calc(100dvh-24px)] w-full max-w-lg overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl" initial={{ scale: 0.97, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.97, opacity: 0 }}>
+          <button type="button" aria-label="転送画面を閉じる" onClick={requestClose} disabled={busy} className="absolute right-3 top-3 rounded p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-40"><X size={18} /></button>
           <div className="p-5 sm:p-6">
             <div className="flex items-start gap-3 pr-8">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-emerald-500/30 bg-emerald-500/10"><ShieldCheck size={20} className="text-emerald-300" /></div>
@@ -188,14 +239,14 @@ export function CredentialTransferModal({
                 <TransferState transfer={transfer} />
                 {recoveryNeeded && <div className="mt-3 flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>意図しない端末や画面共有が疑われる場合は、端末のペアリングを解除し、provider側でAPI keyをローテーションしてください。</span></div>}
                 <div className="mt-4 flex gap-2">
-                  {!terminal && <button type="button" disabled={busy} onClick={() => void stopTransfer(transfer.status === "accepted")} className="flex-1 rounded-lg border border-rose-500/40 px-4 py-2.5 text-sm text-rose-200 hover:border-rose-400">{transfer.status === "accepted" ? "受領を取り消す" : "転送をキャンセル"}</button>}
-                  <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-zinc-700 px-4 py-2.5 text-sm text-zinc-200 hover:border-zinc-500">閉じる</button>
+                  {!terminal && transfer.status !== "accepted" && <button type="button" disabled={busy} onClick={() => void stopTransfer(false)} className="flex-1 rounded-lg border border-rose-500/40 px-4 py-2.5 text-sm text-rose-200 hover:border-rose-400">転送をキャンセル</button>}
+                  <button type="button" onClick={requestClose} className="flex-1 rounded-lg border border-zinc-700 px-4 py-2.5 text-sm text-zinc-200 hover:border-zinc-500">閉じる</button>
                 </div>
               </div>
             )}
 
             {error && <div role="alert" className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</div>}
-            <p className="mt-4 text-[11px] leading-5 text-zinc-600">画面やURLにはcredentialを表示しません。転送は端末IDと暗号鍵に結び付き、期限切れまたは1回の受領で無効になります。</p>
+            <p id="credential-transfer-security-note" className="mt-4 text-[11px] leading-5 text-zinc-600">画面やURLにはcredentialを表示しません。転送は端末IDと暗号鍵に結び付き、期限切れまたは1回の受領で無効になります。</p>
           </div>
         </motion.div>
       </motion.div>
@@ -210,7 +261,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function TransferState({ transfer }: { transfer: CredentialTransfer }) {
   const copy: Record<string, { title: string; body: string; tone: string }> = {
     pending: { title: "受信端末の確認待ち", body: "端末で承認すると、暗号化credentialを1回だけ受け取れます。", tone: "text-sky-200" },
-    accepted: { title: "端末が受領しました", body: "端末でのsecure storage保存確認を待っています。", tone: "text-emerald-200" },
+    accepted: { title: "端末へ配信済みです", body: "配信後は取り消せません。端末でsecure storageへの保存を再試行し、完了確認を送信してください。", tone: "text-emerald-200" },
     completed: { title: "安全に転送しました", body: "受信端末がsecure storageへの保存を確認しました。", tone: "text-emerald-200" },
     rejected: { title: "端末が拒否しました", body: "credentialは端末へ渡されていません。", tone: "text-amber-200" },
     expired: { title: "転送は期限切れです", body: "暗号化payloadは破棄され、再利用できません。", tone: "text-amber-200" },

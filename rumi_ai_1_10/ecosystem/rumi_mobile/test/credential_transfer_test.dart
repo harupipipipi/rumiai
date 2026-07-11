@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -7,7 +8,8 @@ import 'package:http/testing.dart';
 import 'package:rumi_remote_app/src/data/pc/credential_transfer_client.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
-const _pc = PcConnection(baseUrl: 'http://192.0.2.10:8765', token: 'fake-token');
+const _pc =
+    PcConnection(baseUrl: 'http://192.0.2.10:8765', token: 'fake-token');
 
 http.Response _ok(Map<String, dynamic> data) => http.Response(
       jsonEncode({'status': 'ok', 'data': data}),
@@ -29,6 +31,30 @@ Map<String, dynamic> _pendingTransfer() => {
     };
 
 void main() {
+  test('canonical redemption message matches the Python protocol vector',
+      () async {
+    final transfer = CredentialTransfer.fromJson({
+      'transfer_id': 'ctr_vector',
+      'status': 'pending',
+      'device_id': 'device-vector',
+      'provider_id': 'fake-provider',
+      'api_id': 'fake-account',
+      'expires_at': 1893456000000,
+      'redemption_challenge': 'rch_vector',
+    });
+    const expected = '{"api_id":"fake-account","challenge":"rch_vector",'
+        '"device_id":"device-vector","expires_at":1893456000000,'
+        '"provider_id":"fake-provider","transfer_id":"ctr_vector"}';
+    expect(transfer.canonicalRedemptionMessage(), expected);
+    final digest = await Sha256().hash(utf8.encode(expected));
+    expect(
+      digest.bytes
+          .map((value) => value.toRadixString(16).padLeft(2, '0'))
+          .join(),
+      '0ce091bc43b73881bcb71950abe6a8c44672224f819fd15cb183da80de405eda',
+    );
+  });
+
   test('parses only public transfer metadata', () {
     final transfer = CredentialTransfer.fromJson(_pendingTransfer());
     expect(transfer.transferId, 'ctr_fake');
@@ -36,16 +62,20 @@ void main() {
     expect(transfer.providerId, 'fake-provider');
     expect(transfer.apiId, 'fake-account');
     expect(transfer.isPending, isTrue);
-    expect(jsonEncode(transfer.redemptionPayload()), isNot(contains('api_key')));
+    expect(
+        jsonEncode(transfer.redemptionPayload()), isNot(contains('api_key')));
   });
 
-  test('lists pending transfers without putting secrets in URL or request body', () async {
+  test('lists pending transfers without putting secrets in URL or request body',
+      () async {
     Uri? requestedUri;
     String? requestedBody;
     final client = MockClient((request) async {
       requestedUri = request.url;
       requestedBody = request.body;
-      return _ok({'transfers': [_pendingTransfer()]});
+      return _ok({
+        'transfers': [_pendingTransfer()]
+      });
     });
     final transferClient = CredentialTransferClient(client: client);
     final transfers = await transferClient.listPending(_pc);
@@ -62,7 +92,9 @@ void main() {
     http.Request? captured;
     final client = MockClient((request) async {
       captured = request;
-      return _ok({'transfer': {..._pendingTransfer(), 'status': 'rejected'}});
+      return _ok({
+        'transfer': {..._pendingTransfer(), 'status': 'rejected'}
+      });
     });
     final transferClient = CredentialTransferClient(client: client);
     await transferClient.reject(
@@ -71,7 +103,8 @@ void main() {
     );
     transferClient.close();
 
-    expect(captured!.url.path, '/api/mobile/v1/credential-transfers/ctr_fake/reject');
+    expect(captured!.url.path,
+        '/api/mobile/v1/credential-transfers/ctr_fake/reject');
     expect(captured!.url.query, isEmpty);
     expect(jsonDecode(captured!.body), {'reason': 'rejected by recipient'});
     expect(captured!.body, isNot(contains('api_key')));

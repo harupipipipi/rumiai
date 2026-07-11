@@ -43,8 +43,13 @@ class CredentialTransfer {
   final String reason;
 
   bool get isPending => status == 'pending';
+  bool get isAccepted => status == 'accepted';
   bool get isTerminal => const {
-        'completed', 'rejected', 'expired', 'revoked', 'cancelled'
+        'completed',
+        'rejected',
+        'expired',
+        'revoked',
+        'cancelled'
       }.contains(status);
   bool get isExpired => DateTime.now().millisecondsSinceEpoch >= expiresAt;
 
@@ -60,20 +65,23 @@ class CredentialTransfer {
       providerLabel: transfer['provider_label'] as String? ?? '',
       apiId: transfer['api_id'] as String? ?? '',
       expiresAt: (transfer['expires_at'] as num?)?.toInt() ?? 0,
-      redemptionChallenge:
-          transfer['redemption_challenge'] as String? ?? '',
+      redemptionChallenge: transfer['redemption_challenge'] as String? ?? '',
       reason: transfer['reason'] as String? ?? '',
     );
   }
 
   Map<String, dynamic> redemptionPayload() => {
-        'transfer_id': transferId,
-        'device_id': deviceId,
-        'provider_id': providerId,
+        // Keep this order identical to Python json.dumps(sort_keys=True,
+        // separators=(",", ":")); it is the signed protocol contract.
         'api_id': apiId,
-        'expires_at': expiresAt,
         'challenge': redemptionChallenge,
+        'device_id': deviceId,
+        'expires_at': expiresAt,
+        'provider_id': providerId,
+        'transfer_id': transferId,
       };
+
+  String canonicalRedemptionMessage() => jsonEncode(redemptionPayload());
 }
 
 class CredentialTransferClient {
@@ -81,10 +89,15 @@ class CredentialTransferClient {
       : _http = client ?? http.Client();
 
   final http.Client _http;
+  final Map<String, Map<String, dynamic>> _pendingPersistence = {};
   bool _closed = false;
 
   void close() {
     _closed = true;
+    for (final payload in _pendingPersistence.values) {
+      payload.clear();
+    }
+    _pendingPersistence.clear();
     _http.close();
   }
 
@@ -102,14 +115,16 @@ class CredentialTransferClient {
   }
 
   Future<List<CredentialTransfer>> listPending(PcConnection pc) async {
-    final data = await _request(pc, 'GET', '/api/mobile/v1/credential-transfers');
+    final data =
+        await _request(pc, 'GET', '/api/mobile/v1/credential-transfers');
     final transfers = data['transfers'] as List? ?? const [];
     return transfers
         .whereType<Map>()
         .map((value) => CredentialTransfer.fromJson(
               Map<String, dynamic>.from(value),
             ))
-        .where((transfer) => !transfer.isExpired && transfer.isPending)
+        .where((transfer) =>
+            !transfer.isExpired && (transfer.isPending || transfer.isAccepted))
         .toList();
   }
 
@@ -127,7 +142,7 @@ class CredentialTransferClient {
     if (identity.deviceId != transfer.deviceId) {
       throw const CredentialTransferException('この転送は別の端末宛てです。');
     }
-    final encoded = jsonEncode(transfer.redemptionPayload());
+    final encoded = transfer.canonicalRedemptionMessage();
     final digest = await Sha256().hash(utf8.encode(encoded));
     final signature = await deviceStore.signApprovalPayloadHash(
       _hex(digest.bytes),
@@ -171,11 +186,13 @@ class CredentialTransferClient {
     required MobileDeviceStore deviceStore,
     required ApiConfigStore configStore,
   }) async {
-    final payload = await redeem(
-      pc,
-      transfer: transfer,
-      deviceStore: deviceStore,
-    );
+    final payload = _pendingPersistence[transfer.transferId] ??
+        await redeem(
+          pc,
+          transfer: transfer,
+          deviceStore: deviceStore,
+        );
+    _pendingPersistence[transfer.transferId] = payload;
     if (payload['provider_id'] != transfer.providerId ||
         payload['api_id'] != transfer.apiId ||
         payload['expires_at'] != transfer.expiresAt) {
@@ -203,9 +220,18 @@ class CredentialTransferClient {
       catalogOnly: false,
       apiCompatibility: previous?.apiCompatibility ?? 'openai',
     );
-    await configStore.upsertProviderConfig(next);
-    payload.clear();
+    try {
+      // ACK is a statement that durable secure storage succeeded.  A failed
+      // or unverifiable write deliberately leaves the server in accepted so
+      // the user can retry local persistence without claiming completion.
+      await configStore.upsertProviderConfigVerified(next);
+    } catch (_) {
+      // Keep only in process memory so the user can retry a transient secure
+      // storage failure without replaying the one-time server redemption.
+      rethrow;
+    }
     await acknowledge(pc, transfer);
+    _pendingPersistence.remove(transfer.transferId)?.clear();
   }
 
   Future<Map<String, dynamic>> _request(
@@ -223,7 +249,9 @@ class CredentialTransferClient {
     final uri = _uri(pc.baseUrl, path);
     final headers = _headers(pc.token);
     final response = method == 'GET'
-        ? await _http.get(uri, headers: headers).timeout(const Duration(seconds: 15))
+        ? await _http
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 15))
         : await _http
             .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
             .timeout(const Duration(seconds: 15));

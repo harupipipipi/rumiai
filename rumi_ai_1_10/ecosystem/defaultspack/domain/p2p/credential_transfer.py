@@ -25,7 +25,7 @@ from .settings import default_store_path
 TRANSFER_ALGORITHM = "X25519-HKDF-SHA256-AES-256-GCM"
 TRANSFER_VERSION = 1
 TRANSFER_TTL_SECONDS = 90
-TERMINAL_STATES = {"accepted", "rejected", "expired", "revoked", "cancelled"}
+TERMINAL_STATES = {"accepted", "completed", "rejected", "expired", "revoked", "cancelled"}
 _HKDF_SALT = b"rumi-provider-credential-transfer-v1"
 
 
@@ -61,7 +61,7 @@ def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in record.items()
-        if key not in {"envelope", "recipient_public_key", "recipient_signing_key", "redemption_challenge"}
+        if key not in {"envelope", "recipient_public_key", "recipient_signing_key", "redemption_challenge", "expiry_audited"}
     }
 
 
@@ -149,6 +149,7 @@ class CredentialTransferStore:
             "accepted_at": 0,
             "completed_at": 0,
             "reason": "",
+            "expiry_audited": False,
             "envelope": {},
         }
         with self._lock():
@@ -206,6 +207,29 @@ class CredentialTransferStore:
                 self._save(data)
             return _safe_record(record)
 
+    def claim_expiry_audits(
+        self,
+        *,
+        device_id: str = "",
+        transfer_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Atomically claim newly expired records for exactly-once auditing."""
+        with self._lock():
+            data = self._load()
+            claimed: list[dict[str, Any]] = []
+            for record in data["transfers"].values():
+                if transfer_id and record.get("transfer_id") != transfer_id:
+                    continue
+                if device_id and record.get("device_id") != device_id:
+                    continue
+                if record.get("status") != "expired" or record.get("expiry_audited") is True:
+                    continue
+                record["expiry_audited"] = True
+                claimed.append(_safe_record(record))
+            if claimed:
+                self._save(data)
+            return claimed
+
     def redeem(self, transfer_id: str, *, device_id: str, signature: str) -> dict[str, Any]:
         with self._lock():
             data = self._load()
@@ -243,7 +267,9 @@ class CredentialTransferStore:
             allowed = {
                 "rejected": {"pending"},
                 "cancelled": {"awaiting_confirmation", "pending"},
-                "revoked": {"awaiting_confirmation", "pending", "accepted"},
+                # Once redeem returns the envelope, delivery has happened.  The
+                # PC can no longer truthfully revoke that delivered material.
+                "revoked": {"awaiting_confirmation", "pending"},
                 "completed": {"accepted"},
             }
             if record["status"] not in allowed[status]:
