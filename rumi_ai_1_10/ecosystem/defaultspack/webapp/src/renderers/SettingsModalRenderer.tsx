@@ -3098,6 +3098,12 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const placementMenuRef = useRef<HTMLDivElement | null>(null);
+  const placementTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<ControlCenterSection["id"]>(
     () => mapSettingsSectionId(requestedSectionId) ?? "quick_setup",
   );
@@ -3121,8 +3127,8 @@ export function SettingsModalRenderer({
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const controlCenterSections = useMemo(
-    () => buildControlCenterSections(settingsSections),
-    [settingsSections],
+    () => buildControlCenterSections(settingsSections, locale),
+    [locale, settingsSections],
   );
   const accountConnectionCards = useMemo(
     () => buildAccountConnectionPrelude(settingsValues),
@@ -3180,15 +3186,92 @@ export function SettingsModalRenderer({
   useEffect(() => {
     if (!placementMenuOpen) return;
     const handlePointerDown = () => setPlacementMenuOpen(false);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPlacementMenuOpen(false);
-    };
     document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     };
+  }, [placementMenuOpen]);
+  useEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const layer = layerRef.current;
+    const parent = layer?.parentElement;
+    const backgroundSiblings = parent
+      ? Array.from(parent.children).filter((element) => element !== layer && !element.contains(layer))
+      : [];
+    const previousState = backgroundSiblings.map((element) => ({
+      element: element as HTMLElement,
+      inert: (element as HTMLElement).inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    for (const { element } of previousState) {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    }
+    const frame = requestAnimationFrame(() => dialogTitleRef.current?.focus());
+    return () => {
+      cancelAnimationFrame(frame);
+      for (const { element, inert, ariaHidden } of previousState) {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      }
+      const opener = openerRef.current;
+      requestAnimationFrame(() => {
+        if (opener?.isConnected && !opener.hasAttribute("disabled")) opener.focus();
+      });
+    };
+  }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const focusableSelector = [
+      "button:not([disabled])",
+      "[href]",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (placementMenuOpen) {
+          setPlacementMenuOpen(false);
+          placementTriggerRef.current?.focus();
+        } else {
+          onClose();
+        }
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const scope = placementMenuOpen ? placementMenuRef.current : dialogRef.current;
+      if (!scope) return;
+      const focusable = Array.from(scope.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true" && element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        (placementMenuOpen ? placementMenuRef.current : dialogTitleRef.current)?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !scope.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleDialogKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDialogKeyDown, true);
+  }, [isOpen, onClose, placementMenuOpen]);
+  useEffect(() => {
+    if (!placementMenuOpen) return;
+    requestAnimationFrame(() => {
+      placementMenuRef.current?.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+    });
   }, [placementMenuOpen]);
   useEffect(() => {
     setCodexAppServerDraft({
@@ -4022,15 +4105,21 @@ export function SettingsModalRenderer({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center">
+        <div ref={layerRef} className="fixed inset-0 rumi-layer-modal flex items-center justify-center" data-testid="settings-modal-layer">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={onClose}
+            aria-hidden="true"
           />
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rumi-settings-dialog-title"
+            aria-describedby="rumi-settings-dialog-description"
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -4038,8 +4127,16 @@ export function SettingsModalRenderer({
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div className="min-w-0">
-                <h2 className="text-lg font-medium text-zinc-100">Rumi Control Center</h2>
-                <p className="text-xs text-zinc-500 mt-1">
+                <h2
+                  ref={dialogTitleRef}
+                  id="rumi-settings-dialog-title"
+                  tabIndex={-1}
+                  className="text-lg font-medium text-zinc-100 outline-none"
+                >
+                  {t(locale, "settings.title")}
+                </h2>
+                <p id="rumi-settings-dialog-description" className="text-xs text-zinc-500 mt-1">
+                  {t(locale, "settings.description")} {" "}
                   {t(locale, "settings.backendRegistry", {
                     extensionPoints: catalog?.extension_points.length ?? 0,
                     parts: catalog?.parts?.length ?? 0,
@@ -4050,15 +4147,25 @@ export function SettingsModalRenderer({
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <button
+                    ref={placementTriggerRef}
                     type="button"
                     onClick={() => setPlacementMenuOpen((current) => !current)}
                     className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-2.5 py-2 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    title="settings に配置を追加"
+                    title={t(locale, "settings.addPlacement")}
+                    aria-label={t(locale, "settings.addPlacement")}
+                    aria-haspopup="menu"
+                    aria-expanded={placementMenuOpen}
                   >
                     <Plus size={15} />
                   </button>
                   {placementMenuOpen && (
-                    <div className="absolute right-0 top-[calc(100%+8px)] rumi-layer-local-popover w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+                    <div
+                      ref={placementMenuRef}
+                      role="menu"
+                      tabIndex={-1}
+                      aria-label={t(locale, "settings.addPlacement")}
+                      className="absolute right-0 top-[calc(100%+8px)] rumi-layer-local-popover w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl"
+                    >
                       <div className="border-b border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
                         Settings placement candidates
                       </div>
@@ -4067,6 +4174,7 @@ export function SettingsModalRenderer({
                           <button
                             key={manifest.id}
                             type="button"
+                            role="menuitem"
                             onClick={() => {
                               updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "settings" }));
                               setPlacementMenuOpen(false);
@@ -4088,7 +4196,7 @@ export function SettingsModalRenderer({
                     </div>
                   )}
                 </div>
-                <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+                <button type="button" onClick={onClose} aria-label={t(locale, "settings.close")} className="rounded p-1 text-zinc-500 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-300">
                   <X size={18} />
                 </button>
               </div>
@@ -4198,6 +4306,7 @@ export function SettingsModalRenderer({
                       <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
                         <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
                           {t(locale, "settings.advanced")}
+                          <span className="mt-1 block font-normal leading-5 text-zinc-600">{t(locale, "settings.advancedHelp")}</span>
                         </summary>
                         <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
                           {visibleAdvancedFields.map(renderField)}

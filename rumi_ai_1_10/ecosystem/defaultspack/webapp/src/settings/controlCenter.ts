@@ -1,4 +1,5 @@
 import type { SettingsSection } from "../lib/api";
+import { normalizeLocale, type LocaleSetting } from "../lib/i18n";
 import { settingsFieldSearchText } from "../lib/settingsSearch";
 
 export type ControlCenterSectionId =
@@ -212,6 +213,114 @@ const SECTION_META: Array<Omit<ControlCenterSection, "fields" | "sourceSections"
   },
 ];
 
+const JA_SECTION_COPY: Record<ControlCenterSectionId, Pick<ControlCenterSection, "label" | "description" | "help">> = {
+  quick_setup: { label: "はじめに", description: "Rumiを使い始めるために必要な項目です。", help: "モデル、接続、機能、コンピュータ操作の準備状況を最初に確認できます。" },
+  models_api: { label: "モデルとAPI", description: "普段使うモデル、接続先、切り替え方を選びます。", help: "プロバイダー固有の値は、必要な場合だけ詳細設定に表示します。" },
+  accounts_connections: { label: "アカウントと接続", description: "Google、GitHubなどの外部サービスを接続します。", help: "ここではログイン情報を管理します。機能を実行する際の確認方法は「機能とMCP」で設定します。" },
+  tools_mcp: { label: "機能とMCP", description: "利用できる機能、MCPサーバー、実行前の確認方法を管理します。", help: "サービスへのログインと、機能を実行する権限は別々に管理されます。" },
+  computer_automation: { label: "コンピュータ操作", description: "画面・ブラウザ操作、自動化、端末間の引き継ぎを管理します。", help: "画面や入力を操作する機能は影響が大きいため、許可状態をここで確認できます。" },
+  workspace_ui: { label: "表示と操作", description: "言語、見た目、入力欄、ショートカットを変更します。", help: "日常的な表示・操作の設定をまとめています。" },
+  profiles: { label: "プロファイル", description: "用途ごとのモデル、機能、ポリシーの組み合わせを管理します。", help: "現在使われているプロファイルと不足している設定を確認できます。" },
+  privacy_security: { label: "プライバシーと安全", description: "認証情報、承認、履歴、危険な操作の扱いを管理します。", help: "書き込み操作や秘密情報は、承認ルールを保ったまま管理されます。" },
+  packs_extensions: { label: "パックと拡張機能", description: "追加機能のインストール、有効化、更新を管理します。", help: "拡張機能が追加した設定もここから確認できます。" },
+  advanced: { label: "詳細設定", description: "互換性や特殊な利用方法のための設定です。", help: "通常は変更する必要のない項目をまとめています。" },
+  diagnostics: { label: "診断", description: "動作状況、ログ、移行結果を確認します。", help: "問題調査に使う内部情報はここだけに表示します。" },
+};
+
+type LocalizedFieldCopy = { label: string; help?: string; options?: Record<string, string> };
+
+const JA_FIELD_COPY: Record<string, LocalizedFieldCopy> = {
+  "general.composer_placeholder": { label: "入力欄の案内文", help: "メッセージ入力欄が空のときに表示する案内文です。" },
+  "general.show_activity_in_messages": { label: "回答に処理状況を表示", help: "回答の上部に、処理の進み具合や利用した機能を表示します。" },
+  "general.keyboard_button_navigation": { label: "キーボードでボタンを移動", help: "Tabキーで入力欄やサイドバーのボタンへ移動できるようにします。" },
+  "general.spotlight_shortcut_enabled": { label: "会話検索のショートカットを使う", help: "どの画面からでもショートカットで会話検索を開けます。" },
+  "general.spotlight_shortcut": { label: "会話検索のキー", help: "会話検索を開くキーの組み合わせを指定します。" },
+  "general.spotlight_shortcut_text_input": { label: "入力中も会話検索を開く", help: "入力欄にカーソルがあるときも会話検索のショートカットを使えます。" },
+  "general.language": { label: "表示言語", help: "Rumiの画面で使う言語を選びます。拡張機能に翻訳がない場合は元の文言を表示します。", options: { auto: "端末に合わせる" } },
+  "preview.default_mode": { label: "プレビューの表示方法" },
+  "chat_rendering.unknown_block_strategy": { label: "未対応の内容の表示", help: "Rumiがまだ対応していない形式を受け取ったときの表示方法です。", options: { json: "元データを表示" } },
+  "models.preferred_model": { label: "普段使うモデル", help: "新しい会話で最初に使うモデルを選びます。" },
+  "models.on_switch_to_non_vision_with_images": { label: "画像非対応モデルへ切り替えるとき", help: "画像のある会話で、画像を読めないモデルを選んだときの動作です。", options: { auto_bridge: "画像を読み取って引き継ぐ", ask: "切り替える前に確認", block: "切り替えない", ignore: "画像を渡さず切り替える" } },
+  "tools.semantic_backend": { label: "機能候補の探し方", options: { embedding: "意味が近い機能を探す", lexical: "名前や説明から探す" } },
+  "tools.selector_trace": { label: "機能選定の記録" },
+  "tools.semantic_candidate_limit": { label: "確認する機能候補の上限" },
+  "computer_use_haze.enabled": { label: "操作中の画面表示", help: "Rumiが画面を操作している間、画面端に色を表示します。" },
+  "computer_use_haze.preset": { label: "操作中に表示する配色" },
+  "computer_use_haze.start_color": { label: "開始色" },
+  "computer_use_haze.end_color": { label: "終了色" },
+  "computer_use_haze.accent_color": { label: "強調色" },
+  "computer_use_haze.opacity": { label: "表示の濃さ" },
+  "computer_use_haze.edge_width": { label: "表示する幅" },
+  "computer_use_haze.animation_speed": { label: "動きの速さ" },
+  "*.auto_open": { label: "自動で開く" },
+  "*.max_items": { label: "表示する件数" },
+  "*.quick_add_enabled": { label: "日付を押して追加" },
+  "*.default_item_type": { label: "最初に選ぶ項目の種類" },
+  "*.default_time": { label: "既定の時刻" },
+  "*.time_slot_minutes": { label: "時刻の間隔（分）" },
+  "*.show_time_picker": { label: "時刻選択を表示" },
+  "*.agent_task_default": { label: "AIタスクとして追加" },
+  "*.agent_model": { label: "カレンダーで使うモデル" },
+  "*.agent_current_chat": { label: "現在の会話で実行" },
+  "*.week_start": { label: "週の開始曜日" },
+  "*.show_outside_days": { label: "前後の月の日付も表示" },
+  "*.dim_weekends": { label: "週末を控えめに表示" },
+  "*.task_color": { label: "タスクの色" },
+  "*.event_color": { label: "予定の色" },
+  "*.max_items_per_day": { label: "1日に表示する件数" },
+  "*.show_widgets": { label: "ウィジェットを表示" },
+  "*.main_model": { label: "メインモデル" },
+  "*.lightweight_model": { label: "軽量モデル" },
+  "*.preferred_model_group": { label: "モデルグループ" },
+  "*.auto_route_within_group": { label: "用途に合わせてグループ内で自動選択" },
+  "*.model_api_routes": { label: "モデルごとのAPI接続" },
+  "*.thinking_level": { label: "考える深さ" },
+  "*.deepthink_enabled": { label: "長時間の深い検討を使う" },
+  "*.handoff": { label: "クラウド・別端末へ引き継ぐ" },
+  "*.api_keys": { label: "APIキーとトークン" },
+  "*.mention_policy": { label: "メンションの扱い" },
+  "*.show_advanced_commands": { label: "詳細コマンドを表示" },
+  "*.input_setup_guide": { label: "受け取り設定の手順" },
+  "*.endpoint_summary": { label: "受け取り口" },
+  "*.input_provider": { label: "受け取り元" },
+  "*.input_template_id": { label: "受け取り形式" },
+  "*.input_profile_id": { label: "受け取り用プロファイル" },
+  "*.input_endpoint_id": { label: "受け取り口のID" },
+  "*.public_url_launcher": { label: "一時公開URL" },
+  "*.provider_route_copy": { label: "接続先のパス" },
+  "*.input_template_summary": { label: "利用できる受け取り形式" },
+  "*.input_profile_summary": { label: "利用できる受け取り用プロファイル" },
+  "*.include_source_context": { label: "受け取り元の情報を含める" },
+  "*.default_response_mode": { label: "既定の返信方法" },
+  "*.input_response_preset": { label: "返信内容のプリセット" },
+  "*.policy_summary": { label: "送信先ごとのルール" },
+  "*.saved_sources_summary": { label: "保存済みの受け取り元" },
+  "*.output_setup_guide": { label: "送信方法" },
+  "*.external_tokens": { label: "外部サービスのトークン（確認のみ）" },
+  "*.output_provider": { label: "送信先サービス" },
+  "*.output_template_id": { label: "送信形式" },
+  "*.output_profile_id": { label: "送信用プロファイル" },
+  "*.output_send_mode": { label: "送信方法" },
+  "*.output_target_id": { label: "送信先ID" },
+  "*.output_callback_token_id": { label: "送信に使うトークンID" },
+  "*.output_template_summary": { label: "利用できる送信形式" },
+  "*.output_profile_summary": { label: "利用できる送信用プロファイル" },
+  "*.response_summary": { label: "返信内容のルール" },
+  "*.response_prompt_preset": { label: "返信内容のプリセット" },
+  "*.public_url_summary": { label: "一時公開URLの状態" },
+  "*.custom_template_path": { label: "追加テンプレートの場所" },
+  "*.custom_profile_paths": { label: "追加プロファイルの場所" },
+  "*.custom_prompt_examples": { label: "返信例" },
+  "*.mode": { label: "起動の判断方法" },
+  "*.filter_unrelated": { label: "関係のない候補を除外" },
+  "*.ai_request_logging": { label: "AIへのリクエストを記録" },
+};
+
+function localizedSectionMeta(locale: LocaleSetting): Array<Omit<ControlCenterSection, "fields" | "sourceSections">> {
+  if (normalizeLocale(locale) !== "ja") return SECTION_META;
+  return SECTION_META.map((section) => ({ ...section, ...JA_SECTION_COPY[section.id] }));
+}
+
 const SECTION_ID_ALIASES: Record<string, ControlCenterSectionId> = {
   quick_setup: "quick_setup",
   setup: "quick_setup",
@@ -279,8 +388,8 @@ const FIELD_TOKEN_ALIASES: Array<[RegExp, ControlCenterSectionId]> = [
   [/\b(debug|diagnostic|health|log|raw|migration)\b/i, "diagnostics"],
 ];
 
-export function controlCenterSectionMeta(): ControlCenterSection[] {
-  return SECTION_META.map((section) => ({ ...section, fields: [], sourceSections: [] }));
+export function controlCenterSectionMeta(locale: LocaleSetting = "en"): ControlCenterSection[] {
+  return localizedSectionMeta(locale).map((section) => ({ ...section, fields: [], sourceSections: [] }));
 }
 
 export function safeSettingsLabel(value: unknown, fallback: unknown = ""): string {
@@ -293,7 +402,7 @@ export function safeSettingsLabel(value: unknown, fallback: unknown = ""): strin
   return label;
 }
 
-export function normalizeSettingsField(field: SettingsField): SettingsField {
+export function normalizeSettingsField(field: SettingsField, sourceSectionId = "", locale: LocaleSetting = "en"): SettingsField {
   const normalized = { ...field };
   normalized.label = safeSettingsLabel(field.label, field.id);
   if (Array.isArray(field.options)) {
@@ -301,6 +410,19 @@ export function normalizeSettingsField(field: SettingsField): SettingsField {
       ...option,
       label: safeSettingsLabel(option.label, option.value),
     }));
+  }
+  if (normalizeLocale(locale) === "ja") {
+    const copy = JA_FIELD_COPY[`${sourceSectionId}.${field.id}`] ?? JA_FIELD_COPY[`*.${field.id}`];
+    if (copy) {
+      normalized.label = copy.label;
+      if (copy.help) normalized.help = copy.help;
+      if (copy.options && Array.isArray(normalized.options)) {
+        normalized.options = normalized.options.map((option) => ({
+          ...option,
+          label: copy.options?.[String(option.value)] ?? option.label,
+        }));
+      }
+    }
   }
   return normalized;
 }
@@ -335,8 +457,8 @@ export function controlCenterSectionForField(section: SettingsSection, field: Se
   return sectionMatch ?? "packs_extensions";
 }
 
-export function buildControlCenterSections(settingsSections: SettingsSection[]): ControlCenterSection[] {
-  const sections = controlCenterSectionMeta();
+export function buildControlCenterSections(settingsSections: SettingsSection[], locale: LocaleSetting = "en"): ControlCenterSection[] {
+  const sections = controlCenterSectionMeta(locale);
   const byId = new Map(sections.map((section) => [section.id, section]));
   for (const sourceSection of settingsSections) {
     const sourceSectionTargets = new Set<ControlCenterSectionId>();
@@ -345,7 +467,7 @@ export function buildControlCenterSections(settingsSections: SettingsSection[]):
       sourceSectionTargets.add(targetId);
       const target = byId.get(targetId);
       if (!target) continue;
-      const field = normalizeSettingsField(rawField) as ControlCenterField;
+      const field = normalizeSettingsField(rawField, sourceSection.id, locale) as ControlCenterField;
       field.controlSectionId = targetId;
       field.sourceSectionId = sourceSection.id;
       field.sourceSectionLabel = safeSettingsLabel(sourceSection.label, sourceSection.id);

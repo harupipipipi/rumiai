@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { SettingsSection } from "../lib/api";
+import { settingsFieldSearchText } from "../lib/settingsSearch";
 import {
   buildCodexAppServerPrelude,
   buildAccountConnectionPrelude,
@@ -25,6 +26,34 @@ test("settings control center keeps the required section order", () => {
     "Advanced",
     "Diagnostics",
   ]);
+});
+
+test("Japanese settings use task-oriented copy while preserving technical search aliases", () => {
+  const sections = buildControlCenterSections([
+    {
+      id: "general",
+      label: "General",
+      fields: [
+        { id: "composer_placeholder", label: "Composer Placeholder", type: "text", help: "composer placeholder" },
+        { id: "language", label: "Language", type: "select", options: [{ value: "auto", label: "Auto" }] },
+      ],
+    },
+    {
+      id: "tools",
+      label: "Tools",
+      fields: [{ id: "semantic_backend", label: "Semantic backend", type: "select", advanced: true, options: [{ value: "embedding", label: "Embedding" }] }],
+    },
+  ] as SettingsSection[], "ja");
+
+  assert.equal(sections.find((section) => section.id === "workspace_ui")?.label, "表示と操作");
+  const workspaceFields = sections.find((section) => section.id === "workspace_ui")?.fields ?? [];
+  assert.equal(workspaceFields.find((field) => field.id === "composer_placeholder")?.label, "入力欄の案内文");
+  assert.equal(workspaceFields.find((field) => field.id === "language")?.options?.[0]?.label, "端末に合わせる");
+  const semanticField = sections.find((section) => section.id === "tools_mcp")?.fields.find((field) => field.id === "semantic_backend");
+  assert.equal(semanticField?.label, "機能候補の探し方");
+  assert.equal(semanticField?.advanced, true);
+  assert.match(settingsFieldSearchText(semanticField!), /semantic_backend/);
+  assert.match(settingsFieldSearchText(semanticField!), /embedding/);
 });
 
 test("settings control center separates computer control from tools", () => {

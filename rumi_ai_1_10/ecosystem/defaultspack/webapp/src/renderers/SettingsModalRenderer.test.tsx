@@ -147,6 +147,7 @@ test("SettingsModalRenderer renders template model_select with searchable model 
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -197,6 +198,7 @@ test("SettingsModalRenderer shows simple main and lightweight model slots", () =
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -305,6 +307,7 @@ test("SettingsModalRenderer constrains long readonly paths inside settings cards
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "packs",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1310,4 +1313,40 @@ test("settings help pane uses reported active profile with fallback when absent"
   assert.doesNotMatch(withProfile, />default</);
   assert.match(withoutProfile, /No active profile reported/);
   assert.doesNotMatch(withoutProfile, />default</);
+});
+
+test("Settings modal exposes localized dialog semantics and task-oriented Japanese copy", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "general",
+      locale: "ja",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "general",
+        label: "General",
+        fields: [{ id: "composer_placeholder", label: "Composer Placeholder", type: "text", help: "composer placeholder" }],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /aria-labelledby="rumi-settings-dialog-title"/);
+  assert.match(html, /aria-describedby="rumi-settings-dialog-description"/);
+  assert.match(html, /aria-label="設定を閉じる"/);
+  assert.match(html, />設定<\/h2>/);
+  assert.match(html, /入力欄の案内文/);
+  assert.doesNotMatch(html, />Composer Placeholder</);
+  assert.doesNotMatch(html, /バックエンド登録情報/);
 });
