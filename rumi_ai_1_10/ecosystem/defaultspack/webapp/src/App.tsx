@@ -2955,7 +2955,7 @@ function ChatApp() {
       }));
   }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
-  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
+  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "placeholder");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);

@@ -1042,11 +1042,10 @@ class FrontendRegistry:
                         "id": "unknown_block_strategy",
                         "label": "Unknown Block Strategy",
                         "type": "select",
-                        "default": "hidden",
+                        "default": "placeholder",
                         "options": [
-                            {"value": "hidden", "label": "Hide"},
-                            {"value": "text", "label": "Plain Text"},
-                            {"value": "json", "label": "JSON Fallback"},
+                            {"value": "placeholder", "label": "Safe placeholder"},
+                            {"value": "debug", "label": "Developer diagnostics (redacted)"},
                         ],
                     },
                 ],
@@ -2790,7 +2789,7 @@ class FrontendRegistry:
                 "event_color": "green",
                 "max_items_per_day": 3,
             },
-            "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
+            "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "placeholder"},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
             },
