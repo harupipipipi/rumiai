@@ -47,6 +47,13 @@ from domain.ai_client.client import AIClient, AuthorityApprovalRequired
 from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
+from domain.chat.idempotency import (
+    ChatIdempotencyStore,
+    IdempotencyConflictError,
+    operation_key,
+    operation_scope,
+    payload_hash,
+)
 from domain.chat.ir_legacy_adapter import (
     append_assistant_tool_use_to_ir,
     append_tool_result_to_ir,
@@ -1518,6 +1525,105 @@ class ChatRunEngine:
         self._progress_state: dict[str, Any] = {}
 
     def stream(
+        self,
+        input_data: dict[str, Any],
+        context: dict[str, Any] | None = None,
+        *,
+        stream_mode: bool = True,
+    ) -> Iterator[dict[str, Any]]:
+        """Execute once or replay a persistently keyed logical chat operation."""
+        key = operation_key(input_data)
+        if not key:
+            yield from self._stream_once(input_data, context, stream_mode=stream_mode)
+            return
+        reservation = (
+            context.get("_chat_idempotency_reservation")
+            if isinstance(context, dict)
+            else None
+        )
+        scope = operation_scope(input_data, context)
+        digest = payload_hash(input_data)
+        store = ChatIdempotencyStore()
+        if (
+            isinstance(reservation, dict)
+            and reservation.get("key") == key
+            and reservation.get("scope") == scope
+            and reservation.get("digest") == digest
+        ):
+            claim = reservation.get("claim")
+        else:
+            try:
+                claim = store.claim(scope, key, digest)
+            except IdempotencyConflictError as exc:
+                yield run_event(
+                    "error",
+                    run_id="",
+                    conversation_id=str(input_data.get("conversation_id") or ""),
+                    seq=0,
+                    data={
+                        "error": {
+                            "code": "IDEMPOTENCY_CONFLICT",
+                            "message": str(exc),
+                        },
+                        "terminal": True,
+                    },
+                )
+                return
+        if claim.state == "replay":
+            if claim.status == "in_progress":
+                yield run_event(
+                    "error",
+                    run_id="",
+                    conversation_id=str(input_data.get("conversation_id") or ""),
+                    seq=0,
+                    data={
+                        "error": {
+                            "code": "IDEMPOTENCY_IN_PROGRESS",
+                            "message": "This chat operation is already in progress",
+                        },
+                        "terminal": True,
+                    },
+                )
+                return
+            yield from claim.events
+            return
+
+        events: list[dict[str, Any]] = []
+        status = "failed"
+        try:
+            for event in self._stream_once(input_data, context, stream_mode=stream_mode):
+                events.append(event)
+                event_type = str(event.get("type") or "")
+                if event_type == "done":
+                    status = "completed"
+                elif event_type == "cancelled":
+                    status = "cancelled"
+                elif event_type == "approval_requested":
+                    status = "approval_waiting"
+                elif event_type == "error":
+                    status = "failed"
+                yield event
+        except Exception as exc:
+            failure = run_event(
+                "error",
+                run_id=self._run_id,
+                conversation_id=str(input_data.get("conversation_id") or ""),
+                seq=self._event_seq + 1,
+                data={
+                    "error": {
+                        "code": "CHAT_RUN_FAILED",
+                        "message": str(exc),
+                    },
+                    "terminal": True,
+                },
+            )
+            events.append(failure)
+            status = "failed"
+            yield failure
+        finally:
+            store.finish(scope, key, digest, status, events)
+
+    def _stream_once(
         self,
         input_data: dict[str, Any],
         context: dict[str, Any] | None = None,

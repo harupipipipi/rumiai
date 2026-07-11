@@ -1007,6 +1007,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
 
   try {
     await api.sendMessage("c1", "hello", {
+      idempotency_key: "chat-operation-123",
       thinking_level: "medium",
       attachments: [
         { name: "notes.txt", content: "body", size: 4, type: "text/plain" },
@@ -1030,6 +1031,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
     ],
     metadata: { selected_tools: ["local_file"] },
   });
+  assert.equal(requestBody?.idempotency_key, "chat-operation-123");
   assert.deepEqual(requestBody?.tools, ["local_file"]);
   assert.deepEqual(requestBody?.params, {
     thinking_level: "medium",

@@ -3170,7 +3170,7 @@ export function SettingsModalRenderer({
     if (mappedSectionId && controlCenterSections.some((section) => section.id === mappedSectionId)) {
       setActiveSectionId(mappedSectionId);
     }
-  }, [controlCenterSections, requestedSectionId]);
+  }, [controlCenterSections, isOpen, requestedSectionId]);
   useEffect(() => {
     if (!normalizedSearch) return;
     if (!visibleSections.some((section) => section.id === activeSectionId)) {

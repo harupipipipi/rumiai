@@ -321,6 +321,44 @@ test("company tree does not claim the employee group is missing while loading", 
   assert.doesNotMatch(html, /No employee group loaded/);
 });
 
+test("company tree disambiguates companies with duplicate display names", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyTree, {
+      companies: [
+        {
+          id: "chat-team-596c-f34f566e04",
+          name: "Executive Team",
+          agent_count: 9,
+          task_count: 0,
+        },
+        {
+          id: "chat-team-a59c-baebff19d9",
+          name: "Executive Team",
+          agent_count: 9,
+          task_count: 0,
+        },
+      ],
+      activeCompanyId: "chat-team-a59c-baebff19d9",
+    }),
+  );
+
+  assert.match(html, /ID: chat-team-596c-f34f566e04/);
+  assert.match(html, /ID: chat-team-a59c-baebff19d9/);
+});
+
+test("company workspace header identifies the selected company", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyWorkspacePanel, {
+      activeConversationId: "chat-1",
+      activeConversationTitle: "Executive Team chat",
+      activeCompanyIdHint: "chat-team-a59c-baebff19d9",
+    }),
+  );
+
+  assert.match(html, /Executive Team chat/);
+  assert.match(html, /Company ID: chat-team-a59c-baebff19d9/);
+});
+
 test("company workspace resolves MiMo company hints from group and profile context", () => {
   assert.equal(resolveCompanyWorkspaceHint({
     groupId: "company:mimo-coding-company",

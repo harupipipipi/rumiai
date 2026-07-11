@@ -677,6 +677,14 @@ export function CompanyWorkspacePanel({
         <p className="truncate text-[10px] text-zinc-600">
           {activeConversationTitle || activeConversationId || activeCompany?.name || "start a chat to create employees"}
         </p>
+        {(activeCompany?.id || activeCompanyId) && (
+          <p
+            className="truncate font-mono text-[9px] text-zinc-600"
+            title={activeCompany?.id || activeCompanyId || undefined}
+          >
+            Company ID: {activeCompany?.id || activeCompanyId}
+          </p>
+        )}
       </div>
 
       {error && (
