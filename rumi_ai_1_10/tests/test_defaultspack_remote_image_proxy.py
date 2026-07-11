@@ -6,8 +6,10 @@ import urllib.error
 from email.message import Message
 
 import pytest
+import ecosystem.defaultspack.domain.media.remote_image_proxy as proxy_module
 
 from ecosystem.defaultspack.domain.media.remote_image_proxy import (
+    MAX_ACTIVE_CONSENTS,
     MAX_BYTES,
     RemoteImageError,
     RemoteImageProxy,
@@ -33,14 +35,57 @@ def test_proxy_routes_are_local_only_sensitive_and_method_scoped():
     assert all(route.sensitive and route.local_only for route in routes.values())
 
 
+def test_default_transport_pins_validated_ip_and_preserves_tls_host(monkeypatch):
+    captured = {}
+
+    class FakeConnection:
+        _address = "93.184.216.34"
+
+        def __init__(self, host, address, timeout):
+            captured.update(host=host, address=address, timeout=timeout)
+
+        def request(self, method, path, headers):
+            captured.update(method=method, path=path, headers=headers)
+
+        def getresponse(self):
+            return FakeHTTPResponse()
+
+        def close(self):
+            pass
+
+    class FakeHTTPResponse(io.BytesIO):
+        status = 200
+        reason = "OK"
+
+        def __init__(self):
+            super().__init__(png())
+            self.headers = Message()
+            self.headers["Content-Type"] = "image/png"
+
+    monkeypatch.setattr(proxy_module, "_PinnedHTTPSConnection", FakeConnection)
+    opener = proxy_module._PinnedOpener(lambda host: ["93.184.216.34"])
+    request = proxy_module.urllib.request.Request("https://images.example/a.png?q=1")
+    with opener.open(request, 7.0) as response:
+        assert response.read() == png()
+    assert captured == {
+        "host": "images.example",
+        "address": "93.184.216.34",
+        "timeout": 7.0,
+        "method": "GET",
+        "path": "/a.png?q=1",
+        "headers": {"Host": "images.example"},
+    }
+
+
 def png(width=1, height=1):
     return b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", width, height) + b"\0" * 8
 
 
 class Response(io.BytesIO):
-    def __init__(self, body, url="https://images.example/a.png", mime="image/png", length=None):
+    def __init__(self, body, url="https://images.example/a.png", mime="image/png", length=None, peer_ip="93.184.216.34"):
         super().__init__(body)
         self._url = url
+        self.peer_ip = peer_ip
         self.headers = Message()
         self.headers["Content-Type"] = mime
         if length is not None:
@@ -125,6 +170,25 @@ def test_expired_token_never_fetches():
     assert opener.requests == []
 
 
+def test_consent_store_is_bounded_and_prunes_expired_or_revoked_entries():
+    now = [10.0]
+    proxy = RemoteImageProxy(resolver=PUBLIC, clock=lambda: now[0])
+    tokens = [
+        proxy.create(f"https://images.example/{index}.png")["token"]
+        for index in range(MAX_ACTIVE_CONSENTS)
+    ]
+    with pytest.raises(RemoteImageError) as caught:
+        proxy.create("https://images.example/overflow.png")
+    assert caught.value.code == "CONSENT_LIMIT"
+
+    proxy.revoke(tokens[0])
+    assert proxy.create("https://images.example/revoked-slot.png")["token"]
+
+    now[0] += 301
+    assert proxy.create("https://images.example/expired-slots.png")["token"]
+    assert len(proxy._consents) == 1
+
+
 @pytest.mark.parametrize("body,mime,code", [
     (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml", "MIME_BLOCKED"),
     (b"<script>alert(1)</script>", "image/png", "UNSAFE_IMAGE_TYPE"),
@@ -170,3 +234,12 @@ def test_rebinding_on_second_resolution_fails_closed_before_request():
     with pytest.raises(RemoteImageError):
         proxy.fetch(token)
     assert opener.requests == []
+
+
+def test_rebinding_after_validation_is_blocked_by_connected_peer_check():
+    opener = Opener([Response(png(), peer_ip="127.0.0.1")])
+    proxy = RemoteImageProxy(resolver=PUBLIC, opener=opener)
+    token = proxy.create("https://images.example/a.png")["token"]
+    with pytest.raises(RemoteImageError) as caught:
+        proxy.fetch(token)
+    assert caught.value.code == "PRIVATE_NETWORK_BLOCKED"

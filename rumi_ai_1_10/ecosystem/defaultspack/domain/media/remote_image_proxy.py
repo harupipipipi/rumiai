@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import ipaddress
 import secrets
 import socket
+import ssl
 import struct
 import threading
 import time
@@ -26,6 +28,7 @@ except ModuleNotFoundError:  # package import in repository tests
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PIXELS = 40_000_000
 MAX_REDIRECTS = 3
+MAX_ACTIVE_CONSENTS = 256
 TOKEN_TTL_SECONDS = 5 * 60
 READ_TIMEOUT_SECONDS = 10.0
 _ALLOWED_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
@@ -48,9 +51,73 @@ class Consent:
     mime: str = ""
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        return None
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a validated address while authenticating the original host."""
+
+    def __init__(self, host: str, address: str, timeout: float) -> None:
+        super().__init__(host, 443, timeout=timeout, context=ssl.create_default_context())
+        self._address = address
+
+    def connect(self) -> None:
+        raw_socket = socket.create_connection((self._address, 443), self.timeout)
+        try:
+            peer = raw_socket.getpeername()[0].split("%", 1)[0]
+            if ipaddress.ip_address(peer) != ipaddress.ip_address(self._address.split("%", 1)[0]):
+                raise RemoteImageError("DNS_REBINDING_BLOCKED", "The image peer address changed")
+            self.sock = self._context.wrap_socket(raw_socket, server_hostname=self.host)
+        except Exception:
+            raw_socket.close()
+            raise
+
+
+class _PinnedResponse:
+    def __init__(self, response: http.client.HTTPResponse, url: str, connection) -> None:
+        self._response = response
+        self._url = url
+        self._connection = connection
+        self.headers = response.headers
+        self.peer_ip = connection._address
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._response.read(amount)
+
+    def geturl(self) -> str:
+        return self._url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args) -> None:
+        self._response.close()
+        self._connection.close()
+
+
+class _PinnedOpener:
+    """HTTPS-only transport which never re-resolves a validated host."""
+
+    def __init__(self, resolver) -> None:
+        self._resolver = resolver
+
+    def open(self, request, timeout):  # noqa: ANN001
+        parsed = urllib.parse.urlsplit(request.full_url)
+        addresses = self._resolver(parsed.hostname or "")
+        if not addresses or any(not _is_public_ip(address) for address in addresses):
+            raise RemoteImageError("DNS_REBINDING_BLOCKED", "The image address is no longer public")
+        address = sorted(addresses)[0]
+        connection = _PinnedHTTPSConnection(parsed.hostname or "", address, timeout)
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        headers = dict(request.header_items())
+        headers["Host"] = parsed.netloc
+        connection.request("GET", path, headers=headers)
+        response = connection.getresponse()
+        if response.status < 200 or response.status >= 300:
+            error = urllib.error.HTTPError(
+                request.full_url, response.status, response.reason, response.headers, None
+            )
+            response.close()
+            connection.close()
+            raise error
+        return _PinnedResponse(response, request.full_url, connection)
 
 
 def _default_resolver(host: str) -> list[str]:
@@ -126,14 +193,35 @@ def _sniff(body: bytes) -> tuple[str, int, int]:
     raise RemoteImageError("UNSAFE_IMAGE_TYPE", "Only verified PNG, JPEG, GIF, or WebP images are allowed")
 
 
+def _connected_peer_ip(response: object) -> str:
+    """Return the connected socket peer, failing closed for unknown transports."""
+    explicit = getattr(response, "peer_ip", None)
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    current = response
+    for attribute in ("fp", "raw", "_sock"):
+        current = getattr(current, attribute, None)
+        if current is None:
+            break
+    if current is not None:
+        try:
+            peer = current.getpeername()
+        except (AttributeError, OSError):
+            peer = None
+        if isinstance(peer, tuple) and peer and isinstance(peer[0], str):
+            return peer[0]
+    raise RemoteImageError(
+        "PEER_VERIFY_FAILED",
+        "The image server connection could not be verified",
+    )
+
+
 class RemoteImageProxy:
     """Own short-lived consent tokens and fetch validated raster image bytes."""
 
     def __init__(self, *, resolver=_default_resolver, opener=None, clock=time.time) -> None:
         self._resolver = resolver
-        self._opener = opener or urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), _NoRedirect()
-        )
+        self._opener = opener or _PinnedOpener(resolver)
         self._clock = clock
         self._lock = threading.RLock()
         self._consents: dict[str, Consent] = {}
@@ -143,6 +231,17 @@ class RemoteImageProxy:
         token = secrets.token_urlsafe(32)
         expires_at = self._clock() + TOKEN_TTL_SECONDS
         with self._lock:
+            now = self._clock()
+            self._consents = {
+                key: consent
+                for key, consent in self._consents.items()
+                if not consent.revoked and consent.expires_at > now
+            }
+            if len(self._consents) >= MAX_ACTIVE_CONSENTS:
+                raise RemoteImageError(
+                    "CONSENT_LIMIT",
+                    "Too many remote image consents are active",
+                )
             self._consents[token] = Consent(normalized, expires_at)
         record_execution("remote_image.consent", "network_read", {"url_sha256": _url_hash(normalized)})
         return {"token": token, "proxy_url": f"/api/remote-images/{token}", "expires_at": expires_at}
@@ -201,6 +300,11 @@ class RemoteImageProxy:
                     continue
                 raise RemoteImageError("FETCH_FAILED", "The image server rejected the request") from exc
             with response:
+                if not _is_public_ip(_connected_peer_ip(response)):
+                    raise RemoteImageError(
+                        "PRIVATE_NETWORK_BLOCKED",
+                        "The image connection reached a private network target",
+                    )
                 final_url = validate_remote_url(response.geturl(), self._resolver)
                 if final_url != url:
                     raise RemoteImageError("UNVALIDATED_REDIRECT", "An unvalidated redirect was blocked")

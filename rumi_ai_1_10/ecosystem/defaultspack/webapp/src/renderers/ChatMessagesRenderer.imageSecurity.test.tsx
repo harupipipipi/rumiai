@@ -103,3 +103,17 @@ test("spoofed trusted attachment markers cannot bypass history consent", () => {
   assert.doesNotMatch(html, /<img\b/i);
   assert.doesNotMatch(html, /\s(?:src|href|srcset)=["']/i);
 });
+
+test("tool screenshot events reject active SVG data instead of treating it as trusted media", () => {
+  const html = renderMessage({
+    ...agentMessage([]),
+    events: [{
+      type: "browser_screenshot",
+      data_url: "data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+",
+      tool_call_id: "untrusted-tool-call",
+    }],
+  });
+
+  assert.doesNotMatch(html, /<img\b/i);
+  assert.doesNotMatch(html, /data:image\/svg\+xml/i);
+});
