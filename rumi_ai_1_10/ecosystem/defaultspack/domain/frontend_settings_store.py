@@ -10,12 +10,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-try:
-    import fcntl
-except ImportError:  # Windows has no advisory flock API.
-    fcntl = None  # type: ignore[assignment]
-
-
 REVISION_KEY = "_settings_revision"
 
 
@@ -31,6 +25,34 @@ def _thread_lock(path: Path) -> threading.RLock:
     key = str(path.resolve())
     with _locks_guard:
         return _locks.setdefault(key, threading.RLock())
+
+
+def _lock_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class FrontendSettingsStore:
@@ -68,14 +90,11 @@ class FrontendSettingsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with _thread_lock(self.path):
             with self.lock_path.open("a+b") as lock_file:
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                _lock_file(lock_file)
                 try:
                     yield
                 finally:
-                    if fcntl is not None:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
+                    _unlock_file(lock_file)
     def _read_locked(self, *, recover: bool) -> dict[str, Any]:
         if not self.path.exists():
             return {}
@@ -111,16 +130,11 @@ class FrontendSettingsStore:
         if preserve_backup and self.path.exists():
             shutil.copyfile(self.path, self.backup_path)
             self._fsync_file(self.backup_path)
-        try:
-            mode = self.path.stat().st_mode & 0o777
-        except OSError:
-            mode = 0o600
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
         )
         temp_path = Path(temp_name)
         try:
-            os.fchmod(fd, mode)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(value, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")

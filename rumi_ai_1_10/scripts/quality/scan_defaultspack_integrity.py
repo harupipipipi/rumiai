@@ -177,6 +177,12 @@ def check_routes(errors: list[str]) -> None:
 
 def check_frontend_route_parity(errors: list[str]) -> None:
     backend = {_normalize_route(str(spec.pattern or "")) for spec in _route_specs()}
+    from domain.mobile.contract import MOBILE_ROUTE_CONTRACTS
+
+    backend.update(
+        _normalize_route(str(route.pattern or ""))
+        for route in MOBILE_ROUTE_CONTRACTS
+    )
     optional_prefixes = ("/api/agent/company/",)
     for endpoint in sorted(_extract_api_endpoints()):
         if endpoint in backend:

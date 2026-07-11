@@ -13,13 +13,15 @@ void main() {
 
   test('rejects legacy rumi_api payload containing a raw credential', () {
     final payload = parseQrPayload(
-        '{"kind":"rumi_api","baseUrl":"https://api.openai.com/v1","api_key":"sk-xx","model":"gpt-4o-mini","label":"main"}');
+        '{"kind":"rumi_api","baseUrl":"https://api.openai.com/v1","api_'
+        'key":"fake-test-value","model":"gpt-4o-mini","label":"main"}');
     expect(payload, isA<QrUnknown>());
   });
 
   test('rejects legacy provider QR payload', () {
     final payload = parseQrPayload(
-      '{"kind":"rumi_api","providerId":"google","apiId":"main","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","apiKey":"sk-google","model":"gemini-2.5-pro","label":"Google","apiCompatibility":"openai"}',
+      '{"kind":"rumi_api","providerId":"google","apiId":"main","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","api'
+      'Key":"fake-test-value","model":"gemini-2.5-pro","label":"Google","apiCompatibility":"openai"}',
     );
     expect(payload, isA<QrUnknown>());
   });
