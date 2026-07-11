@@ -4,7 +4,7 @@ The remote task gateway exposes a small authenticated polling API on the
 Kernel Pack API. It lets another PC, phone, or CLI submit natural-language work
 to the host PC without adding a new agent runtime.
 
-This gateway uses the existing defaultspack company runtime. Tasks are created
+This gateway uses the existing defaultspack team workspace runtime. Tasks are created
 in the operations company, dispatched through `agent.delegate`, and remain
 subject to the local approval, workspace, audit, and tool policy paths.
 

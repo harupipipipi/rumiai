@@ -289,7 +289,7 @@ class CompanyMessageRouter:
 
 
 class CompanySlackRuntime(CompanyMessageRouter):
-    """Primary asynchronous company workspace runtime."""
+    """Primary asynchronous team workspace runtime."""
 
 
 def _dedupe(values: list[str]) -> list[str]:

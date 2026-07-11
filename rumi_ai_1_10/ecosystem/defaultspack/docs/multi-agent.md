@@ -3,7 +3,8 @@
 The primary user-facing coordination path is the team workspace runtime.
 Internally, the implementation still centers on `CompanySlackRuntime`,
 implemented in `domain/company/message_router.py` with durable runtime state in
-`domain/company/runtime_store.py`.
+`domain/company/runtime_store.py`. Those names are compatibility identifiers;
+the runtime itself is model-independent.
 
 The runtime is Slack-like:
 
@@ -11,7 +12,7 @@ The runtime is Slack-like:
 - mentions route work to agents
 - active agent runs receive mentions as runtime instructions
 - idle agents receive delegated team tasks through `agent.delegate`
-- run links connect company compatibility records and team threads/messages to
+- run links connect compatibility records and team threads/messages to
   AgentEngine runs
 - operations manager ticks inspect open, stale, blocked, and approval-waiting
   work
@@ -22,7 +23,12 @@ AgentEngine runs so policy, approval, model capability, runtime profile, and
 workspace trust enforcement remain downstream in the existing agent/tool
 runtime.
 
-## Terminology Notes
+## Ownership and Terminology
+
+defaultspack owns the generic team workspace, worker runtime, and scheduled
+agent runtime. The optional MiMo Coding Company profile is owned by
+`ecosystem/rumi_operations_company_pack/`; MiMo model aliases and OpenCode Zen
+provider behavior are integration-specific, not a mode of this shared runtime.
 
 - `delegation` is the canonical action name for sending work to another agent.
   In runtime terms this maps to `agent.delegate`.

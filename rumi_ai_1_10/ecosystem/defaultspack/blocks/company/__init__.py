@@ -1,1 +1,1 @@
-"""Company workspace blocks."""
+"""Team workspace blocks using compatibility company routes."""

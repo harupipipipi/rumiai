@@ -532,7 +532,7 @@ def obsolete_superseded_scheduled_approvals(
     conversation_ids: list[str],
     current_request_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Mark approved MiMo scheduled approvals obsolete after their branch moves on."""
+    """Mark approved scheduled approvals obsolete after their branch moves on."""
     try:
         from domain.chat.store import ChatStore
         from domain.safety.approval import list_approval_requests, mark_obsolete

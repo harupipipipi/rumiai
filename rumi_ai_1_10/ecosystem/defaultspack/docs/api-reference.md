@@ -452,7 +452,7 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 
 ---
 
-## Company Workspace Compatibility — legacy multi-agent endpoints
+## Team Workspace Compatibility — legacy multi-agent endpoints
 
 ### POST /api/agent/multi/execute
 
@@ -464,7 +464,7 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 |---|---|---|---|
 | `task` | 必須 | `string` | タスクの記述 |
 | `agents` | 必須 | `array[object]` | エージェント定義のリスト（最低1つ）。各要素は `{name, role, model?, system_prompt?, tools?}` |
-| `company_id` | 任意 | `string` | ルーティング先 company workspace。未指定時は default company |
+| `company_id` | 任意 | `string` | ルーティング先 team workspace。未指定時は default team workspace |
 
 **Response (`data`):**
 
@@ -480,7 +480,7 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 
 | コード | 説明 |
 |---|---|
-| `ERROR` | `task` が未指定、または company workspace routing に失敗 |
+| `ERROR` | `task` が未指定、または team workspace routing に失敗 |
 
 ---
 

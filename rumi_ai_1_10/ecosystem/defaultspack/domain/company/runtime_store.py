@@ -81,7 +81,7 @@ def _stable_sync_id(prefix: str, metadata: dict[str, Any] | None) -> str | None:
 
 
 class CompanyRuntimeStore:
-    """SQLite WAL store for Slack-like company runtime state."""
+    """SQLite WAL store for Slack-like team workspace runtime state."""
 
     _instance: Optional["CompanyRuntimeStore"] = None
     _class_lock = threading.RLock()
