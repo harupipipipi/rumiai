@@ -48,7 +48,9 @@ _JWT_VALUE_RE = re.compile(
     r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*\b"
 )
 _AUTH_SCHEME_VALUE_RE = re.compile(
-    r"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}"
+    r"(?i)\b(?:bearer|basic|token)\s+"
+    r"(?!(?:authentication|authorization|credentials?|scheme)\b)"
+    r"(?=[^\s]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{8,}"
 )
 _SENSITIVE_ERROR_KEY_PATTERN = (
     r"(?:api[_-]?key|x-api[_-]?key|authorization|proxy-authorization|bearer|"
@@ -56,11 +58,11 @@ _SENSITIVE_ERROR_KEY_PATTERN = (
 )
 _SENSITIVE_QUOTED_ASSIGNMENT_RE = re.compile(
     rf"(?i)(?P<prefix>[\"']?\b{_SENSITIVE_ERROR_KEY_PATTERN}\b[\"']?\s*[:=]\s*)"
-    rf"(?P<quote>[\"'])(?P<value>.*?)(?P=quote)"
+    rf"(?P<quote>[\"'])(?P<value>(?:\\.|(?!(?P=quote)).)*)(?P=quote)"
 )
 _AUTHORIZATION_ASSIGNMENT_RE = re.compile(
-    r"(?i)(?P<prefix>\b(?:proxy-)?authorization\b[\"']?\s*[:=]\s*)"
-    r"(?:(?:bearer|basic|token)\s+)?[^\s,;}]+"
+    r"(?i)(?P<prefix>[\"']?\b(?:proxy-)?authorization\b[\"']?\s*[:=]\s*)"
+    r"(?![\"'])(?P<value>(?:[A-Za-z][A-Za-z0-9._~-]*\s+)?[^\s,;}]+)"
 )
 _SENSITIVE_UNQUOTED_ASSIGNMENT_RE = re.compile(
     rf"(?i)(?P<prefix>[\"']?\b{_SENSITIVE_ERROR_KEY_PATTERN}\b[\"']?\s*[:=]\s*)"
@@ -715,7 +717,11 @@ def _tool_use_blocks(response):
     return [
         block
         for block in blocks
-        if isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
+        if (
+            isinstance(block, dict)
+            and block.get("type") in {"tool_use", "tool_call"}
+            and _tool_arguments_or_none(block) is not None
+        )
     ]
 
 
@@ -919,15 +925,21 @@ def _tool_blocked_response(tool_name, result):
     }
 
 
-def _tool_arguments(block):
+def _tool_arguments_or_none(block):
     value = block.get("input", block.get("arguments", {}))
     if isinstance(value, str):
+        if not value.strip():
+            return None
         try:
             parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {"value": parsed}
+            return parsed if isinstance(parsed, dict) else None
         except json.JSONDecodeError:
-            return {"value": value}
-    return value if isinstance(value, dict) else {}
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def _tool_arguments(block):
+    return _tool_arguments_or_none(block) or {}
 
 
 def _append_assistant_tool_use_message(messages, tool_uses, *, reasoning_content=""):

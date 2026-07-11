@@ -549,6 +549,46 @@ def _provider_attempt_context(value: dict[str, Any] | None) -> dict[str, int | s
     return context
 
 
+def _tool_call_activity_key(
+    tool_call_id: str,
+    attempt_context: dict[str, int | str] | None = None,
+) -> str:
+    """Scope provider call IDs to an attempt generation when one is available."""
+
+    call_id = str(tool_call_id or "").strip()
+    generation = (attempt_context or {}).get("provider_attempt_generation")
+    if generation in (None, ""):
+        return call_id
+    return f"{call_id}::provider-attempt:{generation}"
+
+
+def _invalid_tool_arguments_response(
+    tool_name: str,
+    tool_call_id: str,
+) -> dict[str, Any]:
+    """Return a terminal response without entering approval or execution paths."""
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"{tool_name or 'tool'} の入力が不正なため実行しませんでした。"
+                    "tool の引数は JSON object である必要があります。"
+                ),
+            }
+        ],
+        "finish_reason": "tool_call_rejected",
+        "usage": {},
+        "metadata": {
+            "tool_call_rejected": True,
+            "rejection_code": "INVALID_TOOL_ARGUMENTS",
+            "rejected_tool_name": tool_name,
+            "rejected_tool_call_id": tool_call_id,
+        },
+    }
+
+
 def _tool_arguments_without_approval_token(arguments: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(arguments, dict):
         return arguments
@@ -1949,11 +1989,14 @@ class ChatRunEngine:
         if not tool_name:
             return None
         tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
-        arguments = self._tool_arguments(block)
+        arguments = _tool_use_argument_dict(block)
+        if arguments is None:
+            return _invalid_tool_arguments_response(tool_name, tool_call_id)
         tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
         attempt_context = _provider_attempt_context(block)
-        if tool_call_id not in self._started_tool_call_ids:
-            self._started_tool_call_ids.add(tool_call_id)
+        activity_key = _tool_call_activity_key(tool_call_id, attempt_context)
+        if activity_key not in self._started_tool_call_ids:
+            self._started_tool_call_ids.add(activity_key)
             display_payload = _tool_display_payload(tool_name, arguments, status="running")
             event = self._emit(
                 "tool_call_started",
@@ -1979,6 +2022,7 @@ class ChatRunEngine:
         original_tool_context = prepared.tool_context
         if approval_context:
             prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
+        cancelled_error: _ChatCancelled | None = None
         try:
             result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
             if attempt_context:
@@ -1986,10 +2030,42 @@ class ChatRunEngine:
                     if str(tool_log.get("tool_call_id") or "") == tool_call_id:
                         tool_log.update(attempt_context)
                         break
+            self._raise_if_cancelled()
+        except _ChatCancelled as exc:
+            cancelled_error = exc
         finally:
             if approval_context:
                 prepared.tool_context = original_tool_context
-        self._raise_if_cancelled()
+        if cancelled_error is not None:
+            summary = "キャンセルされたため、この tool の待機状態を終了しました"
+            display_payload = _tool_display_payload(
+                tool_name,
+                arguments,
+                status="failed",
+                summary=summary,
+            )
+            yield self._emit(
+                "tool_call_completed",
+                data={
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "is_error": True,
+                    "cancelled": True,
+                    "result_summary": summary,
+                    "summary": summary,
+                    **attempt_context,
+                    **display_payload,
+                },
+                message=display_payload["display_text"],
+                phase="tool_call_completed",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                is_error=True,
+                cancelled=True,
+                **attempt_context,
+            )
+            self._sync_draft(draft, force=True)
+            raise cancelled_error
         summary = _tool_result_summary(tool_name, result)
         artifacts = _tool_result_artifacts(result)
         status = "failed" if _tool_result_is_error(result) else "completed"
@@ -2660,8 +2736,13 @@ class ChatRunEngine:
                         accumulator.ingest(chunk)
                         call_id = str(chunk.get("id") or chunk.get("tool_call_id") or "").strip()
                         tool_name = str(chunk.get("name") or chunk.get("tool_name") or "").strip()
-                        if chunk_type == "tool_call_start" and call_id and call_id not in self._started_tool_call_ids:
-                            self._started_tool_call_ids.add(call_id)
+                        activity_key = _tool_call_activity_key(call_id, attempt_context)
+                        if (
+                            chunk_type == "tool_call_start"
+                            and call_id
+                            and activity_key not in self._started_tool_call_ids
+                        ):
+                            self._started_tool_call_ids.add(activity_key)
                             attempt_started_calls[call_id] = tool_name
                             display_payload = _tool_display_payload(tool_name or "tool", {}, status="running")
                             event = self._emit(
@@ -2885,7 +2966,9 @@ class ChatRunEngine:
                 provider_attempt_discarded=True,
                 **attempt_context,
             )
-            self._started_tool_call_ids.discard(call_id)
+            self._started_tool_call_ids.discard(
+                _tool_call_activity_key(call_id, attempt_context)
+            )
             self._sync_draft(draft, force=True)
 
     def _wait_for_retry_delay(self, delay: float) -> None:

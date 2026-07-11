@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, previewableToolActivityKeys, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, toolActivityPreviewId, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -305,6 +305,38 @@ test("retried tool attempts render discard history beside the clean running atte
   assert.match(html, /README\.md/);
   assert.match(html, /1件失敗/);
   assert.match(html, /作業中/);
+});
+
+test("tool previews match retry generations while legacy events still use call ids", () => {
+  const keys = previewableToolActivityKeys([
+    {
+      type: "tool_call_completed",
+      tool_call_id: "call_1",
+      provider_attempt_generation: 1,
+      provider_attempt_discarded: true,
+    },
+    {
+      type: "tool_call_completed",
+      tool_call_id: "call_1",
+      provider_attempt_generation: 2,
+    },
+    {
+      type: "tool_call_completed",
+      tool_call_id: "legacy_call",
+    },
+  ]);
+
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "call_1",
+    providerAttemptGeneration: 1,
+  }, keys), undefined);
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "call_1",
+    providerAttemptGeneration: 2,
+  }, keys), "call_1");
+  assert.equal(toolActivityPreviewId({
+    toolCallId: "legacy_call",
+  }, keys), "legacy_call");
 });
 
 test("authority approval followup is hidden while waiting response remains passive", () => {

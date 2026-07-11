@@ -338,6 +338,73 @@ test("keeps legacy tool activity merging by call id without attempt generation",
   assert.equal(items[0].toolCallId, "legacy_call");
 });
 
+test("keeps terminal tool state monotonic when events arrive out of order", () => {
+  const items = buildToolActivityItems([], [
+    {
+      type: "tool_call_completed",
+      seq: 2,
+      timestamp: 2_000,
+      tool_call_id: "out-of-order",
+      tool_name: "coding_file_read",
+      provider_attempt_generation: 7,
+      is_error: false,
+    },
+    {
+      type: "tool_call_started",
+      seq: 1,
+      timestamp: 1_000,
+      tool_call_id: "out-of-order",
+      tool_name: "coding_file_read",
+      provider_attempt_generation: 7,
+      arguments: { path: "README.md" },
+    },
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "completed");
+  assert.equal(items[0].startedAt, 1_000);
+  assert.equal(items[0].completedAt, 2_000);
+});
+
+test("keeps cancellation terminal when a success log arrives afterward", () => {
+  const items = buildToolActivityItems(
+    [
+      {
+        tool_name: "coding_file_read",
+        tool_call_id: "cancelled-call",
+        provider_attempt_generation: 8,
+        arguments: { path: "README.md" },
+        result: { status: "ok", data: { path: "README.md" } },
+        timestamp: 3_000,
+      },
+    ],
+    [
+      {
+        type: "tool_call_started",
+        seq: 1,
+        timestamp: 1_000,
+        tool_call_id: "cancelled-call",
+        tool_name: "coding_file_read",
+        provider_attempt_generation: 8,
+      },
+      {
+        type: "tool_call_completed",
+        seq: 2,
+        timestamp: 2_000,
+        tool_call_id: "cancelled-call",
+        tool_name: "coding_file_read",
+        provider_attempt_generation: 8,
+        cancelled: true,
+        is_error: true,
+      },
+    ],
+  );
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "failed");
+  assert.equal(items[0].completedAt, 2_000);
+});
+
 test("shows live elapsed time for running streamed tool activity", () => {
   const groups = buildToolActivityGroups([], [
     {

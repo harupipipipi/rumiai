@@ -396,6 +396,268 @@ def test_stream_never_executes_incomplete_or_non_object_tool_arguments(
     assert tool_uses == []
 
 
+@pytest.mark.parametrize(
+    "raw_arguments",
+    ["not-json", '"README.md"', '["README.md"]', 7, ["README.md"]],
+)
+def test_complete_turn_drops_malformed_or_non_object_tool_arguments(
+    raw_arguments: Any,
+) -> None:
+    from domain.chat.stream_engine import ChatRunEngine
+
+    response = {
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "unsafe-complete",
+                "name": "coding_file_read",
+                "input": raw_arguments,
+            }
+        ],
+        "finish_reason": "tool_calls",
+    }
+    engine = ChatRunEngine(gateway=ScriptedCompleteGateway([response]))
+
+    _events, (returned, tool_uses) = drain_model_turn(
+        engine._model_turn_via_complete(
+            prepared_run(),
+            [{"role": "user", "content": "read README"}],
+            None,
+        )
+    )
+
+    assert returned == response
+    assert tool_uses == []
+
+
+def test_non_stream_run_never_reaches_executor_for_malformed_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.executor import ToolExecutor
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    def fail_if_executed(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("malformed non-stream arguments reached executor")
+
+    monkeypatch.setattr(ToolExecutor, "execute", fail_if_executed)
+    gateway = ScriptedCompleteGateway(
+        [
+            {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "unsafe-non-stream",
+                        "name": "coding_file_read",
+                        "input": ["README.md"],
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        ]
+    )
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-test")
+
+    events = list(
+        ChatRunEngine(store=store, gateway=gateway).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "read README"},
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "coding_file_read",
+                            "parameters": {"type": "object", "properties": {}},
+                        },
+                    }
+                ],
+                "params": {"retry": {"max_attempts": 1}},
+            },
+            {},
+            stream_mode=False,
+        )
+    )
+
+    final = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
+    assert gateway.calls == 1
+    assert final["tool_logs"] == []
+    assert not any(event["type"] == "tool_call_started" for event in events)
+    ChatStore._instance = None
+
+
+def test_empty_stream_fallback_drops_malformed_complete_tool_arguments() -> None:
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class MalformedFallbackGateway(ScriptedGateway):
+        def __init__(self) -> None:
+            super().__init__([[{"type": "stream_end", "finish_reason": "stop"}]])
+            self.complete_calls = 0
+
+        def complete(self, request: dict[str, Any]) -> dict[str, Any]:
+            del request
+            self.complete_calls += 1
+            return {
+                "content": [
+                    {
+                        "type": "tool_call",
+                        "id": "unsafe-fallback",
+                        "name": "coding_file_read",
+                        "arguments": "not-json",
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+
+    gateway = MalformedFallbackGateway()
+    engine = ChatRunEngine(gateway=gateway)
+
+    _events, (response, tool_uses) = drain_model_turn(
+        engine._model_turn(
+            prepared_run(),
+            [{"role": "user", "content": "read README"}],
+            None,
+        )
+    )
+
+    assert gateway.complete_calls == 2
+    assert all(
+        not isinstance(block, dict)
+        or block.get("type") not in {"tool_use", "tool_call"}
+        for block in response.get("content", [])
+    )
+    assert tool_uses == []
+
+
+def test_text_derived_malformed_tool_arguments_are_not_recovered() -> None:
+    from domain.chat.stream_engine import _text_tool_call_blocks
+
+    response = {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    '<tool_invocation name="coding_file_read" '
+                    'arguments={"path":} />'
+                ),
+            }
+        ]
+    }
+
+    assert _text_tool_call_blocks(response, {"coding_file_read"}) == []
+
+
+def test_execution_boundary_rejects_invalid_arguments_before_policy_or_executor() -> None:
+    from domain.chat.stream_engine import ChatRunEngine
+
+    engine = ChatRunEngine(gateway=ScriptedGateway([]))
+    engine._before_tool_call = lambda *_args: (_ for _ in ()).throw(
+        AssertionError("approval/policy boundary must not run")
+    )
+    engine._execute_tool = lambda *_args: (_ for _ in ()).throw(
+        AssertionError("executor must not run")
+    )
+
+    events, response = drain_model_turn(
+        engine._execute_tool_use(
+            prepared_run(),
+            [],
+            None,
+            None,
+            {
+                "type": "tool_use",
+                "id": "unsafe-boundary",
+                "name": "coding_file_read",
+                "input": "not-json",
+            },
+        )
+    )
+
+    assert events == []
+    assert response["finish_reason"] == "tool_call_rejected"
+    assert response["metadata"]["rejection_code"] == "INVALID_TOOL_ARGUMENTS"
+
+
+def test_same_provider_call_id_starts_again_on_the_next_model_turn() -> None:
+    from domain.chat.stream_engine import ChatRunEngine
+
+    tool_attempt = [
+        {
+            "type": "tool_call_start",
+            "id": "reused-call",
+            "name": "coding_file_read",
+        },
+        {
+            "type": "tool_call_delta",
+            "id": "reused-call",
+            "arguments_chunk": '{"path":"README.md"}',
+        },
+        {"type": "tool_call_end", "id": "reused-call"},
+        {"type": "stream_end", "finish_reason": "tool_calls"},
+    ]
+    engine = ChatRunEngine(gateway=ScriptedGateway([tool_attempt, tool_attempt]))
+
+    first_events, (_first_response, first_tool_uses) = drain_model_turn(
+        engine._model_turn(prepared_run(), [], None)
+    )
+    second_events, (_second_response, second_tool_uses) = drain_model_turn(
+        engine._model_turn(prepared_run(), [], None)
+    )
+
+    first_started = [event for event in first_events if event["type"] == "tool_call_started"]
+    second_started = [event for event in second_events if event["type"] == "tool_call_started"]
+    assert len(first_started) == len(second_started) == 1
+    assert first_started[0]["data"]["provider_attempt_generation"] == 1
+    assert second_started[0]["data"]["provider_attempt_generation"] == 2
+    assert first_tool_uses[0]["provider_attempt_generation"] == 1
+    assert second_tool_uses[0]["provider_attempt_generation"] == 2
+
+
+def test_cancel_after_tool_start_emits_terminal_completion_before_stopping() -> None:
+    from domain.chat.stream_engine import ChatRunEngine, _ChatCancelled
+
+    engine = ChatRunEngine(gateway=ScriptedGateway([]))
+    engine._before_tool_call = lambda *_args: []
+    engine._execute_tool = lambda *_args: {"status": "ok", "data": {"path": "README.md"}}
+    cancel_checks = 0
+
+    def cancel_after_start() -> bool:
+        nonlocal cancel_checks
+        cancel_checks += 1
+        return cancel_checks >= 2
+
+    engine._external_cancel_checker = cancel_after_start
+    generator = engine._execute_tool_use(
+        prepared_run(),
+        [],
+        None,
+        None,
+        {
+            "type": "tool_use",
+            "id": "cancelled-call",
+            "name": "coding_file_read",
+            "input": {"path": "README.md"},
+            "provider_attempt_generation": 1,
+        },
+    )
+
+    started = next(generator)
+    completed = next(generator)
+    with pytest.raises(_ChatCancelled):
+        next(generator)
+
+    assert started["type"] == "tool_call_started"
+    assert completed["type"] == "tool_call_completed"
+    assert completed["data"]["cancelled"] is True
+    assert completed["data"]["is_error"] is True
+
+
 def test_retry_discards_thinking_from_failed_attempt() -> None:
     from domain.chat.stream_engine import ChatRunEngine
 
@@ -657,6 +919,38 @@ def test_error_redactor_removes_header_scheme_jwt_and_api_key_values() -> None:
         assert jwt_secret not in redacted
         assert api_secret not in redacted
         assert "[redacted]" in redacted
+
+
+def test_error_redactor_removes_unknown_authorization_schemes_and_values() -> None:
+    from blocks.chat.send import _redact_error_text
+
+    secret = "opaque-" + ("v" * 28)
+    samples = [
+        f"Authorization: Digest {secret}",
+        f"Proxy-Authorization=CustomScheme {secret}",
+        f'{{"authorization": "Negotiate {secret}"}}',
+        f"Authorization: {secret}",
+    ]
+
+    for sample in samples:
+        redacted = _redact_error_text(sample)
+        assert secret not in redacted
+        assert "[redacted]" in redacted
+
+
+def test_error_redactor_preserves_quotes_and_does_not_redact_auth_prose() -> None:
+    from blocks.chat.send import _redact_error_text
+
+    secret = "opaque-" + ("w" * 28)
+    quoted = _redact_error_text(f'{{"authorization": "Custom {secret}"}}')
+    escaped_quote = _redact_error_text(
+        f'{{"authorization": "Custom {secret}\\\"suffix"}}'
+    )
+    prose = "Basic authentication is required; bearer capacity remains available."
+
+    assert quoted == '{"authorization": "[redacted]"}'
+    assert escaped_quote == '{"authorization": "[redacted]"}'
+    assert _redact_error_text(prose) == prose
 
 
 def test_outer_stream_failure_redacts_activity_and_persisted_error(

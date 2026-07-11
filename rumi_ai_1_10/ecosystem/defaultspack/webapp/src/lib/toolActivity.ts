@@ -582,6 +582,23 @@ function eventRank(event: ChatActivityEvent): number {
   return 0;
 }
 
+function activityStatusRank(status: ToolActivityStatus): number {
+  if (status === "failed" || status === "blocked") return 3;
+  if (status === "completed") return 2;
+  if (status === "waiting_approval") return 1;
+  return 0;
+}
+
+function monotonicActivityStatus(
+  current: ToolActivityStatus | undefined,
+  candidate: ToolActivityStatus,
+): ToolActivityStatus {
+  if (!current || activityStatusRank(candidate) >= activityStatusRank(current)) {
+    return candidate;
+  }
+  return current;
+}
+
 function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
   if (event.type === "approval_requested" || event.phase === "approval_requested") return "waiting_approval";
   if (event.type === "tool_blocked" || event.phase === "tool_blocked") return "blocked";
@@ -730,7 +747,7 @@ function updateAccumulatedCallFromEvent(call: AccumulatedToolCall, event: ChatAc
   if (call.startSeq === undefined && seq !== undefined && !call.event) {
     call.startSeq = seq;
   }
-  call.status = statusForEvent(event);
+  call.status = monotonicActivityStatus(call.status, statusForEvent(event));
   const existing = call.event;
   if (!existing || eventRank(event) >= eventRank(existing)) {
     call.event = existing ? mergeActivityEvents(existing, event) : event;
@@ -746,7 +763,7 @@ function updateAccumulatedCallFromLog(call: AccumulatedToolCall, log: ToolLogEnt
   call.orderIndex = Math.min(call.orderIndex, eventCount + index);
   call.completedAt = call.completedAt ?? log.timestamp;
   call.endSeq = maxDefined(call.endSeq, seqValue(log.seq));
-  call.status = statusForLog(log);
+  call.status = monotonicActivityStatus(call.status, statusForLog(log));
   if (call.startSeq === undefined) call.startSeq = seqValue(log.seq);
   if (call.startedAt === undefined && !call.event) call.startedAt = log.timestamp;
 }
