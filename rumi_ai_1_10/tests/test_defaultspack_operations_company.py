@@ -1609,6 +1609,10 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
             "content": [{"type": "text", "text": "This subagent was just started and may still be running."}],
         },
     )
+    future_timestamp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp() * 1000)
+    chat_store._conversations[recent_child["id"]]["created_at"] = future_timestamp
+    chat_store._conversations[recent_child["id"]]["updated_at"] = future_timestamp
+    chat_store._save_conversations()
 
     observed = runtime.status(sync_observability=True, include_desktop_monitoring=True)
     observability = observed["harness"]["observability"]
@@ -1654,6 +1658,86 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_company_status_reports_scheduler_subagent_blocker_signals(tmp_path, monkeypatch):
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.service import CompanyService
+    from domain.company.store import CompanyStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+
+    store = CompanyStore()
+    store.ensure_company(
+        company_id="mimo-coding-company",
+        name="MiMo Coding Company",
+        description="MiMo harness workspace",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+        conversation_group_id="company:mimo-coding-company",
+    )
+    runtime_store = CompanyRuntimeStore()
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="scheduler",
+        content="**MiMo scheduler provider-health blocker**",
+        metadata={
+            "sync_source": "mimo_schedule_history",
+            "sync_key": "schedule:exec-provider-blocked",
+            "schedule_id": "schedule-heartbeat",
+            "execution_id": "exec-provider-blocked",
+            "signal": "provider_health_blocker",
+            "external_blocker": True,
+            "provider_health": {
+                "configured_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "reason": "credits_error",
+            },
+        },
+    )
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="subagent-monitor",
+        content="**MiMo subagent child conversation failed before a reply**",
+        metadata={
+            "sync_source": "mimo_subagent_monitor",
+            "sync_key": "subagent:child-1",
+            "child_conversation_id": "child-1",
+            "signal": "subagent_failed",
+        },
+    )
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="subagent-monitor",
+        content="**MiMo subagent child conversation recovered**",
+        metadata={
+            "sync_source": "mimo_subagent_monitor",
+            "sync_key": "subagent:child-1:repaired",
+            "child_conversation_id": "child-1",
+            "signal": "subagent_repaired",
+        },
+    )
+
+    status = CompanyService().status("mimo-coding-company")
+    blocker_signals = status["reporting"]["blocker_signals"]
+    company_blocker_signals = status["company"]["runtime_blocker_signals"]
+
+    assert status["runtime"]["messages"] == 3
+    assert blocker_signals["blocker_count"] == 2
+    assert [item["signal"] for item in blocker_signals["signals"]] == [
+        "subagent_failed",
+        "provider_health_blocker",
+    ]
+    assert blocker_signals["latest_signal"]["child_conversation_id"] == "child-1"
+    assert company_blocker_signals == blocker_signals
+    assert blocker_signals["signals"][1]["provider_health"]["reason"] == "credits_error"
+    assert all(item["signal"] != "subagent_repaired" for item in blocker_signals["signals"])
+
     _reset_defaultspack_singletons()
 
 

@@ -109,6 +109,7 @@ class CompanyService:
             company = migrate_operations_company_state(store=self.store) or self.bootstrap_default_company()
         runtime_store = self.runtime_store
         company = self._with_runtime_summary(company, runtime_store=runtime_store)
+        reporting = self._runtime_reporting(target_id, company, runtime_store)
         return {
             "bootstrapped": company is not None,
             "company_id": target_id,
@@ -116,6 +117,7 @@ class CompanyService:
             "storage_file": str(self.store.storage_file),
             "runtime_db_path": str(runtime_store.db_path),
             "runtime": runtime_store.stats(target_id) if company is not None else {},
+            "reporting": reporting,
         }
 
     def status_for_conversation(self, conversation_id: str, *, bootstrap: bool = False) -> dict[str, Any]:
@@ -128,6 +130,7 @@ class CompanyService:
         runtime_store = self.runtime_store
         company_id = str(company.get("id") or _conversation_company_id(conversation_id)) if company else _conversation_company_id(conversation_id)
         company = self._with_runtime_summary(company, runtime_store=runtime_store)
+        reporting = self._runtime_reporting(company_id, company, runtime_store)
         return {
             "bootstrapped": company is not None,
             "company_id": company_id,
@@ -136,6 +139,7 @@ class CompanyService:
             "storage_file": str(self.store.storage_file),
             "runtime_db_path": str(runtime_store.db_path),
             "runtime": runtime_store.stats(company_id) if company is not None else {},
+            "reporting": reporting,
         }
 
     def mention(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -183,6 +187,12 @@ class CompanyService:
             enriched["run_count"] = int(stats.get("runs", 0) or 0)
             enriched["thread_count"] = int(stats.get("threads", 0) or 0)
             enriched["inbox_count"] = int(stats.get("inbox", 0) or 0)
+        try:
+            blocker_signals = runtime.blocker_signal_summary(company_id, limit=20)
+        except Exception:
+            blocker_signals = {}
+        if blocker_signals:
+            enriched["runtime_blocker_signals"] = blocker_signals
         channels = enriched.get("channels")
         if isinstance(channels, dict):
             next_channels: dict[str, Any] = {}
@@ -210,6 +220,21 @@ class CompanyService:
             enriched["channels"] = next_channels
             enriched["channel_count"] = len(next_channels)
         return enriched
+
+    @staticmethod
+    def _runtime_reporting(
+        company_id: str,
+        company: dict[str, Any] | None,
+        runtime_store: CompanyRuntimeStore,
+    ) -> dict[str, Any]:
+        if company is None:
+            return {}
+        try:
+            return {
+                "blocker_signals": runtime_store.blocker_signal_summary(company_id, limit=20),
+            }
+        except Exception:
+            return {"blocker_signals": {"blocker_count": 0, "latest_signal": None, "signals": []}}
 
     @staticmethod
     def _runtime_channel_ids(company_id: str, runtime_store: CompanyRuntimeStore) -> list[str]:
