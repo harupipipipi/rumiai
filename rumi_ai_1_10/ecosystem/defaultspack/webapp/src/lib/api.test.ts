@@ -61,10 +61,12 @@ test("MiMo Coding Company UI model fallbacks stay backend-compatible", () => {
 
 test("startProviderOAuth posts scope mode and requested services", async () => {
   let requestUrl = "";
+  let requestHeaders = new Headers();
   let requestBody: Record<string, unknown> = {};
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requestUrl = String(input);
+    requestHeaders = new Headers(init?.headers);
     requestBody = JSON.parse(String(init?.body ?? "{}"));
     return new Response(JSON.stringify({
       status: "ok",
@@ -964,7 +966,7 @@ test("browser authority QA disabled errors explain the launch requirement", () =
   }, "Not Found");
 
   assert.match(message, /AUTHORITY_BROWSER_TEST_DISABLED/);
-  assert.match(message, /ブラウザ承認QA/);
+  assert.match(message, /ブラウザ承認/);
   assert.match(message, /Rumi Viewer/);
   assert.doesNotMatch(message, /対象の会話、モデル、ファイル/);
 });
@@ -1921,41 +1923,24 @@ test("local auth URL helper carries Viewer token into child windows", () => {
   }
 });
 
-test("browser authority ui operator forwards browser QA token in query header and body", async () => {
+test("browser authority ui operator client fails closed without a network request", async () => {
   const originalFetch = globalThis.fetch;
-  let requestUrl = "";
-  let requestHeaderToken = "";
-  let requestBody = "";
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    requestUrl = String(input);
-    requestHeaderToken = new Headers(init?.headers).get("X-Rumi-Approval-Browser-Token") ?? "";
-    requestBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({
-      status: "ok",
-      data: {
-        request_id: "auth_1",
-        ui_operator: {
-          version: 1,
-          kind: "ui_operator",
-          origin: "browser_qa",
-          window_label: "browser",
-          request_id: "auth_1",
-          issued_at: 1,
-          expires_at: 2,
-          nonce: "n",
-          signature: "s",
-        },
-      },
-    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  let fetchCount = 0;
+  globalThis.fetch = (async () => {
+    fetchCount += 1;
+    throw new Error("unexpected fetch");
   }) as typeof fetch;
 
   try {
-    const result = await api.browserAuthorityUiOperator("auth_1", "ambient-browser-qa");
-
-    assert.equal(result.request_id, "auth_1");
-    assert.equal(requestUrl, "/api/authority/browser-ui-operator?browser_approval_token=ambient-browser-qa");
-    assert.equal(requestHeaderToken, "ambient-browser-qa");
-    assert.equal(JSON.parse(requestBody).browser_approval_token, "ambient-browser-qa");
+    const binding = {
+      request_id: "auth_1", device_id: "fake-device", window_id: "fake-window",
+      nonce: "fake-nonce", origin: "https://rumi.invalid",
+    };
+    await assert.rejects(
+      api.browserAuthorityUiOperator(binding, "fake-one-time-code"),
+      /AUTHORITY_BROWSER_TEST_DISABLED/,
+    );
+    assert.equal(fetchCount, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

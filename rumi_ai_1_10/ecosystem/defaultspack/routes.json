@@ -878,9 +878,21 @@
     },
     {
       "method": "POST",
+      "path": "/api/authority/browser-exchange",
+      "flow_id": "transport_direct",
+      "description": "Fail-closed tombstone for the disabled browser approval exchange issuer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/authority/browser-exchange/revoke",
+      "flow_id": "transport_direct",
+      "description": "Fail-closed tombstone for the disabled browser approval exchange revocation route"
+    },
+    {
+      "method": "POST",
       "path": "/api/authority/browser-ui-operator",
       "flow_id": "transport_direct",
-      "description": "Mint a signed ui_operator for local browser approval QA when RUMI_AUTHORITY_BROWSER_TEST_TOKEN is configured"
+      "description": "Reject browser ui_operator minting; native approval context is required"
     },
     {
       "method": "GET",

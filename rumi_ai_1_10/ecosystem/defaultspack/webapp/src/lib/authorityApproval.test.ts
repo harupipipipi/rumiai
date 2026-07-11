@@ -18,8 +18,8 @@ import {
 import {
   browserAuthorityApprovalPath,
   browserApprovalTokenizedPath,
-  readBrowserApprovalTokenFromLocation,
 } from "./authorityApprovalBrowserToken";
+import "./authorityApprovalBrowserSecurity.test";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -381,26 +381,11 @@ test("authority related permissions helper can identify provider-scoped network 
   );
 });
 
-test("authority approval browser token helper accepts URL aliases and builds tokenized path", () => {
-  assert.equal(readBrowserApprovalTokenFromLocation("?browser_approval_token=tok-1"), "tok-1");
-  assert.equal(readBrowserApprovalTokenFromLocation("?approval_browser_token=tok-2"), "tok-2");
-  assert.equal(readBrowserApprovalTokenFromLocation("?browserApprovalToken=tok-3"), "tok-3");
-  assert.equal(
-    browserAuthorityApprovalPath("auth 1", "tok/en"),
-    "/approval?request_id=auth+1&browser_approval_token=tok%2Fen",
-  );
-  assert.equal(
-    browserAuthorityApprovalPath("auth 1", "tok/en", "/ambient-debug?authority_approved=1"),
-    "/approval?request_id=auth+1&browser_approval_token=tok%2Fen&return_to=%2Fambient-debug%3Fauthority_approved%3D1",
-  );
-  assert.equal(
-    browserApprovalTokenizedPath("/finger-recording?authority_approved=1", "tok/en"),
-    "/finger-recording?authority_approved=1&browser_approval_token=tok%2Fen",
-  );
-  assert.equal(
-    browserApprovalTokenizedPath("/finger-recording?browser_approval_token=existing", "tok/en"),
-    "/finger-recording?browser_approval_token=existing",
-  );
+test("authority approval browser helper builds credential-free same-origin paths", () => {
+  assert.equal(browserAuthorityApprovalPath("auth 1", "/ambient-debug?authority_approved=1"), "/approval?request_id=auth+1&return_to=%2Fambient-debug%3Fauthority_approved%3D1");
+  assert.equal(browserApprovalTokenizedPath("/finger-recording?authority_approved=1"), "/finger-recording?authority_approved=1");
+  assert.equal(browserApprovalTokenizedPath("https://external.invalid/fake"), null);
+  assert.equal(browserApprovalTokenizedPath("/finger-recording?browser_approval_token=fake"), null);
 });
 
 test("authority approval window approves exact request by default without related permission bundling", () => {
@@ -461,7 +446,7 @@ test("authority approval window settles already-approved or denied requests on l
   assert.doesNotMatch(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
   assert.doesNotMatch(source, /setRequestId\(activePendingApproval\.requestId\)/);
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
-  assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable \|\| browserApprovalAvailable/);
+  assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable/);
   assert.match(source, /const showApprovalControls = Boolean\(request && request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
 });
@@ -470,7 +455,7 @@ test("authority approval window finalizes hidden resume before broadcasting appr
   const source = authorityApprovalWindowSource();
 
   assert.match(source, /function scheduleAuthorityApprovalWindowClose\(fallbackReturnTo = ""\)[\s\S]*closeAuthorityApprovalWindow\(fallbackReturnTo\)/);
-  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose[\s\S]*nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
+  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose\s*\?\? true/);
   assert.match(source, /scheduleAuthorityApprovalWindowClose\(nativeApprovalAvailableRef\.current \? "" : approvalReturnToFromLocation\(\)\)/);
   assert.match(source, /const decision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, decision\);/);
   assert.match(source, /const retriedDecision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, retriedDecision\);/);
@@ -489,7 +474,7 @@ test("authority approval browser fallback returns same-tab approvals to a safe a
   assert.match(source, /!isApprovalReturnToPathAllowed\(url\.pathname\)/);
   assert.doesNotMatch(source, /startsWith\("\/finger-recording"\)/);
   assert.doesNotMatch(source, /startsWith\("\/ambient-debug"\)/);
-  assert.match(source, /window\.location\.replace\(defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\(fallbackReturnTo\)\)\)/);
+  assert.match(source, /const safeReturnTo = safeSameOriginApprovalPath\(fallbackReturnTo\)/);
 });
 
 test("authority approval route shows the pending picker when request_id is missing", () => {
@@ -525,44 +510,34 @@ test("authority approval window refreshes stale ui_operator once and retries onc
   assert.equal((source.match(/await submitApproveOnce\(\)/g) ?? []).length, 2);
 });
 
-test("authority approval browser route is read-only without URL token but can fetch browser ui_operator with token", () => {
+test("authority approval browser route is read-only and cleans legacy credentials", () => {
   const source = authorityApprovalWindowSource();
   const tokenSource = readFileSync(resolve(SRC_ROOT, "lib", "authorityApprovalBrowserToken.ts"), "utf8");
-  const apiSource = readFileSync(resolve(SRC_ROOT, "lib", "api.ts"), "utf8");
   const resourceSource = readFileSync(resolve(SRC_ROOT, "features", "chat", "resources", "authorityApprovalResources.ts"), "utf8");
 
   assert.match(source, /function hasNativeAuthorityApprovalContext\(\)/);
-  assert.match(source, /readBrowserApprovalTokenFromLocation/);
-  assert.doesNotMatch(source, /readBrowserApprovalTokenFromStorage/);
+  assert.doesNotMatch(source, /readBrowserApprovalToken/);
   assert.match(tokenSource, /BROWSER_APPROVAL_TOKEN_STORAGE_KEY/);
   assert.match(tokenSource, /"browser_approval_token"/);
   assert.match(tokenSource, /"approval_browser_token"/);
   assert.match(tokenSource, /"browserApprovalToken"/);
   assert.match(tokenSource, /"sessionStorage"/);
   assert.match(tokenSource, /"localStorage"/);
-  assert.match(source, /const browserApprovalAvailable = Boolean\(!nativeApprovalAvailable && browserApprovalToken\)/);
+  assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable/);
   assert.match(source, /request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
-  assert.match(source, /getBrowserAuthorityApprovalContext\(targetRequestId, token\)/);
-  assert.match(source, /承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。/);
-  assert.match(source, /ブラウザでは承認テストトークンがないため読み取り専用です。/);
+  assert.match(source, /throw new Error\("AUTHORITY_BROWSER_TEST_DISABLED"\)/);
+  assert.doesNotMatch(source, /BrowserApprovalExchangeSession|browserExchangeRef/);
   assert.match(source, /displayedSettledStatus && \(/);
   assert.match(source, /このリクエストは処理済みです。追加の操作は不要です。/);
-  assert.match(apiSource, /browserAuthorityUiOperator\(requestId: string, browserApprovalToken: string\)/);
-  assert.match(apiSource, /withQuery\("\/api\/authority\/browser-ui-operator", \{\s*browser_approval_token: browserApprovalToken,\s*\}\)/);
-  assert.match(apiSource, /\/api\/authority\/browser-ui-operator/);
-  assert.match(apiSource, /"X-Rumi-Approval-Browser-Token": browserApprovalToken/);
-  assert.match(apiSource, /request_id: requestId,\s*browser_approval_token: browserApprovalToken/s);
-  assert.match(resourceSource, /getBrowserAuthorityApprovalContext\(requestId: string, browserApprovalToken: string\)/);
+  assert.doesNotMatch(resourceSource, /getBrowserAuthorityApprovalContext/);
 });
 
-test("authority approval browser QA token is preserved across child window URLs", () => {
+test("authority approval credentials are absent from child window URLs", () => {
   const appSource = readFileSync(resolve(SRC_ROOT, "App.tsx"), "utf8");
   const source = authorityApprovalWindowSource();
 
-  assert.match(appSource, /browserApprovalTokenizedPath/);
-  assert.match(appSource, /defaultspackUrlWithLocalAuth\(browserApprovalTokenizedPath\("\/finger-recording"\)\)/);
-  assert.match(source, /browserApprovalTokenizedPath/);
-  assert.match(source, /defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\("\/finger-recording\?authority_approved=1"\)\)/);
+  assert.doesNotMatch(appSource, /browserApprovalTokenizedPath/);
+  assert.doesNotMatch(source, /browser_approval_token|approval_browser_token|browserApprovalToken/);
 });
 
 test("authority approval window explains disabled browser QA approval", () => {
@@ -571,7 +546,7 @@ test("authority approval window explains disabled browser QA approval", () => {
   assert.match(source, /function authorityApprovalErrorMessage/);
   assert.match(source, /AUTHORITY_BROWSER_TEST_DISABLED/);
   assert.match(source, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
-  assert.match(source, /このDefaultspackはブラウザ承認QAが無効な状態で起動しています。/);
+  assert.match(source, /このDefaultspackではブラウザ承認が無効です。/);
   assert.match(source, /承認操作に必要なRumi Viewerの署名secretがありません。/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(approvalError\)\)/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(rejectionError\)\)/);

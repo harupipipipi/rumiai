@@ -52,7 +52,6 @@ import {
   sanitizeAssistantAuthorityBoilerplate,
 } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
-import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
@@ -6230,9 +6229,9 @@ function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
       const opened = await openFingerRecordingWindow();
       if (opened) return;
       const popup = window.open(
-        defaultspackUrlWithLocalAuth(browserApprovalTokenizedPath("/finger-recording")),
+        "/finger-recording",
         "rumi-finger-recording",
-        "width=380,height=520",
+        "width=380,height=520,noopener,noreferrer",
       );
       if (popup) popup.focus();
       else setFallbackVisible(true);
