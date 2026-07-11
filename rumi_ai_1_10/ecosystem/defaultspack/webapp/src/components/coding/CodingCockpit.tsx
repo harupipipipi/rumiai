@@ -153,13 +153,15 @@ export function CodingCockpit({
         args: parseMcpArgs(mcpArgs),
       };
       await codingResources.registerMcpServer({ server_id: serverId, name: serverId, config });
-      let result = await codingResources.connectMcpServer({ server_id: serverId });
+      const result = await codingResources.connectMcpServer({ server_id: serverId });
       if (result.approval_required && typeof result.approval_request_id === "string") {
-        const decision = await codingResources.approveCodingApproval(result.approval_request_id);
-        if (!decision.approved || !decision.token) {
-          throw new Error("MCP approval was not granted");
-        }
-        result = await codingResources.connectMcpServer({ server_id: serverId, approval_token: decision.token });
+        await loadSidecarState();
+        setStatus(
+          `MCP approval required for ${serverId}. Review request ${result.approval_request_id} ` +
+            "in the separate Approvals queue, then press Connect again. " +
+            "The requesting form cannot approve its own request.",
+        );
+        return;
       }
       const tools = Array.isArray(result.tools) ? result.tools.length : 0;
       setMcpServerId("");

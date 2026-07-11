@@ -52,7 +52,20 @@ export function resolveVisibleSelectedSeatId(
   return resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId, options)?.seat_id ?? null;
 }
 
+export function clearLegacyDesktopCredentialsFromUrl(): boolean {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  const found = query.has("desktop_access_key") || query.has("access_key");
+  if (!found) return false;
+  query.delete("desktop_access_key");
+  query.delete("access_key");
+  const nextUrl = `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ""}${window.location.hash}`;
+  window.history.replaceState(window.history.state, "", nextUrl);
+  return true;
+}
+
 export function DesktopMonitorWorkspace() {
+  const legacyCredentialWasRemoved = useRef(clearLegacyDesktopCredentialsFromUrl()).current;
   const runtime = useRuntimeDoctor({ autoRunDoctor: true });
   const runtimeReady = runtime.availability.status === "ready";
   const templates = useSandboxTemplates({ enabled: runtimeReady });
@@ -66,7 +79,11 @@ export function DesktopMonitorWorkspace() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(
+    legacyCredentialWasRemoved
+      ? "This desktop link used a retired access key. Ask the owner for fresh access."
+      : null,
+  );
   const [accessKeys, setAccessKeys] = useState<Record<string, string>>({});
   const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
@@ -97,26 +114,36 @@ export function DesktopMonitorWorkspace() {
     const linkedSeatId = query.get("desktop");
     if (!linkedSeatId) return;
     if (processedLinkedSeatIdRef.current === linkedSeatId) return;
-    const linkedAccessKey = query.get("desktop_access_key") || query.get("access_key") || "";
-    if (linkedAccessKey) {
-      query.delete("desktop_access_key");
-      query.delete("access_key");
-      const nextUrl = `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ""}${window.location.hash}`;
-      window.history.replaceState(window.history.state, "", nextUrl);
-    }
-    if (linkedAccessKey) {
-      setAccessKeys((current) => (
-        current[linkedSeatId] === linkedAccessKey
-          ? current
-          : { ...current, [linkedSeatId]: linkedAccessKey }
-      ));
-    }
     if (desktopInstances.desktops.some((desktop) => desktop.seat_id === linkedSeatId)) {
       processedLinkedSeatIdRef.current = linkedSeatId;
       explicitSelectedSeatIdRef.current = linkedSeatId;
       setSelectedSeatId(linkedSeatId);
     }
   }, [desktopInstances.desktops]);
+
+  useEffect(() => {
+    const missingSeatIds = desktopInstances.desktops
+      .map((desktop) => desktop.seat_id)
+      .filter((seatId) => !accessKeys[seatId]);
+    for (const seatId of missingSeatIds) {
+      const operations = [
+        "desktop.read", "desktop.frame", "desktop.start", "desktop.restart",
+        "desktop.stop", "desktop.delete", "desktop.input", "desktop.ai_input",
+        "desktop.rules.update", "desktop.control.acquire", "desktop.control.renew",
+        "desktop.control.release",
+      ];
+      void sandboxesApi.issueDesktopExchange(seatId, operations)
+        .then(({ exchange_code }) => sandboxesApi.redeemDesktopExchange(exchange_code))
+        .then(({ session_credential }) => {
+          setAccessKeys((current) => current[seatId]
+            ? current
+            : { ...current, [seatId]: session_credential });
+        })
+        .catch((error) => setActionError(
+          error instanceof Error ? error.message : "Desktop session setup failed.",
+        ));
+    }
+  }, [accessKeys, desktopInstances.desktops]);
 
   useEffect(() => {
     const preserveSelected = selectedSeatId !== null && explicitSelectedSeatIdRef.current === selectedSeatId;
@@ -162,13 +189,6 @@ export function DesktopMonitorWorkspace() {
     setCreateError(null);
     try {
       const desktop = await sandboxesApi.createDesktop(request);
-      const returnedAccessKey = desktop.access_key || request.access?.access_key || "";
-      if (returnedAccessKey) {
-        setAccessKeys((current) => ({
-          ...current,
-          [desktop.seat_id]: returnedAccessKey,
-        }));
-      }
       explicitSelectedSeatIdRef.current = desktop.seat_id;
       setSelectedSeatId(desktop.seat_id);
       setIsCreateOpen(false);
@@ -227,7 +247,7 @@ export function DesktopMonitorWorkspace() {
     void sandboxesApi.sendDesktopInput(seatId, {
       ...input,
       lease_token: token,
-      access_key: accessKeys[seatId] || undefined,
+      desktop_session_credential: accessKeys[seatId] || undefined,
     }).then(() => {
       setActionError(null);
     }).catch((error) => {
@@ -236,12 +256,6 @@ export function DesktopMonitorWorkspace() {
     });
   }, [accessKeys, control.lease?.lease_token, desktopInstances, visibleSelectedSeatId]);
 
-  const handleAccessKeyChange = useCallback((seatId: string, accessKey: string) => {
-    setAccessKeys((current) => ({
-      ...current,
-      [seatId]: accessKey,
-    }));
-  }, []);
 
   const handleRequestAccess = useCallback((seatId: string) => {
     setAccessMessage(null);
@@ -258,13 +272,7 @@ export function DesktopMonitorWorkspace() {
     setAccessMessage(null);
     void sandboxesApi.grantDesktopAccess(seatId, requestId)
       .then((result) => {
-        if (result.access_key) {
-          setAccessKeys((current) => ({
-            ...current,
-            [seatId]: result.access_key || "",
-          }));
-        }
-        setAccessMessage(result.access_key_hint ? `Access granted (${result.access_key_hint}).` : "Access request granted.");
+        setAccessMessage(result.message || "Access request granted. A scoped session will be issued through the authenticated channel.");
       })
       .catch((error) => {
         setActionError(error instanceof Error ? error.message : "Desktop access grant failed.");
@@ -345,11 +353,9 @@ export function DesktopMonitorWorkspace() {
               <DesktopInspector
                 desktop={selectedDesktop}
                 hasLease={Boolean(control.lease)}
-                accessKey={selectedDesktop ? accessKeys[selectedDesktop.seat_id] || "" : ""}
                 leaseError={control.error}
                 actionError={actionError}
                 accessMessage={accessMessage}
-                onAccessKeyChange={handleAccessKeyChange}
                 onRequestAccess={handleRequestAccess}
                 onGrantAccess={handleGrantAccess}
               />

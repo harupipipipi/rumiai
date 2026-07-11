@@ -11,9 +11,6 @@ import {
 import { subscribeAuthorityApprovalSettlements } from "../lib/authorityApprovalEvents";
 import {
   browserAuthorityApprovalPath,
-  readBrowserApprovalToken,
-  readBrowserApprovalTokenFromLocation,
-  rememberBrowserApprovalToken,
 } from "../lib/authorityApprovalBrowserToken";
 import { openDefaultsConsoleWindow, openFingerRecordingWindow, openAuthorityApprovalWindow, openDefaultspackMainWindow, openHostPermissionsPageWindow } from "../lib/desktopApproval";
 import { LayerPortal } from "../ui/layers/LayerPortal";
@@ -145,8 +142,6 @@ export function AmbientTriggerPanel({
   const [miniChatLoading, setMiniChatLoading] = useState(false);
   const [miniChatError, setMiniChatError] = useState<string | null>(null);
   const [miniAuthorityApprovalResolution, setMiniAuthorityApprovalResolution] = useState<MiniAuthorityApprovalResolution | null>(null);
-  const [browserApprovalToken, setBrowserApprovalToken] = useState(() => readBrowserApprovalToken());
-  const [browserApprovalTokenInput, setBrowserApprovalTokenInput] = useState(() => readBrowserApprovalToken());
   const [miniInput, setMiniInput] = useState("");
   const [miniSending, setMiniSending] = useState(false);
   const [miniChatCreating, setMiniChatCreating] = useState(false);
@@ -335,11 +330,8 @@ export function AmbientTriggerPanel({
   const miniAuthorityApprovalResolving = Boolean(miniAuthorityApprovalCandidate && !miniAuthorityApprovalResolved);
   const miniAuthorityBlocksInput = miniAuthorityApprovalResolving || Boolean(miniAuthorityApproval);
   const browserApprovalQaEnabled = standalone && debugMode;
-  const miniBrowserApprovalTokenRequired = Boolean(
-    browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && !browserApprovalToken.trim(),
-  );
-  const miniBrowserApprovalDirectUrl = browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && browserApprovalToken.trim()
-    ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, browserApprovalToken.trim(), ambientAuthorityApprovalReturnPath())
+  const miniBrowserApprovalDirectUrl = browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow()
+    ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, ambientAuthorityApprovalReturnPath())
     : null;
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
@@ -585,14 +577,6 @@ export function AmbientTriggerPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    const token = readBrowserApprovalTokenFromLocation();
-    if (!token) return;
-    rememberBrowserApprovalToken(token);
-    setBrowserApprovalToken(token);
-    setBrowserApprovalTokenInput(token);
   }, []);
 
   useEffect(() => {
@@ -1139,13 +1123,9 @@ export function AmbientTriggerPanel({
         if (!options?.auto) setMessage("AI使用の承認ウィンドウを開きました。");
         return;
       }
-      const nextBrowserApprovalToken = browserApprovalQaEnabled ? readBrowserApprovalToken() : "";
-      if (nextBrowserApprovalToken) {
-        rememberBrowserApprovalToken(nextBrowserApprovalToken);
-        setBrowserApprovalToken(nextBrowserApprovalToken);
-        setBrowserApprovalTokenInput(nextBrowserApprovalToken);
-        const approvalUrl = browserAuthorityApprovalPath(resolvedApproval.requestId, nextBrowserApprovalToken, ambientAuthorityApprovalReturnPath());
-        const popup = window.open(approvalUrl, `rumi-authority-approval-${resolvedApproval.requestId}`, "width=720,height=820");
+      if (browserApprovalQaEnabled) {
+        const approvalUrl = browserAuthorityApprovalPath(resolvedApproval.requestId, ambientAuthorityApprovalReturnPath());
+        const popup = window.open(approvalUrl, `rumi-authority-approval-${resolvedApproval.requestId}`, "width=720,height=820,noopener,noreferrer");
         if (popup) {
           if (!options?.auto) setMessage("ブラウザ承認ページを開きました。");
           return;
@@ -1153,28 +1133,10 @@ export function AmbientTriggerPanel({
         setMiniChatError("ブラウザのポップアップがブロックされました。同じタブの承認リンクを開いてください。");
         return;
       }
-      if (browserApprovalQaEnabled && !hasNativeAuthorityApprovalWindow()) {
-        setMiniChatError(null);
-        if (!options?.auto) setMessage("ブラウザで承認するにはテストトークンを保存してください。");
-        return;
-      }
     } catch (error) {
       console.info("[ambient] authority approval window unavailable", error);
     }
     setMiniChatError("承認ウィンドウを開けませんでした。Rumi Viewerから承認を開いてください。");
-  }
-
-  function saveMiniBrowserApprovalToken() {
-    const token = browserApprovalTokenInput.trim();
-    if (!token) {
-      setMiniChatError("ブラウザ承認テストトークンを入力してください。");
-      return;
-    }
-    rememberBrowserApprovalToken(token);
-    setBrowserApprovalToken(token);
-    setBrowserApprovalTokenInput(token);
-    setMiniChatError(null);
-    setMessage("ブラウザ承認テストトークンを保存しました。");
   }
 
   async function resolveMiniAuthorityApprovalTarget(
@@ -2102,12 +2064,6 @@ export function AmbientTriggerPanel({
             latestInputPreview={latestSubmittedInput}
             authorityApproval={miniAuthorityApproval}
             authorityApprovalUrl={miniBrowserApprovalDirectUrl}
-            browserApprovalTokenPrompt={miniBrowserApprovalTokenRequired ? {
-              required: true,
-              token: browserApprovalTokenInput,
-              onTokenChange: setBrowserApprovalTokenInput,
-              onSave: saveMiniBrowserApprovalToken,
-            } : null}
             showPicker={standalone || inlineSettingsControlsVisible}
             onInputChange={setMiniInput}
             onSubmit={submitMiniChat}

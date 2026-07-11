@@ -46,6 +46,8 @@ SENSITIVE_LOCAL_PATHS = {
     "/api/authority/requests",
     "/api/authority/test/request",
     "/api/authority/browser-ui-operator",
+    "/api/authority/browser-exchange",
+    "/api/authority/browser-exchange/revoke",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
     "/api/tools/browser-companion/session",

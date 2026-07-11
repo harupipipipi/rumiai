@@ -8,7 +8,7 @@ import { PromptUsageDisclosure } from "../components/prompts/PromptUsageDisclosu
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
 import { buildToolActivityGroups, buildToolActivityItems, toolFolderFor, type RunActivityItem, type ToolActivityGroup, type ToolActivityItem, type ToolActivityStatus } from "../lib/toolActivity";
-import type { ChatContentBlock } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock } from "../lib/api";
 import {
   AUTHORITY_FOLLOWUP_TEXT,
   AUTHORITY_WAITING_TEXT,
@@ -78,6 +78,59 @@ type MessageToolActivityState = {
   hasRunningItems: boolean;
   summary: ToolActivityTraySummary;
 };
+
+function activityEventValue(event: ChatActivityEvent, key: string): unknown {
+  const data = isRecord(event.data) ? event.data : {};
+  return event[key] ?? data[key];
+}
+
+function attemptGeneration(value: unknown): number | string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return undefined;
+}
+
+export function toolActivityPreviewKey(
+  toolCallId: string,
+  providerAttemptGeneration?: number | string,
+): string {
+  const callId = String(toolCallId ?? "").trim();
+  return providerAttemptGeneration === undefined
+    ? callId
+    : `${callId}::provider-attempt:${providerAttemptGeneration}`;
+}
+
+export function previewableToolActivityKeys(events: ChatActivityEvent[]): Set<string> {
+  const keys = new Set<string>();
+  for (const event of events) {
+    if (
+      event.type !== "browser_screenshot"
+      && event.type !== "browser_state_snapshot"
+      && event.type !== "browser_dom_snapshot"
+      && event.type !== "tool_call_completed"
+    ) continue;
+    if (activityEventValue(event, "provider_attempt_discarded") === true) continue;
+    const callId = String(activityEventValue(event, "tool_call_id") ?? "").trim();
+    if (!callId) continue;
+    const generation = attemptGeneration(
+      activityEventValue(event, "provider_attempt_generation"),
+    );
+    keys.add(toolActivityPreviewKey(callId, generation));
+  }
+  return keys;
+}
+
+export function toolActivityPreviewId(
+  item: Pick<RunActivityItem, "toolCallId" | "providerAttemptGeneration">,
+  previewableKeys: Set<string>,
+): string | undefined {
+  if (!item.toolCallId) return undefined;
+  const key = toolActivityPreviewKey(
+    item.toolCallId,
+    item.providerAttemptGeneration,
+  );
+  return previewableKeys.has(key) ? item.toolCallId : undefined;
+}
 
 function shortDetail(value: unknown, limit = 420): string {
   let text = "";
@@ -1116,7 +1169,7 @@ function ToolActivityTimelineRow({
   previewableCallIds: Set<string>;
 }) {
   const artifactPreviewId = isToolActivityItem(item) ? item.artifacts?.find((artifact) => artifact.url)?.path : undefined;
-  const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+  const previewId = toolActivityPreviewId(item, previewableCallIds) ?? artifactPreviewId;
   const hasPreview = Boolean(previewId);
   const statusLabel = item.status === "failed" || item.status === "blocked"
     ? "エラー"
@@ -1184,17 +1237,7 @@ function ToolActivityPanel({
 }) {
   const [showAll, setShowAll] = useState(false);
   if (items.length === 0) return null;
-  const previewableCallIds = new Set(
-    (message.events ?? [])
-      .filter((event) => (
-        event.type === "browser_screenshot"
-        || event.type === "browser_state_snapshot"
-        || event.type === "browser_dom_snapshot"
-        || event.type === "tool_call_completed"
-      ))
-      .map((event) => String(event.tool_call_id ?? "").trim())
-      .filter(Boolean),
-  );
+  const previewableCallIds = previewableToolActivityKeys(message.events ?? []);
   const timeline = showAll ? { items, hiddenCount: 0 } : visibleTimelineItems(items);
   return (
     <section className="rumi-tool-activity mb-3 grid w-full max-w-[640px] gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5 text-zinc-300">
@@ -1410,6 +1453,16 @@ export function ChatMessagesRenderer({
                               )
                             : <MessageMarkdown text={messageDisplayText(message, message.rawText)} />}
                       </div>
+
+                      {message.role === "agent" && message.metadata?.interrupted && (
+                        <div
+                          className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
+                          role="status"
+                        >
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                          <span>応答は途中で中断されました。表示内容は中断前までに届いたものです。</span>
+                        </div>
+                      )}
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
 

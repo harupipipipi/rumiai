@@ -60,6 +60,65 @@ test("refresh conversation loading prefers an explicit URL chat over existing ac
   assert.deepEqual(loaded, ["url-chat"]);
 });
 
+test("refresh conversation loading normalizes stale MiMo URL chats to the active chat", async () => {
+  const attempts: Array<string | null> = [];
+  const activated: Array<string | null> = [];
+  let normalizedUrlChatId: string | null = null;
+  const conversations: Record<string, { id: string; metadata?: Record<string, unknown> }> = {
+    "stale-chat": {
+      id: "stale-chat",
+      metadata: {
+        superseded: true,
+        superseded_reason: "mimo_coding_company_inactive_chat",
+        active_conversation_id: "active-chat",
+        replacement_conversation_id: "active-chat",
+      },
+    },
+    "active-chat": {
+      id: "active-chat",
+      metadata: {
+        profile_id: "defaultspack.mimo_coding_company",
+        company_id: "mimo-coding-company",
+      },
+    },
+  };
+
+  const appLikeLoadConversation = async (conversationId: string | null): Promise<void> => {
+    attempts.push(conversationId);
+    if (!conversationId) {
+      activated.push(null);
+      normalizedUrlChatId = null;
+      return;
+    }
+
+    const conversation = conversations[conversationId];
+    if (!conversation) {
+      throw new Error(`Missing conversation ${conversationId}`);
+    }
+
+    const redirectedId = resolveSupersededConversationRedirect(conversation, conversationId);
+    if (redirectedId) {
+      await appLikeLoadConversation(redirectedId);
+      return;
+    }
+
+    activated.push(conversationId);
+    normalizedUrlChatId = conversationId;
+  };
+
+  await loadConversationForRefresh({
+    preferredId: null,
+    activeConversationId: null,
+    locationChatId: "stale-chat",
+    listedConversations: [{ id: "active-chat" }],
+    loadConversation: appLikeLoadConversation,
+  });
+
+  assert.deepEqual(attempts, ["stale-chat", "active-chat"]);
+  assert.deepEqual(activated, ["active-chat"]);
+  assert.equal(normalizedUrlChatId, "active-chat");
+});
+
 test("superseded conversations redirect to active MiMo company conversation", () => {
   assert.equal(
     resolveSupersededConversationRedirect(

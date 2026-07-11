@@ -878,9 +878,21 @@
     },
     {
       "method": "POST",
+      "path": "/api/authority/browser-exchange",
+      "flow_id": "transport_direct",
+      "description": "Fail-closed tombstone for the disabled browser approval exchange issuer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/authority/browser-exchange/revoke",
+      "flow_id": "transport_direct",
+      "description": "Fail-closed tombstone for the disabled browser approval exchange revocation route"
+    },
+    {
+      "method": "POST",
       "path": "/api/authority/browser-ui-operator",
       "flow_id": "transport_direct",
-      "description": "Mint a signed ui_operator for local browser approval QA when RUMI_AUTHORITY_BROWSER_TEST_TOKEN is configured"
+      "description": "Reject browser ui_operator minting; native approval context is required"
     },
     {
       "method": "GET",
@@ -1493,6 +1505,36 @@
       "path": "/api/desktops/{seat_id}/access-requests/{request_id}/grant",
       "function_id": "managed_runtime_desktop_access_grant",
       "description": "Grant or deny a protected desktop access request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-exchanges",
+      "function_id": "managed_runtime_desktop_exchange_issue",
+      "description": "Issue a one-time scoped desktop exchange code"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktop-access/exchange",
+      "function_id": "managed_runtime_desktop_exchange_redeem",
+      "description": "Redeem a one-time desktop exchange code"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}/access-grants",
+      "function_id": "managed_runtime_desktop_grants_list",
+      "description": "List desktop access grant metadata without secrets"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/desktops/{seat_id}/access-grants/{grant_id}",
+      "function_id": "managed_runtime_desktop_grant_revoke",
+      "description": "Revoke a desktop access grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktop-access/expire",
+      "function_id": "managed_runtime_desktop_grants_expire",
+      "description": "Expire elapsed desktop access grants"
     },
     {
       "method": "POST",

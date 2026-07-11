@@ -111,96 +111,59 @@ def test_authority_http_transport_approve_passes_related_permissions_and_ui_oper
     }]
 
 
-def test_authority_browser_ui_operator_endpoint_is_disabled_without_token(monkeypatch):
+def _browser_exchange_request(request_id="auth_1"):
+    return {
+        "request_id": request_id,
+        "device_id": "fake-device-1",
+        "window_id": "fake-window-1",
+        "nonce": "fake-client-nonce-1",
+        "origin": "http://127.0.0.1:8766",
+        "_headers": {"Origin": "http://127.0.0.1:8766"},
+        "_authority_subject": {"principal_id": "local-ui:fake-principal-digest"},
+    }
+
+
+def test_authority_browser_ui_operator_rejects_legacy_credential(monkeypatch):
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
-    monkeypatch.delenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", raising=False)
     server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    request = _browser_exchange_request()
+    request["browser_approval_token"] = "unmistakably-fake-revoked-value"
 
-    result = server._handle_authority_browser_ui_operator({"request_id": "auth_1"}, {})
+    result = server._handle_authority_browser_ui_operator(request, {})
+
+    assert result["status"] == "error"
+    assert result["_http_status"] == 410
+    assert result["error"]["code"] == "LEGACY_BROWSER_APPROVAL_REVOKED"
+    assert "unmistakably-fake" not in str(result)
+
+
+def test_authority_browser_exchange_cannot_elevate_local_ui_bearer():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    result = server._handle_authority_browser_exchange(
+        _browser_exchange_request(), {}
+    )
 
     assert result["status"] == "error"
     assert result["_http_status"] == 404
     assert result["error"]["code"] == "AUTHORITY_BROWSER_TEST_DISABLED"
 
 
-def test_authority_browser_ui_operator_endpoint_requires_valid_token(monkeypatch):
+def test_authority_browser_ui_operator_cannot_mint_from_http_exchange(monkeypatch):
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-
-    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "fake-signing-key-" + ("x" * 32))
     server = DefaultsHttpServer.__new__(DefaultsHttpServer)
 
-    missing = server._handle_authority_browser_ui_operator({"request_id": "auth_1"}, {})
-    invalid = server._handle_authority_browser_ui_operator(
-        {
-            "request_id": "auth_1",
-            "_headers": {"X-Rumi-Approval-Browser-Token": "wrong"},
-        },
-        {},
-    )
+    redeem_request = _browser_exchange_request()
+    redeem_request["exchange_code"] = "fake-attacker-selected-code"
+    result = server._handle_authority_browser_ui_operator(redeem_request, {})
 
-    assert missing["status"] == "error"
-    assert missing["_http_status"] == 401
-    assert missing["error"]["code"] == "AUTHORITY_BROWSER_TOKEN_REQUIRED"
-    assert invalid["status"] == "error"
-    assert invalid["_http_status"] == 403
-    assert invalid["error"]["code"] == "AUTHORITY_BROWSER_TOKEN_INVALID"
-
-
-def test_authority_browser_ui_operator_endpoint_mints_signed_context_with_body_token(monkeypatch):
-    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-    from core_runtime.authority.ui_operator import verify_ui_operator
-
-    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-signing-secret-" + ("x" * 32))
-    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
-
-    result = server._handle_authority_browser_ui_operator(
-        {
-            "request_id": "auth_1",
-            "browser_approval_token": "browser-secret",
-        },
-        {},
-    )
-
-    assert result["status"] == "ok"
-    assert result["data"]["request_id"] == "auth_1"
-    ui_operator = result["data"]["ui_operator"]
-    verified, reason, normalized = verify_ui_operator(ui_operator, request_id="auth_1")
-    assert verified is True, reason
-    assert normalized["request_id"] == "auth_1"
-
-
-def test_authority_browser_ui_operator_endpoint_accepts_header_and_query_tokens(monkeypatch):
-    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-    from core_runtime.authority.ui_operator import verify_ui_operator
-
-    monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-signing-secret-" + ("x" * 32))
-    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
-
-    by_header = server._handle_authority_browser_ui_operator(
-        {
-            "request_id": "auth_header",
-            "_headers": {"X-Rumi-Approval-Browser-Token": "browser-secret"},
-        },
-        {},
-    )
-    by_query = server._handle_authority_browser_ui_operator(
-        {
-            "request_id": "auth_query",
-            "browser_approval_token": "browser-secret",
-            "_headers": {},
-        },
-        {},
-    )
-
-    for result, request_id in ((by_header, "auth_header"), (by_query, "auth_query")):
-        assert result["status"] == "ok"
-        assert result["data"]["request_id"] == request_id
-        verified, reason, normalized = verify_ui_operator(result["data"]["ui_operator"], request_id=request_id)
-        assert verified is True, reason
-        assert normalized["request_id"] == request_id
+    assert result["status"] == "error"
+    assert result["_http_status"] == 404
+    assert result["error"]["code"] == "AUTHORITY_BROWSER_TEST_DISABLED"
+    assert "fake-attacker-selected-code" not in str(result)
 
 
 def test_authority_http_errors_preserve_status(monkeypatch):

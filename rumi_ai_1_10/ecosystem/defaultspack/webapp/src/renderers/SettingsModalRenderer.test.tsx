@@ -159,6 +159,7 @@ test("SettingsModalRenderer renders template model_select with searchable model 
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -209,6 +210,7 @@ test("SettingsModalRenderer shows simple main and lightweight model slots", () =
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -317,6 +319,7 @@ test("SettingsModalRenderer constrains long readonly paths inside settings cards
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "packs",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -814,6 +817,7 @@ test("settings surface pinned placements render in the modal", () => {
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1055,6 +1059,7 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "accounts",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1195,6 +1200,7 @@ test("settings accounts prelude renders Codex token credential without raw token
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "accounts",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1320,6 +1326,7 @@ test("settings help pane uses reported active profile with fallback when absent"
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1338,6 +1345,7 @@ test("settings help pane uses reported active profile with fallback when absent"
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1357,4 +1365,105 @@ test("settings help pane uses reported active profile with fallback when absent"
   assert.doesNotMatch(withProfile, />default</);
   assert.match(withoutProfile, /No active profile reported/);
   assert.doesNotMatch(withoutProfile, />default</);
+});
+
+test("Settings modal exposes localized dialog semantics and task-oriented Japanese copy", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "general",
+      locale: "ja",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "general",
+        label: "General",
+        fields: [{ id: "composer_placeholder", label: "Composer Placeholder", type: "text", help: "composer placeholder" }],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /aria-labelledby="rumi-settings-dialog-title"/);
+  assert.match(html, /aria-describedby="rumi-settings-dialog-description"/);
+  assert.match(html, /aria-label="設定を閉じる"/);
+  assert.match(html, />設定<\/h2>/);
+  assert.match(html, /入力欄の案内文/);
+  assert.doesNotMatch(html, />Composer Placeholder</);
+  assert.doesNotMatch(html, /バックエンド登録情報/);
+});
+
+test("Japanese Accounts modal does not expose English connection implementation copy", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      locale: "ja",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "accounts_connections",
+        label: "Accounts & Connections",
+        fields: [],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /ログイン、認証情報、権限を分けて管理します/);
+  assert.match(html, /Gmailの検索とメタデータ/);
+  assert.match(html, /認証情報を読み込んで保存/);
+  assert.match(html, /設定の提供元/);
+  assert.match(html, /パックや外部サービスから追加される設定は、利用可能になるとここに表示されます。/);
+  assert.doesNotMatch(html, /Client config needed|Credential needed|Token needed/);
+  assert.doesNotMatch(html, /Connect selected mode|Configure self-host OAuth|Import credential JSON/);
+  assert.doesNotMatch(html, /Restricted Gmail scopes|Settings placement candidates|Accounts &amp; Connections/);
+  assert.doesNotMatch(html, /Pack or provider contributions for this section will appear here after registry validation/);
+});
+
+test("English Settings empty section keeps registry contribution guidance", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "accounts_connections",
+        label: "Accounts & Connections",
+        fields: [],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Pack or provider contributions for this section will appear here after registry validation\./);
+  assert.doesNotMatch(html, /パックや外部サービスから追加される設定/);
 });

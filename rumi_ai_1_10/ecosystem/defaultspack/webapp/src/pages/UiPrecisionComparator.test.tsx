@@ -507,20 +507,20 @@ test("scenario library improves compression, actions, and viewport scores for ev
   }
 });
 
-test("UiPrecisionComparator renders the MiMo and recursive split comparison labels", () => {
+test("UiPrecisionComparator renders truthful static fixture labels", () => {
   const html = renderComparator();
 
-  assert.match(html, /Rumi UI Precision Comparator/);
+  assert.match(html, /Rumi UI Design Scenario Demo/);
   assert.match(html, /AI Chat App/);
   assert.match(html, /Ecommerce Configurator/);
   assert.match(html, /Clinical Intake/);
   assert.match(html, /Fintech Approval/);
   assert.match(html, /Data Grid Admin/);
-  assert.match(html, /MiMo V2\.5 Pro raw/);
-  assert.match(html, /Rumi recursive split/);
-  assert.match(html, /Fairness lock/);
-  assert.match(html, /Human hints/);
-  assert.match(html, /input: shared request brief only/);
+  assert.match(html, /Illustrative raw layout/);
+  assert.match(html, /Illustrative structured layout/);
+  assert.match(html, /Static scenario disclosure/);
+  assert.match(html, /Runtime calls/);
+  assert.match(html, /Editing the brief does not regenerate this preview/);
 });
 
 test("UiPrecisionComparator exposes the advanced scenario selector contract", () => {
@@ -547,18 +547,18 @@ test("UiPrecisionComparator exposes the advanced scenario selector contract", ()
   assert.match(html, /Recursive split tree/);
 });
 
-test("UiPrecisionComparator marks raw and recursive previews with comparison metadata", () => {
+test("UiPrecisionComparator marks raw and structured static previews", () => {
   const html = renderComparator();
 
-  assert.match(html, /data-rumi-node="mimo-raw-preview"/);
-  assert.match(html, /data-rumi-node="rumi-recursive-preview"/);
+  assert.match(html, /data-rumi-node="raw-static-preview"/);
+  assert.match(html, /data-rumi-node="structured-static-preview"/);
   assert.match(html, /data-rumi-density="over-compressed"/);
   assert.match(html, /data-rumi-density="recursive-detail"/);
-  assert.match(html, /data-rumi-role="comparison-render"/);
-  assert.match(html, /split 5 leaves/);
-  assert.match(html, /3 hard fails/);
-  assert.match(html, /0 hard fails/);
-  assert.match(html, /3-&gt;0 fail/);
+  assert.match(html, /data-rumi-role="static-demo-render"/);
+  assert.match(html, /static structured fixture · 5 leaves/);
+  assert.match(html, /3 illustrative flags/);
+  assert.match(html, /0 illustrative flags/);
+  assert.match(html, /3 → 0/);
 });
 
 test("UiPrecisionComparator renders AI chat responsive proof and nested surface risk", () => {
@@ -616,4 +616,14 @@ test("promptFingerprint differentiates long, loading, error, and empty state bri
   for (const fingerprint of fingerprints) {
     assert.match(fingerprint, /^prompt-[0-9a-f]{8}$/);
   }
+});
+
+
+test("UI precision demo discloses static fixtures instead of claiming a live benchmark", () => {
+  const html = renderToStaticMarkup(createElement(UiPrecisionComparator));
+  assert.match(html, /Static demonstration data/);
+  assert.match(html, /does not invoke MiMo, Rumi, or any other model/);
+  assert.match(html, /Reset demo view/);
+  assert.doesNotMatch(html, /Run comparison/);
+  assert.doesNotMatch(html, /Fairness lock/);
 });

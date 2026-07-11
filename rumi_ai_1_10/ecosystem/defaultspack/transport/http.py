@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from blocks._common import ok, error, timestamp
 
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -56,6 +57,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.catalog",
     "blocks.ui.commands",
     "blocks.ui.conversation_preview",
+    "blocks.ui.provider_health",
     "blocks.ui.settings",
 }
 
@@ -85,6 +87,7 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
 _DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.catalog",
     "blocks.ui.conversation_preview",
+    "blocks.ui.provider_health",
     "blocks.ui.settings",
 }
 _DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS = 10.0
@@ -1323,44 +1326,38 @@ class DefaultsHttpServer:
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
+    def _handle_authority_browser_exchange(self, request_data, path_params):
+        del path_params
+        legacy = _legacy_browser_credential_error(request_data)
+        if legacy:
+            return legacy
+        return _http_error(
+            "browser approval exchange is unavailable; use the native approval window",
+            "AUTHORITY_BROWSER_TEST_DISABLED",
+            404,
+        )
+
+    def _handle_authority_browser_exchange_revoke(self, request_data, path_params):
+        del path_params
+        legacy = _legacy_browser_credential_error(request_data)
+        if legacy:
+            return legacy
+        return _http_error(
+            "browser approval exchange is unavailable; use the native approval window",
+            "AUTHORITY_BROWSER_TEST_DISABLED",
+            404,
+        )
+
     def _handle_authority_browser_ui_operator(self, request_data, path_params):
         del path_params
-        expected = str(os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or "").strip()
-        if not expected:
-            response = error("browser approval test endpoint is disabled", "AUTHORITY_BROWSER_TEST_DISABLED")
-            response["_http_status"] = 404
-            return response
-
-        headers = request_data.get("_headers") if isinstance(request_data.get("_headers"), dict) else {}
-        provided = (
-            _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
-            or _browser_qa_token_from_payload(request_data)
+        legacy = _legacy_browser_credential_error(request_data)
+        if legacy:
+            return legacy
+        return _http_error(
+            "browser ui_operator minting is unavailable; use the native approval window",
+            "AUTHORITY_BROWSER_TEST_DISABLED",
+            404,
         )
-        if not provided:
-            response = error("browser approval token is required", "AUTHORITY_BROWSER_TOKEN_REQUIRED")
-            response["_http_status"] = 401
-            return response
-        if not hmac.compare_digest(provided, expected):
-            response = error("browser approval token is invalid", "AUTHORITY_BROWSER_TOKEN_INVALID")
-            response["_http_status"] = 403
-            return response
-
-        request_id = str(request_data.get("request_id") or "").strip()
-        if not request_id:
-            response = error("request_id is required", "INVALID_INPUT")
-            response["_http_status"] = 400
-            return response
-        try:
-            from core_runtime.authority.ui_operator import sign_ui_operator
-
-            ui_operator = sign_ui_operator(request_id)
-        except Exception as exc:
-            return error("authority ui_operator unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
-        if not str(ui_operator.get("signature") or "").strip():
-            response = error("authority ui_operator signing secret is unavailable", "AUTHORITY_UI_OPERATOR_UNAVAILABLE")
-            response["_http_status"] = 503
-            return response
-        return ok({"request_id": request_id, "ui_operator": ui_operator})
 
     def _handle_authority_approve(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
@@ -1797,11 +1794,181 @@ def _local_auth_token_authorized(headers):
     return any(hmac.compare_digest(provided, expected) for expected in _configured_local_auth_tokens())
 
 
+def _browser_exchange_transport_error(headers):
+    """Require the authenticated HTTP origin that owns the local server."""
+    if not _configured_local_auth_tokens():
+        return (403, "local auth token is not configured", "AUTH_REQUIRED")
+    if not _local_auth_token_authorized(headers):
+        return (401, "local auth token required", "AUTH_REQUIRED")
+    origin = _strict_local_origin(_header_value(headers, "Origin"))
+    host_value = _header_value(headers, "Host").strip()
+    try:
+        host = urllib.parse.urlsplit("//" + host_value)
+        origin_parts = urllib.parse.urlsplit(origin)
+        host_port = host.port
+        origin_port = origin_parts.port
+    except (TypeError, ValueError):
+        return (403, "browser exchange origin is invalid", "ORIGIN_DENIED")
+    if (
+        not origin
+        or origin_parts.scheme != "http"
+        or not host.hostname
+        or host.username is not None
+        or host.password is not None
+        or origin_parts.hostname != host.hostname
+        or origin_port != host_port
+    ):
+        return (
+            403,
+            "browser exchange origin does not match the local server",
+            "ORIGIN_DENIED",
+        )
+    if not _header_value(headers, "X-Rumi-CSRF").strip():
+        return (403, "CSRF header required", "CSRF_REQUIRED")
+    return None
+
+
 _BROWSER_QA_TOKEN_KEYS = (
     "browser_approval_token",
     "approval_browser_token",
     "browserApprovalToken",
 )
+
+
+def _legacy_browser_url_without_credentials(parsed_url):
+    try:
+        pairs = urllib.parse.parse_qsl(
+            parsed_url.query, keep_blank_values=True, strict_parsing=False
+        )
+    except (TypeError, ValueError):
+        return None
+    if not any(key in _BROWSER_QA_TOKEN_KEYS for key, _value in pairs):
+        return None
+    clean_query = urllib.parse.urlencode(
+        [(key, value) for key, value in pairs if key not in _BROWSER_QA_TOKEN_KEYS],
+        doseq=True,
+    )
+    return urllib.parse.urlunsplit(
+        ("", "", parsed_url.path or "/", clean_query, "")
+    )
+
+
+def _http_error(message, code, status):
+    response = error(message, code)
+    response["_http_status"] = int(status)
+    return response
+
+
+def _legacy_browser_credential_present(headers=None, payload=None):
+    if _header_value(headers, "X-Rumi-Approval-Browser-Token").strip():
+        return True
+    return bool(_browser_qa_token_from_payload(payload))
+
+
+def _legacy_browser_credential_error(payload):
+    headers = payload.get("_headers") if isinstance(payload, dict) else {}
+    if not _legacy_browser_credential_present(headers, payload):
+        return None
+    return _http_error(
+        "legacy browser approval credentials have been revoked",
+        "LEGACY_BROWSER_APPROVAL_REVOKED",
+        410,
+    )
+
+
+def _strict_local_origin(value):
+    origin = str(value or "").strip()
+    if not origin or origin.startswith("//"):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return ""
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or not _is_allowed_sensitive_origin(origin)
+    ):
+        return ""
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    return f"{parsed.scheme}://{host}{f':{port}' if port is not None else ''}"
+
+
+def _bounded_browser_exchange_field(payload, key, *, maximum=256):
+    value = str(payload.get(key) or "").strip()
+    return value if 0 < len(value) <= maximum else ""
+
+
+def _browser_exchange_audience(payload):
+    from domain.safety.browser_approval_exchange import BrowserApprovalAudience
+
+    if not isinstance(payload, dict):
+        return None, _http_error("invalid exchange request", "INVALID_INPUT", 400)
+    request_id = _bounded_browser_exchange_field(payload, "request_id")
+    device_id = _bounded_browser_exchange_field(payload, "device_id", maximum=128)
+    window_id = _bounded_browser_exchange_field(payload, "window_id", maximum=128)
+    nonce = _bounded_browser_exchange_field(payload, "nonce", maximum=256)
+    claimed_origin = _strict_local_origin(payload.get("origin"))
+    headers = payload.get("_headers") if isinstance(payload.get("_headers"), dict) else {}
+    header_origin = _strict_local_origin(_header_value(headers, "Origin"))
+    subject = payload.get("_authority_subject")
+    principal_id = (
+        str(subject.get("principal_id") or "").strip()
+        if isinstance(subject, dict)
+        else ""
+    )
+    if not all((request_id, device_id, window_id, nonce, principal_id)):
+        return None, _http_error(
+            "request_id, device_id, window_id, nonce and authenticated principal are required",
+            "BROWSER_EXCHANGE_BINDING_REQUIRED",
+            400,
+        )
+    if not claimed_origin or not header_origin or claimed_origin != header_origin:
+        return None, _http_error(
+            "browser exchange origin is invalid or does not match",
+            "BROWSER_EXCHANGE_ORIGIN_MISMATCH",
+            403,
+        )
+    return BrowserApprovalAudience(
+        request_id=request_id,
+        principal_id=principal_id,
+        device_id=device_id,
+        origin=claimed_origin,
+        window_id=window_id,
+        nonce=nonce,
+    ), None
+
+
+def _browser_exchange_settlement_error(reason):
+    normalized = str(reason or "invalid")
+    if normalized in {"expired", "revoked"}:
+        code = (
+            "BROWSER_EXCHANGE_EXPIRED"
+            if normalized == "expired"
+            else "BROWSER_EXCHANGE_REVOKED"
+        )
+        return _http_error(f"browser approval exchange is {normalized}", code, 410)
+    if normalized == "consumed":
+        return _http_error(
+            "browser approval exchange was already consumed",
+            "BROWSER_EXCHANGE_REPLAYED",
+            409,
+        )
+    if normalized == "audience_mismatch":
+        return _http_error(
+            "browser approval exchange audience does not match",
+            "BROWSER_EXCHANGE_AUDIENCE_MISMATCH",
+            403,
+        )
+    return _http_error(
+        "browser approval exchange is invalid", "BROWSER_EXCHANGE_INVALID", 403
+    )
 
 
 def _browser_qa_token_from_payload(payload):
@@ -1827,22 +1994,8 @@ def _local_ui_approval_route_authorized(method, path, headers, request_data=None
 
 
 def _browser_qa_token_authorized(method, path, headers, request_data=None):
-    if str(method or "").upper() != "POST":
-        return False
-    if str(path or "") not in {
-        "/api/ambient/events",
-        "/api/ambient/monitor/start",
-        "/api/authority/browser-ui-operator",
-    }:
-        return False
-    expected = os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "").strip()
-    if not expected:
-        return False
-    provided = (
-        _header_value(headers, "X-Rumi-Approval-Browser-Token").strip()
-        or _browser_qa_token_from_payload(request_data)
-    )
-    return bool(provided) and hmac.compare_digest(provided, expected)
+    del method, path, headers, request_data
+    return False
 
 
 def _ambient_browser_test_token_authorized(method, path, headers, request_data=None):
@@ -1977,6 +2130,48 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             parsed_url = urllib.parse.urlsplit(self.path)
             path = parsed_url.path
+            origin_error = _browser_api_origin_error(
+                method, path, self.headers, self.client_address
+            )
+            if origin_error:
+                self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
+                return
+            if _header_value(
+                self.headers, "X-Rumi-Approval-Browser-Token"
+            ).strip():
+                self._send_json(
+                    410,
+                    error(
+                        "legacy browser approval credentials have been revoked",
+                        "LEGACY_BROWSER_APPROVAL_REVOKED",
+                    ),
+                )
+                return
+            browser_exchange_path = path in {
+                "/api/authority/browser-exchange",
+                "/api/authority/browser-exchange/revoke",
+                "/api/authority/browser-ui-operator",
+            }
+            if browser_exchange_path and parsed_url.query:
+                self._send_json(
+                    400,
+                    error(
+                        "browser approval exchanges do not accept URL parameters",
+                        "BROWSER_EXCHANGE_URL_FORBIDDEN",
+                    ),
+                )
+                return
+            clean_legacy_url = _legacy_browser_url_without_credentials(parsed_url)
+            if method == "GET" and clean_legacy_url is not None:
+                self._send_empty(
+                    303,
+                    {
+                        "Location": clean_legacy_url,
+                        "Referrer-Policy": "no-referrer",
+                        "Cache-Control": "no-store",
+                    },
+                )
+                return
             websocket_error = _websocket_auth_error(self.headers, self.client_address)
             if websocket_error:
                 self._send_json(websocket_error[0], error(websocket_error[1], websocket_error[2]))
@@ -1994,13 +2189,23 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 "_query_params": dict(query_params),
                 "_headers": sanitized_forwarded_headers(self.headers),
             }
+            if browser_exchange_path:
+                bearer = _bearer_token(self.headers)
+                if bearer and _local_auth_token_authorized(self.headers):
+                    server_context["_authority_subject"] = {
+                        "principal_id": "local-ui:"
+                        + hashlib.sha256(bearer.encode("utf-8")).hexdigest()
+                    }
             if method in ("POST", "PUT", "PATCH"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
                     raw_text = raw_body.decode("utf-8", errors="replace")
-                    server_context["_raw_body"] = raw_text
-                    server_context["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
+                    if not browser_exchange_path:
+                        server_context["_raw_body"] = raw_text
+                        server_context["_raw_body_base64"] = base64.b64encode(
+                            raw_body
+                        ).decode("ascii")
                     content_type = str(self.headers.get("Content-Type", "")).lower()
                     if "application/x-www-form-urlencoded" in content_type:
                         body_data = {
@@ -2044,12 +2249,6 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         "API_ROUTE_NOT_ALLOWED",
                     ),
                 )
-                return
-            origin_error = _browser_api_origin_error(
-                method, path, self.headers, self.client_address
-            )
-            if origin_error:
-                self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
                 return
             sensitive_error = self._sensitive_request_error(method, path, request_data)
             if sensitive_error:
@@ -2217,6 +2416,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _sensitive_request_error(self, method, path, request_data=None):
         route_sensitive, route_local_only = self._route_metadata_flags(method, path)
+        if path in {
+            "/api/authority/browser-exchange",
+            "/api/authority/browser-exchange/revoke",
+            "/api/authority/browser-ui-operator",
+        }:
+            exchange_error = _browser_exchange_transport_error(self.headers)
+            if exchange_error:
+                return exchange_error
         coding_error = require_local_guard(
             path,
             method,
@@ -2314,7 +2521,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             )
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval, X-Rumi-Approval-Browser-Token",
+                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval",
             )
             return
         if origin and _is_allowed_sensitive_origin(origin):
@@ -2325,7 +2532,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval, X-Rumi-Approval-Browser-Token",
+            "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval",
         )
 
     def log_message(self, format, *args):

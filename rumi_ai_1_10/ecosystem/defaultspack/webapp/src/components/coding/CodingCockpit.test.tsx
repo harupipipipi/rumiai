@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -24,8 +26,8 @@ test("approval queue renders cockpit approval decisions", () => {
   );
 
   assert.match(html, /terminal\.exec/);
-  assert.match(html, /Approve/);
-  assert.match(html, /Deny/);
+  assert.match(html, /許可/);
+  assert.match(html, /拒否/);
 });
 
 test("approval queue separates expired pending approvals from active approvals", () => {
@@ -49,8 +51,8 @@ test("approval queue separates expired pending approvals from active approvals",
   assert.match(html, /No active approvals/);
   assert.match(html, /Recent approval history/);
   assert.match(html, /expired/);
-  assert.doesNotMatch(html, /Approve/);
-  assert.doesNotMatch(html, /Deny/);
+  assert.doesNotMatch(html, />許可</);
+  assert.doesNotMatch(html, />拒否</);
 });
 
 test("diff panel renders status and diff content", () => {
@@ -106,4 +108,11 @@ test("coding cockpit renders workspace and sidecar sections", () => {
   assert.match(html, /Browser/);
   assert.match(html, /MCP/);
   assert.match(html, /Agents/);
+});
+
+test("MCP requester never approves its own request", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "CodingCockpit.tsx"), "utf8");
+  assert.doesNotMatch(source, /codingResources\.approveCodingApproval/);
+  assert.match(source, /separate Approvals queue/);
+  assert.match(source, /requesting form cannot approve its own request/);
 });
