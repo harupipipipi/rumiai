@@ -45,6 +45,7 @@ class FakeManagedUbuntuCli:
         self.guest_exists = False
         self.deps_installed = False
         self.desktop_running = False
+        self.desktop_start_result: GuestCommandResult | None = None
         self.guest_displays_in_use: set[str] = set()
         self.imported_rootfs_path: str | None = None
         self.imported_install_dir: str | None = None
@@ -145,6 +146,8 @@ class FakeManagedUbuntuCli:
                         display = line.split("DISPLAY_ID=", 1)[1].strip().strip("'\"")
                         if display:
                             self.guest_displays_in_use.add(display)
+                if self.desktop_start_result is not None:
+                    return self.desktop_start_result
                 self.desktop_running = True
                 return GuestCommandResult(returncode=0)
             if "command -v" in script:
@@ -412,6 +415,38 @@ def test_managed_ubuntu_desktop_create_skips_guest_occupied_displays(monkeypatch
     assert "\\$DISPLAY_ID" not in desktop_script
     assert "\\${DISPLAY_ID#:}" not in desktop_script
     assert ":100" in fake.guest_displays_in_use
+
+
+def test_windows_wsl_desktop_start_fails_when_xvfb_does_not_survive(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.guest_exists = True
+    fake.deps_installed = True
+    fake.desktop_start_result = GuestCommandResult(
+        returncode=126,
+        stderr=(
+            "Desktop Xvfb failed to stay running.\n"
+            "_XSERVTransmkdir: Mode of /tmp/.X11-unix should be set to 1777\n"
+        ),
+    )
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+    instance = provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+
+    with pytest.raises(SandboxContractError) as exc:
+        provider.start(instance)
+
+    desktop_script = next(script for script in fake.guest_scripts if "DISPLAY_ID=':98'" in script)
+    assert exc.value.code == "RUNTIME_PROVIDER_UNAVAILABLE"
+    assert "Managed Ubuntu guest command failed" in str(exc.value)
+    assert "Desktop Xvfb failed to stay running" in str(exc.value.details)
+    assert fake.desktop_running is False
+    assert provider.reconcile(instance).instance.state == "stopped"
+    assert "mkdir -p /tmp/.X11-unix" in desktop_script
+    assert "chmod 1777 /tmp/.X11-unix" in desktop_script
+    assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in desktop_script
+    assert "rumi_pidfile_alive" in desktop_script
+    assert "Desktop Xvfb failed to stay running." in desktop_script
+    assert "Desktop openbox failed to stay running." in desktop_script
 
 
 def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch, tmp_path) -> None:
