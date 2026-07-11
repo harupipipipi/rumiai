@@ -8,6 +8,7 @@ import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
 import { AlertTriangle, Search, Package, Loader2, ShieldCheck } from 'lucide-react';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
 
@@ -35,6 +36,7 @@ export function Packs() {
   const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
   const isLoading = useAppStore(state => state.isLoading);
+  const apiError = useAppStore(state => state.apiError);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const [search, setSearch] = useState('');
@@ -65,6 +67,16 @@ export function Packs() {
           <p className="mt-1 text-sm text-text-muted">Manage installed packs and their capabilities.</p>
         </div>
 
+        {apiError ? (
+          <InlineLoadError
+            title="Packs could not be loaded"
+            message={apiError}
+            onRetry={() => void loadPacks()}
+            retrying={isLoading}
+            stale={packs.length > 0}
+          />
+        ) : null}
+
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
@@ -78,13 +90,17 @@ export function Packs() {
         </div>
 
         {/* Pack list */}
-        {filteredPacks.length === 0 ? (
+        {apiError && packs.length === 0 ? null : filteredPacks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-hover">
               <Package className="h-5 w-5 text-text-muted" />
             </div>
-            <h3 className="mt-4 text-base font-medium text-text-main">{t('packs.not_found')}</h3>
-            <p className="mt-1 text-sm text-text-muted">{t('packs.try_different')}</p>
+            <h3 className="mt-4 text-base font-medium text-text-main">
+              {search.trim() ? t('packs.not_found') : 'No packs installed'}
+            </h3>
+            <p className="mt-1 text-sm text-text-muted">
+              {search.trim() ? t('packs.try_different') : 'Installed packs will appear here.'}
+            </p>
           </div>
         ) : (
           <div className="grid gap-3">
