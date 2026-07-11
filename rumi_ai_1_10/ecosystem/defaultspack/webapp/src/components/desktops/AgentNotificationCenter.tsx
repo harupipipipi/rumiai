@@ -11,10 +11,11 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { api, type ChatMessage, type Conversation } from "../../lib/api";
+import { listAgentNotificationConversations, type ChatMessage, type Conversation } from "../../features/notifications/resources/agentNotificationResources";
 import { formatRelativeTime, messageToText, orderConversationMessages } from "../../lib/chat";
 import { cn } from "../../lib/cn";
 import { PENDING_CHAT_REQUEST_TTL_MS, isAssistantMessageStillRunning, type PendingChatRequest } from "../../lib/pendingChat";
+import { layerClassName } from "../../ui/layers/layerTokens";
 
 type AgentNotificationStatus = "waiting" | "running" | "done" | "failed";
 type AgentNotificationFilter = "attention" | "running" | "done" | "all";
@@ -158,14 +159,6 @@ function messageFailed(message: ChatMessage | undefined): boolean {
   });
 }
 
-function eventFailed(conversation: Conversation): boolean {
-  return conversationEvents(conversation).some((event) => {
-    const eventType = String(event.type ?? "").toLowerCase();
-    const status = String(event.status ?? "").toLowerCase();
-    return eventType === "task_failed" || status === "failed" || status === "error";
-  });
-}
-
 function collectToolNames(conversation: Conversation, pending?: PendingChatRequest): string[] {
   const toolNames = new Set<string>();
   for (const toolName of pending?.toolNames ?? []) {
@@ -229,13 +222,13 @@ function buildSummary(
   return firstLine || "Agent の応答が完了しました";
 }
 
-function classifyConversation(conversation: Conversation, pendingRequests: Record<string, PendingChatRequest>, readState: Record<string, number>, now = Date.now()): AgentNotificationItem {
+export function classifyConversation(conversation: Conversation, pendingRequests: Record<string, PendingChatRequest>, readState: Record<string, number>, now = Date.now()): AgentNotificationItem {
   const pending = pendingRequests[conversation.id];
   const latest = latestMessage(conversation);
   let status: AgentNotificationStatus = "done";
   if (pending || isAssistantMessageStillRunning(latest)) {
     status = "running";
-  } else if (messageFailed(latest) || eventFailed(conversation)) {
+  } else if (messageFailed(latest)) {
     status = "failed";
   } else if (messageHasPendingApproval(latest) || latest?.role === "user") {
     status = "waiting";
@@ -308,12 +301,7 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
     setPendingRequests(readPendingRequests(now));
     setReadState(readNumericRecord(READ_STATE_STORAGE_KEY));
     try {
-      const result = await api.listConversations({
-        include_messages: true,
-        is_archived: false,
-        limit: 120,
-      });
-      setConversations(result.conversations);
+      setConversations(await listAgentNotificationConversations());
       setError(null);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "通知の読み込みに失敗しました。");
@@ -454,7 +442,7 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
         <button
           type="button"
           onClick={() => openItem(toastItem)}
-          className="absolute right-3 top-3 z-20 w-[min(340px,calc(100%-24px))] rounded-2xl border border-zinc-700/90 bg-zinc-950/95 p-3 text-left shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur transition hover:border-zinc-500"
+          className={cn(layerClassName.toast, "absolute right-3 top-3 w-[min(340px,calc(100%-24px))] rounded-2xl border border-zinc-700/90 bg-zinc-950/95 p-3 text-left shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur transition hover:border-zinc-500")}
         >
           <div className="flex items-start gap-3">
             <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", statusTone(toastItem.status))}>
