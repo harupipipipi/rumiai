@@ -26,25 +26,33 @@ def test_resolve_target_prefers_explicit_then_tauri_environment(monkeypatch):
     module = _load_module()
     monkeypatch.setattr(module, "host_target", lambda: "host-target")
 
-    assert module.resolve_target("explicit-target", {module.TAURI_TARGET_ENV: "env-target"}) == "explicit-target"
-    assert module.resolve_target(None, {module.TAURI_TARGET_ENV: "env-target"}) == "env-target"
+    environment = {module.TAURI_TARGET_ENV: "env-target"}
+    assert module.resolve_target("explicit-target", environment) == "explicit-target"
+    assert module.resolve_target(None, environment) == "env-target"
     assert module.resolve_target(None, {}) == "host-target"
 
 
-def test_prepare_dev_copies_repo_venv_uv_into_trusted_bundle(tmp_path, monkeypatch):
+def test_prepare_dev_stages_repo_venv_uv_into_trusted_bundle(tmp_path, monkeypatch):
     module = _load_module()
     target = "x86_64-unknown-linux-gnu"
     source = tmp_path / ".venv" / "bin" / "uv"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"uv")
+    verified: list[Path] = []
 
-    monkeypatch.setattr(module, "verify_uv_binary", lambda path: "uv 0.11.14")
+    def fake_verify(path: Path) -> str:
+        verified.append(path)
+        return "uv 0.11.14"
+
+    monkeypatch.setattr(module, "verify_uv_binary", fake_verify)
 
     destination = module.prepare_dev(tmp_path, target)
 
     assert destination == tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
     assert destination.read_bytes() == b"uv"
     assert os.access(destination, os.X_OK)
+    assert verified == [source.resolve(), destination]
+    assert not list(destination.parent.glob(".*.tmp"))
 
 
 def test_resolve_dev_uv_source_prefers_explicit_path_over_repo_venv(tmp_path):
@@ -66,7 +74,64 @@ def test_resolve_dev_uv_source_prefers_explicit_path_over_repo_venv(tmp_path):
     assert resolved == explicit.resolve()
 
 
-def test_prepare_dev_fails_with_actionable_repo_path_when_uv_is_missing(tmp_path, monkeypatch):
+def test_relative_explicit_uv_path_is_resolved_from_repo_root(tmp_path):
+    module = _load_module()
+    explicit = tmp_path / "tools" / "uv"
+    explicit.parent.mkdir(parents=True)
+    explicit.write_bytes(b"uv")
+
+    resolved = module.resolve_dev_uv_source(
+        tmp_path,
+        "x86_64-unknown-linux-gnu",
+        {module.UV_PATH_ENV: "tools/uv"},
+    )
+
+    assert resolved == explicit.resolve()
+
+
+def test_prepare_dev_reuses_valid_existing_trusted_bundle(tmp_path, monkeypatch):
+    module = _load_module()
+    destination = tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"existing")
+    verified: list[Path] = []
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        module,
+        "verify_uv_binary",
+        lambda path: verified.append(path) or "uv 0.11.14",
+    )
+
+    result = module.prepare_dev(tmp_path, "x86_64-unknown-linux-gnu")
+
+    assert result == destination
+    assert verified == [destination]
+    assert destination.read_bytes() == b"existing"
+
+
+def test_prepare_dev_removes_staged_uv_when_post_copy_verification_changes(
+    tmp_path,
+    monkeypatch,
+):
+    module = _load_module()
+    source = tmp_path / ".venv" / "bin" / "uv"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"uv")
+    versions = iter(("uv 0.11.14", "uv 0.11.15"))
+    monkeypatch.setattr(module, "verify_uv_binary", lambda _path: next(versions))
+
+    with pytest.raises(RuntimeError, match="reported a different version"):
+        module.prepare_dev(tmp_path, "x86_64-unknown-linux-gnu")
+
+    destination = tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
+    assert not destination.exists()
+
+
+def test_prepare_dev_fails_with_actionable_repo_path_when_uv_is_missing(
+    tmp_path,
+    monkeypatch,
+):
     module = _load_module()
     monkeypatch.setattr(module.shutil, "which", lambda _name: None)
 
@@ -74,7 +139,10 @@ def test_prepare_dev_fails_with_actionable_repo_path_when_uv_is_missing(tmp_path
         module.prepare_dev(tmp_path, "x86_64-unknown-linux-gnu")
 
 
-def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(tmp_path, monkeypatch):
+def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(
+    tmp_path,
+    monkeypatch,
+):
     module = _load_module()
     manifest = tmp_path / "pack-shell" / "Cargo.toml"
     preparer_path = tmp_path / ".github" / "scripts" / "prepare_tauri_resources.py"
@@ -92,6 +160,7 @@ def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(
     calls: list[tuple[list[str], Path | None]] = []
 
     def fake_run(command, *, cwd=None, capture_output=False):
+        del capture_output
         calls.append(([os.fspath(part) for part in command], cwd))
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -112,7 +181,10 @@ def test_prepare_release_rejects_target_without_pinned_checksum(tmp_path, monkey
     monkeypatch.setattr(
         module,
         "load_resource_preparer",
-        lambda _root: SimpleNamespace(UV_PINNED_VERSION="0.11.14", UV_SHA256_BY_TARGET={}),
+        lambda _root: SimpleNamespace(
+            UV_PINNED_VERSION="0.11.14",
+            UV_SHA256_BY_TARGET={},
+        ),
     )
 
     with pytest.raises(RuntimeError, match="No pinned uv checksum"):
