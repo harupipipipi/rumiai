@@ -805,7 +805,7 @@ async function openCodingWidget(page: Page) {
 
 test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 520 });
-  await openDefaultspack(page);
+  await openDefaultspack(page, "/static/chat");
 
   await expect(page.locator(".rumi-app-shell")).toBeVisible();
   await expect(page.locator(".rumi-workspace-main")).toHaveCSS("min-height", "0px");
