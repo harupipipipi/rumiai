@@ -10,7 +10,11 @@ from typing import Any
 
 RUMI_MODEL_PACK_ID = "rumi"
 RUMI_MODEL_PACK_REF = "modelpack/rumi"
-RUMI_BASE_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+# This is a provider/profile identifier, not a model artifact bundled with Rumi.
+# Runtime materialization prefers the configured defaults profile base model.
+RUMI_INTENDED_BASE_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+# Backward-compatible alias for integrations that imported the old name.
+RUMI_BASE_MODEL = RUMI_INTENDED_BASE_MODEL
 RUMI_DISPLAY_NAME = "Rumi"
 RUMI_PROCESS_VERSION = "2026-06-04"
 RUMI_DEFAULT_THINKING_LEVEL = "medium"
@@ -22,7 +26,7 @@ RUMI_QUARANTINE_MESSAGE = (
     "Rumi quarantined this draft before delivery because the review chain could not verify a marked final response."
 )
 RUMI_BASE_MODEL_CANDIDATES = [
-    RUMI_BASE_MODEL,
+    RUMI_INTENDED_BASE_MODEL,
     "anthropic/claude-sonnet-4-0",
     "openai/gpt-4o",
     "google/gemini-2.5-flash",
@@ -66,6 +70,7 @@ def resolve_rumi_base_model(
     available_models: Any = None,
     *,
     available_providers: Any = None,
+    default_profile_base_model: str | None = None,
 ) -> str:
     model_ids = {
         str(item or "").strip()
@@ -77,6 +82,15 @@ def resolve_rumi_base_model(
         for item in (available_providers if isinstance(available_providers, (list, tuple, set)) else [])
         if str(item or "").strip()
     }
+    default_base = str(default_profile_base_model or "").strip()
+    reserved_providers = {"stub", "rumi", "modelpack", "composite", "synthetic"}
+    default_provider, _, _ = default_base.partition("/")
+    if (
+        default_base
+        and default_base in model_ids
+        and default_provider.lower() not in reserved_providers
+    ):
+        return default_base
     for candidate in RUMI_BASE_MODEL_CANDIDATES:
         if candidate in model_ids:
             return candidate
@@ -84,23 +98,23 @@ def resolve_rumi_base_model(
         provider_id, _, _ = candidate.partition("/")
         if provider_id and provider_id in provider_ids:
             return candidate
-    return RUMI_BASE_MODEL
+    return RUMI_INTENDED_BASE_MODEL
 
 
 def rumi_base_model_metadata(resolved_base_model: str | None = None) -> dict[str, Any]:
-    resolved = str(resolved_base_model or RUMI_BASE_MODEL).strip() or RUMI_BASE_MODEL
+    resolved = str(resolved_base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
     fallback_reason = ""
-    if resolved != RUMI_BASE_MODEL:
+    if resolved != RUMI_INTENDED_BASE_MODEL:
         fallback_reason = "intended_base_model_unavailable_using_active_provider_fallback"
     return {
-        "intended_base_model": RUMI_BASE_MODEL,
+        "intended_base_model": RUMI_INTENDED_BASE_MODEL,
         "resolved_base_model": resolved,
         "fallback_reason": fallback_reason,
     }
 
 
 def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
-    resolved_base_model = str(base_model or RUMI_BASE_MODEL).strip() or RUMI_BASE_MODEL
+    resolved_base_model = str(base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
     base_model_metadata = rumi_base_model_metadata(resolved_base_model)
     return {
         "id": RUMI_MODEL_PACK_ID,

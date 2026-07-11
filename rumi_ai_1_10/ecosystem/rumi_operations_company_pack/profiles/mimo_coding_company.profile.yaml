@@ -89,6 +89,10 @@ node_settings:
       - browser_computer
       - browser_companion
       - computer_use
+      - desktop_list
+      - desktop_create
+      - desktop_frame
+      - desktop_input
       - coding_file_read
       - coding_file_search
       - coding_file_list
@@ -100,6 +104,7 @@ node_settings:
       - coding_git_diff
       - coding_git_commit
       - coding_git_push
+      - coding_github_pr_create
       - coding_terminal_exec
       - sandbox_exec
       - python_exec
@@ -155,6 +160,10 @@ policy:
     - browser_computer
     - browser_companion
     - computer_use
+    - desktop_list
+    - desktop_create
+    - desktop_frame
+    - desktop_input
     - coding_file_read
     - coding_file_search
     - coding_file_list
@@ -166,6 +175,7 @@ policy:
     - coding_git_diff
     - coding_git_commit
     - coding_git_push
+    - coding_github_pr_create
     - coding_terminal_exec
     - sandbox_exec
     - python_exec

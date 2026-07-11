@@ -38,6 +38,44 @@ def _truthy(value):
     return bool(value)
 
 
+def _authority_approval_from_ai_result(ai_result):
+    if not isinstance(ai_result, dict):
+        return None
+    status = str(ai_result.get("status") or ai_result.get("finish_reason") or "").strip().lower()
+    code = str(ai_result.get("code") or "").strip().lower()
+    error_payload = ai_result.get("error") if isinstance(ai_result.get("error"), dict) else {}
+    details = error_payload.get("details") if isinstance(error_payload.get("details"), dict) else {}
+    if not details and isinstance(ai_result.get("authority"), dict):
+        details = ai_result.get("authority")
+    detail_status = str(details.get("status") or details.get("finish_reason") or "").strip().lower()
+    error_code = str(error_payload.get("code") or "").strip().lower()
+    if (
+        status != "authority_approval_required"
+        and code != "authority_approval_required"
+        and error_code != "authority_approval_required"
+        and detail_status != "authority_approval_required"
+    ):
+        return None
+    approval = dict(details)
+    approval.setdefault("status", "authority_approval_required")
+    approval.setdefault("approval_required", True)
+    approval.setdefault("requires_approval", True)
+    approval.setdefault("finish_reason", "authority_approval_required")
+    message = str(
+        approval.get("message")
+        or approval.get("display_summary")
+        or approval.get("reason")
+        or error_payload.get("message")
+        or ai_result.get("message")
+        or ai_result.get("error")
+        or "Authority approval required"
+    )
+    approval.setdefault("message", message)
+    approval.setdefault("error", message)
+    approval.setdefault("code", "authority_approval_required")
+    return approval
+
+
 def _attachment_modalities(attachments):
     items = attachments if isinstance(attachments, list) else []
     has_images = False
@@ -358,7 +396,10 @@ class AgentEngine:
 
     def _execute_tool(self, tool_name, tool_args, context):
         from domain.tool_policy.orchestrator import ToolOrchestrator
-        return ToolOrchestrator().run(tool_name, tool_args, context)
+        from domain.tool_policy.internal_context import mark_trusted_profile_policy_context
+
+        trusted_context = mark_trusted_profile_policy_context(dict(context or {}))
+        return ToolOrchestrator().run(tool_name, tool_args, trusted_context)
 
     def _tool_name_from_definition(self, tool):
         return tool_name_from_definition(tool)
@@ -488,8 +529,36 @@ class AgentEngine:
         self._persist_execution(execution, "tool_auto_approved", execution.pending_tool_call)
         return self.approve(execution.execution_id, source="agent.yolo")
 
+    def _authority_approval_result(self, execution, parsed):
+        approval = dict(parsed.get("content") if isinstance(parsed.get("content"), dict) else {})
+        message = str(
+            approval.get("message")
+            or approval.get("display_summary")
+            or approval.get("reason")
+            or "Authority approval required"
+        )
+        execution.status = "authority_approval_required"
+        execution.error = message
+        execution.add_step("authority_approval_required", approval)
+        self._persist_execution(execution, "approval_requested", approval)
+        return {
+            "execution_id": execution.execution_id,
+            "status": "authority_approval_required",
+            "approval_required": True,
+            "requires_approval": True,
+            "finish_reason": "authority_approval_required",
+            "result": execution.to_dict(),
+            "authority": approval,
+        }
+
     def _parse_ai_response(self, ai_result):
         if ai_result.get("status") != "ok":
+            authority_approval = _authority_approval_from_ai_result(ai_result)
+            if authority_approval is not None:
+                return {
+                    "type": "authority_approval_required",
+                    "content": authority_approval,
+                }
             return {
                 "type": "error",
                 "content": ai_result.get("error", "AI call failed"),
@@ -642,6 +711,8 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
+        if parsed["type"] == "authority_approval_required":
+            return self._authority_approval_result(execution, parsed)
         if parsed["type"] == "error":
             execution.status = "error"
             execution.error = parsed["content"]
@@ -793,6 +864,8 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
+        if parsed["type"] == "authority_approval_required":
+            return self._authority_approval_result(execution, parsed)
         if parsed["type"] == "error":
             execution.status = "error"
             execution.error = parsed["content"]
@@ -874,6 +947,8 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
+        if parsed["type"] == "authority_approval_required":
+            return self._authority_approval_result(execution, parsed)
         if parsed["type"] == "error":
             execution.status = "error"
             execution.error = parsed["content"]
@@ -970,6 +1045,8 @@ class AgentEngine:
         ai_result = self._ai_complete(messages, execution.model, execution.context, [])
         self._touch_execution(execution, "model_call_completed", {"phase": "plan"})
         parsed = self._parse_ai_response(ai_result)
+        if parsed["type"] == "authority_approval_required":
+            return self._authority_approval_result(execution, parsed)
         if parsed["type"] == "error":
             execution.status = "error"
             execution.error = parsed["content"]

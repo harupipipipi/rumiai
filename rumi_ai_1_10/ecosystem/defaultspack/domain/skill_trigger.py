@@ -68,7 +68,7 @@ class RuntimeSkillTriggerService:
         if self._skills is not None:
             return [skill for skill in self._skills if isinstance(skill, dict)]
         try:
-            return get_extension_registry(force_reload=True).skills().list(enabled_only=True)
+            return get_extension_registry().skills().list(enabled_only=True)
         except Exception:
             return []
 

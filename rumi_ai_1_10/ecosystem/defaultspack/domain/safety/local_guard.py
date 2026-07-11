@@ -48,6 +48,7 @@ SENSITIVE_LOCAL_PATHS = {
     "/api/authority/browser-ui-operator",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
+    "/api/tools/browser-companion/session",
     "/api/tools/create",
     "/api/tools/mcp/connect",
     "/api/runtime/ensure",
@@ -115,7 +116,7 @@ def origin_allowed(origin: str | None) -> bool:
 
 
 def csrf_required(method: str, origin: str | None) -> bool:
-    return str(method or "").upper() in {"POST", "PUT", "DELETE"} and bool(origin)
+    return str(method or "").upper() in {"POST", "PUT", "PATCH", "DELETE"} and bool(origin)
 
 
 def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
@@ -129,6 +130,8 @@ def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
             return True
         return normalized_method in methods
     if _is_workspace_member_mutation_path(normalized_path, normalized_method):
+        return True
+    if _is_change_request_sensitive_path(normalized_path, normalized_method):
         return True
     return is_sensitive_local_path(normalized_path, method)
 
@@ -177,6 +180,50 @@ def _is_workspace_member_mutation_path(path: str, method: str | None) -> bool:
         return method is None or method == "PUT"
     if len(parts) == 2 and parts[1] in {"select", "trust"}:
         return method is None or method == "POST"
+    return False
+
+
+def _is_change_request_sensitive_path(path: str, method: str | None) -> bool:
+    prefix = "/api/change-requests/"
+    if path == "/api/change-requests":
+        return method is None or method in {"GET", "POST"}
+    if not path.startswith(prefix):
+        return False
+    suffix = path[len(prefix):].strip("/")
+    if not suffix:
+        return False
+    parts = suffix.split("/")
+    if len(parts) == 1:
+        return method is None or method in {"GET", "PATCH"}
+    if len(parts) == 2 and parts[1] in {
+        "refresh",
+        "export-patch",
+        "comments",
+        "decision",
+        "viewed-files",
+        "checks",
+        "run-check",
+        "seal",
+        "commit",
+    }:
+        allowed_methods = {
+            "refresh": {"POST"},
+            "export-patch": {"POST"},
+            "comments": {"GET", "POST"},
+            "decision": {"POST"},
+            "viewed-files": {"GET", "PATCH", "POST"},
+            "checks": {"GET", "POST"},
+            "run-check": {"POST"},
+            "seal": {"GET"},
+            "commit": {"POST"},
+        }
+        return method is None or method in allowed_methods[parts[1]]
+    if len(parts) == 3 and parts[1] == "comments":
+        return method is None or method in {"GET", "PATCH"}
+    if len(parts) == 3 and parts[1] == "checks":
+        if parts[2] in {"run", "run-check"}:
+            return method is None or method == "POST"
+        return method is None or method == "GET"
     return False
 
 

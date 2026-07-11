@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +22,7 @@ class FunctionSpec:
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
     permission_id: str | None = None
+    grant_config: dict[str, Any] | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -38,6 +40,15 @@ def _default_aliases(function_id: str) -> tuple[str, ...]:
         dotted = ".".join(op_parts)
         aliases.extend(_alias_pair(namespace, dotted))
     return tuple(dict.fromkeys(aliases))
+
+
+def _flag_enabled(name: str) -> bool:
+    value = str(os.environ.get(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _change_request_commit_enabled() -> bool:
+    return _flag_enabled("RUMI_REVIEW_ENABLE_COMMIT")
 
 
 def _requires(function_id: str, risk: str) -> tuple[str, ...]:
@@ -64,6 +75,7 @@ def _spec(
     requires: tuple[str, ...] | None = None,
     caller_requires: tuple[str, ...] | None = None,
     input_schema: dict[str, Any] | None = None,
+    grant_config: dict[str, Any] | None = None,
 ) -> FunctionSpec:
     all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
     return FunctionSpec(
@@ -77,6 +89,7 @@ def _spec(
         requires=_requires(function_id, risk) if requires is None else requires,
         caller_requires=_caller_requires(risk) if caller_requires is None else caller_requires,
         input_schema=input_schema,
+        grant_config=dict(grant_config) if grant_config is not None else None,
     )
 
 
@@ -106,6 +119,8 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
     }
     if spec.permission_id:
         manifest["permission_id"] = spec.permission_id
+    if spec.grant_config is not None:
+        manifest["grant_config"] = dict(spec.grant_config)
     return manifest
 
 
@@ -230,6 +245,18 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),
     )
 )
+TOOL_FUNCTIONS = tuple(
+    _spec(
+        "tool_subagent",
+        "Run the default subagent tool.",
+        ("tool", "agent"),
+        risk="medium",
+        grant_config={"timeout": 240},
+    )
+    if spec.function_id == "tool_subagent"
+    else spec
+    for spec in TOOL_FUNCTIONS
+)
 SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -321,6 +348,7 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_approval_list", "List pending coding approvals.", "low", "blocks.coding.approval_list"),
         ("coding_approval_approve", "Approve a pending coding operation.", "medium", "blocks.coding.approval_approve"),
         ("coding_approval_deny", "Deny a pending coding operation.", "medium", "blocks.coding.approval_deny"),
+        ("coding_github_pr_create", "Create a GitHub pull request for a pushed branch.", "high", "blocks.coding.github_pr_create"),
         ("coding_github_pr_read", "Read GitHub pull request metadata.", "medium", "blocks.coding.github_pr_read"),
         ("coding_github_issue_read", "Read GitHub issue metadata.", "medium", "blocks.coding.github_issue_read"),
         ("coding_github_ci_status", "Read GitHub pull request CI status.", "medium", "blocks.coding.github_ci_status"),
@@ -462,6 +490,32 @@ SANDBOX_CODING_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+CHANGE_REQUEST_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec("coding_change_request_list", "List Rumi Review change requests.", ("coding", "change_request"), block="blocks.change_request.collection", default_args={"_method": "GET"}),
+    _spec("coding_change_request_create", "Create a Rumi Review change request snapshot.", ("coding", "change_request"), risk="medium", block="blocks.change_request.collection", default_args={"_method": "POST"}),
+    _spec("coding_change_request_get", "Get a Rumi Review change request.", ("coding", "change_request"), block="blocks.change_request.item", default_args={"_method": "GET"}),
+    _spec("coding_change_request_update", "Update Rumi Review metadata or status.", ("coding", "change_request"), risk="medium", block="blocks.change_request.item", default_args={"_method": "PATCH"}),
+    _spec("coding_change_request_refresh", "Refresh a Rumi Review snapshot and drift state.", ("coding", "change_request"), risk="medium", block="blocks.change_request.refresh", default_args={"_method": "POST"}),
+    _spec("coding_change_request_export_patch", "Export a Rumi Review patch.", ("coding", "change_request"), block="blocks.change_request.export_patch", default_args={"_method": "POST"}),
+    _spec("coding_change_request_comment", "Create a Rumi Review comment or suggestion.", ("coding", "change_request"), risk="medium", block="blocks.change_request.comments", default_args={"_method": "POST"}),
+    _spec("coding_change_request_comment_update", "Update or resolve a Rumi Review comment.", ("coding", "change_request"), risk="medium", block="blocks.change_request.comments", default_args={"_method": "PATCH"}),
+    _spec("coding_change_request_decision", "Submit a Rumi Review decision.", ("coding", "change_request"), risk="medium", block="blocks.change_request.decision", default_args={"_method": "POST"}),
+    _spec("coding_change_request_viewed_file", "Persist a Rumi Review viewed-file flag.", ("coding", "change_request"), risk="medium", block="blocks.change_request.viewed_files", default_args={"_method": "PATCH"}),
+    _spec("coding_change_request_check_list", "List Rumi Review checks.", ("coding", "change_request"), block="blocks.change_request.checks", default_args={"_method": "GET"}),
+    _spec("coding_change_request_run_check", "Run an allowlisted Rumi Review check.", ("coding", "change_request"), risk="medium", block="blocks.change_request.checks", default_args={"_method": "POST"}),
+    _spec("coding_change_request_check_get", "Get one Rumi Review check.", ("coding", "change_request"), block="blocks.change_request.checks", default_args={"_method": "GET"}),
+    _spec("coding_change_request_seal", "Recalculate the Rumi Review Seal.", ("coding", "change_request"), block="blocks.change_request.seal", default_args={"_method": "GET"}),
+    _spec("coding_change_request_commit", "Commit a sealed Rumi Review snapshot without pushing.", ("coding", "change_request"), risk="high", block="blocks.change_request.commit", default_args={"_method": "POST"}),
+)
+
+DEFAULT_ENABLED_CHANGE_REQUEST_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    spec
+    for spec in CHANGE_REQUEST_FUNCTIONS
+    if spec.function_id != "coding_change_request_commit" or _change_request_commit_enabled()
+
+)
+
+
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
 )
@@ -547,7 +601,14 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 
 
 AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
-    _spec(function_id, description, ("agent",), risk=risk, block=block)
+    _spec(
+        function_id,
+        description,
+        ("agent",),
+        risk=risk,
+        block=block,
+        grant_config={"timeout": 300} if function_id == "agent_run_subagent" else None,
+    )
     for function_id, description, risk, block in (
         ("agent_execute", "Start an agent execution.", "medium", "blocks.agent.execute"),
         ("agent_plan", "Create an agent plan.", "medium", "blocks.agent.plan"),
@@ -571,7 +632,14 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_run_subagent", "Compatibility alias for utility model routing or delegated runs.", "medium", "blocks.agent.run_subagent"),
     )
 ) + tuple(
-    _spec(f"agent_schedule_{name}", f"{label} an agent schedule.", ("agent", "scheduler"), risk=risk, block=f"blocks.agent.scheduler.{module}")
+    _spec(
+        f"agent_schedule_{name}",
+        f"{label} an agent schedule.",
+        ("agent", "scheduler"),
+        risk=risk,
+        block=f"blocks.agent.scheduler.{module}",
+        grant_config={"timeout": 1800} if name == "trigger" else None,
+    )
     for name, label, risk, module in (
         ("create", "Create", "medium", "create"),
         ("list", "List", "low", "list"),
@@ -599,6 +667,89 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_org_report", "Request an agent organization report.", "medium", "blocks.agent.org.report"),
         ("agent_org_transfer_context", "Transfer context to an agent organization.", "medium", "blocks.agent.org.transfer_context"),
     )
+)
+
+
+SUBAGENT_TEAM_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "subagent_request",
+        "Send a request to the Creator-managed subagent team workspace.",
+        ("subagent_team", "creator"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_request"},
+        aliases=("subagent.request",),
+    ),
+    _spec(
+        "subagent_status",
+        "Get Creator-managed subagent team status.",
+        ("subagent_team", "creator"),
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_status"},
+        aliases=("subagent.status",),
+    ),
+    _spec(
+        "subagent_create",
+        "Ask Creator to create a subagent.",
+        ("subagent_team", "creator"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_create"},
+        aliases=("subagent.create",),
+    ),
+    _spec(
+        "subagent_dm_send",
+        "Send a Creator-mediated DM inside the subagent team workspace.",
+        ("subagent_team", "dm"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_dm_send"},
+        aliases=("subagent.dm.send",),
+    ),
+    _spec(
+        "subagent_channel_join",
+        "Ask Creator to join a subagent to a team channel.",
+        ("subagent_team", "channel"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_channel_join"},
+        aliases=("subagent.channel.join",),
+    ),
+    _spec(
+        "subagent_goal_propose",
+        "Propose a PM-gated subagent goal through Creator.",
+        ("subagent_team", "goal"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_goal_propose"},
+        aliases=("subagent.goal.propose",),
+    ),
+    _spec(
+        "subagent_goal_approve",
+        "Approve a PM-gated subagent goal through Creator.",
+        ("subagent_team", "goal"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_goal_approve"},
+        aliases=("subagent.goal.approve",),
+    ),
+    _spec(
+        "subagent_task_complete",
+        "Mark a PM-owned subagent task complete without granting user approval.",
+        ("subagent_team", "goal"),
+        risk="medium",
+        block="blocks.subagent_team.creator",
+        default_args={"action": "subagent_task_complete"},
+        aliases=("subagent.task.complete",),
+    ),
+    _spec(
+        "channel_check",
+        "Check channel membership, PM gate, rich policy, and task completion contract.",
+        ("subagent_team", "channel"),
+        block="blocks.subagent_team.channel_check",
+        default_args={"action": "channel_check"},
+        aliases=("channel.check",),
+    ),
 )
 
 
@@ -990,7 +1141,9 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
     + SANDBOX_CODING_FUNCTIONS
+    + DEFAULT_ENABLED_CHANGE_REQUEST_FUNCTIONS
     + AGENT_FUNCTIONS
+    + SUBAGENT_TEAM_FUNCTIONS
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS

@@ -283,11 +283,24 @@ class ToolExecutor:
             "qualified_name": qualified_name,
             "args": arguments or {},
         }
+        timeout_seconds = _execution_timeout_seconds(tool_def)
+        if timeout_seconds is not None:
+            request["timeout_seconds"] = timeout_seconds
         if isinstance(context, dict) and context.get("request_id"):
             request["request_id"] = context.get("request_id")
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
         if approval_error is not None:
             return approval_error
+        local_tool = self._eager_first_party_local_tool_for_function(pack_id, function_id)
+        if local_tool:
+            if _requires_approval(tool_def) and not _context_has_tool_server_approval(approved_context):
+                return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
+            return self._execute_local_with_tool_def(
+                local_tool,
+                arguments or {},
+                approved_context,
+                tool_def,
+            )
         if _requires_rumi_api_request_approval(tool_def, arguments) and not _context_has_tool_server_approval(approved_context):
             return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
         forwarded_context = _function_call_context(approved_context, tool_def)
@@ -540,6 +553,7 @@ class ToolExecutor:
         if bool(getattr(response, "success", False)):
             return None
         error_type = getattr(response, "error_type", "")
+        permission_denied = error_type == "permission_denied"
         if error_type not in {
             "function_not_found",
             "function_registry_unavailable",
@@ -547,7 +561,7 @@ class ToolExecutor:
         } and not (
             error_type in {"caller_requires_denied", "requires_denied"}
             and _context_has_tool_server_approval(context)
-        ):
+        ) and not permission_denied:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -557,11 +571,20 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if permission_denied:
+                if local_tool != "todo" or not _context_has_tool_server_approval(context):
+                    return None
             if local_tool in {"web_search", "reddit_search"} and error_type != "pack_not_approved":
                 return None
             if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
                 return None
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
+        if permission_denied:
+            if not (
+                (pack_id, function_id) == ("rumi_default_tools_pack", "rumi_api")
+                and tool_server_approval_context_is_internal(context)
+            ):
+                return None
         if error_type == "pack_not_approved" and not _context_has_tool_server_approval(context):
             return None
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
@@ -586,6 +609,7 @@ class ToolExecutor:
         if pack_id == "rumi_default_tools_pack":
             return {
                 "calculator": "calculator",
+                "subagent": "subagent",
             }.get(function_id)
         if pack_id == "defaultspack":
             return {
@@ -596,6 +620,15 @@ class ToolExecutor:
                 "tool_todo": "todo",
             }.get(function_id)
         return None
+
+    @staticmethod
+    def _eager_first_party_local_tool_for_function(pack_id, function_id):
+        # Subagent runs a nested chat turn, so keep it in-process instead of the
+        # generic function subprocess timeout envelope.
+        return {
+            ("defaultspack", "tool_subagent"): "subagent",
+            ("rumi_default_tools_pack", "subagent"): "subagent",
+        }.get((pack_id, function_id))
 
     @staticmethod
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
@@ -895,9 +928,9 @@ class ToolExecutor:
             return result
 
         if _truthy(policy.get("yolo_mode")):
-            next_context["_tool_server_approved"] = True
+            mark_tool_server_approval_context(next_context)
         elif _is_policy_allow_context(context):
-            next_context["_tool_server_approved"] = True
+            mark_tool_server_approval_context(next_context)
         elif _context_has_tool_server_approval(next_context):
             pass
         elif _requires_approval(tool_def):
@@ -1159,9 +1192,10 @@ class ToolExecutor:
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
             result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
+            is_error = bool(result.get("is_error"))
             return {
                 "result": result.get("summary", "subagent completed"),
-                "is_error": False,
+                "is_error": is_error,
                 "widget": {"type": "subagent", **result},
             }
         elif tool_name == "calculator":
@@ -2522,6 +2556,26 @@ def _function_call_context(context, tool_def):
             if isinstance(value, (str, int, float)) and str(value).strip():
                 forwarded[key] = value
     return forwarded
+
+
+def _execution_timeout_seconds(tool_def):
+    if not isinstance(tool_def, dict):
+        return None
+    execution = tool_def.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw = execution.get("timeout_seconds")
+    if raw is None:
+        raw = execution.get("timeout")
+    if raw is None:
+        return None
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if timeout <= 0:
+        return None
+    return min(timeout, 300.0)
 
 
 def _sandbox_function_call_context(context):

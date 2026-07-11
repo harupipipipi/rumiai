@@ -135,6 +135,7 @@ def test_real_tool_registry_has_cloudflare_coverage_for_every_tool() -> None:
 
     assert len(records) == len(tools)
     assert by_id["sandbox_exec"]["compatible"] is True
+    assert by_id["sandbox_files_read"]["compatible"] is True
     assert by_id["sandbox_files_apply_patch"]["compatible"] is True
     assert by_id["sandbox_terminal_exec"]["compatible"] is False
     assert by_id["sandbox_file_write"]["compatible"] is False
@@ -147,3 +148,16 @@ def test_real_tool_registry_has_cloudflare_coverage_for_every_tool() -> None:
     assert summary["all_tools_cloudflare_native"] is False
     assert summary["supported_count"] < summary["count"]
     assert summary["pc_bridge_required"] is True
+
+
+def test_tool_catalog_includes_cloudflare_summary_and_per_tool_records() -> None:
+    from blocks.tool import catalog
+
+    response = catalog.run({}, {})
+    data = response["data"]
+
+    assert data["cloudflare"]["schema"] == "rumi.cloudflare.tool_coverage.v1"
+    assert data["cloudflare"]["all_tools_cloudflare_native"] is False
+    assert data["count"] == len(data["tools"])
+    assert all("cloudflare" in tool for tool in data["tools"])
+    assert all("compatible" in tool["cloudflare"] for tool in data["tools"])

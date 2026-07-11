@@ -1,0 +1,71 @@
+{
+  "id": "tool_ui_commit_plan",
+  "description": "Commit a valid recursive Rumi UI plan into the trusted workspace .rumi/ui run bundle.",
+  "config": {
+    "tool_id": "tool_ui_commit_plan",
+    "name": "tool_ui_commit_plan",
+    "summary": "Commit a valid UI compiler plan into .rumi/ui.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "frontend",
+      "ui",
+      "planner",
+      "recursive-ui-compiler",
+      "artifact"
+    ],
+    "metadata": {
+      "keywords": [
+        "ui compiler",
+        "recursive ui",
+        "component contract",
+        "frontend planning",
+        "artifact commit"
+      ]
+    },
+    "ui": {
+      "group_id": "frontend",
+      "group_label": "Frontend",
+      "group_icon": "layout",
+      "item_icon": "layout",
+      "widget_kind": "tool_toggle",
+      "composer_label": "UI Commit Plan",
+      "composer_description": "Write a valid UI compiler plan into the trusted workspace artifact bundle.",
+      "composer_icon": "layout"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ui_tree": {
+            "type": "object",
+            "description": "Root UI node with semantic children or splitHints."
+          },
+          "config": {
+            "type": "object",
+            "description": "Optional request plan options. Trusted compiler policy cannot be overridden."
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Optional idempotency key for retrying the same run commit."
+          }
+        },
+        "required": [
+          "ui_tree"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.ui_compiler_tools:ui_commit_plan"
+    }
+  }
+}

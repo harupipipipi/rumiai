@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
+import { Avatar } from '@/src/components/ui/Avatar';
 import { fetchBackgroundControlStatus, fetchDesktopSystemInfo, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
 import type { BackgroundControlStatus, DesktopPermissionStatus, DesktopSystemInfo } from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
@@ -259,12 +260,7 @@ export function Settings() {
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-text-main">{t('settings.select_icon')}</label>
                       <div className="flex items-center gap-4">
-                        <img
-                          src={formData.avatar}
-                          alt=""
-                          className="h-14 w-14 rounded-full object-cover border border-border"
-                          referrerPolicy="no-referrer"
-                        />
+                        <Avatar src={formData.avatar} username={formData.username} className="h-14 w-14 text-lg" />
                         <Button
                           variant="outline"
                           size="sm"
@@ -292,7 +288,7 @@ export function Settings() {
                               )}
                               aria-label="Select avatar"
                             >
-                              <img src={av} alt="" className="h-10 w-10 rounded-full object-cover" referrerPolicy="no-referrer" />
+                              <Avatar src={av} username={formData.username} className="h-10 w-10 text-xs" />
                             </button>
                           ))}
                         </div>

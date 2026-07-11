@@ -18,7 +18,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
-from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -81,6 +80,17 @@ from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 logger = logging.getLogger(__name__)
+
+_PACK_APPLY_ROUTE_AUTHORITY: dict[str, Any] = {
+    "owner_pack_id": "core_runtime",
+    "permission_id": "pack.manage",
+    "audience": "kernel_api",
+    "resource_template": {"operation": "pack.apply"},
+}
+
+_HARDCODED_ROUTE_AUTHORITY: dict[tuple[str, str], dict[str, Any]] = {
+    ("POST", "/api/packs/apply"): _PACK_APPLY_ROUTE_AUTHORITY,
+}
 
 
 def _persist_desktop_api_token(api_token: str) -> None:
@@ -462,9 +472,6 @@ class PackAPIHandler(
             return True
         if self._is_fixed_pre_auth_route(method_upper, path):
             return True
-        # Mobile pairing bootstrap/token-delivery routes are reachable before
-        # a device token exists. Handlers still require pairing code, pickup
-        # secret, device_id, and delivery_id as appropriate.
         if method_upper in {"POST", "GET"} and path.startswith("/api/mobile/v1/pairings/"):
             suffix = path[len("/api/mobile/v1/pairings/"):]
             if method_upper == "POST" and (
@@ -1042,83 +1049,6 @@ class PackAPIHandler(
         self._authenticated_device_id = None
         self._authenticated_scopes = []
         self._authenticated_device_scope_authorized = False
-
-    @staticmethod
-    def _authority_device_scope(method: str | None, path: str | None) -> str:
-        method_upper = str(method or "").upper()
-        path_value = str(path or "")
-        if not path_value.startswith("/api/authority/"):
-            return ""
-        if method_upper == "GET" and path_value == "/api/authority/requests":
-            return "authority.request.list"
-        if method_upper == "GET" and path_value.startswith("/api/authority/requests/"):
-            return "authority.request.read"
-        if method_upper == "POST" and path_value.startswith("/api/authority/requests/"):
-            if path_value.endswith("/approve"):
-                return "authority.request.approve"
-            if path_value.endswith("/deny"):
-                return "authority.request.deny"
-            if path_value.endswith("/challenge"):
-                return "authority.request.approve"
-        return ""
-
-    def _check_bearer_auth(
-        self,
-        method: str | None = None,
-        path: str | None = None,
-        *,
-        allow_device: bool = True,
-    ) -> bool:
-        return AuthGateMixin._check_bearer_auth(
-            self,
-            method,
-            path,
-            allow_device=allow_device,
-        )
-
-    def _parse_cookie_header(self) -> dict[str, str]:
-        raw_cookie = self.headers.get("Cookie", "")
-        if not raw_cookie:
-            return {}
-        jar = cookies.SimpleCookie()
-        try:
-            jar.load(raw_cookie)
-        except cookies.CookieError:
-            return {}
-        return {key: morsel.value for key, morsel in jar.items()}
-
-    @staticmethod
-    def _build_set_cookie(
-        name: str,
-        value: str,
-        *,
-        path: str,
-        max_age: int,
-        http_only: bool,
-        same_site: str = "Strict",
-    ) -> str:
-        jar = cookies.SimpleCookie()
-        jar[name] = value
-        morsel = jar[name]
-        morsel["path"] = path
-        morsel["max-age"] = str(max_age)
-        morsel["samesite"] = same_site
-        if http_only:
-            morsel["httponly"] = True
-        return morsel.OutputString()
-
-    def _check_panel_origin(self) -> bool:
-        origin = self.headers.get("Origin", "")
-        return bool(self._get_cors_origin(origin))
-
-    def _check_panel_session(self, method: str) -> bool:
-        return AuthGateMixin._check_panel_session(self, method)
-
-    def _check_auth(self, method: str, path: str) -> bool:
-        return AuthGateMixin._check_auth(self, method, path)
-
-    def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
-        return AuthGateMixin._check_web_mount_auth(self, method, web_mount)
 
     def _current_principal(self):
         return getattr(self, "_authenticated_principal", None)
@@ -1870,7 +1800,8 @@ class PackAPIHandler(
                 return
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
-            if not self._authorize_authenticated_route("POST", path):
+            route_authority = _HARDCODED_ROUTE_AUTHORITY.get(("POST", path))
+            if not self._authorize_authenticated_route("POST", path, route_authority):
                 return
 
             if path == "/api/authority/check":
@@ -1996,7 +1927,11 @@ class PackAPIHandler(
                 elif not _v_is_safe_staging_id(staging_id):
                     self._send_response(APIResponse(False, error="Invalid staging_id"), 400)
                 else:
-                    result = self._pack_apply(staging_id, mode)
+                    result = self._pack_apply(
+                        staging_id,
+                        mode,
+                        actor=self._pack_apply_actor(),
+                    )
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
@@ -2358,7 +2293,6 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_PATCH(self) -> None:
-        """PATCH method for table-driven API routes."""
         _pre_auth_path_patch = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_patch):
             return
@@ -2383,12 +2317,10 @@ class PackAPIHandler(
                 return
             if self._dispatch_defaultspack_http_route("PATCH", path, body):
                 return
-            match = self._match_pack_route(path, "PATCH")
-            if match:
-                self._handle_pack_route_request(path, body, "PATCH", match)
-            else:
-                logger.debug("Unmatched PATCH path: %s", path)
-                self._send_response(APIResponse(False, error="Not found"), 404)
+            if not self._authorize_authenticated_route("PATCH", path):
+                return
+            logger.debug("Unmatched PATCH path: %s", path)
+            self._send_response(APIResponse(False, error="Not found"), 404)
         except Exception as e:
             _log_internal_error("do_PATCH", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)

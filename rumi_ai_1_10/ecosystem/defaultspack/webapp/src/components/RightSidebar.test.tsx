@@ -3,10 +3,35 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
+import {
+  getRailFloatingMenuPosition,
+  RightSidebar,
+  shouldShowToolManagerEmptyState,
+  sidebarActionDisabledReason,
+  toolManagerBaseItemsForNameSearch,
+} from "./RightSidebar";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
+
+test("share and export actions are disabled until a conversation is saved", () => {
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.export", label: "Export Active Conversation" }, null),
+    "エクスポートする会話がありません。会話を保存してから実行してください。",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.share", label: "Create Local Share Link" }, ""),
+    "共有する会話がありません。会話を保存してから実行してください。",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.export", label: "Export Active Conversation" }, "chat-1"),
+    "",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "artifacts.list", label: "List Artifacts" }, null),
+    "",
+  );
+});
 
 test("left sidebar default does not render every tool detail panel", () => {
   const html = renderToStaticMarkup(
@@ -26,6 +51,46 @@ test("left sidebar default does not render every tool detail panel", () => {
   );
 
   assert.doesNotMatch(html, /Detail panel text/);
+});
+
+test("risky tool detail keeps a prominent needs approval affordance", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "node_exec",
+      items: [
+        {
+          id: "node_exec",
+          label: "Node Exec",
+          category: "tool",
+          description: "Execute sandboxed Node code.",
+          risk: "high",
+          tags: ["sandbox", "agent_os", "artifact_workspace"],
+          tool_info: {
+            requires_approval: true,
+            approval_policy: "runtime",
+          },
+          panel: {
+            kind: "tool",
+            notes: ["Requires approval."],
+          },
+        },
+      ],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /data-testid="tool-detail-needs-approval"/);
+  assert.match(html, />Needs approval</);
+  assert.match(html, /Approval policy: runtime/);
+  assert.match(html, />danger</);
+  assert.match(html, />risk:high</);
 });
 
 test("right sidebar initially focuses the rail on tools", () => {
@@ -71,6 +136,29 @@ test("right sidebar does not auto-open employees on initial render", () => {
   assert.doesNotMatch(html, /Employee workspace content/);
 });
 
+test("advanced usage commands can open context token details", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "__context_usage__:1",
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      contextUsage: { usedTokens: 1250, maxContext: 8000, ratio: 0.15625, label: "16%" },
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /data-testid="context-usage-panel"/);
+  assert.match(html, />1250</);
+  assert.match(html, />8000</);
+  assert.match(html, />16%</);
+});
+
 test("right sidebar keeps initial tool groups compact", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {
@@ -93,6 +181,43 @@ test("right sidebar keeps initial tool groups compact", () => {
 
   assert.match(html, /title="その他の機能 \(4 groups\)"/);
   assert.doesNotMatch(html, /title="Group 11 \(1\)"/);
+});
+
+test("tool manager name search no-match does not keep stale tool cards", () => {
+  const allItems = [
+    { id: "browser_companion", label: "Browser Companion", category: "tool" as const },
+    { id: "terminal", label: "Terminal", category: "tool" as const },
+    { id: "prompt_usage", label: "Prompt Usage", category: "widget" as const },
+  ];
+
+  const visibleTools = toolManagerBaseItemsForNameSearch(allItems, [], "zzzz-no-tool-qa");
+
+  assert.equal(visibleTools.length, 0);
+  assert.equal(visibleTools.some((item) => item.label === "Browser Companion"), false);
+});
+
+test("tool manager name search no-match shows the empty state", () => {
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 0,
+    sidebarSearchQuery: "zzzz-no-tool-qa",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), true);
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 1,
+    sidebarSearchQuery: "browser",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), false);
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 0,
+    sidebarSearchQuery: "",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), false);
 });
 
 test("YOLO switch and Model Manager can be pinned", () => {

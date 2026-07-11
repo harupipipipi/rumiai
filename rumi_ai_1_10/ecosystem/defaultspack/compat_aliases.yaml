@@ -1324,6 +1324,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.github_issue_read
+  defaults.coding.github.pr.create:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.github_pr_create
   defaults.coding.github.pr.read:
     owner: coding
     reason: legacy caller compatibility
@@ -1339,6 +1344,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.github_issue_read
+  defaults.coding.github_pr_create:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.github_pr_create
   defaults.coding.github_pr_read:
     owner: coding
     reason: legacy caller compatibility
@@ -3369,6 +3379,226 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.task.board.agent.session
+  defaults.channel.check:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.channel.check
+  defaults.coding.change.request.check.get:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.check.get
+  defaults.coding.change.request.check.list:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.check.list
+  defaults.coding.change.request.comment:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.comment
+  defaults.coding.change.request.comment.update:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.comment.update
+  defaults.coding.change.request.commit:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.commit
+  defaults.coding.change.request.create:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.create
+  defaults.coding.change.request.decision:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.decision
+  defaults.coding.change.request.export.patch:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.export.patch
+  defaults.coding.change.request.get:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.get
+  defaults.coding.change.request.list:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.list
+  defaults.coding.change.request.refresh:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.refresh
+  defaults.coding.change.request.run.check:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.run.check
+  defaults.coding.change.request.seal:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.seal
+  defaults.coding.change.request.update:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.update
+  defaults.coding.change.request.viewed.file:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change.request.viewed.file
+  defaults.coding.change_request_check_get:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_check_get
+  defaults.coding.change_request_check_list:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_check_list
+  defaults.coding.change_request_comment:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_comment
+  defaults.coding.change_request_comment_update:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_comment_update
+  defaults.coding.change_request_commit:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_commit
+  defaults.coding.change_request_create:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_create
+  defaults.coding.change_request_decision:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_decision
+  defaults.coding.change_request_export_patch:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_export_patch
+  defaults.coding.change_request_get:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_get
+  defaults.coding.change_request_list:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_list
+  defaults.coding.change_request_refresh:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_refresh
+  defaults.coding.change_request_run_check:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_run_check
+  defaults.coding.change_request_seal:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_seal
+  defaults.coding.change_request_update:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_update
+  defaults.coding.change_request_viewed_file:
+    owner: rumi_review
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.coding.change_request_viewed_file
+  defaults.subagent.channel.join:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.channel.join
+  defaults.subagent.channel_join:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.channel_join
+  defaults.subagent.create:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.create
+  defaults.subagent.dm.send:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.dm.send
+  defaults.subagent.dm_send:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.dm_send
+  defaults.subagent.goal.approve:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.goal.approve
+  defaults.subagent.goal.propose:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.goal.propose
+  defaults.subagent.goal_approve:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.goal_approve
+  defaults.subagent.goal_propose:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.goal_propose
+  defaults.subagent.request:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.request
+  defaults.subagent.status:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.status
+  defaults.subagent.task.complete:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.task.complete
+  defaults.subagent.task_complete:
+    owner: subagent_team
+    reason: legacy caller compatibility
+    remove_after: v2.4
+    replacement: defaultspack.subagent.task_complete
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.

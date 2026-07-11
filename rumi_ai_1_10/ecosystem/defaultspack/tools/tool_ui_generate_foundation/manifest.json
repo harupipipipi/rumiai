@@ -1,0 +1,17 @@
+{
+  "id": "tool_ui_generate_foundation",
+  "description": "Generate and select recursive UI foundation candidates inside an approved build run.",
+  "config": {
+    "tool_id": "tool_ui_generate_foundation",
+    "name": "tool_ui_generate_foundation",
+    "summary": "Generate UI foundation candidates.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["frontend", "ui", "foundation", "recursive-ui-compiler"],
+    "schema": {"parameters": {"type": "object", "additionalProperties": true, "required": ["ui_tree"], "properties": {"ui_tree": {"type": "object"}}}},
+    "execution": {"type": "local", "handler": "domain.tool.ui_compiler_tools:ui_generate_foundation"}
+  }
+}

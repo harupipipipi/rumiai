@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,17 @@ from .context import principal_from_context
 from .response import error, normalize_output
 
 logger = logging.getLogger(__name__)
+
+def _flag_enabled(name: str) -> bool:
+    value = str(os.environ.get(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _defaultspack_function_enabled(function_id: str) -> bool:
+    if function_id == "coding_change_request_commit":
+        return _flag_enabled("RUMI_REVIEW_ENABLE_COMMIT")
+    return True
+
 
 _REQUEST_CONTEXT_KEYS = {
     "_tool_server_approved",
@@ -167,6 +179,8 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
             function_id = str(manifest.get("function_id") or function_dir.name).strip()
             if not function_id:
                 continue
+            if not _defaultspack_function_enabled(function_id):
+                continue
             try:
                 if registry.register(
                     pack_id="defaultspack",
@@ -218,6 +232,17 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
     return registered
 
 
+def _defaultspack_function_candidate(name: str) -> bool:
+    if not name:
+        return False
+    return (
+        name.startswith("defaultspack:")
+        or name.startswith("defaults.")
+        or name.startswith("defaultspack.")
+        or (":" not in name and "." not in name)
+    )
+
+
 def invoke_function(
     qualified_name: str,
     args: dict[str, Any] | None,
@@ -232,6 +257,16 @@ def invoke_function(
         return error(f"Capability runtime is unavailable: {exc}", "CAPABILITY_RUNTIME_UNAVAILABLE")
 
     principal = principal_id or principal_from_context(context)
+    raw_qualified_name = str(qualified_name or "").strip()
+    try:
+        container = get_container()
+        if _defaultspack_function_candidate(raw_qualified_name):
+            ensure_defaultspack_functions_registered(container)
+            qualified_name = _normalize_defaultspack_function_name(raw_qualified_name, container)
+        else:
+            qualified_name = raw_qualified_name
+    except Exception as exc:
+        return error(f"Capability execution failed: {exc}", "CAPABILITY_EXECUTION_FAILED")
     request = {
         "type": "function.call",
         "qualified_name": qualified_name,
@@ -244,9 +279,6 @@ def invoke_function(
     if timeout_seconds is not None:
         request["timeout_seconds"] = timeout_seconds
     try:
-        container = get_container()
-        if qualified_name.startswith("defaultspack:") or qualified_name.startswith("defaults."):
-            ensure_defaultspack_functions_registered(container)
         executor = container.get_or_none("capability_executor")
         if executor is None:
             from core_runtime.capability_executor import get_capability_executor
@@ -278,6 +310,32 @@ def invoke_function(
             (getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper(),
         )
     return normalize_output(getattr(response, "output", None))
+
+
+def _normalize_defaultspack_function_name(qualified_name: str, container: Any | None = None) -> str:
+    name = str(qualified_name or "").strip()
+    if not name:
+        return name
+    if ":" not in name and "." not in name:
+        return f"defaultspack:{name}"
+    if name.startswith(("defaults.", "defaultspack.")) and container is not None:
+        try:
+            registry = container.get_or_none("function_registry")
+            entry = registry.resolve_by_alias(name) if registry is not None else None
+            if entry is not None:
+                return str(entry.qualified_name)
+        except Exception:
+            pass
+    if ":" in name:
+        return name
+    try:
+        from .registry import get_spec
+
+        if get_spec(name) is not None:
+            return f"defaultspack:{name}"
+    except Exception:
+        pass
+    return name
 
 
 def invoke_defaultspack_function(

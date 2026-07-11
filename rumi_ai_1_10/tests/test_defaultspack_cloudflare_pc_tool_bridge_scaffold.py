@@ -31,7 +31,7 @@ def test_cloudflare_pc_tool_bridge_wrangler_config_is_worker_only() -> None:
 
     assert config["name"] == "rumi-cloudflare-pc-tool-bridge"
     assert config["main"] == "src/index.ts"
-    assert config["compatibility_date"] == "2026-07-01"
+    assert config["compatibility_date"] == "2026-07-02"
     assert config["compatibility_flags"] == ["nodejs_compat"]
     assert config["observability"]["enabled"] is True
     assert "containers" not in config
@@ -82,7 +82,7 @@ def test_cloudflare_pc_tool_bridge_package_uses_workers_types_and_wrangler() -> 
     assert package["private"] is True
     assert package["scripts"]["check"] == "tsc --noEmit"
     assert package["scripts"]["types"] == "wrangler types"
-    assert package["devDependencies"]["wrangler"] == "4.107.0"
+    assert package["devDependencies"]["wrangler"] == "4.106.0"
     assert "@cloudflare/workers-types" in package["devDependencies"]
     assert tsconfig["compilerOptions"]["strict"] is True
     assert tsconfig["compilerOptions"]["types"] == ["@cloudflare/workers-types"]

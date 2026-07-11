@@ -4,6 +4,8 @@ import base64
 import importlib
 import json
 import re
+import threading
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -41,13 +43,17 @@ from transport.registry import (
 class FrontendRegistry:
     """Registry for frontend catalog, settings, and chat preview metadata."""
 
+    _selectable_model_profiles_lock = threading.Lock()
+    _selectable_model_profiles_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+    _selectable_model_profiles_cache_ttl_seconds = 30.0
+
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
-    def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
+    def build_catalog(self, profile_id: str | None = None, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
@@ -65,13 +71,19 @@ class FrontendRegistry:
         ]
         component_bindings = self._filter_frontend_items(component_bindings, selected_frontend_ids)
         sidebar_items = [
-            *self._sidebar_items(ui_surfaces, extensions),
+            *self._sidebar_items(ui_surfaces, extensions, lightweight=lightweight),
             *template_catalog.get("sidebar_items", []),
         ]
         sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
         settings_sections = self._merge_settings_sections(
-            self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
+            self._settings_sections(
+                ui_surfaces,
+                extensions,
+                template_catalog=template_catalog,
+                lightweight=lightweight,
+            ),
             template_catalog.get("settings_sections", []),
+            hydrate_dynamic=not lightweight,
         )
         settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
         chat_renderers = [
@@ -96,7 +108,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": chat_renderers,
             },
-            "skills": self._skill_items(),
+            "skills": [] if lightweight else self._skill_items(),
             "routes": self._route_metadata(),
             "templates": template_catalog.get("templates", []),
             "field_renderers": template_catalog.get("field_renderers", []),
@@ -119,14 +131,20 @@ class FrontendRegistry:
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
-    def get_settings(self) -> dict[str, Any]:
+    def get_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         ui_surfaces = self._load_ui_surfaces()
         return {
             "sections": self._merge_settings_sections(
-                self._settings_sections(ui_surfaces, self._load_extensions(), template_catalog=template_catalog),
+                self._settings_sections(
+                    ui_surfaces,
+                    self._load_extensions(),
+                    template_catalog=template_catalog,
+                    lightweight=lightweight,
+                ),
                 template_catalog.get("settings_sections", []),
+                hydrate_dynamic=not lightweight,
             ),
             "values": self._read_settings(),
         }
@@ -540,6 +558,8 @@ class FrontendRegistry:
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
+        *,
+        lightweight: bool = False,
     ) -> list[dict[str, Any]]:
         registry = ToolRegistry()
         items: list[dict[str, Any]] = []
@@ -597,6 +617,7 @@ class FrontendRegistry:
                         "kind": "tool_settings",
                         "title": label,
                         "fields": self._tool_settings_fields(ui),
+                        "actions": self._tool_panel_actions(ui),
                         "notes": [
                             "Tool call arguments stay in ToolRegistry schema and are not shown as settings.",
                             self._tool_schema_summary(schema),
@@ -660,7 +681,12 @@ class FrontendRegistry:
         )
 
         items.extend(self._config_list(ui_surfaces, "sidebar_items"))
-        items.extend(self._hydrate_sidebar_items(self._config_list(extensions, "sidebar_items")))
+        items.extend(
+            self._hydrate_sidebar_items(
+                self._config_list(extensions, "sidebar_items"),
+                hydrate_models=not lightweight,
+            )
+        )
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
@@ -751,6 +777,7 @@ class FrontendRegistry:
         extensions: list[dict[str, Any]],
         *,
         template_catalog: dict[str, Any] | None = None,
+        lightweight: bool = False,
     ) -> list[dict[str, Any]]:
         external_template_catalog = self._external_io_template_catalog(template_catalog)
         input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
@@ -1015,12 +1042,29 @@ class FrontendRegistry:
                 "description": "会話で使うモデルと thinking 設定。",
                 "fields": [
                     {
+                        "id": "main_model",
+                        "label": "Main Model",
+                        "type": "model_select",
+                        "default": "stub/default",
+                        "options": self._model_options(lightweight=lightweight),
+                        "help": "Default model for normal conversations and new chats.",
+                    },
+                    {
+                        "id": "lightweight_model",
+                        "label": "Lightweight Model",
+                        "type": "model_select",
+                        "default": "",
+                        "options": self._model_options(lightweight=lightweight),
+                        "help": "Fast model for quick replies and delegated rough work. Leave empty for automatic selection.",
+                    },
+                    {
                         "id": "preferred_model",
                         "label": "Preferred Model",
                         "type": "select",
                         "default": "stub/default",
-                        "options": self._model_options(),
+                        "options": self._model_options(lightweight=lightweight),
                         "help": "新しい会話と composer の既定モデルです。",
+                        "advanced": True,
                     },
                     {
                         "id": "preferred_model_group",
@@ -1071,8 +1115,8 @@ class FrontendRegistry:
                         "label": "Model API Variants",
                         "type": "model_api_routes",
                         "default": "",
-                        "options": self._model_route_options(),
-                        "api_keys": provider_key_status(pack_root=self._pack_root),
+                        "options": self._model_route_options(lightweight=lightweight),
+                        "api_keys": [] if lightweight else provider_key_status(pack_root=self._pack_root),
                         "help": "モデルごとに使う API key を選びます。複数選んだら、各 API key ごとに別 model variant として composer に並びます。",
                     },
                     {
@@ -2296,6 +2340,8 @@ class FrontendRegistry:
         self,
         base_sections: list[dict[str, Any]],
         extra_sections: list[dict[str, Any]],
+        *,
+        hydrate_dynamic: bool = True,
     ) -> list[dict[str, Any]]:
         try:
             merge_settings_sections = importlib.import_module("domain.templates.projectors").merge_settings_sections
@@ -2317,6 +2363,8 @@ class FrontendRegistry:
                 str(diagnostic.get("message") or ""),
                 str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
             )
+        if not hydrate_dynamic:
+            return sections
         return self._hydrate_dynamic_settings_fields(sections)
 
     @staticmethod
@@ -2394,11 +2442,12 @@ class FrontendRegistry:
                 item = dict(field)
                 field_id = str(item.get("id") or "").strip()
                 field_type = str(item.get("type") or "").strip()
-                if section_id == "models" and field_id == "preferred_model":
+                if section_id == "models" and field_id in {"preferred_model", "main_model", "lightweight_model"}:
                     if model_options is None:
                         model_options = self._model_options()
                     item["options"] = model_options
-                    item.setdefault("type", "model_select")
+                    if field_id != "preferred_model":
+                        item.setdefault("type", "model_select")
                     item.setdefault("renderer", "model_select")
                 elif str(item.get("type") or "").strip() == "model_select":
                     if model_options is None:
@@ -2534,12 +2583,22 @@ class FrontendRegistry:
             values.extend(item for item in items if isinstance(item, dict))
         return values
 
-    def _hydrate_sidebar_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _hydrate_sidebar_items(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        hydrate_models: bool = True,
+    ) -> list[dict[str, Any]]:
         hydrated: list[dict[str, Any]] = []
         for item in items:
             item = deepcopy(item)
             panel = item.get("panel")
-            if isinstance(panel, dict) and panel.get("kind") == "models" and "models" not in panel:
+            if (
+                hydrate_models
+                and isinstance(panel, dict)
+                and panel.get("kind") == "models"
+                and "models" not in panel
+            ):
                 panel["models"] = self._list_provider_models()
             hydrated.append(item)
         return hydrated
@@ -2748,7 +2807,9 @@ class FrontendRegistry:
             },
         }
 
-    def _model_options(self) -> list[dict[str, str]]:
+    def _model_options(self, *, lightweight: bool = False) -> list[dict[str, str]]:
+        if lightweight:
+            return [{"value": "stub/default", "label": "Stub Default"}]
         profiles = self._selectable_model_profiles()
         return [
             {
@@ -2758,7 +2819,17 @@ class FrontendRegistry:
             for profile in profiles
         ] or [{"value": "stub/default", "label": "Stub Default"}]
 
-    def _model_route_options(self) -> list[dict[str, Any]]:
+    def _model_route_options(self, *, lightweight: bool = False) -> list[dict[str, Any]]:
+        if lightweight:
+            return [
+                {
+                    "value": "stub/default",
+                    "label": "Stub Default",
+                    "provider_id": "stub",
+                    "model_id": "default",
+                    "local": True,
+                }
+            ]
         profiles = self._selectable_model_profiles()
         options: list[dict[str, Any]] = []
         for profile in profiles:
@@ -2799,6 +2870,13 @@ class FrontendRegistry:
         return options or [{"value": "stub/default", "label": "Stub Default", "provider_id": "stub", "model_id": "default", "local": True}]
 
     def _selectable_model_profiles(self) -> list[dict[str, Any]]:
+        cache_key = str(self._pack_root.resolve())
+        now = time.monotonic()
+        with self._selectable_model_profiles_lock:
+            cached = self._selectable_model_profiles_cache.get(cache_key)
+            if cached is not None and now - cached[0] < self._selectable_model_profiles_cache_ttl_seconds:
+                return deepcopy(cached[1])
+
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -2807,24 +2885,36 @@ class FrontendRegistry:
             except ModuleNotFoundError:
                 list_profile_catalog = None
 
-        if list_profile_catalog is not None:
-            profiles = list_profile_catalog()
-        else:
-            profiles = [
-                {
-                    "profile_id": model["id"],
-                    "display_name": model.get("name") or model["id"],
-                    "provider_id": model.get("provider_id") or model.get("provider"),
-                    "model_id": model.get("model_id") or str(model.get("id", "")).split("/", 1)[-1],
-                    "type": model.get("type", "chat"),
-                    "availability": model.get("availability", {}),
-                }
-                for model in self._list_provider_models()
-            ]
+        with self._selectable_model_profiles_lock:
+            now = time.monotonic()
+            cached = self._selectable_model_profiles_cache.get(cache_key)
+            if cached is not None and now - cached[0] < self._selectable_model_profiles_cache_ttl_seconds:
+                return deepcopy(cached[1])
+            if list_profile_catalog is not None:
+                try:
+                    profiles = list_profile_catalog()
+                except Exception:
+                    profiles = self._fallback_selectable_model_profiles()
+            else:
+                profiles = self._fallback_selectable_model_profiles()
 
-        filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
-        filtered.sort(key=self._model_profile_sort_key)
-        return filtered
+            filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
+            filtered.sort(key=self._model_profile_sort_key)
+            self._selectable_model_profiles_cache[cache_key] = (time.monotonic(), deepcopy(filtered))
+            return deepcopy(filtered)
+
+    def _fallback_selectable_model_profiles(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "profile_id": model["id"],
+                "display_name": model.get("name") or model["id"],
+                "provider_id": model.get("provider_id") or model.get("provider"),
+                "model_id": model.get("model_id") or str(model.get("id", "")).split("/", 1)[-1],
+                "type": model.get("type", "chat"),
+                "availability": model.get("availability", {}),
+            }
+            for model in self._list_provider_models()
+        ]
 
     def _is_user_selectable_profile(self, profile: dict[str, Any]) -> bool:
         provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
@@ -2906,6 +2996,30 @@ class FrontendRegistry:
         if not isinstance(fields, list):
             return []
         return [field for field in fields if isinstance(field, dict)]
+
+    def _tool_panel_actions(self, ui: dict[str, Any]) -> list[dict[str, Any]]:
+        actions = ui.get("panel_actions", [])
+        if not isinstance(actions, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id") or "").strip()
+            label = str(action.get("label") or "").strip()
+            if not action_id or not label:
+                continue
+            item = {
+                "id": action_id,
+                "label": label,
+            }
+            for key in ("icon", "method", "endpoint", "preview_type", "requires_approval"):
+                if key in action:
+                    item[key] = action[key]
+            if isinstance(action.get("payload"), dict):
+                item["payload"] = dict(action["payload"])
+            normalized.append(item)
+        return normalized
 
     def _tool_capability_summary(self, tool: dict[str, Any]) -> str:
         parts: list[str] = []

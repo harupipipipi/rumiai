@@ -58,6 +58,79 @@ class TestAppLifecycleManagerHealth:
         assert result["status"] == "ok"
         assert result["needs_setup"] is False
 
+    def test_health_needs_setup_false_after_setup_pack_selection(self, tmp_path):
+        """setup-pack install 済みの場合 -> needs_setup: False"""
+        from core_runtime.app_lifecycle_manager import AppLifecycleManager
+
+        setup_pack_dir = tmp_path / "ecosystem" / "setup_pack" / "defaultspack"
+        setup_pack_dir.mkdir(parents=True)
+        (setup_pack_dir / "pack.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "defaultspack",
+                    "display_name": "Default Pack",
+                    "description": "desc",
+                    "target_pack_id": "defaultspack",
+                    "version": "1.0.0",
+                    "supports_all_ok": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        target_dir = tmp_path / "ecosystem" / "defaultspack"
+        target_dir.mkdir(parents=True)
+        (target_dir / "ecosystem.json").write_text(
+            json.dumps({"pack_identity": "rumi:ecosystem/defaultspack"}),
+            encoding="utf-8",
+        )
+        settings_dir = tmp_path / "user_data" / "settings"
+        settings_dir.mkdir(parents=True)
+        (settings_dir / "setup_pack_selection.json").write_text(
+            json.dumps(
+                {
+                    "setup_pack_id": "defaultspack",
+                    "target_pack_id": "defaultspack",
+                    "setup_pack_ids": ["defaultspack"],
+                    "target_pack_ids": ["defaultspack"],
+                    "active_setup_pack_id": "defaultspack",
+                    "active_target_pack_id": "defaultspack",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        alm = AppLifecycleManager(base_dir=tmp_path)
+        result = alm.get_health()
+
+        assert result["status"] == "ok"
+        assert result["needs_setup"] is False
+
+    def test_health_does_not_accept_stale_setup_pack_selection(self, tmp_path):
+        """壊れた setup-pack selection では setup gate を閉じない"""
+        from core_runtime.app_lifecycle_manager import AppLifecycleManager
+
+        settings_dir = tmp_path / "user_data" / "settings"
+        settings_dir.mkdir(parents=True)
+        (settings_dir / "setup_pack_selection.json").write_text(
+            json.dumps(
+                {
+                    "setup_pack_id": "ghost_pack",
+                    "target_pack_id": "ghost_pack",
+                    "setup_pack_ids": ["ghost_pack"],
+                    "target_pack_ids": ["ghost_pack"],
+                    "active_setup_pack_id": "ghost_pack",
+                    "active_target_pack_id": "ghost_pack",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        alm = AppLifecycleManager(base_dir=tmp_path)
+        result = alm.get_health()
+
+        assert result["status"] == "ok"
+        assert result["needs_setup"] is True
+
     def test_health_returns_ok_status(self, tmp_path):
         """get_health() は常に status=ok を返す"""
         from core_runtime.app_lifecycle_manager import AppLifecycleManager

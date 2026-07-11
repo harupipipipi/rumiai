@@ -21,8 +21,9 @@ Prerequisites:
 cd rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge
 npm install
 npm run check
-npx wrangler deploy --dry-run --containers-rollout=none
-openssl rand -hex 32 | tee /dev/stderr | npx wrangler secret put SANDBOX_API_KEY
+./node_modules/.bin/wrangler deploy --dry-run --containers-rollout=none
+SANDBOX_API_KEY="$(openssl rand -hex 32)"
+printf '%s' "$SANDBOX_API_KEY" | ./node_modules/.bin/wrangler secret put SANDBOX_API_KEY
 npm run deploy
 curl https://rumi-cloudflare-sandbox-bridge.<your-subdomain>.workers.dev/health
 ```
@@ -33,7 +34,7 @@ After deploy, set these values in defaultspack or the runtime environment:
 
 ```bash
 export RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL=https://rumi-cloudflare-sandbox-bridge.<your-subdomain>.workers.dev
-export RUMI_CLOUDFLARE_SANDBOX_API_KEY=<the secret generated above>
+export RUMI_CLOUDFLARE_SANDBOX_API_KEY=<the same secret stored in SANDBOX_API_KEY>
 ```
 
 ## Test the Bridge

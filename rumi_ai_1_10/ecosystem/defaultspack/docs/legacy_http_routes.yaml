@@ -272,6 +272,146 @@ legacy_routes:
   owner: human_operator
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/comments
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/comments
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/comments/{comment_id}
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/change-requests/{id}/comments/{comment_id}
+  legacy_block_module: blocks.change_request.comments
+  replacement_function_id: coding_change_request_comment_update
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/decision
+  legacy_block_module: blocks.change_request.decision
+  replacement_function_id: coding_change_request_decision
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/viewed-files
+  legacy_block_module: blocks.change_request.viewed_files
+  replacement_function_id: coding_change_request_viewed_file
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/checks
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_check_list
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks/run
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/checks/run-check
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/run-check
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_run_check
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/checks/{check_id}
+  legacy_block_module: blocks.change_request.checks
+  replacement_function_id: coding_change_request_check_get
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}/seal
+  legacy_block_module: blocks.change_request.seal
+  replacement_function_id: coding_change_request_seal
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/commit
+  legacy_block_module: blocks.change_request.commit
+  replacement_function_id: coding_change_request_commit
+  owner: rumi_review
+  reason: default-off compatibility fallback; registered only with RUMI_REVIEW_ENABLE_COMMIT
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/bootstrap
+  legacy_block_module: blocks.subagent_team.bootstrap
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/workspace/metadata
+  legacy_block_module: blocks.subagent_team.workspace_metadata
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/creator/decision-preview
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/chat/group-storage
   legacy_block_module: blocks.chat.group_storage
@@ -1005,6 +1145,531 @@ legacy_routes:
   legacy_block_module: blocks.company.messages
   replacement_function_id: ''
   owner: company
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/subagent-team/{company_id}/agents/{agent_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/status
+  legacy_block_module: blocks.subagent_team.status
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/status
+  legacy_block_module: blocks.subagent_team.status
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/channels
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/channels/{channel_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/join
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/leave
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channels/{channel_id}/archive
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/agents
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/agents
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/agents/{short_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/agents/{short_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/agents/{short_id}/pause
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/agents/{short_id}/resume
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/creator/request
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/creator/test
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/creator/settings
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/creator/settings
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/rich
+  legacy_block_module: blocks.subagent_team.rich
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/rich
+  legacy_block_module: blocks.subagent_team.rich
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/dms
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/dms
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/dms/{thread_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/dms/{thread_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/goals/{goal_id}
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/subagent-team/goals/{goal_id}
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/goals/{goal_id}/approve
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/goals/{goal_id}/reject
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/tasks/{task_id}/complete
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/file-tree
+  legacy_block_module: blocks.subagent_team.file_tree
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/file-tree
+  legacy_block_module: blocks.subagent_team.file_tree
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/file-tree/open
+  legacy_block_module: blocks.subagent_team.file_tree
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/channel-check
+  legacy_block_module: blocks.subagent_team.channel_check
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/creator
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/creator
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/status
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/creator
+  legacy_block_module: blocks.subagent_team.creator
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/channels
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/channels
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}/check
+  legacy_block_module: blocks.subagent_team.channels
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/channels/{channel_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/agents
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/agents
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/agents/{agent_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/subagent-team/{company_id}/agents/{agent_id}
+  legacy_block_module: blocks.subagent_team.agents
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/messages
+  legacy_block_module: blocks.subagent_team.messages
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/rich
+  legacy_block_module: blocks.subagent_team.rich
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/goals
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/goals/{goal_id}
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/subagent-team/{company_id}/goals/{goal_id}
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/goals/{goal_id}/close
+  legacy_block_module: blocks.subagent_team.goals
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/dms
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/dms
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/dms/{dm_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/dms/{dm_id}/messages
+  legacy_block_module: blocks.subagent_team.dms
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/subagent-team/{company_id}/file-tree
+  legacy_block_module: blocks.subagent_team.file_tree
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/subagent-team/{company_id}/file-tree
+  legacy_block_module: blocks.subagent_team.file_tree
+  replacement_function_id: ''
+  owner: subagent_team
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests
+  legacy_block_module: blocks.change_request.collection
+  replacement_function_id: ''
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests
+  legacy_block_module: blocks.change_request.collection
+  replacement_function_id: ''
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/change-requests/{id}
+  legacy_block_module: blocks.change_request.item
+  replacement_function_id: ''
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PATCH
+  pattern: /api/change-requests/{id}
+  legacy_block_module: blocks.change_request.item
+  replacement_function_id: ''
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/refresh
+  legacy_block_module: blocks.change_request.refresh
+  replacement_function_id: ''
+  owner: rumi_review
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/change-requests/{id}/export-patch
+  legacy_block_module: blocks.change_request.export_patch
+  replacement_function_id: ''
+  owner: rumi_review
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
@@ -2043,6 +2708,13 @@ legacy_routes:
   owner: tool
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/tools/browser-companion/session
+  legacy_block_module: blocks.tool.browser_companion_session
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/tools/browser-companion/bridge/poll
   legacy_block_module: blocks.tool.browser_companion_bridge_poll
@@ -2497,6 +3169,20 @@ legacy_routes:
   replacement_function_id: ''
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ui/build-recursive
+  legacy_block_module: blocks.ui.build_recursive
+  replacement_function_id: ''
+  owner: ui
+  reason: tracked compatibility fallback for approved recursive UI generation
+  remove_after: v2.4
+- method: GET
+  pattern: /api/ui/generation-status
+  legacy_block_module: blocks.ui.generation_status
+  replacement_function_id: ''
+  owner: ui
+  reason: tracked compatibility fallback for recursive UI run status
   remove_after: v2.4
 - method: GET
   pattern: /api/ui/commands

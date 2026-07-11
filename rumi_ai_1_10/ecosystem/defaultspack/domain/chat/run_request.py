@@ -59,6 +59,11 @@ from domain.chat.tool_recommender import (
     recommend_tool_ids,
     tool_assist_limit,
 )
+from domain.coding.frontend_precision import (
+    PRECISION_TOOL_NAMES,
+    detect_frontend_request,
+    precision_metadata,
+)
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.temporal_context import add_temporal_context_message, current_datetime_context
@@ -120,7 +125,58 @@ _CODING_PR_TOOL_IDS = [
     "coding_git_diff",
     "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
 ]
+
+
+def _is_provider_qualified_model(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text and "/" in text and not text.startswith("modelpack/"))
+
+
+def _apply_provider_surface_defaults(
+    provider_capabilities: dict[str, Any],
+    model_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    if model_capabilities:
+        return provider_capabilities
+    api_surface = (
+        provider_capabilities.get("api_surface")
+        if isinstance(provider_capabilities.get("api_surface"), dict)
+        else {}
+    )
+    updated = dict(provider_capabilities)
+    if api_surface.get("supports_tool_call_shape") and not updated.get("supports_tool_calling"):
+        updated["supports_tool_calling"] = True
+    if (
+        api_surface.get("supports_parallel_tool_call_shape")
+        and not updated.get("supports_parallel_tool_calls")
+    ):
+        updated["supports_parallel_tool_calls"] = True
+    return updated
+
+
+def _runtime_model_capabilities(
+    model_capabilities: dict[str, Any],
+    provider_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    if model_capabilities:
+        return model_capabilities
+    runtime_caps: dict[str, Any] = {}
+    for key in (
+        "supports_tool_calling",
+        "supports_vision",
+        "supports_image_input",
+        "supports_thinking",
+        "supports_fast",
+    ):
+        if provider_capabilities.get(key):
+            runtime_caps[key] = provider_capabilities.get(key)
+    if provider_capabilities.get("supports_reasoning"):
+        runtime_caps["supports_thinking"] = True
+    return runtime_caps
+
+
 _AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
     {"model.invoke", "api_key.use", "network.egress"}
 )
@@ -223,14 +279,16 @@ def prepare_chat_run(
     chat_references = _chat_references(store, conversation_id, metadata)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata.setdefault("chat_references", chat_references)
-    user_message = store.add_message(
-        conversation_id,
-        {
-            "role": message.get("role", "user"),
-            "content": content,
-            "metadata": metadata or None,
-        },
-    )
+    user_message_dict = {
+        "role": message.get("role", "user"),
+        "content": content,
+        "metadata": metadata or None,
+    }
+    if "parent_id" in message:
+        parent_id = str(message.get("parent_id") or "").strip()
+        if parent_id:
+            user_message_dict["parent_id"] = parent_id
+    user_message = store.add_message(conversation_id, user_message_dict)
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
@@ -397,6 +455,17 @@ def prepare_chat_run(
                     set(ignored_tool_policy_keys)
                 )
                 store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
+    frontend_precision = _frontend_precision_metadata(
+        user_text=user_text,
+        metadata=metadata,
+        input_data=prepared_input,
+        conversation_metadata=conversation_metadata,
+        request_context=request_context,
+    )
+    if frontend_precision:
+        metadata["frontend_precision"] = frontend_precision
+        user_message["metadata"] = metadata
+        request_context["frontend_precision"] = frontend_precision
     template_tool_policy_resolution = _resolve_template_tool_policy(
         params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {},
         metadata=metadata,
@@ -448,6 +517,11 @@ def prepare_chat_run(
             },
         },
     }
+    if frontend_precision:
+        tool_resolution_input = _with_frontend_precision_tool_selection(tool_resolution_input)
+        request_context["tool_selection"] = _tool_selection_metadata(
+            _normalize_tool_selection(tool_resolution_input)
+        )
 
     request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
         request_context,
@@ -482,11 +556,16 @@ def prepare_chat_run(
     raw_tools, provider_tools, tool_context = _available_tools(
         request_context, tool_resolution_input, user_text=user_text
     )
+    if frontend_precision:
+        tool_context["frontend_precision"] = frontend_precision
+        request_context["frontend_precision"] = frontend_precision
     tool_hint_prompt = _tool_selection_hints_prompt(tool_context)
     if tool_hint_prompt:
         _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
+    route_preferred_model = model
+    route_preferred_capabilities = get_model_capabilities(route_preferred_model) or {}
     routing_decision = route_model_request(
         ModelRoutingRequest(
             conversation_id=conversation_id,
@@ -517,27 +596,46 @@ def prepare_chat_run(
             settings=model_settings,
         )
     )
-    model = routing_decision.selected_model
+    force_preferred_model = bool(requested_model) or (
+        _is_provider_qualified_model(route_preferred_model)
+        and not route_preferred_capabilities
+    )
+    if force_preferred_model:
+        model = route_preferred_model
+        if routing_decision.selected_model != model:
+            routing_decision.selected_model = model
+            if "explicit_model_override" not in routing_decision.reason_codes:
+                routing_decision.reason_codes.append("explicit_model_override")
+            routing_decision.explanation = f"{model} selected because it was explicitly requested."
+    else:
+        model = routing_decision.selected_model
     selected_capabilities = get_model_capabilities(model) or {}
-    provider_capabilities = get_model_provider_capabilities(
-        model,
-        {
+    provider_model_metadata = None
+    if selected_capabilities:
+        provider_model_metadata = {
             "id": model,
             "provider_id": model.split("/", 1)[0] if "/" in model else "",
             "capabilities": selected_capabilities,
             "metadata": {"capabilities": selected_capabilities},
             "supports_thinking": bool(selected_capabilities.get("supports_thinking")),
-        },
+        }
+    provider_capabilities = _apply_provider_surface_defaults(
+        get_model_provider_capabilities(model, provider_model_metadata),
+        selected_capabilities,
     )
     if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get(
         "supports_thinking"
     ):
         params["thinking_level"] = "none"
     policy = policy_from_context(request_context)
+    runtime_model_capabilities = _runtime_model_capabilities(
+        selected_capabilities,
+        provider_capabilities,
+    )
     runtime_snapshot = build_runtime_capability_snapshot(
         user_text=user_text,
         modalities=modalities,
-        model_capabilities=selected_capabilities,
+        model_capabilities=runtime_model_capabilities,
         context=request_context,
         policy=policy,
     )
@@ -572,7 +670,7 @@ def prepare_chat_run(
         store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     if (
         provider_tools
-        and not selected_capabilities.get("supports_tool_calling")
+        and not runtime_model_capabilities.get("supports_tool_calling")
         and not request_context.get("user_requested_computer_use")
     ):
         unavailable_tools = [
@@ -2656,6 +2754,80 @@ def _with_inferred_tools(
     updated = dict(input_data)
     updated["tools"] = merged
     return updated
+
+
+def _with_frontend_precision_tool_selection(input_data: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(input_data or {})
+    params = dict(updated.get("params") if isinstance(updated.get("params"), dict) else {})
+    selection = dict(params.get("tool_selection") if isinstance(params.get("tool_selection"), dict) else {})
+    include = _merge_tool_items(_coerce_tool_items(selection.get("include")), list(PRECISION_TOOL_NAMES))
+    exclude = [item for item in _coerce_tool_id_list(selection.get("exclude")) if item not in PRECISION_TOOL_NAMES]
+    selection.update(
+        {
+            "mode": "auto",
+            "include": include,
+            "exclude": exclude,
+            "scope": "turn",
+            "must_use": True,
+        }
+    )
+    params["tool_selection"] = selection
+    updated["params"] = params
+    return updated
+
+
+def _frontend_precision_metadata(
+    *,
+    user_text: str,
+    metadata: dict[str, Any],
+    input_data: dict[str, Any],
+    conversation_metadata: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any] | None:
+    files = _frontend_precision_file_hints(input_data, metadata, conversation_metadata)
+    explicit = metadata.get("frontend_precision") if isinstance(metadata.get("frontend_precision"), dict) else {}
+    command_hint = ""
+    if explicit:
+        mode = str(explicit.get("mode") or explicit.get("command") or "strict").strip()
+        command_hint = f"/frontend {mode}" if mode else "/frontend strict"
+    detection = detect_frontend_request(user_text, files=files, command=command_hint)
+    if not detection.enabled:
+        return None
+    return precision_metadata(
+        detection=detection,
+        task=user_text,
+        files=files,
+        context=request_context,
+    )
+
+
+def _frontend_precision_file_hints(
+    input_data: dict[str, Any],
+    metadata: dict[str, Any],
+    conversation_metadata: dict[str, Any],
+) -> list[str]:
+    values: list[Any] = []
+    for source in (input_data, metadata, conversation_metadata):
+        if not isinstance(source, dict):
+            continue
+        for key in ("files", "paths", "target_paths", "targetPaths", "changed_files", "changedFiles"):
+            raw = source.get(key)
+            if isinstance(raw, list):
+                values.extend(raw)
+            elif isinstance(raw, str):
+                values.append(raw)
+        workspace_root = source.get("workspace_root") or source.get("workspaceRoot")
+        if workspace_root:
+            values.append(workspace_root)
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    attachments = message.get("attachments")
+    if isinstance(attachments, list):
+        for item in attachments:
+            if isinstance(item, dict):
+                for key in ("path", "name", "filename"):
+                    if item.get(key):
+                        values.append(item[key])
+    return [str(item) for item in values if str(item or "").strip()]
 
 
 def _has_explicit_selected_tools(input_data: dict[str, Any]) -> bool:

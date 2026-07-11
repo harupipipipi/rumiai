@@ -480,7 +480,14 @@ def test_sandbox_exec_enforces_template_secret_policy_before_guest_agent(tmp_pat
     guest = FakeGuestAgent()
     provider = FakeRuntimeProvider(
         provider_id="fake-runtime",
-        capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"},
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
         guest_agent=guest,
     )
     registry = ProviderRegistry()

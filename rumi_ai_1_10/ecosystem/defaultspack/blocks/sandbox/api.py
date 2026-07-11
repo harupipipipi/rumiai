@@ -46,11 +46,11 @@ from ecosystem.defaultspack.backend.sandbox.lifecycle_sweeper import LifecycleSw
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers import (
+    CloudflareSandboxBridgeProvider,
     DockerProvider,
     LinuxNativeProvider,
     MacLimaProvider,
     WindowsWslProvider,
-    CloudflareSandboxBridgeProvider,
 )
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
@@ -562,12 +562,20 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], contex
     access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
     rules = payload.get("rules")
     provisioning = payload.get("provisioning") if isinstance(payload.get("provisioning"), dict) else None
+    starter = str(payload.get("starter") or "")
     created = service.manager.create(
         image="ubuntu:22.04",
         display=display,
         provider_id=str(payload.get("provider_id") or "auto"),
         name=str(payload.get("name") or ("Ubuntu Desktop" if display else "Sandbox")),
-        template_id=str(payload.get("template_id") or _default_create_template_id(display=display, provider_id=payload.get("provider_id"))),
+        template_id=str(
+            payload.get("template_id")
+            or _default_create_template_id(
+                display=display,
+                provider_id=payload.get("provider_id"),
+                starter=payload.get("starter"),
+            )
+        ),
         width=_positive_int(resolution.get("width"), 1440),
         height=_positive_int(resolution.get("height"), 900),
         role=str(payload.get("role") or ""),
@@ -580,8 +588,11 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], contex
         assigned_agent_id=str(payload.get("assigned_agent") or payload.get("assigned_agent_id") or ""),
         workspace_id=str(payload.get("workspace_id") or ""),
         workspace_access=str(payload.get("workspace_access") or ""),
-        starter=str(payload.get("starter") or ""),
+        starter=starter,
         browser_url=str(payload.get("browser_url") or ""),
+        network_approved=display
+        and starter.strip().lower() in {"browser", "browser_url"}
+        and _context_has_server_approval(context),
     )
     if created.get("ok") is not True:
         return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))
@@ -672,11 +683,36 @@ def _sandbox_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, 
 
 
 def _desktop_list(service: _SandboxApiService) -> list[dict[str, Any]]:
-    return [
-        _desktop_payload(service, item)
-        for item in service.manager.list_instances()
-        if item.get("display") is True
-    ]
+    desktops: list[dict[str, Any]] = []
+    for item in service.manager.list_instances():
+        if not isinstance(item, dict) or item.get("display") is not True:
+            continue
+        try:
+            desktops.append(_desktop_payload(service, item))
+        except Exception:
+            desktops.append(_desktop_payload_error(item))
+    return sorted(desktops, key=_desktop_list_sort_key)
+
+
+def _desktop_list_sort_key(desktop: dict[str, Any]) -> tuple[int, float, str]:
+    status = str(desktop.get("status") or "").strip().lower()
+    if status == "running":
+        status_rank = 0
+    elif status in {"ready", "busy", "starting", "pending"}:
+        status_rank = 1
+    elif status in {"stopped", "paused"}:
+        status_rank = 2
+    elif status in {"destroyed", "deleted"}:
+        status_rank = 4
+    elif status == "failed":
+        status_rank = 5
+    else:
+        status_rank = 3
+    try:
+        updated_rank = -float(desktop.get("updated_at") or desktop.get("created_at") or 0)
+    except (TypeError, ValueError):
+        updated_rank = 0.0
+    return (status_rank, updated_rank, str(desktop.get("name") or desktop.get("seat_id") or ""))
 
 
 def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
@@ -1009,9 +1045,29 @@ def _sandbox_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _desktop_seat_id(item: dict[str, Any]) -> str:
+    return str(item.get("sandbox_id") or item.get("seat_id") or "").strip()
+
+
+def _desktop_id(item: dict[str, Any], *, seat_id: str) -> str:
+    raw_id = item.get("id")
+    if raw_id is not None:
+        desktop_id = str(raw_id).strip()
+        if desktop_id:
+            return desktop_id
+    return seat_id
+
+
 def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[str, Any]:
-    seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
+    seat_id = _desktop_seat_id(item)
+    desktop_id = _desktop_id(item, seat_id=seat_id)
     desktop = item.get("desktop_spec") if isinstance(item.get("desktop_spec"), dict) else {}
+    opaque = item.get("provider_opaque_state") if isinstance(item.get("provider_opaque_state"), dict) else {}
+    metadata = opaque.get("metadata") if isinstance(opaque.get("metadata"), dict) else {}
+    startup = _desktop_startup_payload(opaque=opaque, metadata=metadata)
+    startup_status = opaque.get("startup_status")
+    if startup_status is None and isinstance(metadata.get("startup_status"), dict):
+        startup_status = metadata.get("startup_status")
     state = str(item.get("state") or item.get("status") or "unknown")
     frame = service.frame_cache.last_metadata(seat_id)
     lease = service.lease_manager.active_lease(seat_id)
@@ -1022,6 +1078,7 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     network = item.get("network_policy") if isinstance(item.get("network_policy"), dict) else {}
     network_mode = str(network.get("mode") or "off")
     return {
+        "id": desktop_id,
         "seat_id": seat_id,
         "sandbox_id": seat_id,
         "name": item.get("name") or "Ubuntu Desktop",
@@ -1029,6 +1086,12 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
         "provider_id": item.get("provider_id"),
         "provider_label": _provider_label(str(item.get("provider_id") or "")),
         "template_id": item.get("template_id") or "desktop.ubuntu",
+        "startup": startup,
+        "desktop_spec": _desktop_spec_payload(desktop),
+        "metadata": {
+            "startup": startup,
+            "startup_status": _jsonable(startup_status) if isinstance(startup_status, dict) else None,
+        },
         "resolution": {
             "width": _positive_int(desktop.get("width"), 1440),
             "height": _positive_int(desktop.get("height"), 900),
@@ -1083,6 +1146,67 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     }
 
 
+def _desktop_startup_payload(*, opaque: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
+    startup = opaque.get("startup") if isinstance(opaque.get("startup"), dict) else None
+    if startup is None and isinstance(metadata.get("startup"), dict):
+        startup = metadata.get("startup")
+    if not isinstance(startup, dict):
+        return None
+    payload: dict[str, Any] = {}
+    starter = str(startup.get("starter") or "").strip()
+    if starter:
+        payload["starter"] = starter
+    browser_url = str(startup.get("browser_url") or "").strip()
+    if browser_url:
+        payload["browser_url"] = browser_url
+    return payload or None
+
+
+def _desktop_spec_payload(desktop: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(desktop, dict) or not desktop:
+        return None
+    return {
+        "enabled": bool(desktop.get("enabled")),
+        "width": _positive_int(desktop.get("width"), 1440),
+        "height": _positive_int(desktop.get("height"), 900),
+        "display_backend": desktop.get("display_backend"),
+        "preset": desktop.get("preset"),
+    }
+
+
+def _desktop_payload_error(item: dict[str, Any]) -> dict[str, Any]:
+    seat_id = _desktop_seat_id(item)
+    desktop_id = _desktop_id(item, seat_id=seat_id)
+    provider_id = str(item.get("provider_id") or "")
+    return {
+        "id": desktop_id,
+        "seat_id": seat_id,
+        "sandbox_id": seat_id,
+        "name": item.get("name") or "Desktop",
+        "status": "failed",
+        "provider_id": provider_id,
+        "provider_label": _provider_label(provider_id),
+        "template_id": item.get("template_id") or "desktop.ubuntu",
+        "startup": None,
+        "desktop_spec": None,
+        "metadata": {"startup": None, "startup_status": None},
+        "resolution": {"width": 1440, "height": 900},
+        "frame": None,
+        "assigned_agent": item.get("assigned_agent_id"),
+        "control": {"holder": "none", "lease_expires_at": None},
+        "isolation": _provider_isolation(provider_id, False),
+        "network_policy": {"summary": "unknown", "default": "unknown", "allowed": [], "approval_required": False},
+        "workspace": {"workspace_id": None, "label": None, "access": "none"},
+        "role": None,
+        "rules": {"role": None, "instructions": "", "rule_ids": []},
+        "access_policy": {"mode": "owner_only", "owner_id": None, "key_required": False, "request_required": False, "key_hint": None, "link_enabled": False},
+        "provisioning": {"packages": [], "apps": [], "mcp_servers": [], "status": "unknown"},
+        "last_error": "Desktop state could not be serialized.",
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
 def _desktop_input_payload(result: dict[str, Any], *, seat_id: str, actor: str) -> dict[str, Any]:
     rules = result.get("desktop_rules") if isinstance(result.get("desktop_rules"), dict) else {}
     return {
@@ -1122,7 +1246,7 @@ def _default_provider_id() -> str:
     return "linux_native"
 
 
-def _default_create_template_id(*, display: bool, provider_id: Any = None) -> str:
+def _default_create_template_id(*, display: bool, provider_id: Any = None, starter: Any = None) -> str:
     if not display:
         return "tool.ephemeral"
     clean_provider_id = str(provider_id or "auto").strip().lower()
@@ -1130,6 +1254,8 @@ def _default_create_template_id(*, display: bool, provider_id: Any = None) -> st
         clean_provider_id in {"", "auto"} and _default_provider_id() == "linux_native"
     ):
         return "desktop.linux_native"
+    if str(starter or "").strip().lower() in {"browser", "browser_url"}:
+        return "desktop.browser"
     return "desktop.ubuntu"
 
 
@@ -1172,27 +1298,14 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
         }
     if provider_id == "cloudflare_sandbox_bridge":
         return {
-            "mode": "cloudflare_sandbox_bridge" if ready else "cloudflare_sandbox_bridge_pending",
-            "vm": False,
+            "mode": "cloudflare_container" if ready else "cloudflare_pending",
             "container": True,
-            "remote_provider": True,
-            "security_boundary": True,
-            "host_process_namespace": False,
-            "host_filesystem_shared": False,
-            "host_network_shared": False,
             "sandbox_workspace_shared": False,
             "sandbox_process_namespace_shared": False,
             "sandbox_network_namespace_shared": False,
-            "sandbox_cgroup_scope": "cloudflare_sandbox_container",
-            "sandbox_operation_binding": "provider_instance_id",
-            "process_cleanup": "provider_managed",
-            "untrusted_pack_boundary": True,
-            "pack_isolation_boundary": "cloudflare_sandbox_container",
-            "summary": "Cloudflare Sandbox Bridge delegates sandbox lifecycle, exec, and files to a configured bridge endpoint. It is not a local desktop provider.",
-            "warnings": [
-                "Cloudflare Sandbox Bridge readiness depends on RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL and bridge health.",
-                "Desktop, host workspace, terminal, browser, and computer-control surfaces remain local-provider only.",
-            ],
+            "sandbox_cgroup_scope": "cloudflare_container",
+            "sandbox_operation_binding": "bridge_sandbox_id",
+            "summary": "Runs supported argv/file operations in Cloudflare Containers through the Sandbox Bridge. PC-local desktop, terminal, browser, and workspace tools are not uploaded.",
         }
     if provider_id == "mac_lima":
         return {
@@ -1358,7 +1471,11 @@ def _jsonable(value: Any) -> Any:
 
 
 def _context_has_server_approval(context: dict[str, Any]) -> bool:
-    return internal_tool_decision_allows(context) or tool_server_approval_context_is_internal(context)
+    return (
+        internal_tool_decision_allows(context)
+        or tool_server_approval_context_is_internal(context)
+        or (isinstance(context, dict) and context.get("_tool_server_approved") is True)
+    )
 
 
 def _approved_secret_ids_from_context(context: dict[str, Any]) -> list[str]:

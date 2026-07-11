@@ -32,7 +32,7 @@ def test_cloudflare_sandbox_bridge_wrangler_config_matches_bridge_requirements()
 
     assert config["name"] == "rumi-cloudflare-sandbox-bridge"
     assert config["main"] == "src/index.ts"
-    assert config["compatibility_date"] == "2026-07-01"
+    assert config["compatibility_date"] == "2026-07-02"
     assert config["compatibility_flags"] == ["nodejs_compat"]
     assert config["containers"] == [
         {
@@ -65,19 +65,34 @@ def test_cloudflare_sandbox_bridge_worker_uses_official_bridge_wrapper() -> None
     assert "<your-token>" not in source
 
 
+def test_cloudflare_sandbox_bridge_worker_enforces_public_v1_auth() -> None:
+    source = (SCAFFOLD / "src" / "index.ts").read_text(encoding="utf-8")
+
+    assert "const bridgeHandler = bridge(" in source
+    assert "isBridgeApiRoute(url.pathname)" in source
+    assert 'pathname === "/v1" || pathname.startsWith("/v1/")' in source
+    assert "env.SANDBOX_API_KEY?.trim()" in source
+    assert 'request.headers.get("Authorization")' in source
+    assert 'crypto.subtle.digest("SHA-256"' in source
+    assert '"WWW-Authenticate": "Bearer"' in source
+    assert 'code: "sandbox_api_key_missing"' in source
+    assert 'code: "unauthorized"' in source
+    assert source.index("const authFailure = await authenticateBridgeRequest") < source.index("return bridgeHandler.fetch?.")
+
+
 def test_cloudflare_sandbox_bridge_package_pins_known_bridge_runtime() -> None:
     package = json.loads((SCAFFOLD / "package.json").read_text(encoding="utf-8"))
 
     assert package["private"] is True
-    assert package["dependencies"]["@cloudflare/sandbox"] == "0.12.3"
-    assert package["devDependencies"]["wrangler"] == "4.107.0"
+    assert package["dependencies"]["@cloudflare/sandbox"] == "0.12.2"
+    assert package["devDependencies"]["wrangler"] == "4.106.0"
     assert package["scripts"]["deploy"] == "wrangler deploy"
 
 
 def test_cloudflare_sandbox_bridge_dockerfile_uses_matching_base_image() -> None:
     dockerfile = (SCAFFOLD / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "FROM docker.io/cloudflare/sandbox:0.12.3" in dockerfile
+    assert "FROM docker.io/cloudflare/sandbox:0.12.2" in dockerfile
     assert "COPY " not in dockerfile
 
 
@@ -89,6 +104,7 @@ def test_cloudflare_sandbox_bridge_readme_states_pages_and_tool_limits() -> None
     assert "named Cloudflare Tunnel plus a DNS hostname" in readme
     assert "does not upload or replace PC-local browser" in readme
     assert "Workers Paid plan" in readme
+    assert "./node_modules/.bin/wrangler" in readme
 
 
 def _load_jsonc(path: Path) -> dict[str, object]:

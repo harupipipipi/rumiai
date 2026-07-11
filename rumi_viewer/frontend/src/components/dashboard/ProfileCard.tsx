@@ -54,19 +54,21 @@ export function ProfileCard({
           </div>
 
           <Popover>
-            <PopoverTrigger className="rounded-md p-1.5 hover:bg-bg-hover text-text-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
+            <PopoverTrigger className="rounded-md p-1.5 hover:bg-bg-hover text-text-muted transition-colors">
               <MoreHorizontal className="h-4 w-4" />
               <span className="sr-only">Profile actions</span>
             </PopoverTrigger>
             <PopoverContent className="w-40" align="right">
               <div className="flex flex-col py-1">
                 <button
+                  role="menuitem"
                   onClick={() => onEdit(profile.profile_id)}
                   className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-bg-hover transition-colors rounded-md text-left text-text-main"
                 >
                   <Edit2 className="h-3.5 w-3.5" /> Edit
                 </button>
                 <button
+                  role="menuitem"
                   onClick={() => onActivate(profile.profile_id)}
                   disabled={isActive}
                   className={cn(
@@ -78,6 +80,7 @@ export function ProfileCard({
                   {isActive ? "Active" : "Set Active"}
                 </button>
                 <button
+                  role="menuitem"
                   onClick={() => onDuplicate(profile.profile_id)}
                   className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-bg-hover transition-colors rounded-md text-left text-text-main"
                 >
@@ -85,6 +88,7 @@ export function ProfileCard({
                 </button>
                 <div className="my-1 border-t border-border" />
                 <button
+                  role="menuitem"
                   onClick={() => onDelete(profile.profile_id, profile.name)}
                   className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 transition-colors rounded-md text-left"
                 >

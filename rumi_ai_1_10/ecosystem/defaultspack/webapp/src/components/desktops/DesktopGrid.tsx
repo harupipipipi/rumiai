@@ -11,6 +11,7 @@ type DesktopGridProps = {
   selectedSeatId: string | null;
   density: DesktopDensity;
   leaseSeatId: string | null;
+  emptyReason?: "backend" | "filter";
   accessKeys?: Record<string, string>;
   controlBusy?: boolean;
   onSelect: (seatId: string) => void;
@@ -45,6 +46,7 @@ export function DesktopGrid({
   selectedSeatId,
   density,
   leaseSeatId,
+  emptyReason = "backend",
   accessKeys = {},
   controlBusy = false,
   onSelect,
@@ -73,8 +75,12 @@ export function DesktopGrid({
       <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
         <div className="max-w-sm px-5 text-center">
           <Monitor size={28} className="mx-auto text-zinc-600" />
-          <p className="mt-3 text-sm font-semibold text-zinc-200">No desktop seats</p>
-          <p className="mt-1 text-xs text-zinc-500">The backend returned an empty desktop list.</p>
+          <p className="mt-3 text-sm font-semibold text-zinc-200">
+            {emptyReason === "filter" ? "No matching desktop seats" : "No desktop seats"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {emptyReason === "filter" ? "Desktop seats exist outside the current filter." : "The backend returned an empty desktop list."}
+          </p>
         </div>
       </div>
     );

@@ -343,6 +343,65 @@
       }
     },
     {
+      "id": "opencode-go/mimo-v2.5-free",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "opencode-go",
+      "model_id": "mimo-v2.5-free",
+      "display_name": "MiMo V2.5 Free compatibility alias via OpenCode Go",
+      "type": "chat",
+      "enabled": true,
+      "priority": 14,
+      "routing": {
+        "default_for": [
+          "chat"
+        ]
+      },
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
+      },
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
+      "metadata": {
+        "transport": "openai_chat_completions",
+        "endpoint_path": "/chat/completions",
+        "source": "opencode_go_compatibility_alias",
+        "alias_of": "opencode-go/mimo-v2.5",
+        "openai_model": "mimo-v2.5",
+        "compatibility_note": "Legacy id maps to OpenCode Go mimo-v2.5; the real free model is opencode-zen/mimo-v2.5-free.",
+        "tool_calls_verified": true,
+        "reasoning_effort_verified": true
+      }
+    },
+    {
       "id": "opencode-go/minimax-m3",
       "category": "llm_model",
       "version": "1",

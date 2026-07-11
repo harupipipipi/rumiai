@@ -1,0 +1,46 @@
+{
+  "function_id": "coding_change_request_create",
+  "description": "Create a Rumi Review change request snapshot.",
+  "tags": [
+    "coding",
+    "change_request"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.change.request.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.change_request_create",
+    "defaultspack.coding.change_request_create",
+    "defaults.coding.change.request.create",
+    "defaultspack.coding.change.request.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.change_request.collection",
+      "default_args": {
+        "_method": "POST"
+      }
+    }
+  }
+}

@@ -36,6 +36,47 @@ def _add_messages(store, conversation_id, count):
     return messages
 
 
+def test_chat_store_reassigns_stale_append_sequence_numbers(tmp_path, monkeypatch):
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    first = store.add_message(conversation["id"], {"role": "user", "content": "first"})
+    second = store.add_message(conversation["id"], {"role": "user", "content": "second"})
+
+    assistant = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": "reply to first",
+            "parent_id": first["id"],
+            "sequence_number": first["sequence_number"] + 1,
+        },
+    )
+
+    assert second["sequence_number"] == 2
+    assert assistant["sequence_number"] == 3
+    assert [message["sequence_number"] for message in store.get_conversation(conversation["id"])["messages"]] == [1, 2, 3]
+
+
+def test_chat_store_normalizes_duplicate_sequence_numbers_on_load(tmp_path, monkeypatch):
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    first = store.add_message(conversation["id"], {"role": "user", "content": "first"})
+    store.add_message(conversation["id"], {"role": "assistant", "content": "first reply"})
+    store.add_message(conversation["id"], {"role": "user", "content": "second"})
+    storage_path = Path(os.environ["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"])
+    payload = json.loads(storage_path.read_text(encoding="utf-8"))
+    for message in payload["conversations"][conversation["id"]]["messages"]:
+        if message["id"] != first["id"]:
+            message["sequence_number"] = 2
+    storage_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    ChatStore = type(store)
+    ChatStore._instance = None
+
+    reloaded = ChatStore().get_conversation(conversation["id"])
+
+    assert [message["sequence_number"] for message in reloaded["messages"]] == [1, 2, 3]
+
+
 def test_chat_store_filters_and_sorts_pinned_conversations(tmp_path, monkeypatch):
     from blocks.chat.list_conversations import run as list_conversations
 

@@ -78,8 +78,8 @@ DEFAULT_WSL_ROOTFS_URLS = {
 }
 GUEST_APP_PACKAGE_MAP = {
     "ca-certificates": ("ca-certificates",),
-    "chromium": ("chromium-browser",),
-    "chromium-browser": ("chromium-browser",),
+    "chromium": ("google-chrome-stable",),
+    "chromium-browser": ("google-chrome-stable",),
     "firefox": ("firefox",),
     "google-chrome": ("google-chrome-stable",),
     "google-chrome-stable": ("google-chrome-stable",),
@@ -118,6 +118,11 @@ class GuestCommandResult:
 CommandRunner = Callable[[Sequence[str], str | None, float | None], GuestCommandResult]
 RootfsDownloader = Callable[[str, str], None]
 ChecksumFetcher = Callable[[str], str]
+
+
+def _wsl_distribution_names(output: str) -> tuple[str, ...]:
+    normalized = str(output or "").replace("\x00", "").replace("\ufeff", "")
+    return tuple(line.strip() for line in normalized.splitlines() if line.strip())
 
 
 class ManagedUbuntuProvider:
@@ -298,6 +303,7 @@ class ManagedUbuntuProvider:
         desktop = spec.template.desktop
         width = int(desktop.width if desktop else 1440)
         height = int(desktop.height if desktop else 900)
+        network_approved = bool(spec.metadata.get("network_approved"))
         opaque = {
             "command_path": command_path,
             "runtime_name": self._runtime_name,
@@ -306,10 +312,11 @@ class ManagedUbuntuProvider:
             "width": width,
             "height": height,
             "desktop_enabled": desktop is not None and desktop.enabled,
-            "display": self._allocate_guest_display() if desktop is not None and desktop.enabled else "",
+            "display": self._allocate_guest_display(command_path) if desktop is not None and desktop.enabled else "",
             "workspace_binding": model_to_dict(spec.workspace_binding),
             "network_policy": model_to_dict(spec.template.network),
-            "network_disabled": _guest_network_disabled(spec.template.network),
+            "network_approved": network_approved,
+            "network_disabled": _guest_network_disabled(spec.template.network) and not network_approved,
             "resource_limits": model_to_dict(spec.template.resources),
             "template_packages": [model_to_dict(package) for package in spec.template.packages],
             "desktop_provisioning": spec.metadata.get("desktop_provisioning") or {},
@@ -403,6 +410,7 @@ class ManagedUbuntuProvider:
     def connect_agent(self, instance: ProviderInstance) -> "ManagedUbuntuGuestAgent":
         command_path = str(instance.opaque_state.get("command_path") or self._require_ready(MANAGED_UBUNTU_CAPABILITIES))
         resources = instance.opaque_state.get("resource_limits") if isinstance(instance.opaque_state.get("resource_limits"), Mapping) else {}
+        display = self._client_display(command_path, instance)
         return ManagedUbuntuGuestAgent(
             provider_id=self.provider_id,
             provider_instance_id=instance.provider_instance_id,
@@ -410,7 +418,7 @@ class ManagedUbuntuProvider:
             command_prefix=self._guest_prefix(command_path),
             runner=self._runner,
             workspace_dir=_instance_workspace_dir_for(instance),
-            display=str(instance.opaque_state.get("display") or DEFAULT_DISPLAY),
+            display=display,
             width=_positive_int(instance.opaque_state.get("width"), 1440),
             height=_positive_int(instance.opaque_state.get("height"), 900),
             memory_mb=_optional_positive_int(resources.get("memory_mb")),
@@ -420,6 +428,17 @@ class ManagedUbuntuProvider:
             timeout_ms=_optional_positive_int(resources.get("timeout_ms")),
             network_disabled=_instance_network_disabled(instance),
         )
+
+    def _client_display(self, command_path: str, instance: ProviderInstance) -> str:
+        fallback = str(instance.opaque_state.get("display") or DEFAULT_DISPLAY)
+        result = self._guest_shell(
+            command_path,
+            f"cat {_runtime_dir(instance.provider_instance_id)}/display.env 2>/dev/null",
+            timeout=5,
+            check=False,
+        )
+        candidate = result.stdout.strip()
+        return candidate or fallback
 
     def _command_path(self) -> str | None:
         if self._configured_command_path:
@@ -544,13 +563,15 @@ class ManagedUbuntuProvider:
         result = self._guest_shell(command_path, _instance_exists_script(provider_instance_id, workspace_dir), timeout=10, check=False)
         return result.returncode == 0
 
-    def _allocate_guest_display(self) -> str:
+    def _allocate_guest_display(self, command_path: str | None = None) -> str:
         used = {
             display
             for instance in self._instances.values()
             for display in [_normalized_guest_display(instance.opaque_state.get("display"))]
             if display
         }
+        if command_path:
+            used.update(self._guest_used_displays(command_path))
         for number in range(GUEST_DISPLAY_MIN, GUEST_DISPLAY_MAX + 1):
             display = f":{number}"
             if display not in used:
@@ -561,6 +582,17 @@ class ManagedUbuntuProvider:
             status_code=503,
             details={"display_min": GUEST_DISPLAY_MIN, "display_max": GUEST_DISPLAY_MAX},
         )
+
+    def _guest_used_displays(self, command_path: str) -> set[str]:
+        result = self._guest_shell(command_path, _guest_used_displays_script(), timeout=5, check=False)
+        if result.returncode != 0:
+            return set()
+        return {
+            display
+            for line in result.stdout.splitlines()
+            for display in [_normalized_guest_display(line)]
+            if display
+        }
 
     def _setup_message(self, *, launcher_missing: bool = False, missing_capabilities: Sequence[str] = ()) -> str:
         if missing_capabilities:
@@ -760,7 +792,9 @@ class WindowsWslProvider(ManagedUbuntuProvider):
 
     def _guest_exists(self, command_path: str) -> bool:
         result = self._run((command_path, "-l", "-q"), timeout=10)
-        return result.returncode == 0 and self._runtime_name.casefold() in {line.strip().casefold() for line in result.stdout.splitlines()}
+        return result.returncode == 0 and self._runtime_name.casefold() in {
+            name.casefold() for name in _wsl_distribution_names(result.stdout)
+        }
 
     def _ensure_guest(self, command_path: str) -> None:
         if self._guest_exists(command_path):
@@ -792,6 +826,23 @@ class WindowsWslProvider(ManagedUbuntuProvider):
 
     def _guest_prefix(self, command_path: str) -> tuple[str, ...]:
         return (command_path, "-d", self._runtime_name, "--")
+
+    def _guest_shell(
+        self,
+        command_path: str,
+        script: str,
+        *,
+        input_text: str | None = None,
+        timeout: float | None = None,
+        check: bool = True,
+    ) -> GuestCommandResult:
+        return self._guest_command(
+            command_path,
+            ("bash", "-lc", str(script or "")),
+            input_text=input_text,
+            timeout=timeout,
+            check=check,
+        )
 
     def _version_command(self, command_path: str) -> tuple[str, ...]:
         return (command_path, "--version")
@@ -1369,6 +1420,7 @@ def _desktop_start_script(
         f"RUMI_NETWORK_DISABLED={network_flag!r}\n"
         f"RUMI_SANDBOX_INSTANCE={shlex.quote(provider_instance_id)}\n"
         f"RUMI_SANDBOX_WORKSPACE={quoted_workspace}\n"
+        "DISPLAY_NUM=\"${DISPLAY_ID#:}\"\n"
         "rumi_run() {\n"
         "  if [ \"$RUMI_NETWORK_DISABLED\" = '1' ]; then\n"
         "    command -v unshare >/dev/null 2>&1 || { echo 'unshare is required for sandbox network policy' >&2; return 126; }\n"
@@ -1378,18 +1430,94 @@ def _desktop_start_script(
         "  fi\n"
         "}\n"
         "if [ \"$RUMI_NETWORK_DISABLED\" = '1' ]; then rumi_run true; fi\n"
-        f"if [ ! -f {runtime_dir}/xvfb.pid ] || ! kill -0 $(cat {runtime_dir}/xvfb.pid) >/dev/null 2>&1; then\n"
-        f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" Xvfb {display} -screen 0 {width}x{height}x24 -nolisten tcp >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
-        "  sleep 0.5\n"
+        "RUMI_X11_TCP=0\n"
+        "mkdir -p /tmp/.X11-unix\n"
+        "chmod 1777 /tmp/.X11-unix 2>/dev/null || RUMI_X11_TCP=1\n"
+        "XVFB_TRANSPORT_ARGS='-nolisten tcp'\n"
+        "CLIENT_DISPLAY=\"$DISPLAY_ID\"\n"
+        "if [ \"$RUMI_X11_TCP\" = '1' ]; then\n"
+        "  XVFB_TRANSPORT_ARGS='-nolisten local -listen tcp'\n"
+        "  CLIENT_DISPLAY=\"127.0.0.1:${DISPLAY_NUM}.0\"\n"
         "fi\n"
-        f"if [ ! -f {runtime_dir}/openbox.pid ] || ! kill -0 $(cat {runtime_dir}/openbox.pid) >/dev/null 2>&1; then\n"
-        f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
+        "run_ui() {\n"
+        "  if [ \"$RUMI_X11_TCP\" = '1' ] && [ \"$RUMI_NETWORK_DISABLED\" != '1' ]; then \"$@\"; else rumi_run \"$@\"; fi\n"
+        "}\n"
+        "run_display_service() {\n"
+        "  if [ \"$RUMI_X11_TCP\" = '1' ]; then \"$@\"; else rumi_run \"$@\"; fi\n"
+        "}\n"
+        "run_detached() {\n"
+        "  pidfile=\"$1\"\n"
+        "  shift\n"
+        "  run_ui setsid -f sh -c 'echo $$ > \"$1\"; shift; exec \"$@\"' rumi-detached \"$pidfile\" \"$@\"\n"
+        "}\n"
+        "rumi_process_matches_instance() {\n"
+        "  pid=\"$1\"\n"
+        "  command_name=\"$2\"\n"
+        "  case \"$pid\" in ''|*[!0-9]*) return 1;; esac\n"
+        "  kill -0 \"$pid\" >/dev/null 2>&1 || return 1\n"
+        "  [ \"$(cat \"/proc/$pid/comm\" 2>/dev/null || true)\" = \"$command_name\" ] || return 1\n"
+        "  tr '\\0' '\\n' < \"/proc/$pid/environ\" 2>/dev/null | grep -qx \"RUMI_SANDBOX_INSTANCE=$RUMI_SANDBOX_INSTANCE\"\n"
+        "}\n"
+        "rumi_pidfile_alive() {\n"
+        "  pidfile=\"$1\"\n"
+        "  command_name=\"$2\"\n"
+        "  [ -f \"$pidfile\" ] || return 1\n"
+        "  pid=\"$(cat \"$pidfile\" 2>/dev/null || true)\"\n"
+        "  rumi_process_matches_instance \"$pid\" \"$command_name\"\n"
+        "}\n"
+        "rumi_find_instance_pid() {\n"
+        "  command_name=\"$1\"\n"
+        "  for envfile in /proc/[0-9]*/environ; do\n"
+        "    [ -r \"$envfile\" ] || continue\n"
+        "    pid=\"${envfile#/proc/}\"\n"
+        "    pid=\"${pid%/environ}\"\n"
+        "    rumi_process_matches_instance \"$pid\" \"$command_name\" || continue\n"
+        "    echo \"$pid\"\n"
+        "    return 0\n"
+        "  done\n"
+        "  return 1\n"
+        "}\n"
+        "if [ ! -s /etc/machine-id ] && [ -w /etc ]; then\n"
+        "  RUMI_MACHINE_ID=\"$(tr -d '-' < /proc/sys/kernel/random/uuid | head -c 32)\"\n"
+        "  if [ -n \"$RUMI_MACHINE_ID\" ]; then printf '%s' \"$RUMI_MACHINE_ID\" > /etc/machine-id; fi\n"
+        "fi\n"
+        f"echo \"$CLIENT_DISPLAY\" > {runtime_dir}/display.env\n"
+        "if [ -n \"$DISPLAY_NUM\" ] && [ ! -S \"/tmp/.X11-unix/X$DISPLAY_NUM\" ]; then rm -f \"/tmp/.X${DISPLAY_NUM}-lock\"; fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/xvfb.pid Xvfb; then\n"
+        f"  existing_xvfb=\"$(rumi_find_instance_pid Xvfb || true)\"\n"
+        f"  if [ -n \"$existing_xvfb\" ]; then echo \"$existing_xvfb\" > {runtime_dir}/xvfb.pid; fi\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/xvfb.pid Xvfb; then\n"
+        f"  run_display_service setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" Xvfb {display} -screen 0 {width}x{height}x24 $XVFB_TRANSPORT_ARGS >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
+        "  sleep 0.5\n"
+        f"  launched_xvfb=\"$(rumi_find_instance_pid Xvfb || true)\"\n"
+        f"  if [ -n \"$launched_xvfb\" ]; then echo \"$launched_xvfb\" > {runtime_dir}/xvfb.pid; fi\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/xvfb.pid Xvfb; then\n"
+        "  echo 'Desktop Xvfb failed to stay running.' >&2\n"
+        f"  cat {runtime_dir}/xvfb.log >&2 || true\n"
+        "  exit 126\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/openbox.pid openbox; then\n"
+        f"  existing_openbox=\"$(rumi_find_instance_pid openbox || true)\"\n"
+        f"  if [ -n \"$existing_openbox\" ]; then echo \"$existing_openbox\" > {runtime_dir}/openbox.pid; fi\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/openbox.pid openbox; then\n"
+        f"  run_display_service setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY=\"$CLIENT_DISPLAY\" openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
+        "  sleep 0.2\n"
+        f"  launched_openbox=\"$(rumi_find_instance_pid openbox || true)\"\n"
+        f"  if [ -n \"$launched_openbox\" ]; then echo \"$launched_openbox\" > {runtime_dir}/openbox.pid; fi\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/openbox.pid openbox; then\n"
+        "  echo 'Desktop openbox failed to stay running.' >&2\n"
+        f"  cat {runtime_dir}/openbox.log >&2 || true\n"
+        "  exit 126\n"
         "fi\n"
     )
     if starter == "terminal":
         script += (
             f"if command -v xterm >/dev/null 2>&1; then\n"
-            f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd \"$1\"; exec bash' rumi-terminal {quoted_workspace} >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
+            f"  run_detached {runtime_dir}/starter-terminal.pid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY=\"$CLIENT_DISPLAY\" xterm -title 'Rumi Desktop' -e bash -lc 'cd \"$1\"; exec bash' rumi-terminal {quoted_workspace} >{runtime_dir}/starter-terminal.log 2>&1\n"
             "else\n"
             f"  echo 'xterm is not installed; terminal starter skipped' >{runtime_dir}/starter-terminal.log\n"
             "fi\n"
@@ -1410,17 +1538,45 @@ def _desktop_start_script(
                 "if [ -n \"$BROWSER_BIN\" ]; then\n"
                 "  mkdir -p " + runtime_dir + "/browser-profile\n"
                 "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
-                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    run_detached {runtime_dir}/starter-browser.pid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY=\"$CLIENT_DISPLAY\" \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1\n"
                 "  elif [ -n \"$BROWSER_URL\" ]; then\n"
-                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    run_detached {runtime_dir}/starter-browser.pid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY=\"$CLIENT_DISPLAY\" \"$BROWSER_BIN\" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1\n"
                 "  else\n"
-                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    run_detached {runtime_dir}/starter-browser.pid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY=\"$CLIENT_DISPLAY\" \"$BROWSER_BIN\" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile >{runtime_dir}/starter-browser.log 2>&1\n"
                 "  fi\n"
                 "else\n"
                 f"  echo 'No browser executable found; browser starter skipped' >{runtime_dir}/starter-browser.log\n"
                 "fi\n"
             )
     return script
+
+
+def _guest_used_displays_script() -> str:
+    return (
+        "set +e\n"
+        "rumi_emit_display() {\n"
+        "  value=\"$1\"\n"
+        "  value=\"${value#:}\"\n"
+        "  value=\"${value#.X}\"\n"
+        "  value=\"${value#X}\"\n"
+        "  value=\"${value%-lock}\"\n"
+        "  value=\"${value%%.*}\"\n"
+        "  case \"$value\" in ''|*[!0-9]*) return 0;; esac\n"
+        "  echo \":$value\"\n"
+        "}\n"
+        "for path in /tmp/.X11-unix/X* /tmp/.X[0-9]*-lock; do\n"
+        "  [ -e \"$path\" ] || continue\n"
+        "  rumi_emit_display \"$(basename \"$path\")\"\n"
+        "done\n"
+        "for cmdline in /proc/[0-9]*/cmdline; do\n"
+        "  [ -r \"$cmdline\" ] || continue\n"
+        "  args=\"$(tr '\\0' ' ' < \"$cmdline\" 2>/dev/null || true)\"\n"
+        "  case \"$args\" in *Xvfb*) ;; *) continue;; esac\n"
+        "  for arg in $args; do\n"
+        "    case \"$arg\" in :[0-9]*|:[0-9]*.*) rumi_emit_display \"$arg\";; esac\n"
+        "  done\n"
+        "done | sort -u\n"
+    )
 
 
 def _guest_provisioning_script(provider_instance_id: str, workspace_dir: str, apt_packages: Sequence[str], mcp_servers: Sequence[str]) -> str:
@@ -1449,7 +1605,8 @@ def _guest_provisioning_script(provider_instance_id: str, workspace_dir: str, ap
             "      wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | $RUMI_SUDO tee /usr/share/keyrings/google-linux-signing-keyring.gpg >/dev/null\n"
             "      echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main' | $RUMI_SUDO tee /etc/apt/sources.list.d/google-chrome.list >/dev/null\n"
             "    else\n"
-            "      RUMI_APT_PACKAGES=\"$(printf '%s\n' \"$RUMI_APT_PACKAGES\" | sed 's/google-chrome-stable/chromium-browser/g')\"\n"
+            "      echo 'google-chrome-stable provisioning requires amd64; chromium-browser apt package is not a usable fallback in managed Ubuntu' >&2\n"
+            "      exit 1\n"
             "    fi\n"
             "  fi\n"
             "  $RUMI_SUDO apt-get update\n"
@@ -1577,7 +1734,47 @@ def _instance_destroy_script(provider_instance_id: str, workspace_dir: str) -> s
 
 def _desktop_running_script(provider_instance_id: str) -> str:
     runtime_dir = _runtime_dir(provider_instance_id)
-    return f"test -f {runtime_dir}/xvfb.pid && kill -0 $(cat {runtime_dir}/xvfb.pid)"
+    instance = shlex.quote(provider_instance_id)
+    return (
+        "set +e\n"
+        f"RUMI_SANDBOX_INSTANCE={instance}\n"
+        "rumi_process_matches_instance() {\n"
+        "  pid=\"$1\"\n"
+        "  command_name=\"$2\"\n"
+        "  case \"$pid\" in ''|*[!0-9]*) return 1;; esac\n"
+        "  kill -0 \"$pid\" >/dev/null 2>&1 || return 1\n"
+        "  [ \"$(cat \"/proc/$pid/comm\" 2>/dev/null || true)\" = \"$command_name\" ] || return 1\n"
+        "  tr '\\0' '\\n' < \"/proc/$pid/environ\" 2>/dev/null | grep -qx \"RUMI_SANDBOX_INSTANCE=$RUMI_SANDBOX_INSTANCE\"\n"
+        "}\n"
+        "rumi_pidfile_alive() {\n"
+        "  pidfile=\"$1\"\n"
+        "  command_name=\"$2\"\n"
+        "  [ -f \"$pidfile\" ] || return 1\n"
+        "  pid=\"$(cat \"$pidfile\" 2>/dev/null || true)\"\n"
+        "  rumi_process_matches_instance \"$pid\" \"$command_name\"\n"
+        "}\n"
+        "rumi_find_instance_pid() {\n"
+        "  command_name=\"$1\"\n"
+        "  for envfile in /proc/[0-9]*/environ; do\n"
+        "    [ -r \"$envfile\" ] || continue\n"
+        "    pid=\"${envfile#/proc/}\"\n"
+        "    pid=\"${pid%/environ}\"\n"
+        "    rumi_process_matches_instance \"$pid\" \"$command_name\" || continue\n"
+        "    echo \"$pid\"\n"
+        "    return 0\n"
+        "  done\n"
+        "  return 1\n"
+        "}\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/xvfb.pid Xvfb; then\n"
+        f"  pid=\"$(rumi_find_instance_pid Xvfb || true)\"\n"
+        f"  [ -n \"$pid\" ] && echo \"$pid\" > {runtime_dir}/xvfb.pid\n"
+        "fi\n"
+        f"if ! rumi_pidfile_alive {runtime_dir}/openbox.pid openbox; then\n"
+        f"  pid=\"$(rumi_find_instance_pid openbox || true)\"\n"
+        f"  [ -n \"$pid\" ] && echo \"$pid\" > {runtime_dir}/openbox.pid\n"
+        "fi\n"
+        f"rumi_pidfile_alive {runtime_dir}/xvfb.pid Xvfb && rumi_pidfile_alive {runtime_dir}/openbox.pid openbox\n"
+    )
 
 
 def _instance_exists_script(provider_instance_id: str, workspace_dir: str) -> str:

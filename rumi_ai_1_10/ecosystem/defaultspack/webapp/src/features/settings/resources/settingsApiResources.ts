@@ -39,6 +39,10 @@ export const settingsApiResources = {
     return api.importConnectionBundle(credentialBundle, providerId);
   },
 
+  runProviderOAuthDiagnostics(providerId: string) {
+    return api.runProviderOAuthDiagnostics(providerId);
+  },
+
   getCodexConnectionStatus() {
     return api.getCodexConnectionStatus();
   },

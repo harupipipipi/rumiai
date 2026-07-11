@@ -120,6 +120,42 @@ def test_tool_selection_resource_routes_have_authority_metadata():
     assert trace.resource_template == {"trace_id": "{path.trace_id}"}
 
 
+def test_browser_companion_session_route_is_sensitive_local_only():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+    route = specs[("GET", "/api/tools/browser-companion/session")]
+
+    assert route.sensitive is True
+    assert route.local_only is True
+
+
+def test_tool_setup_registers_browser_companion_session_route_metadata():
+    from blocks.tool.setup import run
+
+    class Registry:
+        def __init__(self):
+            self.entries = []
+
+        def register(self, key, value, meta=None):
+            self.entries.append((key, value, meta))
+
+    registry = Registry()
+    run({"interface_registry": registry})
+
+    routes = {
+        (entry["method"], entry["pattern"]): entry
+        for key, entry, _meta in registry.entries
+        if key == "io.http.route"
+    }
+    route = routes[("GET", "/api/tools/browser-companion/session")]
+
+    assert route["sensitive"] is True
+    assert route["local_only"] is True
+    assert getattr(route["handler"], "__rumi_route_sensitive__") is True
+    assert getattr(route["handler"], "__rumi_route_local_only__") is True
+
+
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     from ecosystem.defaultspack.transport.registry import (
         canonical_http_route_specs,
@@ -308,6 +344,7 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/defaultspack", "_handle_static") in routes
     assert ("GET", "/pack/defaultspack", "_handle_static") in routes
     assert ("GET", "/coding", "_handle_static") in routes
+    assert ("GET", "/calendar", "_handle_static") in routes
     assert ("GET", "/approval", "_handle_static") in routes
     assert ("POST", "/api/authority/browser-ui-operator", "_handle_authority_browser_ui_operator") in routes
     assert ("GET", "/ambient", "_handle_static") in routes
@@ -317,6 +354,13 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/host-permissions", "_handle_static") in routes
     assert ("GET", "/adaptive", "_handle_static") in routes
     assert ("GET", "/operating-profile", "_handle_static") in routes
+
+
+def test_calendar_route_is_spa_shell_fallback():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    assert DefaultsHttpServer._is_spa_shell_fallback_route("GET", "/calendar")
+    assert DefaultsHttpServer._is_spa_shell_fallback_route("GET", "/calendar/")
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
@@ -386,6 +430,22 @@ def test_static_mediapipe_wasm_uses_browser_wasm_mime():
     assert result["_static"] is True
     assert result["content_type"] == "application/wasm"
     assert isinstance(result["body"], bytes)
+
+
+def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
+    canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
+    mirror_dir = DEFAULTSPACK_ROOT / "ui" / "mediapipe" / "wasm"
+
+    canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
+    mirror_files = sorted(path.name for path in mirror_dir.iterdir() if path.is_file())
+
+    assert mirror_files == canonical_files
+    for name in canonical_files:
+        assert (mirror_dir / name).read_bytes() == (canonical_dir / name).read_bytes(), name
+
+    canonical_model = DEFAULTSPACK_ROOT / "webapp" / "public" / "models" / "hand_landmarker.task"
+    mirror_model = DEFAULTSPACK_ROOT / "ui" / "models" / "hand_landmarker.task"
+    assert mirror_model.read_bytes() == canonical_model.read_bytes()
 
 
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
@@ -1233,6 +1293,14 @@ def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
             {"_method": "GET"},
         ),
         (
+            "GET",
+            "/api/company/acme/status",
+            "blocks.company.status",
+            {"company_id": "acme"},
+            {"company_id": "company_id"},
+            {"_method": "GET"},
+        ),
+        (
             "PUT",
             "/api/agent/companies/acme/agents/bot",
             "blocks.company.agents",
@@ -1346,6 +1414,7 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
         ("POST", "/api/agent/companies", "blocks.company.create"),
         ("GET", "/api/company", "blocks.company.list"),
         ("POST", "/api/company/bootstrap", "blocks.company.bootstrap"),
+        ("GET", "/api/company/{company_id}/status", "blocks.company.status"),
         ("GET", "/api/agent/companies/{company_id}/status", "blocks.company.status"),
         ("PUT", "/api/agent/companies/{company_id}/agents/{agent_id}", "blocks.company.agents"),
         (
@@ -1419,6 +1488,7 @@ def test_routes_json_documents_new_route_groups():
     expected = {
         ("POST", "/api/authority/browser-ui-operator"),
         ("GET", "/chat"),
+        ("GET", "/calendar"),
         ("GET", "/defaultspack"),
         ("GET", "/pack/defaultspack"),
         ("GET", "/approval"),

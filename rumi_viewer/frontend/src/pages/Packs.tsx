@@ -58,7 +58,7 @@ export function Packs() {
 
   return (
     <div className="flex-1 overflow-y-auto page-enter">
-      <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-6">
+      <div className="w-full py-8 pr-6 flex flex-col gap-6">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-text-main">{t('packs.title')}</h1>

@@ -1,0 +1,47 @@
+{
+  "function_id": "subagent_goal_approve",
+  "description": "Approve a PM-gated subagent goal through Creator.",
+  "tags": [
+    "subagent_team",
+    "goal"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.goal.approve"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.goal_approve",
+    "defaultspack.subagent.goal_approve",
+    "defaults.subagent.goal.approve",
+    "defaultspack.subagent.goal.approve",
+    "subagent.goal.approve"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_goal_approve"
+      }
+    }
+  }
+}

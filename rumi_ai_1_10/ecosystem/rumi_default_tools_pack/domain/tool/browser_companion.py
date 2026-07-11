@@ -39,6 +39,7 @@ class BrowserCompanionController:
         bridge_store: BrowserCompanionBridgeStore | None = None,
     ) -> None:
         pack_root = Path(__file__).resolve().parents[2]
+        self._pack_root = pack_root
         self._artifact_root = artifact_root or pack_root / "user_data" / "artifacts" / "browser_companion"
         self._bridge = bridge_store or BrowserCompanionBridgeStore()
         self._approval_path = self._bridge.root_dir / "browser_companion_approvals.json"
@@ -141,12 +142,19 @@ class BrowserCompanionController:
             if client.get("is_active"):
                 active_client = client
                 break
+        setup_state = self._setup_state(context, clients=clients)
         return {
             "action": "session",
             "pairing": self._pairing(context, rotate=False).get("pairing"),
             "clients": clients,
-            "active_client_id": active_client.get("client_id") if isinstance(active_client, dict) else self._bridge.active_client_id(),
+            "active_client_id": (
+                active_client.get("client_id")
+                if isinstance(active_client, dict)
+                else self._bridge.active_client_id()
+            ),
             "active_client": active_client,
+            "setup_required": setup_state.get("status") == "missing",
+            "setup_state": setup_state,
             "capabilities": {
                 "multi_browser": True,
                 "dom_snapshot": True,
@@ -154,6 +162,8 @@ class BrowserCompanionController:
                 "accessible_labels": True,
                 "user_session_cookies": True,
                 "browser_tab_capture": True,
+                "browser_profile_metadata": True,
+                "semantic_targeting": ["element_id", "selector", "text", "text_query", "accessible_name", "role", "semantic_id", "nearby_text"],
                 "element_actions": ["click", "type", "press", "scroll", "extract", "highlight", "clear_highlight"],
             },
         }
@@ -168,8 +178,11 @@ class BrowserCompanionController:
     def _select_client(self, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._bridge.resolve_client(
             client_id=str(payload.get("client_id") or ""),
+            browser_profile_id=str(payload.get("browser_profile_id") or ""),
+            installation_id=str(payload.get("installation_id") or ""),
             browser=str(payload.get("browser") or payload.get("browser_name") or ""),
             label=str(payload.get("label") or ""),
+            profile_label=str(payload.get("profile_label") or payload.get("profileLabel") or ""),
         )
         if client is None:
             return {
@@ -189,8 +202,11 @@ class BrowserCompanionController:
     def _resolve_target_client(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         explicit = self._bridge.resolve_client(
             client_id=str(payload.get("client_id") or ""),
+            browser_profile_id=str(payload.get("browser_profile_id") or ""),
+            installation_id=str(payload.get("installation_id") or ""),
             browser=str(payload.get("browser") or payload.get("browser_name") or ""),
             label=str(payload.get("label") or ""),
+            profile_label=str(payload.get("profile_label") or payload.get("profileLabel") or ""),
         )
         if explicit is not None:
             return explicit
@@ -216,9 +232,13 @@ class BrowserCompanionController:
             return {
                 "action": remote_action,
                 "is_error": True,
+                "error_code": "BROWSER_COMPANION_CLIENT_MISSING",
                 "reason": "No connected browser companion clients are available. Pair the extension first.",
                 "pairing": self._pairing(context, rotate=False).get("pairing"),
                 "clients": self._bridge.list_clients(include_stale=True),
+                "setup_required": True,
+                "setup_state": self._setup_state(context, clients=[]),
+                "retry_after_setup": True,
             }
         approval_payload = self._approval_payload(remote_action, payload, client)
         if self._read_only_blocks(remote_action, context):
@@ -262,11 +282,13 @@ class BrowserCompanionController:
                 "command_id": command.get("command_id"),
             }
         result = completed.get("result") if isinstance(completed.get("result"), dict) else {}
+        client = self._bridge.get_client(str(client.get("client_id") or "")) or client
         semantics = self._action_semantics(remote_action, result)
         output = {
             "action": remote_action,
             "client": client,
             "client_id": client.get("client_id"),
+            **self._client_profile_fields(client),
             "command_id": command.get("command_id"),
             **semantics,
             "result": result,
@@ -284,6 +306,8 @@ class BrowserCompanionController:
             output["snapshot"] = result.get("snapshot")
         elif isinstance(result.get("snapshot"), list):
             output["snapshot"] = result.get("snapshot")
+        if "snapshot_metadata" in result:
+            output["snapshot_metadata"] = result.get("snapshot_metadata")
         if "tabs" in result:
             output["tabs"] = result.get("tabs")
         if "tab" in result:
@@ -294,7 +318,84 @@ class BrowserCompanionController:
             output["data"] = result.get("data")
         if "elements" in result:
             output["elements"] = result.get("elements")
+        elif isinstance(result.get("snapshot"), dict) and isinstance(result["snapshot"].get("nodes"), list):
+            output["elements"] = result["snapshot"].get("nodes")
         return output
+
+    def _setup_state(self, context: dict[str, Any], *, clients: list[dict[str, Any]]) -> dict[str, Any]:
+        extension_root = self._browser_extension_root()
+        state = {
+            "status": "ok" if clients else "missing",
+            "missing": [] if clients else ["browser_companion_client"],
+            "reason": (
+                "At least one browser companion client is paired."
+                if clients
+                else "No browser companion clients are paired with this defaultspack server."
+            ),
+            "ui": {
+                "surface": "defaultspack.sidebar",
+                "sidebar_item_id": "browser_companion",
+                "settings_field_id": "browser_companion_setup_guide",
+            },
+            "extension": {
+                "type": "chromium_manifest_v3",
+                "path": str(extension_root),
+                "manifest_path": str(extension_root / "manifest.json"),
+                "options_page": "Rumi Browser Companion extension options",
+            },
+            "server_urls": candidate_base_urls(context),
+            "tool_actions": {
+                "refresh_pairing": {"tool": "browser_companion", "args": {"action": "bridge.pairing"}},
+                "check_session": {"tool": "browser_companion", "args": {"action": "session"}},
+            },
+            "steps": [
+                {
+                    "id": "open_extensions",
+                    "label": "Open the Chromium extensions page and enable Developer mode.",
+                },
+                {
+                    "id": "load_unpacked",
+                    "label": "Load the Rumi Browser Companion unpacked extension folder.",
+                    "path": str(extension_root),
+                },
+                {
+                    "id": "copy_pairing",
+                    "label": "Use browser_companion bridge.pairing to copy a server URL and pairing token.",
+                },
+                {
+                    "id": "poll_bridge",
+                    "label": "Paste the values in the extension options page and click Poll Bridge Now.",
+                },
+                {
+                    "id": "verify_session",
+                    "label": "Run browser_companion session and confirm clients is not empty.",
+                },
+            ],
+        }
+        if clients:
+            state["client_count"] = len(clients)
+        return state
+
+    def _browser_extension_root(self) -> Path:
+        return self._pack_root.parent / "defaultspack" / "browser_extensions" / "rumi_browser_companion"
+
+    @staticmethod
+    def _client_profile_fields(client: dict[str, Any]) -> dict[str, Any]:
+        client_profile = client.get("client_profile") if isinstance(client.get("client_profile"), dict) else {}
+        browser_profile_id = client.get("browser_profile_id") or client_profile.get("browser_profile_id")
+        profile_label = client.get("profile_label") or client_profile.get("profile_label")
+        installation_id = client.get("installation_id") or client_profile.get("installation_id")
+        return {
+            "browser_profile_id": browser_profile_id,
+            "profile_label": profile_label,
+            "installation_id": installation_id,
+            "client_profile": {
+                **client_profile,
+                "browser_profile_id": browser_profile_id or "",
+                "profile_label": profile_label or "",
+                "installation_id": installation_id or "",
+            },
+        }
 
     @staticmethod
     def _requires_approval(remote_action: str) -> bool:
@@ -483,6 +584,10 @@ class BrowserCompanionController:
     def _remote_payload(payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {
             "client_id",
+            "browser_profile_id",
+            "profile_label",
+            "profileLabel",
+            "installation_id",
             "browser",
             "browser_name",
             "label",
@@ -493,6 +598,19 @@ class BrowserCompanionController:
             "selector",
             "selectors",
             "text",
+            "text_query",
+            "textQuery",
+            "accessible_name",
+            "accessibleName",
+            "role",
+            "semantic_id",
+            "semanticId",
+            "nearby_text",
+            "nearbyText",
+            "value",
+            "input_text",
+            "inputText",
+            "name",
             "key",
             "keys",
             "code",

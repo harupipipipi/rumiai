@@ -72,6 +72,12 @@ export function CompanyTree({
               }`}
             >
               <span className="block truncate text-[12px] font-medium text-zinc-200">{company.name || company.id}</span>
+              <span
+                className="mt-0.5 block truncate font-mono text-[9px] text-zinc-600"
+                title={company.id}
+              >
+                ID: {company.id}
+              </span>
               <span className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
                 <span>{company.agent_count ?? Object.keys(company.agents ?? {}).length} employees</span>
                 <span>{taskCount} tasks</span>
@@ -81,7 +87,7 @@ export function CompanyTree({
         })}
         {companies.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            {emptyMessage}
+            {busy ? "Loading employee group..." : emptyMessage}
           </div>
         )}
       </div>

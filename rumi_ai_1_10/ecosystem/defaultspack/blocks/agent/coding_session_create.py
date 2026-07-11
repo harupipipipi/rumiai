@@ -6,12 +6,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import error, ok
 from blocks.agent._state import set_multi_session
 from domain.agent.multi import MultiAgentOrchestrator
+from domain.coding.frontend_precision import promote_coding_session_input
 
 
 def run(input_data, context=None):
     if not isinstance(input_data, dict):
         return error("input_data must be a dict")
     context = context or {}
+    input_data, frontend_precision = promote_coding_session_input(input_data, context)
     task = input_data.get("task") or "Coding subagent session"
     agents = input_data.get("agents") or [
         {"name": "worker", "role": "coding worker", "model": input_data.get("model", "stub/default"), "tools": []}
@@ -40,12 +42,16 @@ def run(input_data, context=None):
         return error(result.get("error", "session create failed"), code="AGENT_SESSION_CREATE_ERROR")
     session = result.get("session")
     if session is not None:
+        if frontend_precision.get("enabled"):
+            session.shared_context["frontend_precision"] = frontend_precision
+            session.shared_context.setdefault("workspace", {})["frontend_precision"] = frontend_precision
         set_multi_session(result["session_id"], session)
-    return ok(
-        {
-            "session_id": result.get("session_id"),
-            "status": result.get("status"),
-            "session": result.get("result"),
-            "workspace": result.get("workspace", {}),
-        }
-    )
+    payload = {
+        "session_id": result.get("session_id"),
+        "status": result.get("status"),
+        "session": session.to_dict() if session is not None else result.get("result"),
+        "workspace": result.get("workspace", {}),
+    }
+    if frontend_precision.get("enabled"):
+        payload["frontend_precision"] = frontend_precision
+    return ok(payload)

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
@@ -21,13 +21,24 @@ import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/a
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
+import { hasSelectedSetupPack } from '@/src/lib/setupPacks';
+
+function SetupVerificationGate() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg-main p-6 text-sm text-text-muted">
+      Verifying setup...
+    </div>
+  );
+}
 
 export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
+  const setSetupDone = useAppStore(state => state.setSetupDone);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
+  const [setupPackVerified, setSetupPackVerified] = useState(!isSetupDone);
 
   useLayoutEffect(() => {
     applyAppearanceToRoot(document.documentElement, { theme, colorMode });
@@ -43,6 +54,34 @@ export default function App() {
       addToast(message, 'error');
     });
   }, [addToast]);
+
+  useEffect(() => {
+    if (!isSetupDone) {
+      setSetupPackVerified(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSetupPackVerified(false);
+    void hasSelectedSetupPack()
+      .then((verified) => {
+        if (cancelled) return;
+        setSetupPackVerified(verified);
+        if (!verified) {
+          setSetupDone(false);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSetupPackVerified(false);
+        setSetupDone(false);
+        addToast(error instanceof Error ? error.message : 'Setup pack verification failed', 'error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSetupDone, setSetupDone, addToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +135,9 @@ export default function App() {
 
         <Route
           path={panelRoutes.home}
-          element={isSetupDone ? <Layout /> : <Navigate to={panelRoutes.setup} replace />}
+          element={isSetupDone
+            ? (setupPackVerified ? <Layout /> : <SetupVerificationGate />)
+            : <Navigate to={panelRoutes.setup} replace />}
         >
           <Route index element={<Dashboard />} />
           <Route path={panelRoutes.packs.slice(1)} element={<Packs />} />

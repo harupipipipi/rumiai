@@ -27,13 +27,19 @@ def run(context):
             file=sys.stderr,
         )
 
-    def _lazy(module_path, func_name="run"):
+    def _lazy(module_path, func_name="run", *, sensitive=False, pre_auth=False, local_only=False):
         """Return a lazy handler that imports the module on first call."""
         def handler(request_data, context):
             import importlib
             mod = importlib.import_module(module_path)
             fn = getattr(mod, func_name)
             return fn(request_data, context)
+        try:
+            setattr(handler, "__rumi_route_sensitive__", bool(sensitive))
+            setattr(handler, "__rumi_route_pre_auth__", bool(pre_auth))
+            setattr(handler, "__rumi_route_local_only__", bool(local_only))
+        except Exception:
+            pass
         return handler
 
     def _guarded(handler, operation, risk="high"):
@@ -72,6 +78,12 @@ def run(context):
         ("POST", "/api/tools/embedding-index/rebuild", _lazy("blocks.tool.embedding_index_rebuild"), {}),
         ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
         ("POST", "/api/tools/browser-computer", _lazy("blocks.tool.browser_computer"), {}),
+        (
+            "GET",
+            "/api/tools/browser-companion/session",
+            _lazy("blocks.tool.browser_companion_session", sensitive=True, local_only=True),
+            {},
+        ),
         ("POST", "/api/tools/browser-companion/bridge/poll", _lazy("blocks.tool.browser_companion_bridge", "run_poll"), {}),
         ("POST", "/api/tools/browser-companion/bridge/result", _lazy("blocks.tool.browser_companion_bridge", "run_result"), {}),
         # ---- Capability catalog routes ----
@@ -123,6 +135,9 @@ def run(context):
                 "pattern": pattern,
                 "handler": handler,
                 "path_inject": path_inject,
+                "sensitive": bool(getattr(handler, "__rumi_route_sensitive__", False)),
+                "pre_auth": bool(getattr(handler, "__rumi_route_pre_auth__", False)),
+                "local_only": bool(getattr(handler, "__rumi_route_local_only__", False)),
             },
             meta={"_source_component": source_component},
         )

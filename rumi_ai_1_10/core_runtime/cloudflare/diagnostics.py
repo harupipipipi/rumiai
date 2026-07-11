@@ -111,7 +111,6 @@ def cloudflare_environment_status(
             "pc_tool_bridge_pc_origin_env": "RUMI_PC_ORIGIN",
             "pc_tool_bridge_pc_bearer_env": "RUMI_PC_RUNTIME_BEARER",
             "pc_tool_bridge_allowed_origin_env": "RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN",
-            "pc_local_tools_note": "PC-local browser/computer/files/terminal tools are not Cloudflare-native; route them through the PC Tool Bridge and local approval path.",
         },
         "constraints": {
             "cloudflare_sandbox_requires_workers_paid": True,
@@ -126,10 +125,10 @@ def cloudflare_environment_status(
             "sandbox_preview_urls_require_custom_domain_for_production": True,
             "all_tools_cloudflare_native_supported": False,
             "pc_local_tools_require_pc_bridge": True,
-            "pc_local_browser_computer_files_terminal_not_cloudflare_native": True,
             "pc_tool_bridge_requires_named_tunnel": True,
             "pc_tool_bridge_does_not_upload_pc_local_tools": True,
             "pc_tool_bridge_preserves_pc_approval_authority": True,
+            "wrangler_diagnostics_require_explicit_command_or_local_install": True,
         },
     }
 
@@ -144,9 +143,6 @@ def _wrangler_command(env: Mapping[str, str]) -> list[str]:
     local_wrangler = _local_wrangler_command()
     if local_wrangler:
         return local_wrangler
-    npx = shutil.which("npx")
-    if npx:
-        return [npx, "--yes", "wrangler"]
     return []
 
 
@@ -186,11 +182,18 @@ def _local_wrangler_command() -> list[str]:
 
 
 def _command_presence(name: str, command: Sequence[str]) -> dict[str, Any]:
+    if name == "wrangler" and not command:
+        detail = (
+            "Wrangler command was not found. Set RUMI_WRANGLER_COMMAND or run npm install in a Cloudflare scaffold "
+            "so its pinned node_modules/.bin/wrangler is available; diagnostics will not auto-download Wrangler."
+        )
+    else:
+        detail = f"{name} command is available." if command else f"{name} command was not found on PATH."
     return {
         "available": bool(command),
         "status": "available" if command else "missing",
         "command": _public_command(command),
-        "detail": f"{name} command is available." if command else f"{name} command was not found on PATH.",
+        "detail": detail,
     }
 
 

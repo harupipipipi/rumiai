@@ -15,6 +15,7 @@ from typing import Any, Dict
 
 _PACK_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _PACK_ROOT.parent.parent
+_REPO_ECOSYSTEM_ROOT = _REPO_ROOT / "ecosystem"
 _PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport", "ecosystem")
 _IMPORT_LOCK = threading.RLock()
 
@@ -27,30 +28,28 @@ def _path_is_inside_pack(path: Path) -> bool:
         return False
 
 
-def _path_contains_pack(path: Path) -> bool:
+def _path_is_inside_repo_ecosystem(path: Path) -> bool:
     try:
-        _PACK_ROOT.resolve().relative_to(path.resolve())
+        path.resolve().relative_to(_REPO_ECOSYSTEM_ROOT)
         return True
     except (OSError, ValueError):
         return False
 
 
-def _module_is_from_pack(module: Any) -> bool:
+def _module_is_from_local_package(module: Any, package_name: str) -> bool:
     module_file = getattr(module, "__file__", None)
+    path_check = _path_is_inside_repo_ecosystem if package_name == "ecosystem" else _path_is_inside_pack
     if not module_file:
         module_paths = getattr(module, "__path__", None)
         if module_paths is None:
             return False
-        return any(
-            _path_is_inside_pack(Path(item)) or _path_contains_pack(Path(item))
-            for item in module_paths
-        )
-    return _path_is_inside_pack(Path(module_file))
+        return any(path_check(Path(item)) for item in module_paths)
+    return path_check(Path(module_file))
 
 
 def _drop_foreign_top_level_package(package_name: str) -> None:
     module = sys.modules.get(package_name)
-    if module is None or _module_is_from_pack(module):
+    if module is None or _module_is_from_local_package(module, package_name):
         return
     prefix = package_name + "."
     for loaded_name in list(sys.modules):

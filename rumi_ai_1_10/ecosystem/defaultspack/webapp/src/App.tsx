@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Hand, Loader2 } from "lucide-react";
 
-import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import {
+  CompanyWorkspacePanel,
+  resolveCompanyWorkspaceHint,
+  resolveCompanyWorkspaceHintFromGroup,
+} from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
 import { AdaptiveRuntimePage } from "./adaptive";
@@ -15,6 +19,7 @@ import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { WarmActionIcon } from "./components/WarmActionIcon";
+import { SubagentTeamWorkspace } from "./subagentTeam";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
   WORKSPACE_TAB_CREATE_OPTIONS,
@@ -25,7 +30,14 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import {
+  initialActiveWorkspaceTabIdForPathname,
+  initialWorkspaceTabsForPathname,
+  workspaceKindForPathname,
+  workspaceUrlForKind,
+} from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
+import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -44,6 +56,7 @@ import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToke
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
+import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -53,6 +66,7 @@ import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSys
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
@@ -1640,6 +1654,29 @@ function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   return `${label} は再実行が必要です`;
 }
 
+function browserApprovalSettlementKey(approval: BrowserApproval): string {
+  const requestId = approval.requestId?.trim();
+  if (requestId) return `request:${requestId}`;
+  return [
+    "local",
+    approval.toolCallId ?? "",
+    approval.toolName,
+    approval.action,
+    JSON.stringify(approval.payload),
+  ].join(":");
+}
+
+function approvalStaleUiMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const looksStale = /\bHTTP\s+(403|404|409)\b/i.test(message)
+    || /approval.*(expired|not found|not pending|already|denied)/i.test(message)
+    || /(expired|stale).*approval/i.test(message)
+    || /承認.*(期限|期限切れ|拒否|処理済み|見つかりません)/.test(message);
+  return looksStale
+    ? "この承認リクエストは期限切れか、すでに処理済みです。新しい承認カードが届くまで操作できません。"
+    : null;
+}
+
 function hasAgentServiceProfile(catalog: UICatalog | null, profileId: string): boolean {
   const profiles = catalog?.agent_service?.profiles ?? [];
   return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === profileId);
@@ -1679,6 +1716,66 @@ function settingList(value: unknown): string[] {
     return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
   }
   return [];
+}
+
+export const MIMO_CODING_DEFAULT_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+export const MIMO_CODING_DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni";
+export const MIMO_CODING_DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash";
+
+const MIMO_CODING_EXPIRED_MODELS = new Set([
+  "opencode-go/mimo-v2.5",
+]);
+
+const MIMO_CODING_BACKEND_COMPATIBLE_MODELS = new Set([
+  MIMO_CODING_DEFAULT_MODEL,
+  "xiaomi-token-plan-sgp/mimo-v2.5",
+  "xiaomi-token-plan-sgp/mimo-v2-pro",
+  MIMO_CODING_DEFAULT_VISION_MODEL,
+  MIMO_CODING_DEFAULT_FAST_MODEL,
+  "gitlawb-opengateway/mimo-v2.5-pro",
+  "gitlawb-opengateway/mimo-v2.5",
+  "gitlawb-opengateway/mimo-v2-pro",
+  "gitlawb-opengateway/mimo-v2-omni",
+  "gitlawb-opengateway/mimo-v2-flash",
+  "groq/openai/gpt-oss-120b",
+  "cerebras/gpt-oss-120b",
+  "stub/default",
+]);
+
+function mimoCodingCandidateModels(settingsAllowlist: string[], manifestAllowlist: string[]): string[] {
+  const sourceAllowlist = settingsAllowlist.length ? settingsAllowlist : manifestAllowlist;
+  return sourceAllowlist.filter((item) => (
+    MIMO_CODING_BACKEND_COMPATIBLE_MODELS.has(item)
+    && !MIMO_CODING_EXPIRED_MODELS.has(item)
+  ));
+}
+
+export function resolveMimoCodingModel(
+  preferredModel: string,
+  settingsAllowlist: string[],
+  manifestAllowlist: string[],
+): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  if (candidates.includes(preferredModel)) return preferredModel;
+  if (candidates.includes(MIMO_CODING_DEFAULT_MODEL)) return MIMO_CODING_DEFAULT_MODEL;
+  if (candidates.includes("stub/default")) return "stub/default";
+  return candidates[0] ?? MIMO_CODING_DEFAULT_MODEL;
+}
+
+export function resolveMimoVisionModel(settingsAllowlist: string[], manifestAllowlist: string[]): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  const visionPreferred = candidates.find((item) => /omni|vision|vl/i.test(item));
+  if (visionPreferred) return visionPreferred;
+  if (candidates.includes(MIMO_CODING_DEFAULT_VISION_MODEL)) return MIMO_CODING_DEFAULT_VISION_MODEL;
+  return MIMO_CODING_DEFAULT_VISION_MODEL;
+}
+
+export function resolveMimoFastModel(settingsAllowlist: string[], manifestAllowlist: string[]): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  const fastPreferred = candidates.find((item) => /flash|mini/i.test(item));
+  if (fastPreferred) return fastPreferred;
+  if (candidates.includes(MIMO_CODING_DEFAULT_FAST_MODEL)) return MIMO_CODING_DEFAULT_FAST_MODEL;
+  return MIMO_CODING_DEFAULT_FAST_MODEL;
 }
 
 function settingNumber(value: unknown, fallback: number): number {
@@ -2048,6 +2145,8 @@ function isPendingInLocation(): boolean {
 }
 
 function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
+  const routeKind = workspaceKindForPathname(window.location.pathname);
+  if (routeKind && routeKind !== "chat" && routeKind !== "coding") return;
   const url = new URL(window.location.href);
   url.pathname = window.location.pathname === "/coding" ? "/coding" : "/chat";
   if (conversationId) {
@@ -2064,6 +2163,14 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   if (next !== current) {
     window.history.pushState({ conversationId }, "", next);
+  }
+}
+
+function pushWorkspaceRoute(kind: WorkspaceTabKind, conversationId: string | null = null) {
+  const next = workspaceUrlForKind(kind, window.location.href, conversationId);
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) {
+    window.history.pushState({ workspaceKind: kind, conversationId }, "", next);
   }
 }
 
@@ -2088,6 +2195,55 @@ function matchCommandName(body: string, candidate: string): string | null {
   const flexiblePattern = new RegExp(`^${candidateParts.map(escapeRegExp).join("[\\s_-]+")}(?:\\s+|$)`, "i");
   const flexibleMatch = body.match(flexiblePattern);
   return flexibleMatch ? flexibleMatch[0].trimEnd() : null;
+}
+
+function normalizeCommandText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseCommandRest(rest: string, specs: ComposerCommandItem["args"] = []): Record<string, unknown> {
+  if (!rest) return {};
+  const args: Record<string, unknown> = {};
+  let remaining = rest;
+
+  for (const spec of specs) {
+    const name = spec.name.trim();
+    if (!name) continue;
+    const optionPattern = new RegExp(`(^|\\s)${escapeRegExp(name)}=([^\\s]+)`, "gi");
+    remaining = remaining.replace(optionPattern, (_match, prefix: string, value: string) => {
+      args[name] = value;
+      return prefix ? " " : "";
+    });
+    const slashFlagPattern = new RegExp(`(^|\\s)/${escapeRegExp(name)}(?=\\s|$)`, "gi");
+    remaining = remaining.replace(slashFlagPattern, (_match, prefix: string) => {
+      args[name] = true;
+      return prefix ? " " : "";
+    });
+  }
+
+  const greedySpec = specs.find((spec) => spec.greedy === true);
+  const remainder = normalizeCommandText(remaining);
+  if (greedySpec) {
+    if (remainder) args[greedySpec.name] = remainder;
+    return args;
+  }
+
+  const positionalSpecs = specs.filter((spec) => args[spec.name] === undefined);
+  if (positionalSpecs.length === 1 && remainder) {
+    args[positionalSpecs[0].name] = remainder;
+  } else if (positionalSpecs.length > 1 && remainder) {
+    const tokens = remainder.split(/\s+/);
+    positionalSpecs.forEach((spec, index) => {
+      if (index === positionalSpecs.length - 1) {
+        const trailing = tokens.slice(index).join(" ");
+        if (trailing) args[spec.name] = trailing;
+      } else if (tokens[index]) {
+        args[spec.name] = tokens[index];
+      }
+    });
+  }
+
+  return args;
 }
 
 type ParsedSlashCommandInput = {
@@ -2121,21 +2277,7 @@ export function parseSlashCommandInput(
   if (!matchedCommand) return null;
 
   const rest = body.slice(matchedName.length).trim();
-  const args: Record<string, unknown> = {};
-  const specs = matchedCommand.args ?? [];
-  if (specs.length === 1 && rest) {
-    args[specs[0].name] = rest;
-  } else if (specs.length > 1 && rest) {
-    const tokens = rest.split(/\s+/);
-    specs.forEach((spec, index) => {
-      if (index === specs.length - 1) {
-        const remainder = tokens.slice(index).join(" ");
-        if (remainder) args[spec.name] = remainder;
-      } else if (tokens[index]) {
-        args[spec.name] = tokens[index];
-      }
-    });
-  }
+  const args = parseCommandRest(rest, matchedCommand.args ?? []);
   return { command: matchedCommand, args, raw: trimmed };
 }
 
@@ -2247,11 +2389,17 @@ function ChatApp() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const settingsValuesRef = useRef(settingsValues);
+  const pinnedPlacementSaveRevisionRef = useRef(0);
+  useEffect(() => {
+    settingsValuesRef.current = settingsValues;
+  }, [settingsValues]);
   const [desktopSystemInfo, setDesktopSystemInfo] = useState<DesktopSystemInfo | null>(null);
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
@@ -2268,10 +2416,8 @@ function ChatApp() {
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
-    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
-  ]);
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialActiveWorkspaceTabIdForPathname(window.location.pathname));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -2283,6 +2429,7 @@ function ChatApp() {
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
+  const [settledBrowserApprovalKeys, setSettledBrowserApprovalKeys] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
   const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
@@ -2312,6 +2459,7 @@ function ChatApp() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
@@ -2384,6 +2532,7 @@ function ChatApp() {
   const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isSubagentWorkspace = activeWorkspaceKind === "subagents";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
   const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
@@ -2522,10 +2671,15 @@ function ChatApp() {
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
-  const browserApproval = pendingBrowserApproval(messages);
+  const rawBrowserApproval = pendingBrowserApproval(messages);
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
+  const settledBrowserApprovalKeySet = useMemo(() => new Set(settledBrowserApprovalKeys), [settledBrowserApprovalKeys]);
+  const rawBrowserApprovalKey = rawBrowserApproval ? browserApprovalSettlementKey(rawBrowserApproval) : "";
+  const browserApproval = rawBrowserApproval && !settledBrowserApprovalKeySet.has(rawBrowserApprovalKey)
+    ? rawBrowserApproval
+    : null;
   const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
     : null;
@@ -2696,7 +2850,12 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
+  const isActivityPreviewVisible =
+    showRegion("activity_preview") &&
+    effectiveShowPreview &&
+    !isCanvasWorkspace &&
+    !isDesktopsWorkspace &&
+    !isSubagentWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -3010,8 +3169,8 @@ function ChatApp() {
     });
   }
 
-  async function refreshProviderOAuthStatus(providerId: string) {
-    const result = await api.providerOAuthStatus(providerId);
+  async function refreshProviderOAuthStatus(providerId: string, options: { activeDiagnostics?: boolean } = {}) {
+    const result = await api.providerOAuthStatus(providerId, options);
     if (result.provider && typeof result.provider === "object" && !Array.isArray(result.provider)) {
       mergeProviderOAuthStatus(providerId, result.provider as Record<string, unknown>);
     }
@@ -3106,6 +3265,11 @@ function ChatApp() {
       return;
     }
     const conversation = await api.getConversation(conversationId);
+    const supersededTargetId = resolveSupersededConversationRedirect(conversation, conversationId);
+    if (supersededTargetId) {
+      await loadConversation(supersededTargetId, updateUrl);
+      return;
+    }
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
@@ -3115,21 +3279,13 @@ function ChatApp() {
   async function refreshConversations(preferredId?: string | null) {
     const result = await api.listConversations();
     setConversations(result.conversations);
-
-    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
-    if (!targetId) {
-      setActiveConversationId(null);
-      setActiveConversation(null);
-      void refreshPreview(null);
-      return;
-    }
-
-    if (!result.conversations.some((conversation) => conversation.id === targetId)) {
-      await loadConversation(result.conversations[0]?.id ?? null);
-      return;
-    }
-
-    await loadConversation(targetId);
+    await loadConversationForRefresh({
+      preferredId,
+      activeConversationId,
+      locationChatId: chatIdFromLocation(),
+      listedConversations: result.conversations,
+      loadConversation,
+    });
   }
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
@@ -3213,6 +3369,20 @@ function ChatApp() {
   useEffect(() => {
     const handlePopState = () => {
       setError(null);
+      const routeKind = workspaceKindForPathname(window.location.pathname) ?? "chat";
+      if (routeKind !== "chat") {
+        const routeTabId = `workspace-tab-route-${routeKind}`;
+        setWorkspaceTabs((current) => (
+          current.some((tab) => tab.id === routeTabId)
+            ? current
+            : [...current, createWorkspaceTab(routeKind, { id: routeTabId })]
+        ));
+        setActiveWorkspaceTabId(routeTabId);
+        setMode(routeKind === "coding" ? "coding" : "agent");
+      } else {
+        setActiveWorkspaceTabId(DEFAULT_WORKSPACE_TAB_ID);
+        setMode("agent");
+      }
       void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
       });
@@ -3362,6 +3532,7 @@ function ChatApp() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     setPendingNewTaskContext(null);
+    setActiveHistoryCompanyId(null);
     const activeTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId);
     if (activeTab?.kind === "chat") {
       setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId ? { ...tab, conversationId } : tab));
@@ -3381,6 +3552,10 @@ function ChatApp() {
         if (activeConversationId === conversation.id) setActiveConversation(conversation);
       })
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
+  };
+
+  const handleHistoryGroupSelect = (group: ChatGroup) => {
+    setActiveHistoryCompanyId(resolveCompanyWorkspaceHintFromGroup(group));
   };
 
   const closeSpotlight = () => {
@@ -3419,8 +3594,34 @@ function ChatApp() {
     }
   };
 
+  const applySettingsValues = (next: Record<string, Record<string, unknown>>) => {
+    settingsValuesRef.current = next;
+    setSettingsValues(next);
+  };
+
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
-    setSettingsValues((current) => {
+    if (sectionId === "sidebar" && fieldId === "ui_placements") {
+      const previous = settingsValuesRef.current;
+      const previousPlacements = normalizePinnedPlacements(previous.sidebar?.ui_placements);
+      const next = withPinnedPlacements(previous, normalizePinnedPlacements(value));
+      const revision = ++pinnedPlacementSaveRevisionRef.current;
+      applySettingsValues(next);
+      void api.updateUiSettings(next)
+        .then((result) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const persisted = withCalendarSettingsValues(result.values);
+          applySettingsValues(persisted);
+        })
+        .catch((updateError) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const rolledBack = withPinnedPlacements(settingsValuesRef.current, previousPlacements);
+          applySettingsValues(rolledBack);
+          setError(updateError instanceof Error ? updateError.message : "Failed to save pinned widgets.");
+        });
+      return;
+    }
+    {
+      const current = settingsValuesRef.current;
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
       const fieldType = String(field?.type ?? "");
@@ -3513,8 +3714,9 @@ function ChatApp() {
         const action = String(payload.action ?? "upsert").trim();
         const kind = String(payload.kind ?? "").trim() || undefined;
         if (action === "oauth_refresh") {
+          const activeDiagnostics = Boolean(payload.active_diagnostics);
           if (providerId) {
-            void refreshProviderOAuthStatus(providerId).catch(console.error);
+            void refreshProviderOAuthStatus(providerId, { activeDiagnostics }).catch(console.error);
           } else {
             void refreshCatalog().catch(console.error);
           }
@@ -3591,10 +3793,10 @@ function ChatApp() {
         if (ambientRoutingKey) {
           void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
         }
-        void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
+        void api.updateUiSettings(next).then((result) => applySettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
-      return next;
-    });
+      applySettingsValues(next);
+    }
   };
 
   const updateModelSettings = (updates: Record<string, unknown>) => {
@@ -3872,6 +4074,11 @@ function ChatApp() {
           `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
+      case "open_context_viewer":
+      case "show_usage":
+        setActiveSidebarItemId("__context_usage__");
+        setSidebarSelectionTick((value) => value + 1);
+        return;
       case "open_settings":
       case "open_permissions":
       case "open_theme_settings":
@@ -4037,8 +4244,9 @@ function ChatApp() {
     }
   };
 
-  const handleModeChange = (newMode: AppMode) => {
+  const handleModeChange = (newMode: AppMode, updateRoute = true) => {
     setMode(newMode);
+    if (!updateRoute) return;
     if (newMode === "coding" && window.location.pathname !== "/coding") {
       const url = new URL(window.location.href);
       url.pathname = "/coding";
@@ -4057,15 +4265,18 @@ function ChatApp() {
     setActiveWorkspaceTabId(tab.id);
     setError(null);
     if (tab.kind === "chat") {
-      handleModeChange("agent");
-      void loadConversation(tab.conversationId ?? null);
+      handleModeChange("agent", false);
+      pushWorkspaceRoute("chat", tab.conversationId ?? null);
+      void loadConversation(tab.conversationId ?? null, false);
       return;
     }
     if (tab.kind === "coding") {
-      handleModeChange("coding");
+      handleModeChange("coding", false);
+      pushWorkspaceRoute("coding", activeConversationId);
       return;
     }
-    handleModeChange("agent");
+    handleModeChange("agent", false);
+    pushWorkspaceRoute(tab.kind, activeConversationId);
     if (tab.kind === "calendar" || tab.kind === "kanban") {
       return;
     }
@@ -4289,14 +4500,29 @@ function ChatApp() {
     }
   };
 
+  const settleBrowserApproval = (approval: BrowserApproval) => {
+    const settlementKey = browserApprovalSettlementKey(approval);
+    setSettledBrowserApprovalKeys((keys) => (
+      keys.includes(settlementKey) ? keys : [...keys, settlementKey].slice(-50)
+    ));
+    if (approval.requestId) {
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(approval.requestId ?? "")
+          ? ids
+          : [...ids, approval.requestId ?? ""].filter(Boolean).slice(-50)
+      ));
+    }
+  };
+
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
     if (!activeConversationId) return;
+    const currentApproval = browserApproval;
     setError(null);
     setIsGenerating(true);
     const approvalToolIds = selectedToolIds.length
       ? selectedToolIds
-      : [browserApproval.toolName].filter(Boolean);
+      : [currentApproval.toolName].filter(Boolean);
     rememberPendingRequest({
       conversationId: activeConversationId,
       startedAt: Date.now(),
@@ -4305,18 +4531,14 @@ function ChatApp() {
     });
     try {
       const approvalWorkspace = workspaceContextFromConversation(activeConversation);
-      let approvalToken = browserApproval.token ?? "";
-      if (browserApproval.requestId) {
-        const decision = await api.approveCodingApproval(browserApproval.requestId);
+      let approvalToken = currentApproval.token ?? "";
+      if (currentApproval.requestId) {
+        const decision = await api.approveCodingApproval(currentApproval.requestId);
         if (!decision.approved) {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
-        setSettledRuntimeApprovalIds((ids) => (
-          ids.includes(browserApproval.requestId ?? "")
-            ? ids
-            : [...ids, browserApproval.requestId ?? ""].filter(Boolean).slice(-50)
-        ));
+        settleBrowserApproval(currentApproval);
       }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
@@ -4338,15 +4560,15 @@ function ChatApp() {
             workspace_root: approvalWorkspace.workspaceRoot,
           } : {}),
           approval_followup: {
-            action: browserApproval.action,
-            operation: browserApproval.action,
+            action: currentApproval.action,
+            operation: currentApproval.action,
             approval_token: approvalToken,
-            payload: browserApproval.payload,
-            request_id: browserApproval.requestId,
-            tool_call_id: browserApproval.toolCallId,
-            tool_name: browserApproval.toolName,
+            payload: currentApproval.payload,
+            request_id: currentApproval.requestId,
+            tool_call_id: currentApproval.toolCallId,
+            tool_name: currentApproval.toolName,
           },
-          runtime_content: browserApprovalRuntimeContent(browserApproval, approvalToken),
+          runtime_content: browserApprovalRuntimeContent(currentApproval, approvalToken),
           selected_tools: approvalToolIds,
         },
       });
@@ -4356,9 +4578,44 @@ function ChatApp() {
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
       forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+      const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
+      if (staleMessage) {
+        settleBrowserApproval(currentApproval);
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+      }
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const denyBrowserAction = async () => {
+    if (!browserApproval) return;
+    const currentApproval = browserApproval;
+    const actionKey = browserApprovalSettlementKey(currentApproval);
+    if (activeBrowserApprovalActionRef.current === actionKey) return;
+    activeBrowserApprovalActionRef.current = actionKey;
+    setError(null);
+    try {
+      if (currentApproval.requestId) {
+        await api.denyCodingApproval(currentApproval.requestId, "Denied from chat approval card");
+      }
+      settleBrowserApproval(currentApproval);
+      if (activeConversationId) {
+        await loadConversation(activeConversationId, false);
+        await refreshConversations(activeConversationId);
+      }
+    } catch (approvalError) {
+      const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
+      if (staleMessage) {
+        settleBrowserApproval(currentApproval);
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer 承認の拒否に失敗しました。");
+      }
+    } finally {
+      activeBrowserApprovalActionRef.current = null;
     }
   };
 
@@ -4423,7 +4680,15 @@ function ChatApp() {
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
       forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
+      const staleMessage = approvalStaleUiMessage(approvalError);
+      if (staleMessage) {
+        setSettledRuntimeApprovalIds((ids) => (
+          ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
+        ));
+        setError(staleMessage);
+      } else {
+        setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
+      }
     } finally {
       activeRuntimeApprovalActionRef.current = null;
       setIsGenerating(false);
@@ -4513,25 +4778,19 @@ function ChatApp() {
   const preferredMimoCodingModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
     const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
-    const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
-    if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
-    if (effectiveAllowlist.includes("xiaomi-token-plan-sgp/mimo-v2.5-pro")) return "xiaomi-token-plan-sgp/mimo-v2.5-pro";
-    if (effectiveAllowlist.includes("stub/default")) return "stub/default";
-    return effectiveAllowlist[0] ?? "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    return resolveMimoCodingModel(preferredModel, allowlist, manifestAllowlist);
   };
 
   const preferredMimoVisionModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
-    if (visionPreferred) return visionPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    return resolveMimoVisionModel(allowlist, manifestAllowlist);
   };
 
   const preferredMimoFastModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
-    if (fastPreferred) return fastPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    return resolveMimoFastModel(allowlist, manifestAllowlist);
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
@@ -4539,7 +4798,9 @@ function ChatApp() {
   const mimoCodingMaxToolCalls = () => {
     const raw = settingsValues.mimo_coding_company?.max_tool_calls;
     if (raw === null || raw === undefined || raw === "" || raw === false) return null;
-    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+    const numeric = settingNumber(raw, 0);
+    if (numeric <= 0) return null;
+    return Math.max(1, Math.min(200, numeric));
   };
   const mimoCodingMaxToolCallsPayload = () => {
     const value = mimoCodingMaxToolCalls();
@@ -4853,8 +5114,23 @@ function ChatApp() {
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
+      const requestFingerprint = JSON.stringify({
+        text: userText,
+        attachments: submittedAttachments.map(({ name, size, type, source, sourcePath }) => (
+          { name, size, type, source, sourcePath }
+        )),
+      });
+      const recoverablePending = pendingRequests[conversation.id];
+      const operationId = recoverablePending?.requestFingerprint === requestFingerprint
+        && recoverablePending.operationId
+        ? recoverablePending.operationId
+        : typeof globalThis.crypto?.randomUUID === "function"
+          ? globalThis.crypto.randomUUID()
+          : `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
       rememberPendingRequest({
         conversationId: conversation.id,
+        operationId,
+        requestFingerprint,
         startedAt: requestStartedAt,
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
         toolNames: [],
@@ -5148,6 +5424,7 @@ function ChatApp() {
       const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
+        idempotency_key: operationId,
         params: templateRequestPayload.params,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
@@ -5350,11 +5627,16 @@ function ChatApp() {
   const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
     ? activeConversation.metadata
     : {};
-  const activeConversationCompanyId = typeof activeConversationMetadata.company_id === "string"
-    ? activeConversationMetadata.company_id
-    : typeof activeConversationMetadata.companyId === "string"
-      ? activeConversationMetadata.companyId
-      : null;
+  const activeConversationGroupId = cleanOptionalString(activeConversation?.group_id)
+    ?? cleanOptionalString(activeConversationMetadata.group_id ?? activeConversationMetadata.groupId);
+  const activeConversationCompanyId = resolveCompanyWorkspaceHint({
+    companyId: activeConversationMetadata.company_id ?? activeConversationMetadata.companyId,
+    groupId: activeConversationGroupId,
+    conversationKind: activeConversation?.conversation_kind,
+    profileId: activeConversationMetadata.profile_id,
+    tags: activeConversation?.tags,
+  });
+  const activeCompanyWorkspaceHint = activeConversationCompanyId ?? activeHistoryCompanyId;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -5526,6 +5808,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5556,6 +5839,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5671,6 +5955,10 @@ function ChatApp() {
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
               </div>
+            ) : isSubagentWorkspace ? (
+              <div className="flex min-h-0 flex-1">
+                <SubagentTeamWorkspace activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />
+              </div>
             ) : isCanvasWorkspace ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
@@ -5755,13 +6043,24 @@ function ChatApp() {
                           </pre>
                         </details>
                       </div>
-                      <button
-                        type="button"
-                        onClick={approveBrowserAction}
-                        className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
-                      >
-                        許可 (2)
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={denyBrowserAction}
+                          aria-label="browser/computer の承認を拒否"
+                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
+                        >
+                          拒否 (2)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={approveBrowserAction}
+                          aria-label="browser/computer の承認を許可"
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可 (3)
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -5805,6 +6104,7 @@ function ChatApp() {
                             void denyCodingAction();
                           }}
                           onClick={denyCodingAction}
+                          aria-label="runtime 操作の承認を拒否"
                           className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
                         >
                           拒否 (2)
@@ -5816,6 +6116,7 @@ function ChatApp() {
                             void approveCodingAction();
                           }}
                           onClick={approveCodingAction}
+                          aria-label="runtime 操作の承認を許可"
                           className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                         >
                           許可 (3)
@@ -5884,12 +6185,19 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
+            companyPanel={(
+              <CompanyWorkspacePanel
+                activeConversationId={activeConversationId}
+                activeConversationTitle={activeChatTitle}
+                activeCompanyIdHint={activeCompanyWorkspaceHint}
+              />
+            )}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            contextUsage={contextUsage}
             promptUsage={activePromptUsage}
             promptProfileId={activePromptProfileId}
             conversationId={activeConversationId}
@@ -6027,6 +6335,9 @@ export default function App() {
   if (pathname === "/prompts") {
     return <PromptStudio />;
   }
+  if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
+    return <UiPrecisionComparator />;
+  }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
   }
@@ -6042,7 +6353,7 @@ export default function App() {
   if (pathname === "/adaptive" || pathname === "/operating-profile") {
     return <AdaptiveRuntimePage />;
   }
-  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat" || pathname === "/calendar") {
     return <ChatApp />;
   }
   return <ChatApp />;

@@ -73,6 +73,7 @@ export type AccountConnectionPreludeCard = {
   capabilities: string[];
   approvalRequiredCapabilities: string[];
   rejectedCapabilities: string[];
+  provisioning: Record<string, unknown>;
   credentialRef: string;
   expiresAt: string;
   scopeModes: AccountConnectionScopeModeOption[];
@@ -654,6 +655,7 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       capabilities: stringList(status.capabilities),
       approvalRequiredCapabilities: stringList(status.approval_required_capabilities),
       rejectedCapabilities: stringList(status.rejected_capabilities),
+      provisioning: recordValue(status.provisioning),
       credentialRef: String(credentialRef.credential_id || ""),
       expiresAt: String(status.expires_at || ""),
       scopeModes,

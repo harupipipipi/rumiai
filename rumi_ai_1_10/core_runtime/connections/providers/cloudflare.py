@@ -117,7 +117,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
         ProviderCapability(
             id="cloudflare.runner.deploy",
             display_name="Deploy Rumi runner",
-            description="Create or update Cloudflare Sandbox Bridge and PC Tool Bridge runner resources.",
+            description="Create or update Rumi runner resources such as Worker, Workflow, D1, R2, Queue, and secrets.",
             risk="high",
         ),
     ],
@@ -187,7 +187,6 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
         "pc_tool_bridge_runtime": "Cloudflare Worker narrow proxy to a named Tunnel PC runtime",
         "stable_pc_tunnel_note": "Cloudflare Pages/pages.dev is not a permanent tunnel to a Mac. Use a named Cloudflare Tunnel plus a DNS hostname on a Cloudflare-managed zone.",
         "pc_tool_bridge_note": "PC-bound tools are not uploaded to Cloudflare. They are invoked through the PC Tool Bridge, preserving PC runtime approval, policy, and audit.",
-        "pc_local_tools_note": "PC-local browser/computer/files/terminal tools are not Cloudflare-native and require the local PC bridge path.",
         "free_plan_note": "Cloudflare Sandbox uses Cloudflare Containers. Accounts without Containers access require the Workers Paid plan.",
         "self_host_env": [
             "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID",

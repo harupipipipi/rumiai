@@ -887,7 +887,7 @@ def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monk
     assert final["raw_text"] == "Recovered visible answer."
     assert final["metadata"]["thinking"]["transcript"] == "private plan"
     assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2}
+    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
     ChatStore._instance = None
 
 
@@ -941,7 +941,7 @@ def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeyp
     assert "".join(deltas) == "Recovered after empty stream."
     assert final["raw_text"] == "Recovered after empty stream."
     assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2}
+    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
     ChatStore._instance = None
 
 
@@ -3920,6 +3920,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
     assert ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
+    assert ("GET", "/api/tools/browser-companion/session", "blocks.tool.browser_companion_session") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes

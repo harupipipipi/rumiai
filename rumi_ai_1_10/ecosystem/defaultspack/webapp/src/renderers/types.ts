@@ -102,6 +102,7 @@ export type HistoryBoardRendererProps = {
   isCalendarActive?: boolean;
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
+  onGroupSelect?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
   onDesktopsOpen?: () => void;
   isDesktopsActive?: boolean;
@@ -245,6 +246,7 @@ export type RightSidebarRendererProps = {
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  contextUsage?: ContextUsageInfo | null;
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;

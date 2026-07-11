@@ -286,6 +286,66 @@ def test_pack_apply_revalidates_pack_id_from_staging_meta(tmp_path):
     assert not (tmp_path / "escape").exists()
 
 
+def test_pack_applier_audits_apply_actor(monkeypatch, tmp_path):
+    from core_runtime.pack_applier import PackApplier
+
+    staging_id = "a" * 16
+    staging_root = tmp_path / "staging"
+    staging_dir = staging_root / staging_id
+    pack_dir = staging_dir / "payload" / "safe_pack"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "ecosystem.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "safe_pack",
+                "version": "1.0.0",
+                "metadata": {"name": "Safe Pack"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (staging_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "staging_id": staging_id,
+                "detected_pack_ids": ["safe_pack"],
+                "is_multi_pack": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    audit_events = []
+
+    class _Audit:
+        def log_system_event(self, **kwargs):
+            audit_events.append(kwargs)
+
+    monkeypatch.setattr(
+        "core_runtime.audit_logger.get_audit_logger",
+        lambda: _Audit(),
+    )
+    monkeypatch.setattr(
+        "core_runtime.approval_manager.get_approval_manager",
+        lambda: SimpleNamespace(mark_modified=lambda _pack_id: None),
+    )
+
+    result = PackApplier(
+        ecosystem_dir=str(tmp_path / "ecosystem"),
+        backup_root=str(tmp_path / "backups"),
+        staging_root=str(staging_root),
+    ).apply(staging_id, actor="profile:work__surface:mobile")
+
+    assert result.success is True
+    assert [event["event_type"] for event in audit_events] == [
+        "pack_apply_started",
+        "pack_apply_completed",
+    ]
+    assert all(
+        event["details"]["actor"] == "profile:work__surface:mobile"
+        for event in audit_events
+    )
+
+
 def test_defaultspack_management_aliases_do_not_need_runtime_registry(monkeypatch):
     pack_root = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
     monkeypatch.syspath_prepend(str(pack_root))

@@ -8,15 +8,15 @@
   "config": {
     "name": "computer_use",
     "summary": "macOS(Swift host)、Windows(Win32/UIA)、Linux(Xvfb仮想desktop優先 + visible fallback)を分けたComputer Use。LinuxではホストWaylandの裏ウィンドウを直接叩かず、rumiai所有のX11仮想DISPLAYを使える場合はそこで操作します。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、必要なら show_app で Vivaldi/Chrome/VS Code/Finder/LINE などをメイン画面に表示し、select_window で対象ウィンドウを選んでから screenshot/click します。視覚クリックは full/selected-window screenshot -> source=latest の crop/zoom で候補領域を拡大 -> crop画像基準の normalized_x/normalized_y で click、という順にしてください。source=latest は直近のfull/selected-window画像から切り出します。今見ているcropをさらに切る意図がある場合だけ source=current_crop を使ってください。別操作へ移る前は fresh screenshot を取り、古いzoom座標を使い回さないでください。文字入力は action=type と text を優先してください。",
-    "tags": ["computer", "desktop", "screenshot", "approval", "mac-swift", "windows", "linux", "xvfb", "x11-virtual"],
+    "tags": ["computer", "desktop", "screenshot", "ocr", "accessibility", "approval", "mac-swift", "windows", "linux", "xvfb", "x11-virtual"],
     "schema": {
       "parameters": {
         "type": "object",
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "apps", "open_url", "browser_open_url", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll", "clipboard", "clipboard_read", "clipboard_write", "clipboard_clear", "backspace", "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose"],
-            "description": "Use open_url with url and optional app=Google Chrome/Vivaldi to open a website directly in the visible browser. Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, observe to inspect the current driver chain and visible target state, and screenshot before actions. Use semantic_action for accessibility-backed intents, pid_event for experimental pid-targeted background-safe actions, and doctor for driver diagnostics. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
+            "enum": ["context", "apps", "open_url", "browser_open_url", "screenshot", "ocr", "ax_tree", "move", "click", "click_text", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll", "clipboard", "clipboard_read", "clipboard_write", "clipboard_clear", "backspace", "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose"],
+            "description": "Use open_url with url and optional app=Google Chrome/Vivaldi to open a website directly in the visible browser. Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, observe to inspect the current driver chain and visible target state, and screenshot/ocr/ax_tree before actions. Use click_text with text/query/text_query/match_text and optional element_id/role/confidence_threshold for text-targeted clicks, semantic_action for accessibility-backed intents, pid_event for experimental pid-targeted background-safe actions, and doctor for driver diagnostics. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
@@ -42,7 +42,16 @@
           "from_y": {"type": "integer", "description": "Alias for drag start y coordinate."},
           "to_x": {"type": "integer", "description": "Alias for drag end x coordinate."},
           "to_y": {"type": "integer", "description": "Alias for drag end y coordinate."},
-          "text": {"type": "string", "description": "Required non-empty text to enter when action is type. Prefer this over repeated key presses for words; use action=key for shortcuts."},
+          "text": {"type": "string", "description": "Required non-empty text to enter when action is type. Also accepted as the text target for action=click_text. Prefer this over repeated key presses for words; use action=key for shortcuts."},
+          "query": {"type": "string", "description": "Alias text query for action=ocr or action=click_text."},
+          "text_query": {"type": "string", "description": "Alias text query for action=click_text."},
+          "match_text": {"type": "string", "description": "Text that action=click_text should match."},
+          "element_id": {"type": "string", "description": "Accessibility element id for action=click_text or semantic_action."},
+          "role": {"type": "string", "description": "Optional accessibility role filter for action=ax_tree or action=click_text."},
+          "include_ocr": {"type": "boolean", "description": "When supported, include OCR data in observe/ax_tree-style read results."},
+          "include_ax_tree": {"type": "boolean", "description": "When supported, include accessibility tree data in ocr/observe-style read results."},
+          "confidence_threshold": {"type": "number", "description": "Minimum OCR/text match confidence for action=click_text when the host supports it."},
+          "intent": {"type": "string", "description": "Natural-language intent for semantic_action or click_text fallback."},
           "key": {"type": "string", "description": "Single key or shortcut key for action=key, for example backspace, return, or a with modifier=meta."},
           "modifier": {"type": "string", "description": "Optional single key modifier such as meta, command, control, shift, or alt."},
           "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Optional key modifiers for action=key."},

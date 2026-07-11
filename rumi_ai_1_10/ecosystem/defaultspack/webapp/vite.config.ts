@@ -1,10 +1,26 @@
 import path from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+function staticShellChunkUrls(): Plugin {
+  return {
+    name: "defaultspack-static-shell-chunk-urls",
+    renderChunk(code, chunk) {
+      if (!chunk.fileName.endsWith(".js")) return null;
+      const rewritten = code.replace(
+        /(from|import\()\s*(["'])\.\/(shell-[^"']+\.js)\2/g,
+        (_match, prefix: string, quote: string, fileName: string) =>
+          `${prefix}${quote}/static/${fileName}${quote}`,
+      );
+      return rewritten === code ? null : { code: rewritten, map: null };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  base: "/static/",
+  plugins: [react(), tailwindcss(), staticShellChunkUrls()],
   esbuild: {
     keepNames: true,
   },

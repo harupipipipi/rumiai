@@ -114,7 +114,7 @@ def stop_run(input_data, context=None):
     if not convo_id:
         return error("conversation_id is required", "INVALID_INPUT")
     # Delegate to existing stop logic
-    from domain.chat.run_engine import ChatRunEngine
+    from domain.chat.stream_engine import ChatRunEngine
     try:
         engine = ChatRunEngine()
         engine.stop(convo_id)
@@ -155,7 +155,7 @@ def import_branch(input_data, context=None):
         return error("messages must be a list", "INVALID_INPUT")
     store = _store()
     try:
-        convo = store.create_conversation(title=title)
+        convo = store.create_conversation(metadata={"title": title})
         convo_id = convo.get("id", "")
         for msg in messages:
             if isinstance(msg, dict):

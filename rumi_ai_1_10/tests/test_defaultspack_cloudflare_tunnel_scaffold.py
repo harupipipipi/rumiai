@@ -17,6 +17,8 @@ def test_cloudflare_pc_tunnel_scaffold_documents_named_tunnel_not_pages() -> Non
     assert "named Cloudflare Tunnel" in readme
     assert "do not support Server-Sent Events" in readme
     assert "cloudflared tunnel route dns rumi-pc rumi-pc.example.com" in readme
+    assert "explicitly installed Wrangler binary" in readme
+    assert "npx wrangler" not in readme
     assert "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME" in readme
     assert "hostname: rumi-pc.example.com" in config
     assert "service: http://127.0.0.1:8765" in config

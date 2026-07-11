@@ -178,6 +178,8 @@ class CompanyMessageRouter:
                 "mentions": message.get("mentions", []),
                 "message_id": message.get("message_id"),
                 "thread_id": message.get("thread_id"),
+                "subagent_team": metadata.get("subagent_team") if isinstance(metadata.get("subagent_team"), dict) else {},
+                "channel_check": (metadata.get("subagent_team") if isinstance(metadata.get("subagent_team"), dict) else {}).get("channel_check"),
             },
         )
         dispatch = self.run_dispatcher.dispatch_task(

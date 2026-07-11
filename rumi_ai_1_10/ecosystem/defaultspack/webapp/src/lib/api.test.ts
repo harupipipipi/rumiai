@@ -5,7 +5,20 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import {
+  MIMO_CODING_DEFAULT_FAST_MODEL,
+  MIMO_CODING_DEFAULT_MODEL,
+  MIMO_CODING_DEFAULT_VISION_MODEL,
+  frontendCommandArgs,
+  keepSelectedToolsAfterSend,
+  parseCommandBoolean,
+  parseSlashCommandInput,
+  resolveMimoCodingModel,
+  resolveMimoFastModel,
+  resolveMimoVisionModel,
+  resolveUltraYoloModeState,
+  resolvedFrontendCommandArgs,
+} from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -21,6 +34,30 @@ function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
     assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
   }
 }
+
+test("MiMo Coding Company UI model fallbacks stay backend-compatible", () => {
+  const staleLegacyAllowlist = ["opencode-go/mimo-v2.5"];
+  const currentManifestAllowlist = [
+    MIMO_CODING_DEFAULT_MODEL,
+    MIMO_CODING_DEFAULT_VISION_MODEL,
+    MIMO_CODING_DEFAULT_FAST_MODEL,
+    "stub/default",
+  ];
+
+  assert.equal(
+    resolveMimoCodingModel("opencode-go/mimo-v2.5", staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_MODEL,
+  );
+  assert.equal(
+    resolveMimoVisionModel(staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_VISION_MODEL,
+  );
+  assert.equal(
+    resolveMimoFastModel(staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_FAST_MODEL,
+  );
+  assert.equal(resolveMimoCodingModel("stub/default", ["stub/default"], []), "stub/default");
+});
 
 test("startProviderOAuth posts scope mode and requested services", async () => {
   let requestUrl = "";
@@ -58,6 +95,33 @@ test("startProviderOAuth posts scope mode and requested services", async () => {
     scope_mode: "google_gmail_metadata",
     services: ["identity", "gmail_metadata"],
   });
+});
+
+test("providerOAuthStatus can request active diagnostics", async () => {
+  let requestUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestUrl = String(input);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider: {
+          provider_id: "cloudflare",
+          provisioning: {
+            environment_status: "blocked",
+          },
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.providerOAuthStatus("cloudflare", { activeDiagnostics: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/oauth?provider_id=cloudflare&active_diagnostics=true");
 });
 
 test("importProviderConnection posts credential imports to connections route", async () => {
@@ -242,6 +306,68 @@ test("slash command parsing supports multi-word aliases without treating them as
 
   const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("slash command parsing supports greedy text and key-value options", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "goal",
+      name: "goal",
+      label: "Goal",
+      category: "tools",
+      visibility: "default",
+      risk: "medium",
+      args: [
+        { name: "goal", type: "string", required: true, greedy: true },
+        { name: "max_iterations", type: "string", required: false },
+        { name: "model", type: "string", required: false },
+        { name: "rich", type: "string", required: false },
+      ],
+      execution: { type: "pack_block", qualified_name: "defaultspack:goal.run" },
+    } as ComposerCommandItem,
+  ];
+
+  const rich = parseSlashCommandInput("/goal /rich Solve the long goal", commands);
+  assert.deepEqual(rich?.args, { rich: true, goal: "Solve the long goal" });
+
+  const keyed = parseSlashCommandInput("/goal Ship the approval window max_iterations=rich model=stub", commands);
+  assert.deepEqual(keyed?.args, {
+    max_iterations: "rich",
+    model: "stub",
+    goal: "Ship the approval window",
+  });
+});
+
+test("slash command parsing supports rule actions without free-form rule text", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "rule",
+      name: "rule",
+      label: "Rule",
+      category: "settings",
+      visibility: "default",
+      risk: "low",
+      args: [
+        { name: "rule", type: "string", required: false, greedy: true },
+        { name: "action", type: "string", required: false },
+        { name: "rule_id", type: "string", required: false },
+        { name: "priority", type: "string", required: false },
+      ],
+      execution: { type: "pack_block", qualified_name: "defaultspack:rule.run" },
+    } as ComposerCommandItem,
+  ];
+
+  const list = parseSlashCommandInput("/rule action=list", commands);
+  assert.deepEqual(list?.args, { action: "list" });
+
+  const disable = parseSlashCommandInput("/rule action=disable rule_id=rule_123", commands);
+  assert.deepEqual(disable?.args, { action: "disable", rule_id: "rule_123" });
+
+  const create = parseSlashCommandInput("/rule Keep the work in one PR priority=high", commands);
+  assert.deepEqual(create?.args, {
+    priority: "high",
+    rule: "Keep the work in one PR",
+  });
 });
 
 test("slash command parsing can be disabled by template feature flags", () => {
@@ -879,6 +1005,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
 
   try {
     await api.sendMessage("c1", "hello", {
+      idempotency_key: "chat-operation-123",
       thinking_level: "medium",
       attachments: [
         { name: "notes.txt", content: "body", size: 4, type: "text/plain" },
@@ -902,6 +1029,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
     ],
     metadata: { selected_tools: ["local_file"] },
   });
+  assert.equal(requestBody?.idempotency_key, "chat-operation-123");
   assert.deepEqual(requestBody?.tools, ["local_file"]);
   assert.deepEqual(requestBody?.params, {
     thinking_level: "medium",
@@ -2244,6 +2372,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     if (path.includes("/p2p/messages/send")) data = { envelope: {}, peer: { peer_id: "peer-a" } };
     if (path.includes("/company/status")) data = { bootstrapped: true, company_id: "chat-team-c1", conversation_id: "c1", company: null };
     if (path.includes("/company/bootstrap")) data = { bootstrapped: true, company: { id: "chat-team-c1", name: "Executive Team" } };
+    if (path.includes("/subagent-team/creator/settings")) data = { settings: { auto_create_agents: false, default_channel_id: "ops" } };
     if (path.includes("/research/web-search")) data = { provider: "external_web", sources: [] };
     if (path.includes("/company/operations-company/runs")) data = { runs: [], total: 0 };
     if (path.includes("/company/operations-company/agents/reviewer/inbox")) data = { inbox: [], total: 0 };
@@ -2265,6 +2394,12 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     await api.dispatchCompanyTask("operations-company", "task-1");
     await api.listCompanyRuns("operations-company", { task_id: "task-1", limit: 5 });
     await api.listCompanyAgentInbox("operations-company", "reviewer", { limit: 5 });
+    await api.updateSubagentTeamCreatorSettings({
+      companyId: "operations-company",
+      conversationId: "c1",
+      auto_create_agents: false,
+      default_channel_id: "ops",
+    });
     await api.getP2PStatus();
     await api.sendP2PMessage("peer-a", { text: "hello" });
   } finally {
@@ -2312,8 +2447,20 @@ test("company and p2p helpers target frontend workspace routes", async () => {
   });
   assert.equal(seen[7].input, "/api/company/operations-company/runs?company_id=operations-company&task_id=task-1&limit=5");
   assert.equal(seen[8].input, "/api/company/operations-company/agents/reviewer/inbox?company_id=operations-company&agent_id=reviewer&limit=5");
-  assert.equal(seen[9].input, "/api/p2p/status");
-  assert.deepEqual(seen[10], {
+  assert.deepEqual(seen[9], {
+    input: "/api/subagent-team/creator/settings",
+    method: "PATCH",
+    body: {
+      company_id: "operations-company",
+      conversation_id: "c1",
+      settings: {
+        auto_create_agents: false,
+        default_channel_id: "ops",
+      },
+    },
+  });
+  assert.equal(seen[10].input, "/api/p2p/status");
+  assert.deepEqual(seen[11], {
     input: "/api/p2p/messages/send",
     method: "POST",
     body: { peer_id: "peer-a", text: "hello" },

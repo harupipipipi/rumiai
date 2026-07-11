@@ -215,6 +215,18 @@ class PairingSession:
             "expires_at": int(self.expires_at),
         }
 
+    def start_response_dict(self) -> dict[str, Any]:
+        response = self.public_dict()
+        response.update(
+            {
+                "code": self.code,
+                "pairing_code": self.code,
+                "pickup_secret": self.token_pickup_secret,
+                "token_pickup_secret": self.token_pickup_secret,
+            }
+        )
+        return response
+
     def claim_hash(self) -> str:
         return _claim_hash(self)
 

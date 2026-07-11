@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -405,6 +406,18 @@ def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, A
         if not method or not pattern or not legacy_block_module:
             continue
         allowlist[(method, pattern, legacy_block_module)] = route
+    allowlist.setdefault(
+        ("GET", "/api/company/{company_id}/status", "blocks.company.status"),
+        {
+            "method": "GET",
+            "pattern": "/api/company/{company_id}/status",
+            "legacy_block_module": "blocks.company.status",
+            "replacement_function_id": "",
+            "owner": "defaultspack",
+            "reason": "Company status route alias for harness compatibility.",
+            "remove_after": "v2.4",
+        },
+    )
     return allowlist
 
 
@@ -507,6 +520,17 @@ def _dedupe_http_route_specs(groups: list[list[HttpRouteSpec]]) -> list[HttpRout
     return result
 
 
+def _change_request_commit_route_enabled() -> bool:
+    value = str(os.environ.get("RUMI_REVIEW_ENABLE_COMMIT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _route_enabled_by_default(spec: HttpRouteSpec) -> bool:
+    if spec.method == "POST" and spec.pattern == "/api/change-requests/{id}/commit":
+        return _change_request_commit_route_enabled()
+    return True
+
+
 def canonical_http_route_specs(*, include_always_available: bool = True) -> list[HttpRouteSpec]:
     """Return the canonical endpoint -> flow/function/block declaration map.
 
@@ -514,8 +538,8 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     chat ingress can move without changing public HTTP paths.
     """
     flow_specs = flow_http_route_specs()
-    fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
     adaptive_specs = list(_ADAPTIVE_HTTP_ROUTE_SPECS)
+    fallback_specs = [spec for spec in _FALLBACK_HTTP_ROUTE_SPECS if _route_enabled_by_default(spec)]
     template_specs = template_http_route_specs()
     base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs, adaptive_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
@@ -1046,188 +1070,112 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/company/bootstrap", block_module="blocks.company.bootstrap"),
     HttpRouteSpec(
         "GET",
-        "/api/company/{company_id}",
-        block_module="blocks.company.get",
+        "/api/company/{company_id}/status",
+        block_module="blocks.company.status",
         path_inject={"company_id": "company_id"},
     ),
-    HttpRouteSpec(
-        "PUT",
-        "/api/company/{company_id}",
-        block_module="blocks.company.update",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "DELETE",
-        "/api/company/{company_id}",
-        block_module="blocks.company.delete",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/settings",
-        block_module="blocks.company.settings",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/settings",
-        block_module="blocks.company.settings",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/agents",
-        block_module="blocks.company.agents",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/agents",
-        block_module="blocks.company.agents",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/channels",
-        block_module="blocks.company.channels",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/channels",
-        block_module="blocks.company.channels",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/channels/{channel_id}/messages",
-        block_module="blocks.company.messages",
-        path_inject={"company_id": "company_id", "channel_id": "channel_id"},
-        defaults={"action": "list"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/channels/{channel_id}/messages",
-        block_module="blocks.company.messages",
-        path_inject={"company_id": "company_id", "channel_id": "channel_id"},
-        defaults={"action": "create"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/messages",
-        block_module="blocks.company.messages",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/messages",
-        block_module="blocks.company.messages",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/threads",
-        block_module="blocks.company.threads",
-        path_inject={"company_id": "company_id"},
-        defaults={"action": "list"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/threads",
-        block_module="blocks.company.threads",
-        path_inject={"company_id": "company_id"},
-        defaults={"action": "create"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/threads/{thread_id}",
-        block_module="blocks.company.threads",
-        path_inject={"company_id": "company_id", "thread_id": "thread_id"},
-        defaults={"action": "get"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/threads/{thread_id}/messages",
-        block_module="blocks.company.messages",
-        path_inject={"company_id": "company_id", "thread_id": "thread_id"},
-        defaults={"action": "create"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/tasks",
-        block_module="blocks.company.tasks",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/tasks",
-        block_module="blocks.company.tasks",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/dispatch",
-        block_module="blocks.company.dispatch",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/tasks/{task_id}/dispatch",
-        block_module="blocks.company.dispatch",
-        path_inject={"company_id": "company_id", "task_id": "task_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/runs",
-        block_module="blocks.company.runs",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/agents/{agent_id}/inbox",
-        block_module="blocks.company.inbox",
-        path_inject={"company_id": "company_id", "agent_id": "agent_id"},
-        defaults={"action": "list"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/agents/{agent_id}/inbox/{inbox_id}/consume",
-        block_module="blocks.company.inbox",
-        path_inject={"company_id": "company_id", "agent_id": "agent_id", "inbox_id": "inbox_id"},
-        defaults={"action": "consume"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/supervisor/tick",
-        block_module="blocks.company.supervisor_tick",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/summaries",
-        block_module="blocks.company.summary",
-        path_inject={"company_id": "company_id"},
-        defaults={"action": "list"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/summaries/refresh",
-        block_module="blocks.company.summary",
-        path_inject={"company_id": "company_id"},
-        defaults={"action": "refresh"},
-    ),
-    HttpRouteSpec(
-        "GET",
-        "/api/company/{company_id}/inbound-routes",
-        block_module="blocks.company.inbound_routes",
-        path_inject={"company_id": "company_id"},
-    ),
-    HttpRouteSpec(
-        "POST",
-        "/api/company/{company_id}/inbound-routes",
-        block_module="blocks.company.inbound_routes",
-        path_inject={"company_id": "company_id"},
-    ),
+    HttpRouteSpec("POST", "/api/subagent-team/bootstrap", block_module="blocks.subagent_team.bootstrap"),
+    HttpRouteSpec("POST", "/api/subagent-team/workspace/metadata", block_module="blocks.subagent_team.workspace_metadata"),
+    HttpRouteSpec("GET", "/api/subagent-team/status", block_module="blocks.subagent_team.status"),
+    HttpRouteSpec("POST", "/api/subagent-team/status", block_module="blocks.subagent_team.status"),
+    HttpRouteSpec("GET", "/api/subagent-team/channels", block_module="blocks.subagent_team.channels", defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channels", block_module="blocks.subagent_team.channels", defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/channels/{channel_id}", block_module="blocks.subagent_team.channels", path_inject={"channel_id": "channel_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PATCH", "/api/subagent-team/channels/{channel_id}", block_module="blocks.subagent_team.channels", path_inject={"channel_id": "channel_id"}, defaults={"action": "patch"}),
+    HttpRouteSpec("GET", "/api/subagent-team/channels/{channel_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"channel_id": "channel_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channels/{channel_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"channel_id": "channel_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channels/{channel_id}/join", block_module="blocks.subagent_team.channels", path_inject={"channel_id": "channel_id"}, defaults={"action": "join"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channels/{channel_id}/leave", block_module="blocks.subagent_team.channels", path_inject={"channel_id": "channel_id"}, defaults={"action": "leave"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channels/{channel_id}/archive", block_module="blocks.subagent_team.channels", path_inject={"channel_id": "channel_id"}, defaults={"action": "archive"}),
+    HttpRouteSpec("GET", "/api/subagent-team/agents", block_module="blocks.subagent_team.agents", defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/agents", block_module="blocks.subagent_team.agents", defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/agents/{short_id}", block_module="blocks.subagent_team.agents", path_inject={"short_id": "short_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PATCH", "/api/subagent-team/agents/{short_id}", block_module="blocks.subagent_team.agents", path_inject={"short_id": "short_id"}, defaults={"action": "patch"}),
+    HttpRouteSpec("POST", "/api/subagent-team/agents/{short_id}/pause", block_module="blocks.subagent_team.agents", path_inject={"short_id": "short_id"}, defaults={"action": "pause"}),
+    HttpRouteSpec("POST", "/api/subagent-team/agents/{short_id}/resume", block_module="blocks.subagent_team.agents", path_inject={"short_id": "short_id"}, defaults={"action": "resume"}),
+    HttpRouteSpec("POST", "/api/subagent-team/creator/request", block_module="blocks.subagent_team.creator", defaults={"action": "request"}),
+    HttpRouteSpec("POST", "/api/subagent-team/creator/test", block_module="blocks.subagent_team.creator", defaults={"action": "test"}),
+    HttpRouteSpec("GET", "/api/subagent-team/creator/decision-preview", block_module="blocks.subagent_team.creator", defaults={"action": "preview"}),
+    HttpRouteSpec("GET", "/api/subagent-team/creator/settings", block_module="blocks.subagent_team.creator", defaults={"action": "settings"}),
+    HttpRouteSpec("PATCH", "/api/subagent-team/creator/settings", block_module="blocks.subagent_team.creator", defaults={"action": "update_settings"}),
+    HttpRouteSpec("GET", "/api/subagent-team/rich", block_module="blocks.subagent_team.rich", defaults={"action": "get"}),
+    HttpRouteSpec("POST", "/api/subagent-team/rich", block_module="blocks.subagent_team.rich", defaults={"action": "set"}),
+    HttpRouteSpec("POST", "/api/subagent-team/messages", block_module="blocks.subagent_team.messages", defaults={"action": "send"}),
+    HttpRouteSpec("GET", "/api/subagent-team/dms", block_module="blocks.subagent_team.dms", defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/dms", block_module="blocks.subagent_team.dms", defaults={"action": "send"}),
+    HttpRouteSpec("GET", "/api/subagent-team/dms/{thread_id}/messages", block_module="blocks.subagent_team.dms", path_inject={"thread_id": "dm_id"}, defaults={"action": "messages"}),
+    HttpRouteSpec("POST", "/api/subagent-team/dms/{thread_id}/messages", block_module="blocks.subagent_team.dms", path_inject={"thread_id": "dm_id"}, defaults={"action": "send"}),
+    HttpRouteSpec("GET", "/api/subagent-team/goals", block_module="blocks.subagent_team.goals", defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/goals", block_module="blocks.subagent_team.goals", defaults={"action": "propose"}),
+    HttpRouteSpec("GET", "/api/subagent-team/goals/{goal_id}", block_module="blocks.subagent_team.goals", path_inject={"goal_id": "goal_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PATCH", "/api/subagent-team/goals/{goal_id}", block_module="blocks.subagent_team.goals", path_inject={"goal_id": "goal_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("POST", "/api/subagent-team/goals/{goal_id}/approve", block_module="blocks.subagent_team.goals", path_inject={"goal_id": "goal_id"}, defaults={"action": "approve"}),
+    HttpRouteSpec("POST", "/api/subagent-team/goals/{goal_id}/reject", block_module="blocks.subagent_team.goals", path_inject={"goal_id": "goal_id"}, defaults={"action": "reject"}),
+    HttpRouteSpec("POST", "/api/subagent-team/tasks/{task_id}/complete", block_module="blocks.subagent_team.goals", path_inject={"task_id": "task_id"}, defaults={"action": "task_complete"}),
+    HttpRouteSpec("GET", "/api/subagent-team/file-tree", block_module="blocks.subagent_team.file_tree", defaults={"action": "list"}),
+    HttpRouteSpec("GET", "/api/subagent-team/file-tree/open", block_module="blocks.subagent_team.file_tree", defaults={"action": "open"}),
+    HttpRouteSpec("POST", "/api/subagent-team/channel-check", block_module="blocks.subagent_team.channel_check"),
+    HttpRouteSpec("GET", "/api/company/{company_id}", block_module="blocks.company.get", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("PUT", "/api/company/{company_id}", block_module="blocks.company.update", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("DELETE", "/api/company/{company_id}", block_module="blocks.company.delete", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/channels/{channel_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/channels/{channel_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/threads", block_module="blocks.company.threads", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/threads", block_module="blocks.company.threads", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/threads/{thread_id}", block_module="blocks.company.threads", path_inject={"company_id": "company_id", "thread_id": "thread_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/threads/{thread_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "thread_id": "thread_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/tasks/{task_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id", "task_id": "task_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/runs", block_module="blocks.company.runs", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/agents/{agent_id}/inbox", block_module="blocks.company.inbox", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/agents/{agent_id}/inbox/{inbox_id}/consume", block_module="blocks.company.inbox", path_inject={"company_id": "company_id", "agent_id": "agent_id", "inbox_id": "inbox_id"}, defaults={"action": "consume"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/supervisor/tick", block_module="blocks.company.supervisor_tick", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/summaries", block_module="blocks.company.summary", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/summaries/refresh", block_module="blocks.company.summary", path_inject={"company_id": "company_id"}, defaults={"action": "refresh"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/subagent-team/creator", block_module="blocks.subagent_team.creator", defaults={"action": "status"}),
+    HttpRouteSpec("POST", "/api/subagent-team/creator", block_module="blocks.subagent_team.creator", defaults={"action": "ensure"}),
+    HttpRouteSpec("POST", "/api/subagent-team/file-tree", block_module="blocks.subagent_team.file_tree"),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/status", block_module="blocks.subagent_team.creator", path_inject={"company_id": "company_id"}, defaults={"action": "status"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/creator", block_module="blocks.subagent_team.creator", path_inject={"company_id": "company_id"}, defaults={"action": "preview"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/channels", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/channels", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/channels/{channel_id}", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PUT", "/api/subagent-team/{company_id}/channels/{channel_id}", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("DELETE", "/api/subagent-team/{company_id}/channels/{channel_id}", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "archive"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/channels/{channel_id}/check", block_module="blocks.subagent_team.channels", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "check"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/channels/{channel_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/channels/{channel_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "send"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/agents", block_module="blocks.subagent_team.agents", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/agents", block_module="blocks.subagent_team.agents", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/agents/{agent_id}", block_module="blocks.subagent_team.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PUT", "/api/subagent-team/{company_id}/agents/{agent_id}", block_module="blocks.subagent_team.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("DELETE", "/api/subagent-team/{company_id}/agents/{agent_id}", block_module="blocks.subagent_team.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "archive"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/messages", block_module="blocks.subagent_team.messages", path_inject={"company_id": "company_id"}, defaults={"action": "send"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/rich", block_module="blocks.subagent_team.rich", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/goals", block_module="blocks.subagent_team.goals", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/goals", block_module="blocks.subagent_team.goals", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/goals/{goal_id}", block_module="blocks.subagent_team.goals", path_inject={"company_id": "company_id", "goal_id": "goal_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PUT", "/api/subagent-team/{company_id}/goals/{goal_id}", block_module="blocks.subagent_team.goals", path_inject={"company_id": "company_id", "goal_id": "goal_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/goals/{goal_id}/close", block_module="blocks.subagent_team.goals", path_inject={"company_id": "company_id", "goal_id": "goal_id"}, defaults={"action": "close"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/dms", block_module="blocks.subagent_team.dms", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/dms", block_module="blocks.subagent_team.dms", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/dms/{dm_id}/messages", block_module="blocks.subagent_team.dms", path_inject={"company_id": "company_id", "dm_id": "dm_id"}, defaults={"action": "messages"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/dms/{dm_id}/messages", block_module="blocks.subagent_team.dms", path_inject={"company_id": "company_id", "dm_id": "dm_id"}, defaults={"action": "send"}),
+    HttpRouteSpec("GET", "/api/subagent-team/{company_id}/file-tree", block_module="blocks.subagent_team.file_tree", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/subagent-team/{company_id}/file-tree", block_module="blocks.subagent_team.file_tree", path_inject={"company_id": "company_id"}),
     HttpRouteSpec("GET", "/api/agent/companies", block_module="blocks.company.list"),
     HttpRouteSpec("POST", "/api/agent/companies", block_module="blocks.company.create"),
     HttpRouteSpec(
@@ -1742,6 +1690,28 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     ),
     HttpRouteSpec("GET", "/api/coding/git/status", block_module="blocks.coding.git_status"),
     HttpRouteSpec("GET", "/api/coding/git/diff", block_module="blocks.coding.git_diff"),
+    HttpRouteSpec("GET", "/api/change-requests", block_module="blocks.change_request.collection"),
+    HttpRouteSpec("POST", "/api/change-requests", block_module="blocks.change_request.collection"),
+    HttpRouteSpec("GET", "/api/change-requests/{id}", block_module="blocks.change_request.item", path_inject={"id": "id"}),
+    HttpRouteSpec("PATCH", "/api/change-requests/{id}", block_module="blocks.change_request.item", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/refresh", block_module="blocks.change_request.refresh", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/export-patch", block_module="blocks.change_request.export_patch", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/comments", block_module="blocks.change_request.comments", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/comments", block_module="blocks.change_request.comments", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/comments/{comment_id}", block_module="blocks.change_request.comments", path_inject={"id": "id", "comment_id": "comment_id"}),
+    HttpRouteSpec("PATCH", "/api/change-requests/{id}/comments/{comment_id}", block_module="blocks.change_request.comments", path_inject={"id": "id", "comment_id": "comment_id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/decision", block_module="blocks.change_request.decision", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/viewed-files", block_module="blocks.change_request.viewed_files", path_inject={"id": "id"}),
+    HttpRouteSpec("PATCH", "/api/change-requests/{id}/viewed-files", block_module="blocks.change_request.viewed_files", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/viewed-files", block_module="blocks.change_request.viewed_files", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/checks", block_module="blocks.change_request.checks", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/checks", block_module="blocks.change_request.checks", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/checks/run", block_module="blocks.change_request.checks", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/checks/run-check", block_module="blocks.change_request.checks", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/run-check", block_module="blocks.change_request.checks", path_inject={"id": "id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/checks/{check_id}", block_module="blocks.change_request.checks", path_inject={"id": "id", "check_id": "check_id"}),
+    HttpRouteSpec("GET", "/api/change-requests/{id}/seal", block_module="blocks.change_request.seal", path_inject={"id": "id"}),
+    HttpRouteSpec("POST", "/api/change-requests/{id}/commit", block_module="blocks.change_request.commit", path_inject={"id": "id"}),
     HttpRouteSpec("GET", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/commit", block_module="blocks.coding.git_commit"),
@@ -2023,6 +1993,13 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/tools/browser-computer", block_module="blocks.tool.browser_computer"
     ),
     HttpRouteSpec(
+        "GET",
+        "/api/tools/browser-companion/session",
+        block_module="blocks.tool.browser_companion_session",
+        sensitive=True,
+        local_only=True,
+    ),
+    HttpRouteSpec(
         "POST",
         "/api/tools/browser-companion/bridge/poll",
         block_module="blocks.tool.browser_companion_bridge_poll",
@@ -2205,6 +2182,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
     HttpRouteSpec("POST", "/api/ui/client-events", block_module="blocks.ui.client_events"),
+    HttpRouteSpec("POST", "/api/ui/build-recursive", block_module="blocks.ui.build_recursive", sensitive=True),
+    HttpRouteSpec("GET", "/api/ui/generation-status", block_module="blocks.ui.generation_status"),
     HttpRouteSpec(
         "GET",
         "/api/ui/conversations/{id}/preview",
@@ -2346,6 +2325,10 @@ _ADAPTIVE_HTTP_ROUTE_SPECS = [
     ),
 ]
 
+_SUBAGENT_TEAM_HTTP_ROUTE_SPECS = [
+    spec for spec in _FALLBACK_HTTP_ROUTE_SPECS if spec.pattern.startswith("/api/subagent-team")
+]
+
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
@@ -2355,6 +2338,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/calendar", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
@@ -2365,6 +2349,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/host-permissions", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/adaptive", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/operating-profile", handler_name="_handle_static"),
+    *_SUBAGENT_TEAM_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 

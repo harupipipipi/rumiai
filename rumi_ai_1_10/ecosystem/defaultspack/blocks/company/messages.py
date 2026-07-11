@@ -1,9 +1,25 @@
 from blocks._common import ok, error
 from domain.company.message_router import CompanySlackRuntime
+from domain.company.mimo_sync import sync_mimo_company_workspace
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 
-from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict
+from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict, subagent_team_write_denied
+
+
+def _bool_param(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "tail", "latest"}
+    return False
+
+
+def _message_order(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"desc", "descending", "latest", "newest"}:
+        return "desc"
+    return "asc"
 
 
 def run(input_data, context):
@@ -18,14 +34,25 @@ def run(input_data, context):
     try:
         if action == "list":
             limit, offset = limit_offset(input_data)
+            sync_mimo_company_workspace(company_id)
             if store.get_company(company_id) is None:
                 return missing_company(company_id)
+            if _bool_param(input_data.get("tail")) or _bool_param(input_data.get("latest")):
+                _head, total = runtime_store.list_messages(
+                    company_id,
+                    channel_id=input_data.get("channel_id"),
+                    thread_id=input_data.get("thread_id"),
+                    limit=1,
+                    offset=0,
+                )
+                offset = max(int(total) - int(limit), 0)
             result = runtime_store.list_messages(
                 company_id,
                 channel_id=input_data.get("channel_id"),
                 thread_id=input_data.get("thread_id"),
                 limit=limit,
                 offset=offset,
+                order=_message_order(input_data.get("order")),
             )
             messages, total = result
             return ok({"messages": messages, "total": total})
@@ -38,6 +65,9 @@ def run(input_data, context):
                 return error("message not found: " + str(message_id), "NOT_FOUND")
             return ok(message)
         if action in {"add", "create"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             content = input_data.get("content")
             if not content:
                 return invalid("content is required")

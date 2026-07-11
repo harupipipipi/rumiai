@@ -1,0 +1,70 @@
+{
+  "id": "tool_ui_compile_plan",
+  "description": "Compile a requested page into a recursive Rumi UI tree and leaf contracts without writing artifacts.",
+  "config": {
+    "tool_id": "tool_ui_compile_plan",
+    "name": "tool_ui_compile_plan",
+    "summary": "Compile recursive UI tree and contracts without writes.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "frontend",
+      "ui",
+      "planner",
+      "recursive-ui-compiler"
+    ],
+    "metadata": {
+      "keywords": [
+        "ui compiler",
+        "recursive ui",
+        "component contract",
+        "compression",
+        "frontend planning"
+      ]
+    },
+    "ui": {
+      "group_id": "frontend",
+      "group_label": "Frontend",
+      "group_icon": "layout",
+      "item_icon": "layout",
+      "widget_kind": "tool_toggle",
+      "composer_label": "UI Compile Plan",
+      "composer_description": "Split a page request into bounded UI contracts.",
+      "composer_icon": "layout"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ui_tree": {
+            "type": "object",
+            "description": "Root UI node with optional children or splitHints."
+          },
+          "config": {
+            "type": "object",
+            "description": "Optional recursive UI compiler config and budgets."
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "Rejected on this read-only compile tool; use tool_ui_commit_plan for approved writes."
+          }
+        },
+        "required": [
+          "ui_tree"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.ui_compiler_tools:ui_compile_plan"
+    }
+  }
+}

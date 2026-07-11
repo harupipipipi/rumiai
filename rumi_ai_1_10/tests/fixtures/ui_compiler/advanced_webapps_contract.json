@@ -1,0 +1,383 @@
+{
+  "id": "advanced-webapps-suite",
+  "purpose": "Dogfood recursive UI generation across advanced commerce, clinical, fintech, and dense admin websites.",
+  "density": "compact",
+  "implementationMode": "component-with-slots",
+  "importance": "pageFrame",
+  "responsibilities": {
+    "responsiveTopologies": ["advanced-suite-route"]
+  },
+  "slots": [
+    {"id": "commerce", "acceptsNodeId": "commerce-shell", "purpose": "B2B product configurator", "minWidth": 320},
+    {"id": "clinical", "acceptsNodeId": "clinical-shell", "purpose": "Clinical intake flow", "minWidth": 320},
+    {"id": "fintech", "acceptsNodeId": "fintech-shell", "purpose": "Risk approval workflow", "minWidth": 320},
+    {"id": "admin", "acceptsNodeId": "admin-shell", "purpose": "Dense data-grid admin", "minWidth": 320}
+  ],
+  "children": [
+    {
+      "id": "commerce-shell",
+      "purpose": "Configure products while keeping quote and compatibility evidence readable.",
+      "density": "compact",
+      "implementationMode": "component-with-slots",
+      "importance": "pageFrame",
+      "responsibilities": {
+        "responsiveTopologies": ["commerce-desktop-three-region", "commerce-mobile-step-route"]
+      },
+      "slots": [
+        {"id": "gallery", "acceptsNodeId": "product-gallery", "purpose": "Variant gallery", "minWidth": 280},
+        {"id": "options", "acceptsNodeId": "option-matrix", "purpose": "Configuration controls", "minWidth": 320},
+        {"id": "compatibility", "acceptsNodeId": "compatibility-alerts", "purpose": "Compatibility proof", "minWidth": 280},
+        {"id": "quote", "acceptsNodeId": "quote-summary", "purpose": "Price and stock summary", "minWidth": 280},
+        {"id": "checkout", "acceptsNodeId": "checkout-cta", "purpose": "Purchase action", "minWidth": 240}
+      ],
+      "children": [
+        {
+          "id": "product-gallery",
+          "purpose": "Show product variants, stock badges, and image order.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["variant-card", "stock-badge", "selection-marker"],
+            "controls": ["variant-select", "image-zoom"],
+            "states": ["default", "selected", "low-stock"],
+            "responsiveTopologies": ["gallery-scroll"]
+          },
+          "requiredStates": ["default", "selected", "low-stock"],
+          "allowedPrimitives": ["Surface", "Badge", "Button"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "option-matrix",
+          "purpose": "Configure model, storage, warranty, and service options without toolbar overload.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["option-group", "price-delta", "availability-note"],
+            "controls": ["model", "storage", "warranty", "service-plan"],
+            "states": ["default", "changed", "invalid-combination"],
+            "responsiveTopologies": ["option-stepper"]
+          },
+          "inputs": ["model"],
+          "events": ["onModelChange"],
+          "requiredStates": ["default", "changed", "invalid-combination"],
+          "allowedPrimitives": ["Button", "SegmentedControl", "Select", "InlineAlert"],
+          "visibleActionBudget": 4
+        },
+        {
+          "id": "compatibility-alerts",
+          "purpose": "Explain impossible combinations and recovery paths.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["alert", "recovery-action"],
+            "controls": ["fix-option"],
+            "states": ["clear", "warning", "blocking"],
+            "responsiveTopologies": ["alert-stack"]
+          },
+          "requiredStates": ["clear", "warning", "blocking"],
+          "allowedPrimitives": ["InlineAlert", "Button"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "quote-summary",
+          "purpose": "Keep subtotal, lead time, stock, and approval readiness visible.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["price-total", "lead-time", "approval-status"],
+            "controls": ["save-quote", "refresh-stock"],
+            "states": ["default", "stale", "ready"],
+            "responsiveTopologies": ["sticky-quote"]
+          },
+          "requiredStates": ["default", "stale", "ready"],
+          "allowedPrimitives": ["Surface", "Badge", "Button"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "checkout-cta",
+          "purpose": "Submit checkout or saved quote only after compatibility passes.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["primary-cta", "readiness-copy"],
+            "controls": ["checkout", "request-approval"],
+            "mutations": ["submit-checkout"],
+            "states": ["locked", "ready", "submitting"],
+            "responsiveTopologies": ["cta-bar"]
+          },
+          "requiredStates": ["locked", "ready", "submitting"],
+          "allowedPrimitives": ["Button", "InlineAlert"],
+          "visibleActionBudget": 2
+        }
+      ]
+    },
+    {
+      "id": "clinical-shell",
+      "purpose": "Collect clinical intake information while preserving required fields and risk warnings.",
+      "density": "comfortable",
+      "implementationMode": "component-with-slots",
+      "importance": "pageFrame",
+      "responsibilities": {
+        "responsiveTopologies": ["clinical-desktop-review", "clinical-mobile-step-route"]
+      },
+      "slots": [
+        {"id": "patient", "acceptsNodeId": "patient-summary", "purpose": "Patient identity", "minWidth": 280},
+        {"id": "triage", "acceptsNodeId": "symptom-triage", "purpose": "Symptom triage", "minWidth": 320},
+        {"id": "medication", "acceptsNodeId": "medication-history", "purpose": "Medication and allergies", "minWidth": 280},
+        {"id": "consent", "acceptsNodeId": "consent-review", "purpose": "Consent review", "minWidth": 280},
+        {"id": "appointment", "acceptsNodeId": "appointment-action", "purpose": "Next appointment", "minWidth": 240}
+      ],
+      "children": [
+        {
+          "id": "patient-summary",
+          "purpose": "Anchor identity, appointment time, and high-risk flags.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["identity-card", "appointment-chip", "risk-flag"],
+            "controls": ["verify-identity"],
+            "states": ["default", "verified", "mismatch"],
+            "responsiveTopologies": ["summary-rail"]
+          },
+          "requiredStates": ["default", "verified", "mismatch"],
+          "allowedPrimitives": ["Surface", "Badge", "Button"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "symptom-triage",
+          "purpose": "Capture severity, duration, red flags, and recovery prompts.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["severity-scale", "red-flag-alert", "duration-field"],
+            "controls": ["severity", "duration", "red-flag", "notes"],
+            "states": ["empty", "editing", "red-flag"],
+            "responsiveTopologies": ["triage-step"]
+          },
+          "inputs": ["severity"],
+          "events": ["onSeverityChange"],
+          "requiredStates": ["empty", "editing", "red-flag"],
+          "allowedPrimitives": ["TextArea", "Select", "InlineAlert", "Button"],
+          "visibleActionBudget": 3
+        },
+        {
+          "id": "medication-history",
+          "purpose": "List medications and allergy warnings with clear provenance.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["medication-row", "allergy-warning", "source-note"],
+            "controls": ["add-medication", "confirm-allergy"],
+            "states": ["default", "allergy", "empty"],
+            "responsiveTopologies": ["medication-stack"]
+          },
+          "requiredStates": ["default", "allergy", "empty"],
+          "allowedPrimitives": ["Surface", "Badge", "InlineAlert", "Button"],
+          "visibleActionBudget": 3
+        },
+        {
+          "id": "consent-review",
+          "purpose": "Keep consent, privacy, and data sharing readable before submit.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["consent-copy", "signature-state"],
+            "controls": ["signature", "privacy-toggle"],
+            "states": ["unsigned", "signed", "needs-review"],
+            "responsiveTopologies": ["consent-card"]
+          },
+          "requiredStates": ["unsigned", "signed", "needs-review"],
+          "allowedPrimitives": ["TextArea", "Button", "InlineAlert"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "appointment-action",
+          "purpose": "Schedule next action and submit intake safely.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["readiness-summary", "submit-action"],
+            "controls": ["schedule", "submit"],
+            "mutations": ["submit-intake"],
+            "states": ["blocked", "ready", "submitting"],
+            "responsiveTopologies": ["clinical-action-bar"]
+          },
+          "requiredStates": ["blocked", "ready", "submitting"],
+          "allowedPrimitives": ["Button", "InlineAlert"],
+          "visibleActionBudget": 2
+        }
+      ]
+    },
+    {
+      "id": "fintech-shell",
+      "purpose": "Review transaction risk evidence before approval or rejection.",
+      "density": "compact",
+      "implementationMode": "component-with-slots",
+      "importance": "pageFrame",
+      "responsibilities": {
+        "responsiveTopologies": ["fintech-risk-console", "fintech-mobile-review-route"]
+      },
+      "slots": [
+        {"id": "transaction", "acceptsNodeId": "transaction-summary", "purpose": "Transaction summary", "minWidth": 280},
+        {"id": "signals", "acceptsNodeId": "risk-signal-stack", "purpose": "Risk signals", "minWidth": 320},
+        {"id": "exception", "acceptsNodeId": "exception-review", "purpose": "Exception review", "minWidth": 280},
+        {"id": "ledger", "acceptsNodeId": "audit-ledger", "purpose": "Audit trail", "minWidth": 280},
+        {"id": "actions", "acceptsNodeId": "approval-actions", "purpose": "Approval actions", "minWidth": 240}
+      ],
+      "children": [
+        {
+          "id": "transaction-summary",
+          "purpose": "Show amount, counterparty, payment rail, and deadline.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["amount", "counterparty", "deadline"],
+            "controls": ["open-details"],
+            "states": ["default", "deadline-soon"],
+            "responsiveTopologies": ["transaction-summary-card"]
+          },
+          "requiredStates": ["default", "deadline-soon"],
+          "allowedPrimitives": ["Surface", "Badge", "Button"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "risk-signal-stack",
+          "purpose": "Order KYC, sanctions, velocity, and anomaly evidence.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["risk-score", "signal-row", "evidence-link"],
+            "controls": ["expand-signal", "request-proof"],
+            "states": ["clear", "review", "blocked"],
+            "responsiveTopologies": ["risk-signal-stack"]
+          },
+          "requiredStates": ["clear", "review", "blocked"],
+          "allowedPrimitives": ["Surface", "Badge", "Button", "InlineAlert"],
+          "visibleActionBudget": 3
+        },
+        {
+          "id": "exception-review",
+          "purpose": "Explain policy mismatch and operator notes.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["exception-reason", "operator-note"],
+            "controls": ["add-note", "mark-reviewed"],
+            "states": ["open", "reviewed", "needs-info"],
+            "responsiveTopologies": ["exception-panel"]
+          },
+          "requiredStates": ["open", "reviewed", "needs-info"],
+          "allowedPrimitives": ["TextArea", "Button", "InlineAlert"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "audit-ledger",
+          "purpose": "Render immutable audit history without stealing decision priority.",
+          "importance": "secondaryRegion",
+          "implementationMode": "repeated-component",
+          "responsibilities": {
+            "visualRoles": ["audit-row", "timestamp", "actor"],
+            "states": ["default", "empty"],
+            "responsiveTopologies": ["ledger-list"]
+          },
+          "requiredStates": ["default", "empty"],
+          "allowedPrimitives": ["Surface", "Badge"],
+          "visibleActionBudget": 1
+        },
+        {
+          "id": "approval-actions",
+          "purpose": "Approve, request info, or reject only after evidence review.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["primary-decision", "guard-copy"],
+            "controls": ["request-info", "reject", "approve"],
+            "mutations": ["submit-decision"],
+            "states": ["locked", "ready", "submitting"],
+            "responsiveTopologies": ["approval-action-bar"]
+          },
+          "requiredStates": ["locked", "ready", "submitting"],
+          "allowedPrimitives": ["Button", "InlineAlert"],
+          "visibleActionBudget": 3
+        }
+      ]
+    },
+    {
+      "id": "admin-shell",
+      "purpose": "Operate a dense enterprise data grid without mobile overflow or unsafe bulk actions.",
+      "density": "dataDense",
+      "implementationMode": "component-with-slots",
+      "importance": "pageFrame",
+      "responsibilities": {
+        "responsiveTopologies": ["admin-grid-desktop", "admin-row-summary-mobile"]
+      },
+      "slots": [
+        {"id": "grid", "acceptsNodeId": "grid-shell", "purpose": "Grid surface", "minWidth": 320},
+        {"id": "filters", "acceptsNodeId": "filter-builder", "purpose": "Filter builder", "minWidth": 280},
+        {"id": "bulk", "acceptsNodeId": "bulk-action-bar", "purpose": "Bulk actions", "minWidth": 260},
+        {"id": "detail", "acceptsNodeId": "row-detail-drawer", "purpose": "Selected row detail", "minWidth": 280},
+        {"id": "audit", "acceptsNodeId": "audit-state-rail", "purpose": "Audit state", "minWidth": 240}
+      ],
+      "children": [
+        {
+          "id": "grid-shell",
+          "purpose": "Own table topology, sticky regions, and row-summary mobile fallback.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["column-header", "row-summary", "selection-state"],
+            "controls": ["select-row", "sort", "open-row"],
+            "states": ["default", "selected", "empty"],
+            "layoutAlgorithms": ["sticky-column"],
+            "responsiveTopologies": ["grid-to-row-summary"]
+          },
+          "requiredStates": ["default", "selected", "empty"],
+          "allowedPrimitives": ["Surface", "Badge", "Button"],
+          "visibleActionBudget": 3
+        },
+        {
+          "id": "filter-builder",
+          "purpose": "Build compound filters without overflowing the toolbar.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["filter-chip", "condition-row", "recovery-action"],
+            "controls": ["add-filter", "remove-filter", "apply-filter", "clear-filter"],
+            "states": ["default", "dirty", "empty-result"],
+            "responsiveTopologies": ["filter-drawer"]
+          },
+          "requiredStates": ["default", "dirty", "empty-result"],
+          "allowedPrimitives": ["SearchField", "Button", "Select", "InlineAlert"],
+          "visibleActionBudget": 4
+        },
+        {
+          "id": "bulk-action-bar",
+          "purpose": "Show selection count and guard destructive bulk mutation.",
+          "importance": "primaryRegion",
+          "responsibilities": {
+            "visualRoles": ["selection-count", "danger-action", "confirmation-copy"],
+            "controls": ["review-selection", "apply-bulk", "cancel"],
+            "mutations": ["apply-bulk-change"],
+            "states": ["hidden", "review", "confirm"],
+            "responsiveTopologies": ["bulk-action-sheet"]
+          },
+          "requiredStates": ["hidden", "review", "confirm"],
+          "allowedPrimitives": ["Button", "InlineAlert", "Badge"],
+          "visibleActionBudget": 3
+        },
+        {
+          "id": "row-detail-drawer",
+          "purpose": "Inspect selected record without expanding every table column.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["detail-field", "policy-note"],
+            "controls": ["close-detail", "copy-id"],
+            "states": ["empty", "selected"],
+            "responsiveTopologies": ["detail-drawer"]
+          },
+          "requiredStates": ["empty", "selected"],
+          "allowedPrimitives": ["Surface", "Button", "Badge"],
+          "visibleActionBudget": 2
+        },
+        {
+          "id": "audit-state-rail",
+          "purpose": "Summarize permission and audit status outside the grid.",
+          "importance": "secondaryRegion",
+          "responsibilities": {
+            "visualRoles": ["permission-state", "audit-status"],
+            "controls": ["open-audit"],
+            "states": ["passed", "pending", "failed"],
+            "responsiveTopologies": ["audit-rail"]
+          },
+          "requiredStates": ["passed", "pending", "failed"],
+          "allowedPrimitives": ["Badge", "Button", "InlineAlert"],
+          "visibleActionBudget": 2
+        }
+      ]
+    }
+  ]
+}

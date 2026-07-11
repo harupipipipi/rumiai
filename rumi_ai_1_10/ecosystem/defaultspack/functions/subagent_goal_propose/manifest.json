@@ -1,0 +1,47 @@
+{
+  "function_id": "subagent_goal_propose",
+  "description": "Propose a PM-gated subagent goal through Creator.",
+  "tags": [
+    "subagent_team",
+    "goal"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.goal.propose"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.goal_propose",
+    "defaultspack.subagent.goal_propose",
+    "defaults.subagent.goal.propose",
+    "defaultspack.subagent.goal.propose",
+    "subagent.goal.propose"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_goal_propose"
+      }
+    }
+  }
+}

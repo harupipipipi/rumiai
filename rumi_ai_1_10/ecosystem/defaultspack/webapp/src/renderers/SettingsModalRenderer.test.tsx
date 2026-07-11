@@ -200,6 +200,66 @@ test("SettingsModalRenderer renders template model_select with searchable model 
   assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
 });
 
+test("SettingsModalRenderer shows simple main and lightweight model slots", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "main_model",
+              label: "Main Model",
+              type: "model_select",
+              options: [{ value: "provider/main", label: "Main Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "lightweight_model",
+              label: "Lightweight Model",
+              type: "model_select",
+              options: [{ value: "provider/fast", label: "Fast Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "utility_models",
+              label: "Utility Models",
+              type: "textarea",
+              advanced: true,
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          main_model: "provider/main",
+          lightweight_model: "provider/fast",
+          utility_models: { fast_reply: "provider/fast" },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Main Model/);
+  assert.match(html, /Lightweight Model/);
+  assert.match(html, /Main Choice/);
+  assert.match(html, /Fast Choice/);
+  assert.match(html, /Advanced/);
+  assert.match(html, /Utility Models/);
+  assert.equal((html.match(/data-settings-renderer="model_select"/g) ?? []).length, 2);
+});
+
 test("SettingsModalRenderer renders template slash command registration field", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
@@ -244,6 +304,65 @@ test("SettingsModalRenderer renders template slash command registration field", 
   assert.match(html, /value="yolo"/);
   assert.match(html, /value="go"/);
   assert.match(html, /YOLO/);
+});
+
+test("SettingsModalRenderer constrains long readonly paths inside settings cards", () => {
+  const longTemplatePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/templates/very/deep/path/with/no-natural-breaks/ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns";
+  const longProfilePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/profiles/another/very/deep/path/with/no-natural-breaks/ExternalCustomProfileExtensionThatWouldOtherwiseOverlap";
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "packs",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "external_custom",
+          label: "External Custom",
+          fields: [
+            {
+              id: "custom_template_path",
+              label: "Template Extension Path",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longTemplatePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+            {
+              id: "custom_profile_paths",
+              label: "Profile Extension Paths",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longProfilePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        external_custom: {
+          custom_template_path: longTemplatePath,
+          custom_profile_paths: longProfilePath,
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /External Custom/);
+  assert.match(html, /Template Extension Path/);
+  assert.match(html, /Profile Extension Paths/);
+  assert.match(html, /min-w-0 rounded-lg border border-zinc-800 bg-zinc-950\/50 p-4/);
+  assert.match(html, /group\/readonly flex min-w-0/);
+  assert.match(html, /min-w-0 flex-1 whitespace-pre-wrap break-all/);
+  assert.match(html, /ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns/);
+  assert.match(html, /ExternalCustomProfileExtensionThatWouldOtherwiseOverlap/);
+  assert.match(html, /title="Copy"/);
 });
 
 test("slash command settings keep unsaved empty rows with stable row ids", () => {
@@ -987,6 +1106,29 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
                 connection_status: "missing_scope_config",
                 status_label: "Missing scope config",
                 disabled_reason: "Configure self-host OAuth",
+                provisioning: {
+                  environment_status: "blocked",
+                  sandbox_ready: false,
+                  pages_ready: true,
+                  stable_pc_tunnel_ready: false,
+                  pc_tool_bridge_ready: false,
+                  constraints: {
+                    cloudflare_sandbox_requires_workers_paid: true,
+                    pages_dev_is_not_a_pc_tunnel_hostname: true,
+                    all_tools_cloudflare_native_supported: false,
+                    pc_local_tools_require_pc_bridge: true,
+                    wrangler_diagnostics_require_explicit_command_or_local_install: true,
+                  },
+                  blockers: [
+                    {
+                      code: "CLOUDFLARE_WRANGLER_MISSING",
+                      message:
+                        "Set RUMI_WRANGLER_COMMAND or run npm install in a Cloudflare scaffold so its pinned node_modules/.bin/wrangler is available.",
+                    },
+                    { code: "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED", message: "Cloudflare Containers require the Workers Paid plan." },
+                    { code: "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED", message: "Set a named Cloudflare Tunnel hostname." },
+                  ],
+                },
               },
             },
           ],
@@ -1013,6 +1155,15 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
   assert.match(html, /Official app required|Hosted broker flows|official hosted broker/);
   assert.match(html, /Configure self-host OAuth/);
   assert.match(html, /title="Configure self-host OAuth"/);
+  assert.match(html, /Cloudflare runtime/);
+  assert.match(html, /Sandbox \+ PC bridge/);
+  assert.match(html, /Run diagnostics/);
+  assert.match(html, /Sandbox: Workers Paid plan/);
+  assert.match(html, /pages\.dev is not a PC tunnel/);
+  assert.match(html, /Wrangler: explicit command or local install/);
+  assert.match(html, /Set RUMI_WRANGLER_COMMAND/);
+  assert.match(html, /node_modules\/\.bin\/wrangler/);
+  assert.match(html, /Cloudflare Containers require the Workers Paid plan/);
   assert.doesNotMatch(html, />Not connected</);
 });
 
