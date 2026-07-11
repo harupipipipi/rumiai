@@ -18,6 +18,7 @@ from domain.frontend_settings_store import (  # noqa: E402
     FrontendSettingsStore,
     REVISION_KEY,
 )
+import domain.frontend_settings_store as frontend_settings_store  # noqa: E402
 from domain.ai_client.model_runtime_settings import (  # noqa: E402
     ModelRuntimeSettingsService,
 )
@@ -143,3 +144,18 @@ def test_atomic_write_propagates_permission_error(
     monkeypatch.setattr("os.replace", denied)
     with pytest.raises(PermissionError, match="denied"):
         store.update(lambda current: {**current, "value": True})
+
+
+def test_atomic_write_skips_unsupported_directory_fsync_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "frontend_settings.json"
+    store = FrontendSettingsStore(path)
+
+    monkeypatch.setattr(frontend_settings_store.os, "name", "nt")
+
+    def fail_if_opened(*_args: object, **_kwargs: object) -> int:
+        raise AssertionError("directories must not be opened for fsync on Windows")
+
+    monkeypatch.setattr(frontend_settings_store.os, "open", fail_if_opened)
+    store._fsync_directory(path.parent)
