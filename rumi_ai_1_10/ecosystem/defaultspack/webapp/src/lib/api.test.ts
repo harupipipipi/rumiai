@@ -89,6 +89,27 @@ test("conversation share API exports redacted history and revokes through token-
   ]);
 });
 
+test("mobile pairing review methods use authoritative encoded routes and explicit decisions", async () => {
+  const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), method: String(init?.method ?? "GET"), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({ status: "ok", data: { pairing_id: "pair/id", status: "claimed", pairing: { pairing_id: "pair/id", status: "claimed", expires_at: 1 }, claim: { device_label: "Phone", requested_scopes: [], allowed_scopes: [] }, claim_hash: "hash" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await api.getMobilePairingStatus("pair/id");
+    await api.getMobilePairingReview("pair/id");
+    await api.approveMobilePairing("pair/id", { claim_hash: "hash", scopes: ["chat.read"] });
+    await api.rejectMobilePairing("pair/id", "pairing cancelled by desktop reviewer");
+  } finally { globalThis.fetch = originalFetch; }
+  assert.deepEqual(requests, [
+    { url: "/api/mobile/v1/pairings/pair%2Fid/status", method: "GET", body: undefined },
+    { url: "/api/mobile/v1/pairings/pair%2Fid/review", method: "GET", body: undefined },
+    { url: "/api/mobile/v1/pairings/pair%2Fid/approve", method: "POST", body: { claim_hash: "hash", scopes: ["chat.read"] } },
+    { url: "/api/mobile/v1/pairings/pair%2Fid/reject", method: "POST", body: { reason: "pairing cancelled by desktop reviewer" } },
+  ]);
+});
+
 test("conversation share preview exposes provenance without interpreting message text", () => {
   const record = {
     token: "opaque",

@@ -1222,6 +1222,13 @@ class FrontendRegistry:
                         },
                         "help": "Pairs destination nodes, probes provider route portability, and starts fenced handoff operations.",
                     },
+                    {
+                        "id": "mobile_pairing_review_id",
+                        "label": "Mobile Pairing Review",
+                        "type": "mobile_pairing_review",
+                        "default": "",
+                        "help": "Review an authoritative pending mobile pairing request. Closing never silently approves, rejects, or cancels it.",
+                    },
                 ],
             },
             {
