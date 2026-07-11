@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { api, type Conversation } from "../lib/api";
 import {
   AMBIENT_FINAL_ANSWER_CHANNEL,
-  AMBIENT_FINAL_ANSWER_STORAGE_KEY,
+  LEGACY_AMBIENT_FINAL_ANSWER_STORAGE_KEY,
   ambientFinalAnswerKey,
-  parseAmbientFinalAnswerPayload,
+  parseAmbientFinalAnswerReference,
   type AmbientFinalAnswerPayload,
+  type AmbientFinalAnswerReference,
 } from "./finalAnswerBridge";
+import { ambientLatestAssistantFinal } from "./ambientMiniChatState";
 import { safeLocalStorageGet, safeLocalStorageSet } from "./ambientStorage";
 import { ambientOperationLabels } from "./ambientUiState";
 
@@ -29,6 +32,22 @@ export function shouldReadAmbientFinalAnswer({
   if (!enabled || blocked || alreadySeen) return false;
   const eventTime = payload.message_created_at ?? payload.updated_at;
   return eventTime >= enabledAt - 1_000;
+}
+
+export function ambientFinalAnswerPayloadFromReference(
+  reference: AmbientFinalAnswerReference,
+  conversation: Conversation | null | undefined,
+): AmbientFinalAnswerPayload | null {
+  if (!conversation || String(conversation.id || "") !== reference.conversation_id) return null;
+  const assistant = ambientLatestAssistantFinal(conversation);
+  if (!assistant || assistant.messageId !== reference.message_id) return null;
+  return {
+    conversation_id: reference.conversation_id,
+    message_id: assistant.messageId,
+    message_created_at: assistant.createdAt || reference.message_created_at,
+    text: assistant.text,
+    updated_at: reference.updated_at,
+  };
 }
 
 export function useFinalAnswerBridge({
@@ -56,6 +75,7 @@ export function useFinalAnswerBridge({
   const mountedAtRef = useRef(Date.now());
   const readoutEnabledAtRef = useRef(Date.now());
   const seenAnswerKeysRef = useRef(new Set<string>());
+  const seenReferenceNoncesRef = useRef(new Set<string>());
   const initializedSourcesRef = useRef(new Set<string>());
   const currentPayloadRef = useRef<AmbientFinalAnswerPayload | null>(null);
 
@@ -162,39 +182,54 @@ export function useFinalAnswerBridge({
   }, [applyFinalAnswer, finalAnswer, finalAnswerText]);
 
   useEffect(() => {
+    try {
+      window.localStorage.removeItem(LEGACY_AMBIENT_FINAL_ANSWER_STORAGE_KEY);
+    } catch {
+      // Legacy content may be inaccessible in restricted webviews; it is never read or rewritten.
+    }
+  }, []);
+
+  useEffect(() => {
     if (!standalone) return;
+    let cancelled = false;
     const timers = new Set<number>();
     const applyPayload = (payload: AmbientFinalAnswerPayload | null, source: string, live: boolean) => {
       const timer = applyFinalAnswer(payload, source, live);
       if (timer) timers.add(timer);
     };
-    try {
-      applyPayload(parseAmbientFinalAnswerPayload(window.localStorage.getItem(AMBIENT_FINAL_ANSWER_STORAGE_KEY)), "storage-bootstrap", false);
-    } catch {
-      // Local storage may be blocked; live BroadcastChannel updates still work when available.
-    }
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === AMBIENT_FINAL_ANSWER_STORAGE_KEY) {
-        applyPayload(parseAmbientFinalAnswerPayload(event.newValue), "storage-event", true);
+    const resolveReference = async (reference: AmbientFinalAnswerReference) => {
+      if (seenReferenceNoncesRef.current.has(reference.nonce)) return;
+      seenReferenceNoncesRef.current.add(reference.nonce);
+      try {
+        const conversation = await api.getConversation(reference.conversation_id);
+        if (cancelled) return;
+        const payload = ambientFinalAnswerPayloadFromReference(reference, conversation);
+        if (!payload) {
+          onMessage("回答通知を確認できませんでした。チャットから最新状態を確認してください。");
+          return;
+        }
+        applyPayload(payload, "authenticated-reference", true);
+      } catch {
+        if (!cancelled) onMessage("回答通知を取得できませんでした。接続を確認して再試行してください。");
       }
     };
-    window.addEventListener("storage", handleStorage);
+
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel(AMBIENT_FINAL_ANSWER_CHANNEL);
       channel.onmessage = (event) => {
-        const data = event.data as AmbientFinalAnswerPayload | undefined;
-        applyPayload(data ? parseAmbientFinalAnswerPayload(JSON.stringify(data)) : null, "broadcast", true);
+        const reference = parseAmbientFinalAnswerReference(event.data);
+        if (reference) void resolveReference(reference);
       };
     } catch {
       channel = null;
     }
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      cancelled = true;
       channel?.close();
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [applyFinalAnswer, standalone]);
+  }, [applyFinalAnswer, onMessage, standalone]);
 
   return {
     frontOnFinal,

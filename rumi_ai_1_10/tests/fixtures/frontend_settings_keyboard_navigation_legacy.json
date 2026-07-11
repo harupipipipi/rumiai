@@ -1,0 +1,12 @@
+{
+  "general": {
+    "composer_placeholder": "既存のプレースホルダー",
+    "keyboard_button_navigation": false,
+    "language": "en",
+    "legacy_custom_flag": "keep-me"
+  },
+  "preview": {
+    "auto_open": true,
+    "max_items": 7
+  }
+}

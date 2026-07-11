@@ -131,11 +131,16 @@ class FrontendSettingsStore:
         if preserve_backup and self.path.exists():
             shutil.copyfile(self.path, self.backup_path)
             self._fsync_file(self.backup_path)
+        try:
+            mode = self.path.stat().st_mode & 0o777
+        except OSError:
+            mode = 0o600
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
         )
         temp_path = Path(temp_name)
         try:
+            os.fchmod(fd, mode)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(value, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")

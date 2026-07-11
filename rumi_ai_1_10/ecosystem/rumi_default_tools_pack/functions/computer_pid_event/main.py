@@ -15,8 +15,8 @@ for path in (RUMI_ROOT, PACK_ROOT, DEFAULTSPACK_ROOT):
 
 try:
     from ecosystem.rumi_default_tools_pack.domain.computer import (
-        ComputerSeatService,
-        create_default_computer_seat_service,
+        ComputerToolService,
+        create_default_computer_tool_service,
     )
     from ecosystem.rumi_default_tools_pack.domain.computer.models import ComputerTarget
     from ecosystem.rumi_default_tools_pack.functions._computer_approval import (
@@ -24,20 +24,20 @@ try:
         has_computer_action_approval,
     )
 except ImportError:  # pragma: no cover - direct function execution fallback
-    from domain.computer import ComputerSeatService, create_default_computer_seat_service
+    from domain.computer import ComputerToolService, create_default_computer_tool_service
     from domain.computer.models import ComputerTarget
     from functions._computer_approval import (
         computer_action_approval_required,
         has_computer_action_approval,
     )
 
-_service: ComputerSeatService | None = None
+_service: ComputerToolService | None = None
 
 
-def _get_service() -> ComputerSeatService:
+def _get_service() -> ComputerToolService:
     global _service
     if _service is None:
-        _service = create_default_computer_seat_service()
+        _service = create_default_computer_tool_service()
     return _service
 
 
@@ -51,16 +51,12 @@ def run(context, args):
         svc = _get_service()
         target = ComputerTarget(pid=a.get("pid"))
 
-        if action == "click":
-            result = svc.click(target, x=a.get("x", 0), y=a.get("y", 0), button=a.get("button", "left"))
-        elif action == "type_text":
-            result = svc.type_text(target, text=a.get("text", ""))
-        elif action == "key":
-            result = svc.key(target, key_combo=a.get("key_combo", ""))
-        elif action == "scroll":
-            result = svc.scroll(target, x=a.get("x", 0), y=a.get("y", 0), direction=a.get("direction", "down"), clicks=a.get("clicks", 3))
-        else:
-            result = {"action": action, "error": f"Unknown action: {action}"}
+        payload = {
+            key: value
+            for key, value in a.items()
+            if key not in {"action", "approval", "approval_token"}
+        }
+        result = svc.pid_event(action, target, payload)
 
         # Always mark as experimental
         if isinstance(result, dict):

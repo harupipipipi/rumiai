@@ -1,18 +1,83 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   canExecuteComposerEndpointAction,
+  composerMentionMetadataFromWidgets,
+  composerFileMentionWidget,
+  composerServiceMentionWidget,
   composerSkillMentionDisplay,
   composerSkillMentionWidget,
   composerToolMentionDisplay,
+  composerToolMentionWidget,
   filterComposerSkillMentions,
   isSafeLocalEndpoint,
+  reconcileComposerSemanticDraft,
   resolveComposerWidgetDrop,
   skillMentionIdsFromText,
+  toolMentionIdsFromText,
   trustedComposerActionForWidget,
+  withComposerMentionSelectionOwnership,
 } from "./composerWidgets";
+import {
+  activeMentionAtCursor,
+  codePointIndexToUtf16Offset,
+  extractMentionTokens,
+  hasUnescapedMentionSyntax,
+  utf16OffsetToCodePointIndex,
+} from "./mentionContract";
 import type { ComposerExtensionItem } from "../renderers/types";
+
+type BoundaryFixture = {
+  active_query: string | null;
+  active_start_codepoint?: number;
+  active_start_utf16?: number;
+  cursor_codepoint?: number;
+  cursor_utf16?: number;
+  known_values?: string[];
+  name: string;
+  text: string;
+  token_spans?: Array<[number, number]>;
+  tokens: string[];
+};
+
+const boundaryFixtures = JSON.parse(readFileSync(resolve(
+  import.meta.dirname,
+  "../../../../..",
+  "tests/fixtures/mention_boundaries.json",
+), "utf8")) as BoundaryFixture[];
+
+test("frontend follows the shared Unicode mention boundary fixtures", () => {
+  for (const fixture of boundaryFixtures) {
+    assert.deepEqual(
+      extractMentionTokens(fixture.text, fixture.known_values).map((mention) => mention.value),
+      fixture.tokens,
+      fixture.name,
+    );
+    if (fixture.token_spans) {
+      assert.deepEqual(
+        extractMentionTokens(fixture.text, fixture.known_values).map(({ start, end }) => [start, end]),
+        fixture.token_spans,
+        fixture.name,
+      );
+    }
+    const cursor = fixture.cursor_utf16 ?? fixture.text.length;
+    const activeMention = activeMentionAtCursor(fixture.text, cursor, fixture.known_values);
+    assert.equal(
+      activeMention?.query ?? null,
+      fixture.active_query,
+      fixture.name,
+    );
+    if (fixture.cursor_codepoint !== undefined) {
+      assert.equal(utf16OffsetToCodePointIndex(fixture.text, cursor), fixture.cursor_codepoint);
+      assert.equal(codePointIndexToUtf16Offset(fixture.text, fixture.cursor_codepoint), cursor);
+      assert.equal(activeMention?.start, fixture.active_start_utf16);
+      assert.equal(activeMention?.startCodePoint, fixture.active_start_codepoint);
+    }
+  }
+});
 
 test("composer endpoint actions are limited to safe local non-approval APIs", () => {
   assert.equal(isSafeLocalEndpoint("/api/coding/git/status"), true);
@@ -116,7 +181,10 @@ test("composer skill mentions resolve aliases and create prompt widgets", () => 
     metadata: {
       source: "composer_at_mention",
       mention: {
-        syntax: "@feedback/live-review",
+        id: "feedback/live-review",
+        kind: "skill",
+        label: "Live Review",
+        syntax: "@Live Review",
         skill_id: "feedback/live-review",
       },
       skill: {
@@ -131,7 +199,7 @@ test("composer skill mentions resolve aliases and create prompt widgets", () => 
   });
 });
 
-test("composer mention display prefers human labels and keeps ids visible", () => {
+test("composer mention display keeps internal ids out of normal UI", () => {
   assert.deepEqual(composerToolMentionDisplay({
     id: "coding_file_read",
     label: "Read File",
@@ -139,7 +207,7 @@ test("composer mention display prefers human labels and keeps ids visible", () =
     description: "Read a workspace file.",
   }), {
     label: "Read File",
-    description: "coding_file_read - Read a workspace file.",
+    description: "Read a workspace file.",
   });
   assert.deepEqual(composerSkillMentionDisplay({
     id: "feedback/live-review",
@@ -147,6 +215,148 @@ test("composer mention display prefers human labels and keeps ids visible", () =
     description: "Require evidence-backed verification.",
   }), {
     label: "Live Review",
-    description: "feedback/live-review - Require evidence-backed verification.",
+    description: "Require evidence-backed verification.",
   });
+});
+
+test("semantic mention metadata keeps stable ids separate from human labels", () => {
+  const fileWidget = composerFileMentionWidget("src/App.tsx");
+  const serviceWidget = composerServiceMentionWidget({
+    id: "github",
+    label: "GitHub",
+    toolIds: ["github_issue_search"],
+  });
+  assert.deepEqual(composerMentionMetadataFromWidgets([fileWidget, serviceWidget]), [
+    {
+      id: "src/App.tsx",
+      kind: "file",
+      label: "src/App.tsx",
+      syntax: "@src/App.tsx",
+    },
+    {
+      id: "github",
+      kind: "service",
+      label: "GitHub",
+      syntax: "@GitHub",
+    },
+  ]);
+});
+
+test("semantic mention reconciliation removes escaped and deselected tool state", () => {
+  const tool = { id: "web_search", label: "Web Search", category: "tool" };
+  const ownedWidget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget(tool),
+    [],
+  );
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [ownedWidget],
+    selectedToolIds: ["web_search"],
+    text: "Use \\@Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [ownedWidget],
+    selectedToolIds: [],
+    text: "Use @Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+});
+
+test("semantic mention matching requires a complete token boundary", () => {
+  assert.equal(hasUnescapedMentionSyntax("Use @GitHub", "@Git"), false);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git/foo", "@Git"), false);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git.", "@Git"), true);
+  assert.equal(hasUnescapedMentionSyntax("Use @Git, please", "@Git"), true);
+
+  const widget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget({ id: "git", label: "Git", category: "tool" }),
+    [],
+  );
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [widget],
+    selectedToolIds: ["git"],
+    text: "Use @GitHub",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+});
+
+test("semantic mention reconciliation preserves a pre-existing manual tool choice", () => {
+  const widget = withComposerMentionSelectionOwnership(
+    composerToolMentionWidget({ id: "web_search", label: "Web Search", category: "tool" }),
+    ["web_search"],
+  );
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [widget],
+    selectedToolIds: ["web_search"],
+    text: "literal \\@Web Search",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: ["web_search"],
+  });
+});
+
+test("semantic mention reconciliation requires live file attachments and service tools", () => {
+  const fileWidget = composerFileMentionWidget("README.md");
+  const serviceWidget = withComposerMentionSelectionOwnership(composerServiceMentionWidget({
+    id: "github",
+    label: "GitHub",
+    toolIds: ["github_issue_search"],
+  }), []);
+
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    attachmentPaths: [],
+    droppedWidgets: [fileWidget],
+    requireFileAttachment: true,
+    selectedToolIds: [],
+    text: "Review @README.md",
+  }).droppedWidgets, []);
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    attachmentPaths: ["README.md"],
+    droppedWidgets: [fileWidget],
+    requireFileAttachment: true,
+    selectedToolIds: [],
+    text: "Review @README.md",
+  }).droppedWidgets, [fileWidget]);
+  assert.deepEqual(reconcileComposerSemanticDraft({
+    droppedWidgets: [serviceWidget],
+    selectedToolIds: [],
+    text: "Use @GitHub",
+  }), {
+    droppedWidgets: [],
+    selectedToolIds: [],
+  });
+});
+
+test("duplicate human labels are not ambiguously reparsed", () => {
+  const tools = [
+    { id: "browser_computer", label: "Browser", category: "tool" },
+    { id: "browser_companion", label: "Browser", category: "tool" },
+  ];
+  assert.deepEqual(skillMentionIdsFromText("@Browser", []), []);
+  assert.deepEqual(toolMentionIdsFromText("@Browser", tools), []);
+  assert.deepEqual(toolMentionIdsFromText("@browser_computer", tools), ["browser_computer"]);
+  assert.deepEqual(composerMentionMetadataFromWidgets([
+    composerToolMentionWidget(tools[1]),
+  ]), [{
+    id: "browser_companion",
+    kind: "tool",
+    label: "Browser",
+    syntax: "@Browser",
+  }]);
+});
+
+test("copy and paste keeps human mention text literal without exposing an internal id", () => {
+  const tools = [{ id: "browser_computer", label: "Browser Computer", category: "tool" }];
+  const pastedText = "Use @Browser Computer";
+
+  assert.equal(pastedText.includes("browser_computer"), false);
+  assert.deepEqual(toolMentionIdsFromText(pastedText, tools), []);
 });

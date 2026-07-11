@@ -15,6 +15,9 @@ def run(input_data, context):
     conv = store.get_conversation(conversation_id)
     if conv is None:
         return error("Conversation not found", "NOT_FOUND")
+    metadata = conv.get("metadata") if isinstance(conv.get("metadata"), dict) else {}
+    if metadata.get("shared_read_only") is True:
+        return error("This imported conversation is read-only", "PERMISSION_DENIED")
     message = input_data.get("message")
     if not message or not isinstance(message, dict):
         return error("message dict is required", "INVALID_INPUT")

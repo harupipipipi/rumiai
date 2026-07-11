@@ -79,6 +79,20 @@ function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
   return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
 }
 
+function memoPreviewItem(memo = ''): ToolPreviewItem {
+  return {
+    id: MEMO_PREVIEW_ID,
+    toolStepId: 'memo',
+    timestamp: 0,
+    data: {
+      type: 'file',
+      filename: 'memo.md',
+      size: 'local memo',
+      content: memo,
+    },
+  };
+}
+
 function isArtifactPlaceholderContent(content: string | undefined, path?: string): boolean {
   const text = String(content ?? '').trim();
   if (!text) return false;
@@ -115,19 +129,7 @@ export function buildToolPreviewDisplayItems(
   activePreviewId?: string | null,
 ): ToolPreviewItem[] {
   const shouldShowMemo = Boolean(memo?.trim()) || activePreviewId === MEMO_PREVIEW_ID || activePreviewId === 'memo';
-  const memoPreview: ToolPreviewItem | null = shouldShowMemo
-    ? {
-        id: MEMO_PREVIEW_ID,
-        toolStepId: 'memo',
-        timestamp: 0,
-        data: {
-          type: 'file',
-          filename: 'memo.md',
-          size: 'local memo',
-          content: memo ?? '',
-        },
-      }
-    : null;
+  const memoPreview = shouldShowMemo ? memoPreviewItem(memo) : null;
   const renderablePreviews = previews.filter(isCanvasPreviewItemRenderable);
   const items = memoPreview ? [memoPreview, ...renderablePreviews] : [...renderablePreviews];
   if (!activePreviewId) return items;
@@ -135,6 +137,27 @@ export function buildToolPreviewDisplayItems(
   const active = items.find((item) => matchesPreviewId(item, activePreviewId));
   if (!active) return items;
   return [active, ...items.filter((item) => item.id !== active.id)];
+}
+
+export function buildCanvasTabPickerItems(
+  displayItems: ToolPreviewItem[],
+  memo: string | undefined,
+  memoEnabled: boolean,
+): ToolPreviewItem[] {
+  if (!memoEnabled || displayItems.some((item) => item.id === MEMO_PREVIEW_ID)) {
+    return displayItems;
+  }
+  return [memoPreviewItem(memo), ...displayItems];
+}
+
+export function selectCanvasTab(openPreviewIds: string[], item: ToolPreviewItem) {
+  return {
+    openPreviewIds: openPreviewIds.includes(item.id)
+      ? openPreviewIds
+      : [...openPreviewIds, item.id],
+    activeTabId: item.id,
+    memoTabCreated: item.id === MEMO_PREVIEW_ID,
+  };
 }
 
 export function buildToolPreviewTimelineItems(items: ToolPreviewItem[]): ToolPreviewItem[] {
@@ -1022,6 +1045,22 @@ interface ToolPreviewPanelProps {
   onMemoChange?: (value: string) => void;
 }
 
+export const CANVAS_CLOSE_LABEL = 'Canvasを閉じる';
+
+export function CanvasCloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+      title={CANVAS_CLOSE_LABEL}
+      aria-label={CANVAS_CLOSE_LABEL}
+    >
+      <X size={14} />
+    </button>
+  );
+}
+
 export function ToolPreviewPanel({
   previews,
   isVisible,
@@ -1036,20 +1075,35 @@ export function ToolPreviewPanel({
   const [activeTabId, setActiveTabId] = useState(TIMELINE_TAB_ID);
   const [openPreviewIds, setOpenPreviewIds] = useState<string[]>([]);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [memoTabCreated, setMemoTabCreated] = useState(
+    activePreviewId === MEMO_PREVIEW_ID || activePreviewId === 'memo',
+  );
   const displayItems = useMemo(
-    () => buildToolPreviewDisplayItems(previews, memo, activePreviewId),
-    [activePreviewId, memo, previews],
+    () => buildToolPreviewDisplayItems(
+      previews,
+      memo,
+      memoTabCreated ? MEMO_PREVIEW_ID : activePreviewId,
+    ),
+    [activePreviewId, memo, memoTabCreated, previews],
+  );
+  const pickerItems = useMemo(
+    () => buildCanvasTabPickerItems(displayItems, memo, Boolean(onMemoChange)),
+    [displayItems, memo, onMemoChange],
   );
   const displayItemIdsKey = displayItems.map((item) => item.id).join('|');
 
   const openPreviewTab = (item: ToolPreviewItem) => {
-    setOpenPreviewIds((ids) => (ids.includes(item.id) ? ids : [...ids, item.id]));
+    setOpenPreviewIds((ids) => selectCanvasTab(ids, item).openPreviewIds);
     setActiveTabId(item.id);
+    if (item.id === MEMO_PREVIEW_ID) setMemoTabCreated(true);
     setIsPickerOpen(false);
   };
 
   const closePreviewTab = (previewId: string) => {
     setOpenPreviewIds((ids) => ids.filter((id) => id !== previewId));
+    if (previewId === MEMO_PREVIEW_ID && !memo?.trim()) {
+      setMemoTabCreated(false);
+    }
     if (activeTabId === previewId) {
       setActiveTabId(TIMELINE_TAB_ID);
     }
@@ -1170,7 +1224,7 @@ export function ToolPreviewPanel({
                 新規タブ
               </div>
               <div className="max-h-72 overflow-y-auto p-1">
-                {displayItems.map((item) => (
+                {pickerItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -1214,12 +1268,7 @@ export function ToolPreviewPanel({
           >
             <Maximize2 size={13} />
           </button>
-          <button
-            onClick={onClose}
-            className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
-          >
-            <X size={14} />
-          </button>
+          <CanvasCloseButton onClose={onClose} />
         </div>
       </div>
 

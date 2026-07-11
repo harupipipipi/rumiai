@@ -43,6 +43,39 @@ test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
 });
 
+test("user messages restore human mention badges from semantic metadata", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "user-with-mention",
+      role: "user",
+      content: [{ type: "text", text: "Use @Browser Computer" }],
+      rawText: "Use @Browser Computer",
+      metadata: {
+        mentions: [{
+          id: "browser_computer",
+          kind: "tool",
+          label: "Browser Computer",
+          syntax: "@Browser Computer",
+        }],
+      },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /data-testid="message-mention-badge"/);
+  assert.match(html, /@Browser Computer/);
+  assert.doesNotMatch(html, />@browser_computer</);
+});
+
 test("assistant authority retry boilerplate is stripped while preserving the answer", () => {
   const leakedText = "The model/API authority is now approved. Retrying the request to DeepSeek V4 Flash via OpenCode Go with the provided credentials and network context.\n\n---\n\nHello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
   const answer = "Hello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";

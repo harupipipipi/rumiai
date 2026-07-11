@@ -758,7 +758,7 @@ function CategorySwitcher({
   active,
   counts,
   onChange,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
 }: {
   active: "all" | SidebarCategory;
   counts: Record<string, number>;
@@ -841,7 +841,7 @@ function SidebarSearchControl({
   resultCount,
   totalCount,
   onQueryChange,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
 }: {
   query: string;
   resultCount: number;
@@ -943,7 +943,7 @@ export function RightSidebar({
   selectedToolIds = [],
   companyPanel,
   codingPanel,
-  keyboardButtonNavigation = false,
+  keyboardButtonNavigation = true,
   selectedProfile = null,
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
@@ -2432,6 +2432,11 @@ export function RightSidebar({
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
                     title="ピン留めした機能"
+                    aria-label={
+                      starredItemIds.length > 0
+                        ? `Starred tools (${starredItemIds.length})`
+                        : "Starred tools"
+                    }
                   >
             <Star
               size={18}

@@ -74,7 +74,14 @@ def image_render(arguments: dict[str, Any], context: dict[str, Any] | None = Non
             image.save(output)
         except Exception:
             write_bytes_file(output, PNG_1X1)
-        return ok({"path": ws.relative(output), "width": width, "height": height})
+        return ok(
+            {
+                "path": ws.relative(output),
+                "workspace_path": ws.workspace_relative(output),
+                "width": width,
+                "height": height,
+            }
+        )
     except Exception as exc:
         return err(str(exc), "IMAGE_RENDER_FAILED")
 

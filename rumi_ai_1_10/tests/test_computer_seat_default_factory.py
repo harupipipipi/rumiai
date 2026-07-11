@@ -9,9 +9,15 @@ import pytest
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.factory import (
     create_default_driver_registry,
     create_default_computer_seat_service,
+    create_default_computer_tool_service,
 )
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.registry import DriverRegistry
-from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.service import ComputerSeatService
+from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.service import (
+    ComputerSeatService,
+)
+from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.tool_service import (
+    ComputerToolService,
+)
 
 
 def test_factory_returns_registry():
@@ -58,3 +64,9 @@ def test_service_doctor_has_drivers():
     result = svc.doctor()
     assert "platform" in result
     assert "driver_chain_order" in result
+
+
+def test_create_default_tool_service_uses_host_boundary():
+    svc = create_default_computer_tool_service()
+    assert isinstance(svc, ComputerToolService)
+    assert svc.doctor()["driver_chain_order"]

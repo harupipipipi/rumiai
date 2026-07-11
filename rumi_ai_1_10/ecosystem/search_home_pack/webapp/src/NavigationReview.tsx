@@ -308,15 +308,11 @@ export function NavigationReview({
           この移動先を開く
         </button>
         <button
-          disabled={!destination.ok}
           onClick={onCopy}
-          style={{
-            ...styles.secondaryButton,
-            ...(!destination.ok ? styles.disabledButton : {}),
-          }}
+          style={styles.secondaryButton}
           type="button"
         >
-          URLをコピー
+          {destination.ok ? "URLをコピー" : "ブロック詳細をコピー"}
         </button>
         {fallback.ok && fallback.url !== (destination.ok ? destination.url : "") ? (
           <button onClick={onOpenFallback} style={styles.secondaryButton} type="button">

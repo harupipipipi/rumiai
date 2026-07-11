@@ -15,7 +15,20 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
-  overflow: hidden; /* Prevent body scroll, handle inside panes */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Scroll ownership contract:
+   - document/body keep a vertical fallback so missed pane scroll handling does
+     not clip content on short/mobile/keyboard-resized viewports.
+   - .rumi-app-shell fills at least the dynamic viewport without globally
+     clipping overflow.
+   - top-level panes own internal scroll with min-h-0 + overflow-auto/y-auto. */
+.rumi-app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 /* ----------------------------------
@@ -1016,9 +1029,14 @@ body,
   text-shadow: none !important;
 }
 
-#root :is(input, textarea, select, button):focus,
-#root :is(input, textarea, select, button):focus-visible {
+#root :is(input, textarea, select, button):focus {
   outline: none !important;
+  box-shadow: none !important;
+}
+
+#root :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid rgb(56 189 248 / 85%) !important;
+  outline-offset: 2px !important;
   box-shadow: none !important;
 }
 

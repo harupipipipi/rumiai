@@ -4,6 +4,8 @@ import copy
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
@@ -296,6 +298,83 @@ def test_unsafe_candidate_urls_are_filtered_out():
     assert decision.target_candidates[0]["final_url"] == "https://safe.example.com/article"
 
 
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("javascript:alert(1)", "unsafe_scheme"),
+        ("data:text/html,fake", "unsafe_scheme"),
+        ("file:///tmp/fake-secret", "unsafe_scheme"),
+        ("custom://example.com/path", "unsupported_scheme"),
+        ("/relative/path", "unsupported_scheme"),
+        ("https://[::1", "malformed_url"),
+        ("https://fake-user:fake-password@example.com/", "embedded_credentials"),
+        ("https://example.com/%0d%0aheader", "control_characters"),
+        ("https:\\example.com\\path", "ambiguous_url_syntax"),
+        ("http://127.0.0.1/private", "private_or_local_host"),
+        ("http://2130706433/private", "private_or_local_host"),
+        ("http://0177.0.0.1/private", "private_or_local_host"),
+        ("http://0x7f.0.0.1/private", "private_or_local_host"),
+        ("http://127.1/private", "private_or_local_host"),
+        ("http://0x7f000001/private", "private_or_local_host"),
+        ("http://169.254.169.254/latest/meta-data/", "private_or_local_host"),
+        ("http://[::1]/private", "private_or_local_host"),
+        ("http://service.local/private", "private_or_local_host"),
+    ],
+)
+def test_candidate_url_policy_rejects_unsafe_destinations(url, reason):
+    from ecosystem.search_home_pack.domain.safe_url import validate_candidate_url
+
+    result = validate_candidate_url(url, allow_localhost=False)
+
+    assert result.ok is False
+    assert result.reason == reason
+
+
+def test_candidate_url_policy_normalizes_idn_host_to_punycode():
+    from ecosystem.search_home_pack.domain.safe_url import validate_candidate_url
+
+    result = validate_candidate_url("https://例え.テスト/path")
+
+    assert result.ok is True
+    assert result.normalized_url == "https://xn--r8jz45g.xn--zckzah/path"
+
+
+def test_dns_resolution_rejects_any_private_answer(monkeypatch):
+    from ecosystem.search_home_pack.domain import safe_url
+
+    monkeypatch.setattr(
+        safe_url.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (safe_url.socket.AF_INET, safe_url.socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            (safe_url.socket.AF_INET, safe_url.socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443)),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="dns_resolved_private_or_local_host"):
+        safe_url.resolve_public_addresses("fake-public.example", 443)
+
+
+def test_unsafe_redirect_target_removes_entire_candidate():
+    from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver
+
+    bridge = FakeBridge(search_results=[{"url": "https://safe.example.com/start", "title": "start"}])
+    resolver = SearchTargetResolver(
+        bridge=bridge,
+        probe_fn=lambda candidate: {
+            **candidate,
+            "final_url": "http://127.0.0.1/private",
+            "redirected": True,
+        },
+    )
+
+    decision = resolver.resolve("redirect candidate")
+
+    assert decision.target_candidates == []
+    assert decision.target_url.startswith("https://www.google.com/search?")
+    assert decision.resolution_reason == "no_viable_target_fallback"
+
+
 def test_desktop_route_state_round_trip(tmp_path):
     from ecosystem.search_home_pack import desktop_app
 
@@ -306,3 +385,23 @@ def test_desktop_route_state_round_trip(tmp_path):
 
     desktop_app.clear_route_state(root=tmp_path)
     assert desktop_app.load_route_state(root=tmp_path) == {}
+
+
+def test_desktop_route_state_does_not_persist_secret_bearing_urls(tmp_path):
+    from ecosystem.search_home_pack import desktop_app
+
+    fake_secret = "fake-secret-do-not-store"
+    desktop_app.persist_route_state(
+        {
+            "query": f"https://example.com/callback?access_token={fake_secret}",
+            "target_url": f"https://example.com/callback?access_token={fake_secret}",
+            "target_candidates": [
+                {"url": f"https://example.com/path#{fake_secret}"}
+            ],
+        },
+        root=tmp_path,
+    )
+
+    serialized = desktop_app.route_state_path(root=tmp_path).read_text(encoding="utf-8")
+    assert fake_secret not in serialized
+    assert desktop_app.load_route_state(root=tmp_path)["target_url"] == ""

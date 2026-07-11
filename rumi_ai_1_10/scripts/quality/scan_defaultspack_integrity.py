@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 WEBAPP_ROOT = DEFAULTSPACK_ROOT / "webapp"
 COMPAT_ALIASES_PATH = DEFAULTSPACK_ROOT / "compat_aliases.yaml"
+COMPAT_ALIAS_REFERENCE_PATH = ROOT / "docs" / "defaultspack-compat-alias-reference.md"
 
 
 def _failures() -> list[str]:
@@ -192,6 +193,10 @@ def check_frontend_route_parity(errors: list[str]) -> None:
 
 
 def check_function_aliases(errors: list[str]) -> None:
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    from domain.function_runtime.compat_aliases import compat_alias_metadata_errors
+
     alias_owner: dict[str, str] = {}
     compat_config = _compat_aliases_config()
     canonical_prefix = str(compat_config.get("canonical_prefix") or "defaultspack.")
@@ -220,13 +225,11 @@ def check_function_aliases(errors: list[str]) -> None:
             alias_owner[alias] = str(function_id)
             if any(alias.startswith(prefix) for prefix in compat_prefixes):
                 compat_meta = compat_aliases.get(alias)
-                if not isinstance(compat_meta, dict):
-                    errors.append(f"compat alias missing allowlist entry: {alias}")
+                metadata_errors = compat_alias_metadata_errors(alias, compat_meta)
+                if metadata_errors:
+                    errors.extend(metadata_errors)
                     continue
                 replacement = str(compat_meta.get("replacement") or "").strip()
-                if not replacement:
-                    errors.append(f"compat alias missing replacement: {alias}")
-                    continue
                 if replacement not in canonical_aliases:
                     errors.append(
                         f"compat alias replacement must point to a canonical alias on the same function: {alias} -> {replacement}"
@@ -235,6 +238,19 @@ def check_function_aliases(errors: list[str]) -> None:
     for alias in sorted(compat_aliases):
         if alias not in alias_owner:
             errors.append(f"compat alias allowlist entry is stale: {alias}")
+
+    from domain.function_runtime.compat_aliases import render_compat_alias_reference
+
+    expected_reference = render_compat_alias_reference()
+    try:
+        committed_reference = COMPAT_ALIAS_REFERENCE_PATH.read_text(encoding="utf-8")
+    except OSError:
+        committed_reference = ""
+    if committed_reference != expected_reference:
+        errors.append(
+            "compat alias reference is stale; run "
+            "python scripts/quality/render_defaultspack_compat_alias_docs.py"
+        )
 
 
 def check_local_first_defaults(errors: list[str]) -> None:

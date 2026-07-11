@@ -1,7 +1,7 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
   const HIGHLIGHT_LAYER_ID = "rumi-browser-companion-highlight-layer";
-  const SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
+  const SEARCH_HOME_MESSAGE_SOURCE = "rumi-search-home";
   let sequence = 0;
   let highlightTimer = null;
   let searchHomeRouteStateExpiresAt = 0;
@@ -19,12 +19,23 @@
     if (!message || typeof message !== "object") {
       return;
     }
-    if (message.type === "rumi:search-home:set-route-state") {
-      searchHomeRouteStateExpiresAt = Date.now() + SEARCH_HOME_ROUTE_STATE_MAX_AGE_MS;
-      chrome.runtime.sendMessage({
+    if (message.type === "rumi:search-home:set-route-state" && message.source === SEARCH_HOME_MESSAGE_SOURCE && event.origin === window.location.origin) {
+      searchHomeRouteStateExpiresAt = 0;
+      const routeMessage = {
         type: "rumi:search-home:set-route-state",
-        payload: message.payload || {}
-      });
+        payload: message.payload || {},
+        source_origin: event.origin
+      };
+      try {
+        const maybePromise = chrome.runtime.sendMessage(routeMessage, updateSearchHomeRouteStateExpiry);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(updateSearchHomeRouteStateExpiry).catch(() => {
+            searchHomeRouteStateExpiresAt = 0;
+          });
+        }
+      } catch (_error) {
+        searchHomeRouteStateExpiresAt = 0;
+      }
     }
   });
 

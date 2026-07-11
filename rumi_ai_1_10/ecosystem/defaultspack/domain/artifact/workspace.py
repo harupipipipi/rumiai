@@ -19,6 +19,11 @@ class ArtifactWorkspace:
 
     def resolve(self, user_path: str | None, *, must_exist: bool = False, allow_root: bool = False) -> Path:
         normalized = str(user_path or ".").replace("\\", "/").lstrip("/")
+        workspace_prefix = self._conversation_workspace_prefix()
+        if workspace_prefix and normalized == workspace_prefix:
+            normalized = "."
+        elif workspace_prefix and normalized.startswith(workspace_prefix + "/"):
+            normalized = normalized[len(workspace_prefix) + 1 :]
         target = (self.root / normalized).resolve()
         root = self.root.resolve()
         try:
@@ -34,6 +39,23 @@ class ArtifactWorkspace:
     def relative(self, path: Path) -> str:
         resolved = Path(path).resolve()
         return resolved.relative_to(self.root.resolve()).as_posix()
+
+    def workspace_relative(self, path: Path) -> str:
+        """Return a path suitable for conversation workspace file serving."""
+        relative = self.relative(path)
+        artifact_prefix = self._conversation_workspace_prefix()
+        return f"{artifact_prefix}/{relative}" if artifact_prefix else relative
+
+    def _conversation_workspace_prefix(self) -> str:
+        conversation_workspace = self.context.get("conversation_workspace_dir")
+        if not isinstance(conversation_workspace, str) or not conversation_workspace.strip():
+            return ""
+        try:
+            artifact_prefix = self.root.resolve().relative_to(Path(conversation_workspace).expanduser().resolve())
+        except ValueError:
+            return ""
+        prefix = artifact_prefix.as_posix()
+        return "" if prefix == "." else prefix
 
     def ensure_dir(self, user_path: str = ".") -> Path:
         path = self.resolve(user_path, allow_root=True)

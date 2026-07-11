@@ -17,13 +17,22 @@ from .service import ComputerSeatService
 from .registry import DriverRegistry
 from .audit import AuditLogger
 from .permissions import requires_approval, risk_level
-from .factory import create_default_driver_registry, create_default_computer_seat_service
+from .factory import (
+    create_default_computer_host,
+    create_default_computer_seat_service,
+    create_default_computer_tool_service,
+    create_default_driver_registry,
+)
+from .host_adapter import ComputerSeatHostAdapter
+from .tool_service import ComputerToolService
 
 __all__ = [
     "ActionResult",
     "AXElement",
     "ComputerCapabilities",
     "ComputerSeatService",
+    "ComputerSeatHostAdapter",
+    "ComputerToolService",
     "ComputerTarget",
     "DriverRegistry",
     "AuditLogger",
@@ -31,5 +40,7 @@ __all__ = [
     "requires_approval",
     "risk_level",
     "create_default_driver_registry",
+    "create_default_computer_host",
     "create_default_computer_seat_service",
+    "create_default_computer_tool_service",
 ]
