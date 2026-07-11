@@ -1,4 +1,4 @@
-import { Bot, FolderGit2, FolderPlus, Globe2, PlugZap, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, FolderGit2, FolderPlus, Globe2, PlugZap, RefreshCw, RotateCw, ShieldCheck, Trash2, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
@@ -28,11 +28,151 @@ function workspaceLabel(workspace: CodingWorkspaceRecord): string {
   return workspace.label || workspace.workspace_id;
 }
 
+export type McpLifecycleAction = "disconnect" | "remove";
+
+export type PendingMcpLifecycle = {
+  requestId: string;
+  action: McpLifecycleAction;
+  serverId: string;
+  workspaceId: string | null;
+};
+
+export type McpServerDetailRow = {
+  label: string;
+  value: string;
+};
+
+const MCP_SECRET_NAME = /(?:api[_-]?key|authorization|cookie|credential|password|secret|token)/i;
+
+function serverRecord(server: McpServerRecord): Record<string, unknown> {
+  return server as unknown as Record<string, unknown>;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export function mcpServerIdentifier(server: McpServerRecord): string {
+  return String(server.server_id || server.server_name || server.name || "").trim();
+}
+
+function mcpServerConfig(server: McpServerRecord): Record<string, unknown> {
+  const record = serverRecord(server);
+  return objectRecord(record.registered_config ?? server.config);
+}
+
+function safeMcpEndpoint(value: unknown): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text)) {
+    return text.slice(0, 240);
+  }
+  try {
+    const url = new URL(text);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "[invalid endpoint]";
+  }
+}
+
+export function redactMcpArguments(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  let redactNext = false;
+  for (const raw of value.slice(0, 40)) {
+    const argument = String(raw);
+    if (redactNext) {
+      result.push("[redacted]");
+      redactNext = false;
+      continue;
+    }
+    const assignment = argument.match(/^([^=]{1,80})=(.*)$/s);
+    if (assignment && MCP_SECRET_NAME.test(assignment[1])) {
+      result.push(`${assignment[1]}=[redacted]`);
+      continue;
+    }
+    if (MCP_SECRET_NAME.test(argument) && /^--?[A-Za-z0-9_.-]+$/.test(argument)) {
+      result.push(argument);
+      redactNext = true;
+      continue;
+    }
+    result.push(safeMcpEndpoint(argument).slice(0, 240));
+  }
+  return result;
+}
+
+export function mcpServerDetailRows(server: McpServerRecord): McpServerDetailRow[] {
+  const config = mcpServerConfig(server);
+  const transport = String(server.transport || config.transport || "stdio");
+  const tools = Array.isArray(server.tools) ? server.tools.map((tool) => String(tool)).filter(Boolean) : [];
+  const env = objectRecord(config.env);
+  const rows: McpServerDetailRow[] = [
+    { label: "State", value: serverPermission(server) },
+    { label: "Transport", value: transport },
+  ];
+  if (transport === "sse") {
+    const endpoint = safeMcpEndpoint(config.url);
+    if (endpoint) rows.push({ label: "Endpoint", value: endpoint });
+  } else {
+    const command = String(config.command || "").trim();
+    if (command) rows.push({ label: "Command", value: command.slice(0, 240) });
+    const args = redactMcpArguments(config.args);
+    if (args.length) rows.push({ label: "Arguments", value: args.join(" ") });
+    const cwd = String(config.cwd || "").trim();
+    if (cwd) rows.push({ label: "Working directory", value: cwd.slice(0, 240) });
+  }
+  const envKeys = Object.keys(env).filter((key) => key.trim()).slice(0, 40);
+  if (envKeys.length) {
+    rows.push({ label: "Environment", value: `Configured keys only: ${envKeys.join(", ")}` });
+  }
+  if (tools.length) rows.push({ label: "Tools", value: tools.slice(0, 20).join(", ") });
+  return rows;
+}
+
 function serverPermission(server: McpServerRecord): string {
+  if (server.connected) return "connected";
+  const status = String(server.status || "").trim();
+  if (status) return status;
   const permission = server.permissions;
   if (permission && permission.approved === true) return "approved";
   if (permission && permission.approved === false) return "unapproved";
-  return server.connected ? "connected" : "registered";
+  return "registered";
+}
+
+export function isMcpLifecycleApprovalRequest(request: CodingApprovalRequest): boolean {
+  return request.operation === "tool.mcp_disconnect" || request.operation === "tool.mcp_remove";
+}
+
+export function approvedMcpLifecycleRetryReason(
+  pending: PendingMcpLifecycle | null,
+  currentWorkspaceId: string | null,
+  decision: CodingApprovalDecision,
+): string | null {
+  if (!pending || pending.requestId !== decision.request_id) {
+    return "This MCP lifecycle approval is stale or already settled. Refresh the server and try again.";
+  }
+  if (pending.workspaceId !== currentWorkspaceId) {
+    return "The selected workspace changed after review. Request the MCP action again.";
+  }
+  if (!decision.approved || !decision.token) {
+    return decision.reason || "The MCP lifecycle action was not approved.";
+  }
+  return null;
+}
+
+function approvalRequestId(result: {
+  approval_request_id?: string;
+  approval_request?: { request_id?: string };
+}): string {
+  return typeof result.approval_request_id === "string"
+    ? result.approval_request_id
+    : result.approval_request?.request_id ?? "";
 }
 
 function artifactPreview(artifact: BrowserArtifact): string {
@@ -86,6 +226,9 @@ export function CodingCockpit({
   const [mcpArgs, setMcpArgs] = useState("");
   const [mcpBusy, setMcpBusy] = useState(false);
   const [pendingMcp, setPendingMcp] = useState<PendingMcpConnection | null>(null);
+  const [pendingMcpLifecycle, setPendingMcpLifecycle] = useState<PendingMcpLifecycle | null>(null);
+  const [expandedMcpServerId, setExpandedMcpServerId] = useState<string | null>(null);
+  const [removeConfirmServerId, setRemoveConfirmServerId] = useState<string | null>(null);
   const [approvalRefreshKey, setApprovalRefreshKey] = useState(0);
   const [activeCockpitTab, setActiveCockpitTab] = useState<"review" | "workspace">("review");
   const isSidebar = variant === "sidebar";
@@ -175,6 +318,102 @@ export function CodingCockpit({
     setStatus(`MCP connected: ${serverId}${tools.length ? ` (${tools.length} tools)` : ""}`);
   };
 
+  const rememberPendingMcpLifecycle = (
+    requestId: string,
+    action: McpLifecycleAction,
+    serverId: string,
+  ) => {
+    setPendingMcpLifecycle({
+      requestId,
+      action,
+      serverId,
+      workspaceId: activeWorkspaceId,
+    });
+    setApprovalRefreshKey((value) => value + 1);
+    setActiveCockpitTab("workspace");
+    setStatus(
+      `${action === "remove" ? "Removing" : "Disconnecting"} ${serverId} requires approval. ` +
+        "Review the separate Approvals queue; this server row cannot approve itself.",
+    );
+  };
+
+  const runMcpLifecycle = async (
+    action: McpLifecycleAction,
+    serverId: string,
+    approvalToken?: string,
+  ) => {
+    if (!serverId || mcpBusy) return;
+    setMcpBusy(true);
+    setStatus(null);
+    try {
+      const result = action === "disconnect"
+        ? await codingResources.disconnectMcpServer({
+            server_id: serverId,
+            workspace_id: activeWorkspaceId,
+            approval_token: approvalToken,
+          })
+        : await codingResources.removeMcpServer({
+            server_id: serverId,
+            workspace_id: activeWorkspaceId,
+            approval_token: approvalToken,
+          });
+      const requestId = approvalRequestId(result);
+      if (result.approval_required) {
+        if (!requestId) throw new Error("MCP lifecycle approval response did not include a request id");
+        rememberPendingMcpLifecycle(requestId, action, serverId);
+        return;
+      }
+      setPendingMcpLifecycle(null);
+      setRemoveConfirmServerId(null);
+      if (action === "remove" && expandedMcpServerId === serverId) {
+        setExpandedMcpServerId(null);
+      }
+      await loadSidecarState();
+      setStatus(action === "remove" ? `MCP registration removed: ${serverId}` : `MCP disconnected: ${serverId}`);
+    } catch (err) {
+      setApprovalRefreshKey((value) => value + 1);
+      setStatus(`MCP ${action} failed. The registration remains visible for recovery. ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
+  const reconnectMcpServer = async (server: McpServerRecord) => {
+    const serverId = mcpServerIdentifier(server);
+    if (!serverId || mcpBusy) return;
+    const config = mcpServerConfig(server);
+    const command = String(config.command || "").trim();
+    const args = Array.isArray(config.args) ? config.args.map((item) => String(item)) : [];
+    const draft: McpConnectionDraft = {
+      serverId,
+      command,
+      args,
+      workspaceId: activeWorkspaceId,
+    };
+    setMcpServerId(serverId);
+    setMcpCommand(command);
+    setMcpArgs(args.join("\n"));
+    setMcpBusy(true);
+    setStatus(null);
+    try {
+      const result = await codingResources.connectMcpServer({
+        server_id: serverId,
+        workspace_id: activeWorkspaceId,
+      });
+      const requestId = approvalRequestId(result);
+      if (result.approval_required) {
+        if (!requestId) throw new Error("MCP approval response did not include a request id");
+        rememberPendingMcp(requestId, draft);
+        return;
+      }
+      await finishMcpConnection(serverId, Array.isArray(result.tools) ? result.tools : []);
+    } catch (err) {
+      setStatus(`MCP reconnect failed. The saved registration was not removed. ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
   const handleApprovalApproved = async (decision: CodingApprovalDecision, request: CodingApprovalRequest) => {
     if (request.operation === "terminal.exec") {
       setApprovedTerminalDecision({
@@ -183,6 +422,28 @@ export function CodingCockpit({
         token: decision.token,
         nonce: Date.now(),
       });
+      return;
+    }
+    if (isMcpLifecycleApprovalRequest(request)) {
+      const retryReason = approvedMcpLifecycleRetryReason(
+        pendingMcpLifecycle,
+        activeWorkspaceId,
+        decision,
+      );
+      if (retryReason) {
+        setPendingMcpLifecycle(null);
+        setApprovalRefreshKey((value) => value + 1);
+        setStatus(retryReason);
+        return;
+      }
+      if (!pendingMcpLifecycle || !decision.token || mcpBusy) return;
+      const approvedAttempt = pendingMcpLifecycle;
+      setPendingMcpLifecycle(null);
+      await runMcpLifecycle(
+        approvedAttempt.action,
+        approvedAttempt.serverId,
+        decision.token,
+      );
       return;
     }
     if (!isMcpApprovalRequest(request)) return;
@@ -227,6 +488,14 @@ export function CodingCockpit({
   };
 
   const handleApprovalDenied = (request: CodingApprovalRequest) => {
+    if (isMcpLifecycleApprovalRequest(request)) {
+      if (pendingMcpLifecycle?.requestId !== request.request_id) return;
+      const deniedAction = pendingMcpLifecycle.action;
+      setPendingMcpLifecycle(null);
+      setRemoveConfirmServerId(null);
+      setStatus(`MCP ${deniedAction} denied. The current registration and process state are unchanged.`);
+      return;
+    }
     if (!isMcpApprovalRequest(request) || pendingMcp?.requestId !== request.request_id) return;
     setPendingMcp(null);
     setStatus("MCP connection denied. You can edit the configuration and connect again.");
@@ -438,12 +707,104 @@ export function CodingCockpit({
               </button>
             </div>
             <div className="space-y-1.5">
-              {mcpServers.map((server) => (
-                <div key={server.server_id || server.server_name || server.name} className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1.5">
-                  <span className="min-w-0 truncate font-mono text-[11px] text-zinc-300">{server.name || server.server_name || server.server_id}</span>
-                  <span className="flex-shrink-0 text-[10px] text-zinc-600">{serverPermission(server)}</span>
-                </div>
-              ))}
+              {mcpServers.map((server) => {
+                const serverId = mcpServerIdentifier(server);
+                const expanded = expandedMcpServerId === serverId;
+                const confirmRemove = removeConfirmServerId === serverId;
+                const rows = mcpServerDetailRows(server);
+                return (
+                  <div key={serverId} className="rounded-md border border-zinc-800 bg-zinc-950/40">
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={`mcp-server-details-${serverId}`}
+                      onClick={() => setExpandedMcpServerId(expanded ? null : serverId)}
+                      className="flex w-full items-center gap-2 px-2 py-2 text-left"
+                    >
+                      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
+                        {server.name || server.server_name || server.server_id}
+                      </span>
+                      <span className="flex-shrink-0 text-[10px] text-zinc-500">
+                        {serverPermission(server)}
+                      </span>
+                    </button>
+                    {expanded && (
+                      <div id={`mcp-server-details-${serverId}`} className="border-t border-zinc-800 px-2 pb-2 pt-2">
+                        <dl className="grid gap-1.5">
+                          {rows.map((row) => (
+                            <div key={row.label} className="grid grid-cols-[92px_minmax(0,1fr)] gap-2 text-[10px]">
+                              <dt className="text-zinc-600">{row.label}</dt>
+                              <dd className="break-all font-mono text-zinc-300">{row.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void reconnectMcpServer(server)}
+                            disabled={mcpBusy}
+                            className="inline-flex h-7 items-center gap-1 rounded border border-zinc-700 px-2 text-[10px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title={`Reconnect ${serverId}`}
+                          >
+                            <RotateCw size={11} />
+                            Reconnect
+                          </button>
+                          {server.connected && (
+                            <button
+                              type="button"
+                              onClick={() => void runMcpLifecycle("disconnect", serverId)}
+                              disabled={mcpBusy}
+                              className="inline-flex h-7 items-center gap-1 rounded border border-amber-500/30 px-2 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-40"
+                              title={`Disconnect ${serverId}`}
+                            >
+                              <Unplug size={11} />
+                              Disconnect
+                            </button>
+                          )}
+                          {!confirmRemove ? (
+                            <button
+                              type="button"
+                              onClick={() => setRemoveConfirmServerId(serverId)}
+                              disabled={mcpBusy}
+                              className="inline-flex h-7 items-center gap-1 rounded border border-red-500/30 px-2 text-[10px] text-red-200 hover:bg-red-500/10 disabled:opacity-40"
+                              title={`Remove ${serverId}`}
+                            >
+                              <Trash2 size={11} />
+                              Remove
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void runMcpLifecycle("remove", serverId)}
+                                disabled={mcpBusy}
+                                className="inline-flex h-7 items-center gap-1 rounded bg-red-500/20 px-2 text-[10px] font-semibold text-red-100 hover:bg-red-500/30 disabled:opacity-40"
+                              >
+                                <Trash2 size={11} />
+                                Confirm remove
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRemoveConfirmServerId(null)}
+                                disabled={mcpBusy}
+                                className="h-7 rounded border border-zinc-700 px-2 text-[10px] text-zinc-400 hover:bg-zinc-800 disabled:opacity-40"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {confirmRemove && (
+                          <p role="alert" className="mt-2 text-[10px] leading-4 text-red-200">
+                            Removing disconnects the process, removes projected tools, and deletes the saved registration.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {mcpServers.length === 0 && <p className="py-3 text-center text-[11px] text-zinc-600">No MCP servers</p>}
             </div>
           </section>
