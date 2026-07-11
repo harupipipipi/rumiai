@@ -10,7 +10,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
-from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF  # noqa: E402
+from domain.ai_client.rumi_process import (  # noqa: E402
+    RUMI_BASE_MODEL,
+    RUMI_INTENDED_BASE_MODEL,
+    RUMI_MODEL_PACK_REF,
+    resolve_rumi_base_model,
+)
 
 
 def _profile(
@@ -142,6 +147,49 @@ def test_model_runtime_settings_materializes_builtin_rumi_against_available_prov
     assert rumi_profile["availability"]["status"] == "configured"
     assert rumi_profile["supports_tool_calling"] is True
     assert rumi_profile["supports_thinking"] is True
+
+
+def test_runtime_rumi_base_model_prefers_configured_default_profile(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._base_profile_catalog = lambda settings=None: [
+        _profile(
+            "openai/default-chat",
+            display_name="Default Chat",
+            provider_id="openai",
+            model_id="default-chat",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+        _profile(
+            RUMI_INTENDED_BASE_MODEL,
+            display_name="MiMo",
+            provider_id="xiaomi-token-plan-sgp",
+            model_id="mimo-v2.5-pro",
+            availability={"configured": True, "active": True, "status": "configured"},
+        ),
+    ]
+    monkeypatch.setattr("domain.ai_client.providers.detect_available_providers", lambda: {})
+    monkeypatch.setattr("domain.ai_client.providers.get_all_known_models", lambda: [])
+
+    resolved = service._runtime_rumi_base_model({"preferred_model": "openai/default-chat"})
+
+    assert resolved == "openai/default-chat"
+    pack = service._ensure_rumi_model_packs([], settings={"preferred_model": "openai/default-chat"})[0]
+    assert [member["model"] for member in pack["members"]] == [
+        "openai/default-chat",
+        "openai/default-chat",
+    ]
+
+
+def test_resolve_rumi_base_model_fallback_is_deterministic():
+    assert resolve_rumi_base_model([], available_providers=[]) == RUMI_INTENDED_BASE_MODEL
+    assert (
+        resolve_rumi_base_model(
+            ["google/gemini-2.5-flash", "openai/gpt-4o"],
+            available_providers={"google", "openai"},
+            default_profile_base_model="missing/default",
+        )
+        == "openai/gpt-4o"
+    )
 
 
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):

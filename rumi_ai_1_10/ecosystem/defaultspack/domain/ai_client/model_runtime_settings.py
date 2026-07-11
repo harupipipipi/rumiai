@@ -371,6 +371,8 @@ class ModelRuntimeSettingsService:
         }
 
     def _runtime_rumi_base_model(self, settings: dict[str, Any] | None = None) -> str:
+        effective_settings = settings if isinstance(settings, dict) else self.default_model_settings()
+        default_profile_base_model = str(effective_settings.get("preferred_model") or DEFAULT_MODEL).strip()
         base_profiles = self._base_profile_catalog(settings)
         available_models: list[str] = []
         available_providers: set[str] = set()
@@ -409,6 +411,7 @@ class ModelRuntimeSettingsService:
         return resolve_rumi_base_model(
             available_models,
             available_providers=available_providers,
+            default_profile_base_model=default_profile_base_model,
         )
 
     def _ensure_rumi_model_packs(self, model_packs: Any, *, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
