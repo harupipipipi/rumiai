@@ -696,6 +696,20 @@ def _mobile_http_route_specs() -> list[HttpRouteSpec]:
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
+        "POST", "/api/remote-images/consents",
+        block_module="blocks.media.remote_image", sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
+        "GET", "/api/remote-images/{token}",
+        block_module="blocks.media.remote_image", path_inject={"token": "token"},
+        sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
+        "DELETE", "/api/remote-images/{token}",
+        block_module="blocks.media.remote_image", path_inject={"token": "token"},
+        sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
         "POST",
         "/v1/chat/completions",
         flow_id="defaultspack.chat_turn",
