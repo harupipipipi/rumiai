@@ -10,6 +10,10 @@ TAURI_ROOT = ROOT / "rumi_viewer" / "src-tauri"
 TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 DEV_REQUIREMENTS = ROOT / "rumi_ai_1_10" / "requirements-dev.txt"
+VIEWER_BUILD_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "desktop-installers.yml",
+    ROOT / ".github" / "workflows" / "release.yml",
+)
 PLATFORM_TARGETS = {
     "windows": ["nsis"],
     "macos": ["dmg"],
@@ -54,6 +58,14 @@ def test_installer_targets_are_selected_by_tauri_platform_overrides():
         targets = platform_config["bundle"]["targets"]
         assert targets == expected_targets
         assert "msi" not in targets
+
+
+def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
+    for workflow in VIEWER_BUILD_WORKFLOWS:
+        contents = workflow.read_text(encoding="utf-8")
+        assert "cargo tauri build" in contents
+        assert "Prepare bundled Rumi runtime" not in contents
+        assert "python .github/scripts/prepare_tauri_resources.py" not in contents
 
 
 def test_dev_uv_version_matches_release_bundle_pin():
