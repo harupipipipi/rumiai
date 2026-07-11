@@ -139,3 +139,31 @@ test('GraphEditor keeps the loaded resource locked after a rejected selection an
   await act(async () => root?.unmount());
   dom.window.close();
 });
+
+test('GraphEditor distinguishes a successful empty catalog from invalid graph JSON', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {url: 'http://localhost/graphs'});
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    localStorage: dom.window.localStorage,
+    sessionStorage: dom.window.sessionStorage,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/profiles')) return envelope({profiles: [], count: 0, startup_profile_relationship: {}});
+    if (url.endsWith('/graphs')) return envelope({graphs: [], count: 0});
+    throw new Error(`Unexpected request: ${url}`);
+  }) as typeof fetch;
+
+  let root: Root | undefined;
+  await act(async () => {
+    root = createRoot(document.getElementById('root')!);
+    root.render(<GraphEditor />);
+  });
+  await settle();
+  assert.match(document.body.textContent ?? '', /No capability graphs/);
+  assert.doesNotMatch(document.body.textContent ?? '', /Invalid JSON/);
+  await act(async () => root?.unmount());
+  dom.window.close();
+});
