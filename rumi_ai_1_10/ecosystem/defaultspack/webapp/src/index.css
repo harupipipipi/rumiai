@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @import "./ui/layers/layers.css";
 @import "./ui/motion/luxeMotion.css";
+@import "./styles/rumi-liquid-mobile.css";
 
 @theme {
   --font-sans: "Inter", "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", ui-sans-serif, system-ui, sans-serif;

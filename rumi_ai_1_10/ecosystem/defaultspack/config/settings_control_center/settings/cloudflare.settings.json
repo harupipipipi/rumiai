@@ -10,8 +10,8 @@
         "ja": "Cloudflare"
       },
       "description": {
-        "en": "Connect Cloudflare for cloud continuation in the user's account.",
-        "ja": "ユーザーのCloudflareアカウントでクラウド継続を有効にします。"
+        "en": "Connect Cloudflare for cloud-capable sandbox work and named Tunnel PC tool bridging.",
+        "ja": "Cloudflareで実行できるsandbox作業とnamed Tunnel経由のPC tool委譲を接続します。"
       },
       "section": "accounts_connections",
       "priority": 30,
@@ -25,21 +25,27 @@
       "profileAware": true,
       "searchKeywords": [
         "cloudflare",
-        "cloud continuation",
+        "cloud sandbox",
         "oauth",
-        "runner"
+        "runner",
+        "sandbox",
+        "bridge",
+        "pc tool bridge",
+        "tunnel",
+        "named tunnel",
+        "pages.dev"
       ]
     },
     {
       "id": "cloudflare.computer.cloud_continuation",
       "owner": "cloudflare_core",
       "title": {
-        "en": "Cloud continuation",
-        "ja": "クラウド継続"
+        "en": "Cloud sandbox / PC bridge",
+        "ja": "Cloud sandbox / PC bridge"
       },
       "description": {
-        "en": "Continue tasks in Cloudflare when this computer is offline.",
-        "ja": "PCがオフラインの時にCloudflareで作業を継続します。"
+        "en": "Use Cloudflare Sandbox for cloud-capable work and keep PC-bound tools delegated to the local PC through a named Tunnel.",
+        "ja": "Cloudflare Sandboxで実行できる作業を動かし、PC依存toolはnamed Tunnel経由でローカルPCへ委譲します。"
       },
       "section": "computer_automation",
       "priority": 30,
@@ -53,9 +59,14 @@
       "profileAware": true,
       "searchKeywords": [
         "cloudflare",
-        "sleep",
-        "resume",
-        "checkpoint"
+        "cloud sandbox",
+        "pc bridge",
+        "sandbox",
+        "bridge",
+        "pc tool bridge",
+        "tunnel",
+        "named tunnel",
+        "pages.dev"
       ]
     }
   ]

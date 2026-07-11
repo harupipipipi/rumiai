@@ -216,6 +216,10 @@ domains:
   memory2:
     may_import: []
     path: domain/memory2
+  mobile:
+    may_import:
+    - domain/tool
+    path: domain/mobile
   output_profiles:
     may_import: []
     path: domain/output_profiles

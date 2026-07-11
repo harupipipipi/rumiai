@@ -33,6 +33,18 @@ def test_provider_safe_payload_has_no_secret():
     assert payload["tokenImportSupported"] is True
     assert payload["scopeToCapability"][0]["capabilities"] == ["cloudflare.account.read"]
     assert payload["capabilities"][0]["displayName"] == "Read account metadata"
+    assert payload["metadata"]["pc_tunnel_scaffold_path"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tunnel"
+    assert payload["metadata"]["pc_tool_bridge_scaffold_path"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge"
+    assert "not uploaded to Cloudflare" in payload["metadata"]["pc_tool_bridge_note"]
+    assert "browser/computer/files/terminal" in payload["metadata"]["pc_local_tools_note"]
+    assert "Workers Paid plan" in payload["metadata"]["free_plan_note"]
+    assert payload["metadata"]["tool_coverage_surface"] == "/api/tools/catalog"
+    assert payload["metadata"]["all_tools_cloudflare_native_supported"] is False
+    assert payload["metadata"]["pc_bridge_required_for_host_tools"] is True
+    assert "pages.dev" in payload["metadata"]["stable_pc_tunnel_note"]
+    assert "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME" in payload["metadata"]["self_host_env"]
+    assert "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL" in payload["metadata"]["self_host_env"]
+    assert "RUMI_PC_TOOL_BRIDGE_TOKEN" in payload["metadata"]["self_host_env"]
 
 
 def test_cloudflare_pages_write_requires_approval():

@@ -701,6 +701,50 @@ def test_sandbox_file_patch_denies_read_only_workspace_before_guest_agent(tmp_pa
     assert guest.patch_requests == []
 
 
+def test_sandbox_file_read_routes_to_guest_file_service(tmp_path):
+    class ReadGuest(FakeGuestAgent):
+        def __init__(self):
+            super().__init__()
+            self.read_requests = []
+
+        def read_file(self, sandbox_id, payload):
+            self.read_requests.append((sandbox_id, dict(payload)))
+            return {
+                "ok": True,
+                "sandbox_id": sandbox_id,
+                "path": payload["path"],
+                "content": "hello\n",
+                "encoding": "utf-8",
+                "size": 6,
+            }
+
+    guest = ReadGuest()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")
+
+    result = manager.read_file(created["sandbox_id"], {"path": "src/app.py", "max_chars": 100})
+
+    assert result["ok"] is True
+    assert result["path"] == "src/app.py"
+    assert result["content"] == "hello\n"
+    assert result["provider_id"] == "fake-runtime"
+    assert guest.read_requests == [(created["sandbox_id"], {"path": "src/app.py", "max_chars": 100})]
+
+
 def test_sandbox_port_expose_requires_network_policy_approval_before_guest_agent(tmp_path):
     class PortGuest(FakeGuestAgent):
         def __init__(self):
