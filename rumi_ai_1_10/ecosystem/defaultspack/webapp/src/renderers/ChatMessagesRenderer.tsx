@@ -1081,7 +1081,7 @@ function stringValue(value: unknown): string {
 }
 
 function isImageDataUrl(value: string): boolean {
-  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+  return /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(value);
 }
 
 function browserActionForEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): string | undefined {

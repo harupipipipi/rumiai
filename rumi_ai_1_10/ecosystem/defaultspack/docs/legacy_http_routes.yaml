@@ -1,5 +1,26 @@
 legacy_routes:
 - method: POST
+  pattern: /api/remote-images/consents
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: GET
+  pattern: /api/remote-images/{token}
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/remote-images/{token}
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: POST
   pattern: /api/chat/conversations/{id}/stream
   legacy_block_module: blocks.chat.stream
   replacement_function_id: ''
