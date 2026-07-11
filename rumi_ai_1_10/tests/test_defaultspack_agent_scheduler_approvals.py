@@ -2573,6 +2573,7 @@ def test_scheduler_times_out_conversation_run_and_allows_next_interval(tmp_path,
         with calls_lock:
             assert callable(contexts[0].get("is_cancelled"))
             assert contexts[0]["is_cancelled"]() is True
+            assert calls[0]["params"]["request_timeout"] == 2.0
         saved_after_timeout = load_schedule(schedule["id"])
         assert "running_execution" not in saved_after_timeout
         assert "running_started_at" not in saved_after_timeout
@@ -2628,9 +2629,11 @@ def test_scheduler_times_out_ai_complete_run_and_clears_running(tmp_path, monkey
     complete_started = threading.Event()
     complete_release = threading.Event()
     complete_finished = threading.Event()
+    captured: dict[str, object] = {}
 
     def fake_complete(payload, context):
-        del payload, context
+        captured["payload"] = payload
+        captured["context"] = context
         complete_started.set()
         try:
             complete_release.wait(timeout=5)
@@ -2659,6 +2662,9 @@ def test_scheduler_times_out_ai_complete_run_and_clears_running(tmp_path, monkey
         assert history["status"] == "error"
         assert "timed out after 0.2 seconds" in history["error"]
         assert history["timeout_seconds"] == 0.2
+        assert captured["payload"]["params"]["request_timeout"] == 2.0
+        assert callable(captured["context"].get("is_cancelled"))
+        assert captured["context"]["is_cancelled"]() is True
         saved = load_schedule(schedule["id"])
         assert "running_execution" not in saved
         assert "running_started_at" not in saved
@@ -2709,6 +2715,7 @@ def test_scheduler_ai_complete_uses_profile_authority_context(tmp_path, monkeypa
 
         assert history["status"] == "completed"
         assert captured["payload"]["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
+        assert captured["payload"]["params"]["request_timeout"] == 25.0
         assert captured["context"]["profile_id"] == "defaultspack.mimo_coding_company"
         assert captured["context"]["authority_principal_id"] == "profile:defaultspack.mimo_coding_company"
         assert captured["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
