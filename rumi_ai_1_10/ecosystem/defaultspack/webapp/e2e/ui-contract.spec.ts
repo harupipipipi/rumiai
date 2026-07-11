@@ -833,7 +833,7 @@ test("composer approval menu opens action permissions while selection modes live
   await expect(approvalMenu).not.toContainText("自動で選ぶ");
 
   await approvalMenu.getByRole("button", { name: "詳細はこちら" }).click();
-  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Tools & MCP" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Tools & MCP" }).first()).toBeVisible();
   await expect(page.getByText("Installed tools, MCP servers, discovered tools, visibility, and approval policy.")).toBeVisible();
@@ -886,6 +886,69 @@ test("browser approval uses the shared user-first decision surface at narrow wid
   await surface.getByRole("button", { name: "拒否（2）" }).click();
   await expect(surface).toBeHidden();
   expect(denialPayload).toMatchObject({ approval_request_id: "approval-browser-contract" });
+});
+
+test("settings modal contains focus, dismisses nested layers in order, and restores its opener", async ({ page }) => {
+  await installDefaultspackApiMocks(page);
+  await page.goto("/static/");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+
+  const opener = page.getByTitle("Settings").last();
+  await opener.focus();
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeFocused();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(page.getByRole("button", { name: "Close settings" })).toBeVisible();
+
+  const backgroundState = await page.getByTestId("settings-modal-layer").evaluate((layer) => (
+    Array.from(layer.parentElement?.children ?? [])
+      .filter((element) => element !== layer)
+      .map((element) => ({ inert: (element as HTMLElement).inert, ariaHidden: element.getAttribute("aria-hidden") }))
+  ));
+  expect(backgroundState.length).toBeGreaterThan(0);
+  expect(backgroundState.every((state) => state.inert && state.ariaHidden === "true")).toBe(true);
+
+  const focusWrapResult = await dialog.evaluate((element) => {
+    const selector = "button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
+    const focusable = Array.from(element.querySelectorAll<HTMLElement>(selector)).filter((item) => item.offsetParent !== null);
+    focusable.at(-1)?.focus();
+    return focusable.length;
+  });
+  expect(focusWrapResult).toBeGreaterThan(1);
+  await page.keyboard.press("Tab");
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
+
+  const placementTrigger = page.getByRole("button", { name: "Add an item to Settings" });
+  await placementTrigger.click();
+  await expect(page.getByRole("menu", { name: "Add an item to Settings" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu", { name: "Add an item to Settings" })).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(placementTrigger).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  await opener.click();
+  await expect(dialog).toBeVisible();
+  await page.getByTestId("settings-modal-layer").click({ position: { x: 2, y: 2 } });
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  await opener.click();
+  await expect(dialog).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 640 });
+  const narrowBounds = await dialog.boundingBox();
+  expect(narrowBounds).not.toBeNull();
+  expect(narrowBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(narrowBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(narrowBounds!.x + narrowBounds!.width).toBeLessThanOrEqual(390);
+  expect(narrowBounds!.y + narrowBounds!.height).toBeLessThanOrEqual(640);
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(dialog).toBeHidden();
 });
 
 test("tool hub service selections can be scoped to the conversation and survive reload", async ({ page }) => {
