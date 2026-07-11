@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+PayloadFactory = Callable[[Path], dict[str, Any]]
+Entrypoint = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
+
+
+def _assert_approval_required(result: dict[str, Any], operation: str) -> None:
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["approval_required"] is True
+    assert data["operation"] == operation
+    assert data["approval_request_id"]
+    assert data["args_hash"]
+
+
+def _assert_invalid_approval(result: dict[str, Any]) -> None:
+    assert result["status"] == "error"
+    assert result["error"]["code"].startswith("APPROVAL_")
+    assert result.get("_http_status") == 403
+
+
+def _exercise_denial_contract(
+    tmp_path: Path,
+    entrypoint: Entrypoint,
+    payload_factory: PayloadFactory,
+    operation: str,
+) -> None:
+    missing_grant = entrypoint(payload_factory(tmp_path), {})
+    _assert_approval_required(missing_grant, operation)
+
+    forged_client_flag = entrypoint(
+        {**payload_factory(tmp_path), "approved": True},
+        {},
+    )
+    _assert_approval_required(forged_client_flag, operation)
+
+    forged_token = entrypoint(
+        {**payload_factory(tmp_path), "approval_token": "forged.token"},
+        {},
+    )
+    _assert_invalid_approval(forged_token)
+
+
+def _file_write_payload(tmp_path: Path) -> dict[str, Any]:
+    return {
+        "workspace_root": str(tmp_path),
+        "path": "notes.txt",
+        "content": "after\n",
+    }
+
+
+def _tool_create_payload(tmp_path: Path) -> dict[str, Any]:
+    del tmp_path
+    return {
+        "name": "issue665_contract_tool",
+        "description": "issue 665 contract fixture",
+        "parameters": {"type": "object", "properties": {}},
+        "handler_code": "def run(args, context):\n    return {'status': 'ok'}\n",
+    }
+
+
+def _http_server_without_starting_listener(facade: object | None = None):
+    from transport.http import DefaultsHttpServer
+
+    server = object.__new__(DefaultsHttpServer)
+    server.facade = facade
+    return server
+
+
+def test_coding_file_write_denial_parity_across_direct_and_function_entrypoints(
+    tmp_path: Path,
+) -> None:
+    from blocks.coding.file_write import run as block_file_write
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    cases: list[Entrypoint] = [
+        lambda payload, context: block_file_write(payload, context),
+        lambda payload, context: run_defaultspack_function(
+            "coding_file_write",
+            payload,
+            context,
+        ),
+    ]
+
+    for entrypoint in cases:
+        _exercise_denial_contract(
+            tmp_path,
+            entrypoint,
+            _file_write_payload,
+            "file.write",
+        )
+
+
+def test_tool_create_denial_parity_across_direct_and_function_entrypoints(
+    tmp_path: Path,
+) -> None:
+    from blocks.tool.create import run as block_tool_create
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    cases: list[Entrypoint] = [
+        lambda payload, context: block_tool_create(payload, context),
+        lambda payload, context: run_defaultspack_function(
+            "tool_create",
+            payload,
+            context,
+        ),
+    ]
+
+    for entrypoint in cases:
+        _exercise_denial_contract(
+            tmp_path,
+            entrypoint,
+            _tool_create_payload,
+            "tool.create",
+        )
+
+
+def test_legacy_http_fallback_denies_forged_coding_write_approval(
+    tmp_path: Path,
+) -> None:
+    server = _http_server_without_starting_listener(facade=None)
+
+    def entrypoint(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        del context
+        return server._invoke_fallback_block(
+            "blocks.coding.file_write",
+            payload,
+            {},
+        )
+
+    _exercise_denial_contract(
+        tmp_path,
+        entrypoint,
+        _file_write_payload,
+        "file.write",
+    )
+
+
+def test_http_function_route_adapter_preserves_function_denial_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.function_runtime import dispatcher
+
+    server = _http_server_without_starting_listener(facade=object())
+
+    def fake_invoke_function(
+        function_name: str,
+        payload: dict[str, Any],
+        context: dict[str, Any],
+        **_: Any,
+    ) -> dict[str, Any]:
+        assert function_name == "defaultspack:coding_file_write"
+        return dispatcher.run_defaultspack_function(
+            "coding_file_write",
+            payload,
+            context,
+        )
+
+    monkeypatch.setattr(
+        "domain.function_runtime.bridge.invoke_function",
+        fake_invoke_function,
+    )
+
+    def entrypoint(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        del context
+        return server._invoke_function_route(
+            "defaultspack:coding_file_write",
+            payload,
+            {},
+            fallback_block_module="blocks.coding.file_write",
+        )
+
+    _exercise_denial_contract(
+        tmp_path,
+        entrypoint,
+        _file_write_payload,
+        "file.write",
+    )
+
+
+def test_issue665_first_slice_documents_remaining_execution_route_gaps() -> None:
+    # Issue #665 is broader than this first slice. These surfaces are
+    # intentionally allowlisted here until focused route harnesses can exercise
+    # them without live bearer secrets, external webhook signatures, or
+    # bootstrap state:
+    #
+    # - mobile bearer API paths: need a token factory/test principal fixture.
+    # - webhook/preauth routes: many are ingress/read/setup routes rather than
+    #   direct write-like execution gates, and need per-provider signature
+    #   fixtures before parity assertions are meaningful.
+    # - bootstrap routes: need explicit route-by-route classification so safe
+    #   idempotent bootstrap is not conflated with host execution.
+    assert True
