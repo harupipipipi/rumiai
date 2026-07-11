@@ -93,9 +93,10 @@ def run(context):
         ("POST", "/api/consent/{id}/confirm", _lazy("blocks.tool.consent_confirm"), {"id": "consent_id"}),
         # ---- MCP routes ----
         ("POST", "/api/tools/mcp/connect", _lazy("blocks.tool.mcp_connect"), {}),
+        ("POST", "/api/tools/mcp/disconnect", _lazy("blocks.tool.mcp_server_lifecycle", "run_disconnect"), {}),
         ("GET", "/api/tools/mcp", _lazy("blocks.tool.mcp_list"), {}),
         ("POST", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
-        ("DELETE", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        ("DELETE", "/api/tools/mcp", _lazy("blocks.tool.mcp_server_lifecycle", "run_remove"), {}),
         ("GET", "/api/browser/artifacts", _lazy("blocks.browser.artifacts"), {}),
         # ---- Container routes (T14) ----
         ("POST", "/api/container", _guarded(_lazy("blocks.tool.container.create"), "container.create"), {}),
