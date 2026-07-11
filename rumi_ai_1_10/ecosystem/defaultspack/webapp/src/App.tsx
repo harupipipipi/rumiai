@@ -66,6 +66,7 @@ import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSys
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
@@ -2388,6 +2389,11 @@ function ChatApp() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const settingsValuesRef = useRef(settingsValues);
+  const pinnedPlacementSaveRevisionRef = useRef(0);
+  useEffect(() => {
+    settingsValuesRef.current = settingsValues;
+  }, [settingsValues]);
   const [desktopSystemInfo, setDesktopSystemInfo] = useState<DesktopSystemInfo | null>(null);
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -3588,8 +3594,34 @@ function ChatApp() {
     }
   };
 
+  const applySettingsValues = (next: Record<string, Record<string, unknown>>) => {
+    settingsValuesRef.current = next;
+    setSettingsValues(next);
+  };
+
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
-    setSettingsValues((current) => {
+    if (sectionId === "sidebar" && fieldId === "ui_placements") {
+      const previous = settingsValuesRef.current;
+      const previousPlacements = normalizePinnedPlacements(previous.sidebar?.ui_placements);
+      const next = withPinnedPlacements(previous, normalizePinnedPlacements(value));
+      const revision = ++pinnedPlacementSaveRevisionRef.current;
+      applySettingsValues(next);
+      void api.updateUiSettings(next)
+        .then((result) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const persisted = withCalendarSettingsValues(result.values);
+          applySettingsValues(persisted);
+        })
+        .catch((updateError) => {
+          if (revision !== pinnedPlacementSaveRevisionRef.current) return;
+          const rolledBack = withPinnedPlacements(settingsValuesRef.current, previousPlacements);
+          applySettingsValues(rolledBack);
+          setError(updateError instanceof Error ? updateError.message : "Failed to save pinned widgets.");
+        });
+      return;
+    }
+    {
+      const current = settingsValuesRef.current;
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
       const fieldType = String(field?.type ?? "");
@@ -3761,10 +3793,10 @@ function ChatApp() {
         if (ambientRoutingKey) {
           void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
         }
-        void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
+        void api.updateUiSettings(next).then((result) => applySettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
-      return next;
-    });
+      applySettingsValues(next);
+    }
   };
 
   const updateModelSettings = (updates: Record<string, unknown>) => {
@@ -4041,6 +4073,11 @@ function ChatApp() {
         setError(
           `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
+        return;
+      case "open_context_viewer":
+      case "show_usage":
+        setActiveSidebarItemId("__context_usage__");
+        setSidebarSelectionTick((value) => value + 1);
         return;
       case "open_settings":
       case "open_permissions":
@@ -6144,6 +6181,7 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            contextUsage={contextUsage}
             promptUsage={activePromptUsage}
             promptProfileId={activePromptProfileId}
             conversationId={activeConversationId}

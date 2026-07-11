@@ -63,6 +63,8 @@ export type PinnedPlacement = {
   surface: PlacementSurface;
 };
 
+export type UiSettingsValues = Record<string, Record<string, unknown>>;
+
 export type PlacementFilterOptions = {
   surface: PlacementSurface;
   orientation: Exclude<PlacementOrientation, "both">;
@@ -152,6 +154,19 @@ export function togglePinnedPlacement(
     ));
   }
   return [...placements, nextPlacement];
+}
+
+export function withPinnedPlacements(
+  values: UiSettingsValues,
+  placements: PinnedPlacement[],
+): UiSettingsValues {
+  return {
+    ...values,
+    sidebar: {
+      ...(values.sidebar ?? {}),
+      ui_placements: normalizePinnedPlacements(placements),
+    },
+  };
 }
 
 export function resolvePlacementHtmlRendering(manifest: PlacementManifest): {
