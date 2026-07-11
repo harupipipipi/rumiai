@@ -152,6 +152,35 @@ def test_bridge_forwards_timeout_seconds_to_capability_executor():
     assert request["timeout_seconds"] == 120
 
 
+def test_bridge_omits_timeout_for_subagent_manifest_timeout_resolution():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {"execution_id": "subagent-1"}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "defaultspack:tool_subagent",
+            {"task": "scheduled MiMo delegation smoke"},
+            {
+                "request_id": "req-issue-382-scheduled-subagent",
+                "source": "scheduler",
+                "profile_id": "defaultspack.mimo_coding_company",
+            },
+        )
+
+    assert result == {"status": "ok", "data": {"execution_id": "subagent-1"}}
+    _principal_id, request = executor.execute.call_args.args
+    assert request["qualified_name"] == "defaultspack:tool_subagent"
+    assert request["context"]["source"] == "scheduler"
+    assert "timeout_seconds" not in request
+
+
 def test_bridge_forwards_sanitized_request_context_to_capability_executor():
     from domain.function_runtime.bridge import invoke_function
 
