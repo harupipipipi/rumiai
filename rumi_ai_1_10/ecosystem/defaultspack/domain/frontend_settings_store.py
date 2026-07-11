@@ -142,11 +142,7 @@ class FrontendSettingsStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_path, self.path)
-            directory_fd = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            self._fsync_directory(self.path.parent)
         finally:
             temp_path.unlink(missing_ok=True)
 
@@ -154,3 +150,16 @@ class FrontendSettingsStore:
     def _fsync_file(path: Path) -> None:
         with path.open("rb") as handle:
             os.fsync(handle.fileno())
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        # Windows does not support opening directories with ``os.open``.
+        # The replaced file itself has already been flushed above; directory
+        # fsync is an additional durability guarantee on POSIX filesystems.
+        if os.name == "nt":
+            return
+        directory_fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
