@@ -1385,7 +1385,38 @@ test("Japanese Accounts modal does not expose English connection implementation 
   assert.match(html, /Gmailの検索とメタデータ/);
   assert.match(html, /認証情報を読み込んで保存/);
   assert.match(html, /設定の提供元/);
+  assert.match(html, /パックや外部サービスから追加される設定は、利用可能になるとここに表示されます。/);
   assert.doesNotMatch(html, /Client config needed|Credential needed|Token needed/);
   assert.doesNotMatch(html, /Connect selected mode|Configure self-host OAuth|Import credential JSON/);
   assert.doesNotMatch(html, /Restricted Gmail scopes|Settings placement candidates|Accounts &amp; Connections/);
+  assert.doesNotMatch(html, /Pack or provider contributions for this section will appear here after registry validation/);
+});
+
+test("English Settings empty section keeps registry contribution guidance", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "accounts_connections",
+        label: "Accounts & Connections",
+        fields: [],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Pack or provider contributions for this section will appear here after registry validation\./);
+  assert.doesNotMatch(html, /パックや外部サービスから追加される設定/);
 });

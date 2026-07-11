@@ -4322,7 +4322,10 @@ export function SettingsModalRenderer({
                     )}
                     {!normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-                        Pack or provider contributions for this section will appear here after registry validation.
+                        {localizedCopy(
+                          "Pack or provider contributions for this section will appear here after registry validation.",
+                          "パックや外部サービスから追加される設定は、利用可能になるとここに表示されます。",
+                        )}
                       </div>
                     )}
                     {visibleAdvancedFields.length > 0 && (
