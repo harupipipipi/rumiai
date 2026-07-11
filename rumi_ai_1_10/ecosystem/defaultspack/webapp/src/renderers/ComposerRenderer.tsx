@@ -2140,12 +2140,14 @@ export function ComposerRenderer({
 	        onDropWidget?.(composerFileMentionWidget(candidate.file));
 	      }
 	      onInputChange(next.value);
-	      const reference: ComposerEntityReference = {
-	        kind: candidate.kind,
-	        id: candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file,
-	        syntax: `@${mentionText}`,
-	      };
-	      onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
+	      if (candidate.kind !== "service") {
+	        const reference: ComposerEntityReference = {
+	          kind: candidate.kind,
+	          id: candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file,
+	          syntax: `@${candidate.label}`,
+	        };
+	        onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
+	      }
 	      if (candidate.kind === "file" && mode === "coding") {
 	        onAtFileAttach?.(candidate.file);
 	      }
@@ -3293,7 +3295,7 @@ export function ComposerRenderer({
             }}
           />
 
-          {((!isNewConversation && (attachedFiles.length > 0 || pendingMentionAttachmentPaths.length > 0)) || visibleComposerWidgets.length > 0) && (
+          {((!isNewConversation && (attachedFiles.length > 0 || pendingMentionAttachmentPaths.length > 0)) || droppedWidgets.length > 0) && (
             <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
               {!isNewConversation && pendingMentionAttachmentPaths.map((path) => (
                 <PendingFileChip key={path} path={path} onRemove={onPendingMentionAttachmentRemove} />
