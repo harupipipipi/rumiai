@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import error
 from domain.ai_client.client import AIClient
 from domain.chat.run_request import validate_chat_run_input
+from domain.chat.idempotency import IdempotencyConflictError, reserve_chat_operation
 from domain.chat.store import ChatStore
 from domain.chat.stream_engine import ChatRunEngine, _InlineThoughtFilter
 from domain.stream.events import to_legacy_chat_stream_event
@@ -46,4 +47,29 @@ def run(input_data, context):
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         return error("Conversation not found", "NOT_FOUND")
-    return {"_sse": True, "events": _engine_events(_input_with_default_empty_tools(input_data), context)}
+    try:
+        engine_context = reserve_chat_operation(input_data, context)
+    except IdempotencyConflictError as exc:
+        response = error(str(exc), "IDEMPOTENCY_CONFLICT")
+        response["_http_status"] = 409
+        return response
+    except ValueError as exc:
+        response = error(str(exc), "INVALID_INPUT")
+        response["_http_status"] = 400
+        return response
+    reservation = engine_context.get("_chat_idempotency_reservation")
+    claim = reservation.get("claim") if isinstance(reservation, dict) else None
+    if (
+        getattr(claim, "status", "") == "in_progress"
+        and getattr(claim, "state", "") == "replay"
+    ):
+        response = error(
+            "This chat operation is already in progress",
+            "IDEMPOTENCY_IN_PROGRESS",
+        )
+        response["_http_status"] = 409
+        return response
+    return {
+        "_sse": True,
+        "events": _engine_events(_input_with_default_empty_tools(input_data), engine_context),
+    }

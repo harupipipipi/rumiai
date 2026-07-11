@@ -1962,6 +1962,7 @@ export type ToolSelectionPreviewResponse = {
 };
 
 type SendMessageOptions = {
+  idempotency_key?: string;
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
@@ -2377,6 +2378,7 @@ function messageRequestBody(
   options?: SendMessageOptions,
 ): Record<string, unknown> {
   return {
+    idempotency_key: options?.idempotency_key ?? createChatOperationId(),
     message: {
       role: "user",
       content: text,
@@ -2394,6 +2396,13 @@ function messageRequestBody(
       tool_selection: options?.tool_selection ?? undefined,
     },
   };
+}
+
+function createChatOperationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
 async function readStreamEvents(

@@ -879,6 +879,21 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any], 
     if access_error is not None:
         return access_error
     access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
+    changes_access_policy = bool(access) or any(
+        key in payload for key in ("access_mode", "access_request_required")
+    )
+    if changes_access_policy:
+        owner_result = service.manager.validate_desktop_access(
+            seat_id,
+            None,
+            owner_id=_desktop_principal_id(context),
+        )
+        if owner_result.get("ok") is not True:
+            return _api_error(
+                str(owner_result.get("error") or "Desktop owner access is required"),
+                str(owner_result.get("code") or "DESKTOP_OWNER_REQUIRED"),
+                int(owner_result.get("status_code") or 403),
+            )
     result = service.manager.update_desktop_rules(
         seat_id,
         role=payload.get("role"),
