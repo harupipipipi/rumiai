@@ -469,7 +469,14 @@ export function GraphEditor() {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading selected graph…
             </div>
           ) : null}
-          {viewMode === 'json' ? (
+          {!loadError && graphs.length === 0 ? (
+            <div className="flex min-h-[520px] items-center justify-center p-6 text-center">
+              <div>
+                <h2 className="text-base font-semibold text-text-main">No capability graphs</h2>
+                <p className="mt-1 text-sm text-text-muted">Graphs available to this runtime will appear here.</p>
+              </div>
+            </div>
+          ) : viewMode === 'json' ? (
             <textarea
               className="h-full min-h-[520px] w-full resize-none bg-bg-main p-4 font-mono text-sm text-text-main outline-none"
               value={source}
