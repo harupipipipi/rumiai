@@ -1,7 +1,7 @@
 """
 domain.tool.container_manager — Docker コンテナ管理。
 Docker SDK が利用可能ならそれを使い、なければ subprocess フォールバック。
-Docker 自体が利用不可なら local-only モード（コマンド実行のみ）。
+Docker 自体が利用不可なら fail-closed で停止する。
 """
 import subprocess
 import shutil
@@ -55,6 +55,26 @@ def _run_cmd(args, timeout=30):
 # インメモリ コンテナ管理
 # ---------------------------------------------------------------------------
 _containers = {}
+
+
+class DockerUnavailableError(RuntimeError):
+    """Raised when Docker-backed container operations cannot be performed."""
+
+
+def _docker_unavailable_message():
+    return (
+        "Docker is not available; refusing to create or use a local host "
+        "execution fallback. Start Docker or route the work through an "
+        "explicit approval-aware host execution policy."
+    )
+
+
+def _raise_if_local_fallback(info):
+    if info.status in ("local-only", "running-local", "stopped-local"):
+        raise DockerUnavailableError(
+            "Refusing to use legacy local host execution fallback for container "
+            "{}. {}".format(info.container_id, _docker_unavailable_message())
+        )
 
 
 class ContainerInfo:
@@ -189,7 +209,7 @@ def _cli_exec(docker_id, command):
 def create_container(name, image, config):
     """
     コンテナを作成する。
-    Docker が利用可能ならば Docker で作成、不可なら local-only stub を返す。
+    Docker が利用可能ならば Docker で作成、不可なら fail-closed。
     戻り値: ContainerInfo の dict
     """
     container_id = str(uuid.uuid4())
@@ -217,9 +237,7 @@ def create_container(name, image, config):
         except Exception as exc:
             raise RuntimeError("Docker CLI create failed: {}".format(exc))
     else:
-        # Docker 不可: local-only モード
-        docker_id = "local-{}".format(container_id[:12])
-        status = "local-only"
+        raise DockerUnavailableError(_docker_unavailable_message())
 
     info = ContainerInfo(
         container_id=container_id,
@@ -238,9 +256,7 @@ def start_container(container_id):
     info = _containers.get(container_id)
     if info is None:
         raise KeyError("container not found: {}".format(container_id))
-    if info.status == "local-only":
-        info.status = "running-local"
-        return info.to_dict()
+    _raise_if_local_fallback(info)
     docker_id = getattr(info, "_docker_id", container_id)
     if _docker_available:
         _sdk_start(docker_id)
@@ -257,9 +273,7 @@ def stop_container(container_id):
     info = _containers.get(container_id)
     if info is None:
         raise KeyError("container not found: {}".format(container_id))
-    if info.status in ("local-only", "running-local"):
-        info.status = "stopped-local"
-        return info.to_dict()
+    _raise_if_local_fallback(info)
     docker_id = getattr(info, "_docker_id", container_id)
     if _docker_available:
         _sdk_stop(docker_id)
@@ -291,17 +305,7 @@ def exec_in_container(container_id, command):
     info = _containers.get(container_id)
     if info is None:
         raise KeyError("container not found: {}".format(container_id))
-
-    if info.status in ("local-only", "running-local"):
-        # ローカルフォールバック: subprocess でコマンド実行
-        if isinstance(command, list):
-            result = _run_cmd(command, timeout=120)
-        else:
-            result = _run_cmd(["sh", "-c", command], timeout=120)
-        return {
-            "exit_code": result["returncode"],
-            "output": result["stdout"] + result["stderr"],
-        }
+    _raise_if_local_fallback(info)
 
     docker_id = getattr(info, "_docker_id", container_id)
     if _docker_available:
