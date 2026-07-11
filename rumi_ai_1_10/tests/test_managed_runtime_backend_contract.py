@@ -659,6 +659,15 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
             "text": "http://127.0.0.1:8766/chat",
         },
     )
+    unsupported_action = manager.desktop_input(
+        "input-seat",
+        {
+            "action": "navigate",
+            "client_action_id": "unsupported-action",
+            "lease_token": "lease-token",
+            "text": "http://127.0.0.1:8766/chat",
+        },
+    )
     valid = manager.desktop_input(
         "input-seat",
         {
@@ -678,6 +687,11 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
     assert missing_action["code"] == "INVALID_DESKTOP_INPUT"
     assert "action=type_text" in missing_action["error"]
     assert "key=Enter" in missing_action["error"]
+    assert unsupported_action["ok"] is False
+    assert unsupported_action["code"] == "INVALID_DESKTOP_INPUT"
+    assert "supported actions" in unsupported_action["error"]
+    assert "action=type_text" in unsupported_action["error"]
+    assert "key=Enter" in unsupported_action["error"]
     assert valid["ok"] is True
     assert agent.provider_inputs == [
         {
