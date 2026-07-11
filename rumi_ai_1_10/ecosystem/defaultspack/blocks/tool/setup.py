@@ -107,7 +107,26 @@ def run(context):
         ("POST", "/api/tools/mcp/connect", _lazy("blocks.tool.mcp_connect"), {}),
         ("GET", "/api/tools/mcp", _lazy("blocks.tool.mcp_list"), {}),
         ("POST", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
-        ("DELETE", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        (
+            "POST",
+            "/api/tools/mcp/disconnect",
+            _guarded(
+                _lazy("blocks.tool.mcp_registry", "run_disconnect"),
+                "tool.mcp_disconnect",
+                risk="medium",
+            ),
+            {},
+        ),
+        (
+            "DELETE",
+            "/api/tools/mcp",
+            _guarded(
+                _lazy("blocks.tool.mcp_registry", "run_remove"),
+                "tool.mcp_remove",
+                risk="high",
+            ),
+            {},
+        ),
         ("GET", "/api/browser/artifacts", _lazy("blocks.browser.artifacts"), {}),
         # ---- Container routes (T14) ----
         ("POST", "/api/container", _guarded(_lazy("blocks.tool.container.create"), "container.create"), {}),
