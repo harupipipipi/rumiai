@@ -118,15 +118,15 @@ test("generic authority approval success refetches before settling", () => {
   assert.match(source, /const finalizeDeniedRequest = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus\)/);
 });
 
-test("ambient authority settlement subscribers replay stored browser fallback settlements", () => {
+test("ambient authority settlement subscribers cannot replay stored settlements", () => {
   const source = readSource("ambient", "AmbientTriggerPanel.tsx");
   const eventSource = readSource("lib", "authorityApprovalEvents.ts");
 
   assert.match(eventSource, /readStoredAuthorityApprovalSettlement/);
-  assert.match(eventSource, /options\?\.replayStored/);
-  assert.match(eventSource, /AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS = 5 \* 60 \* 1000/);
-  assert.match(eventSource, /replayStoredRequestId\?: string/);
-  assert.match(eventSource, /clearStoredAuthorityApprovalSettlement\(settlement\.requestId\)/);
+  assert.doesNotMatch(eventSource, /options\?\.replayStored/);
+  assert.doesNotMatch(eventSource, /AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS/);
+  assert.match(eventSource, /window\.localStorage\.removeItem\(LEGACY_AUTHORITY_APPROVAL_STORAGE_KEY\)/);
+  assert.match(eventSource, /readStoredAuthorityApprovalSettlement[\s\S]*clearStoredAuthorityApprovalSettlement\(\);[\s\S]*return null/);
   assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*miniAuthorityApproval[\s\S]*\}, \{ replayStored: true, replayStoredRequestId: miniAuthorityApproval\.requestId \}\)/);
   assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*AMBIENT_AUTHORITY_REQUEST_ID[\s\S]*\}, \{ replayStored: true, replayStoredRequestId: AMBIENT_AUTHORITY_REQUEST_ID \}\)/);
 });
