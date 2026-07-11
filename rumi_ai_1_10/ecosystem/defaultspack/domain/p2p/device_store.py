@@ -97,6 +97,7 @@ class DeviceRecord:
     profile_id: str = "default"
     label: str = ""
     public_key: str = ""
+    encryption_public_key: str = ""
     fingerprint: str = ""
     token_hash: str = ""
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
@@ -126,6 +127,7 @@ class DeviceRecord:
             profile_id=str(value.get("profile_id") or "default"),
             label=str(value.get("label") or ""),
             public_key=str(value.get("public_key") or value.get("device_public_key") or ""),
+            encryption_public_key=str(value.get("encryption_public_key") or value.get("device_encryption_public_key") or ""),
             fingerprint=str(value.get("fingerprint") or ""),
             token_hash=str(value.get("token_hash") or ""),
             scopes=normal_scopes,
@@ -145,6 +147,7 @@ class DeviceRecord:
             "profile_id": self.profile_id,
             "label": self.label,
             "public_key": self.public_key[:16] + "…" if len(self.public_key) > 16 else self.public_key,
+            "encryption_key_configured": bool(self.encryption_public_key),
             "fingerprint": self.fingerprint,
             "scopes": list(self.scopes),
             "approval_scopes": list(self.approval_scopes),
@@ -196,6 +199,7 @@ class DeviceStore:
         *,
         label: str = "",
         public_key: str = "",
+        encryption_public_key: str = "",
         fingerprint: str = "",
         scopes: list[str] | None = None,
         pairing_id: str = "",
@@ -226,6 +230,7 @@ class DeviceStore:
                 profile_id=str(profile_id or "default").strip() or "default",
                 label=label,
                 public_key=public_key,
+                encryption_public_key=encryption_public_key,
                 fingerprint=fingerprint,
                 token_hash=_hash_token(plaintext),
                 scopes=resolved_scopes,
@@ -247,6 +252,7 @@ class DeviceStore:
         *,
         label: str = "",
         public_key: str = "",
+        encryption_public_key: str = "",
         fingerprint: str = "",
         scopes: list[str] | None = None,
         pairing_id: str = "",
@@ -262,6 +268,7 @@ class DeviceStore:
             device_id,
             label=label,
             public_key=public_key,
+            encryption_public_key=encryption_public_key,
             fingerprint=fingerprint,
             scopes=scopes,
             pairing_id=pairing_id,
@@ -341,6 +348,7 @@ class DeviceStore:
             self._data["devices"][did]["token_hash"] = d.token_hash
             self._data["devices"][did]["approval_token_hash"] = d.approval_token_hash
             self._data["devices"][did]["public_key"] = d.public_key
+            self._data["devices"][did]["encryption_public_key"] = d.encryption_public_key
             self._data["devices"][did]["profile_id"] = d.profile_id
         save_json_object(self.path, self._data)
 
