@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type KeyboardEvent } from 'react';
 import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
 import { fetchBackgroundControlStatus, fetchDesktopSystemInfo, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
 import type { BackgroundControlStatus, DesktopPermissionStatus, DesktopSystemInfo } from '@/src/lib/apiTypes';
@@ -58,6 +58,8 @@ export function Settings() {
   const [desktopInfo, setDesktopInfo] = useState<DesktopSystemInfo | null>(null);
   const [desktopInfoError, setDesktopInfoError] = useState<string | null>(null);
   const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
+  const profileTabRef = useRef<HTMLButtonElement>(null);
+  const versionTabRef = useRef<HTMLButtonElement>(null);
   const desktopShellAvailable = isDesktopShellAvailable();
 
   const loadDesktopInfo = async () => {
@@ -169,6 +171,21 @@ export function Settings() {
     await applyUpdate(target);
   };
 
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    let nextTab: 'profile' | 'version' | null = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      nextTab = activeTab === 'profile' ? 'version' : 'profile';
+    } else if (event.key === 'Home') {
+      nextTab = 'profile';
+    } else if (event.key === 'End') {
+      nextTab = 'version';
+    }
+    if (!nextTab) return;
+    event.preventDefault();
+    setActiveTab(nextTab);
+    (nextTab === 'profile' ? profileTabRef : versionTabRef).current?.focus();
+  };
+
   return (
     <div className="flex-1 overflow-y-auto page-enter">
       <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-8">
@@ -179,13 +196,18 @@ export function Settings() {
         </div>
 
         {/* Tab navigation */}
-        <div className="flex gap-1 border-b border-border" role="tablist">
+        <div className="flex gap-1 border-b border-border" role="tablist" aria-label={t('settings.title')}>
           <button
+            ref={profileTabRef}
+            id="settings-profile-tab"
             role="tab"
             aria-selected={activeTab === 'profile'}
+            aria-controls="settings-profile-panel"
+            tabIndex={activeTab === 'profile' ? 0 : -1}
             onClick={() => setActiveTab('profile')}
+            onKeyDown={handleTabKeyDown}
             className={cn(
-              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]",
               activeTab === 'profile'
                 ? "border-accent text-accent"
                 : "border-transparent text-text-muted hover:text-text-main"
@@ -194,11 +216,16 @@ export function Settings() {
             <User className="h-4 w-4" /> {t('settings.profile')}
           </button>
           <button
+            ref={versionTabRef}
+            id="settings-version-tab"
             role="tab"
             aria-selected={activeTab === 'version'}
+            aria-controls="settings-version-panel"
+            tabIndex={activeTab === 'version' ? 0 : -1}
             onClick={() => setActiveTab('version')}
+            onKeyDown={handleTabKeyDown}
             className={cn(
-              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]",
               activeTab === 'version'
                 ? "border-accent text-accent"
                 : "border-transparent text-text-muted hover:text-text-main"
@@ -210,7 +237,12 @@ export function Settings() {
 
         {/* Profile Tab */}
         {activeTab === 'profile' && (
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div
+            id="settings-profile-panel"
+            role="tabpanel"
+            aria-labelledby="settings-profile-tab"
+            className="grid gap-6 lg:grid-cols-2"
+          >
             {/* Left column */}
             <div className="flex flex-col gap-6">
               {/* Account connection */}
@@ -257,7 +289,7 @@ export function Settings() {
                   <CardContent className="space-y-5">
                     {/* Avatar */}
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-text-main">{t('settings.select_icon')}</label>
+                      <span id="settings-avatar-label" className="text-sm font-medium text-text-main">{t('settings.select_icon')}</span>
                       <div className="flex items-center gap-4">
                         <img
                           src={formData.avatar}
@@ -270,14 +302,20 @@ export function Settings() {
                           size="sm"
                           onClick={() => setShowAvatarPicker(!showAvatarPicker)}
                           aria-expanded={showAvatarPicker}
+                          aria-controls="settings-avatar-options"
                         >
                           {t('settings.change_icon')}
                           <ChevronDown className={cn("h-3 w-3 transition-transform", showAvatarPicker && "rotate-180")} />
                         </Button>
                       </div>
                       {showAvatarPicker && (
-                        <div className="flex gap-2 flex-wrap mt-2 p-3 border border-border rounded-lg bg-bg-main">
-                          {AVATAR_OPTIONS.map((av) => (
+                        <div
+                          id="settings-avatar-options"
+                          role="group"
+                          aria-labelledby="settings-avatar-label"
+                          className="flex gap-2 flex-wrap mt-2 p-3 border border-border rounded-lg bg-bg-main"
+                        >
+                          {AVATAR_OPTIONS.map((av, index) => (
                             <button
                               key={av}
                               onClick={() => {
@@ -290,7 +328,8 @@ export function Settings() {
                                   ? "border-accent scale-105"
                                   : "border-transparent opacity-60 hover:opacity-100"
                               )}
-                              aria-label="Select avatar"
+                              aria-label={`${t('settings.select_icon')} ${index + 1}`}
+                              aria-pressed={formData.avatar === av}
                             >
                               <img src={av} alt="" className="h-10 w-10 rounded-full object-cover" referrerPolicy="no-referrer" />
                             </button>
@@ -301,8 +340,9 @@ export function Settings() {
 
                     {/* Username */}
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-text-main">{t('settings.username')}</label>
+                      <label htmlFor="settings-username" className="text-sm font-medium text-text-main">{t('settings.username')}</label>
                       <Input
+                        id="settings-username"
                         value={formData.username}
                         onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                       />
@@ -310,10 +350,11 @@ export function Settings() {
 
                     {/* Language */}
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-text-main flex items-center gap-2">
+                      <label htmlFor="settings-language" className="text-sm font-medium text-text-main flex items-center gap-2">
                         <Globe className="h-3.5 w-3.5 text-text-muted" /> {t('settings.language')}
                       </label>
                       <select
+                        id="settings-language"
                         className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 py-2 text-sm text-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
                         value={formData.language}
                         onChange={(e) => setFormData({ ...formData, language: e.target.value })}
@@ -333,10 +374,11 @@ export function Settings() {
 
                     {/* Job */}
                     <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-text-main flex items-center gap-2">
+                      <label htmlFor="settings-job" className="text-sm font-medium text-text-main flex items-center gap-2">
                         <Briefcase className="h-3.5 w-3.5 text-text-muted" /> {t('settings.job')}
                       </label>
                       <Input
+                        id="settings-job"
                         value={formData.job}
                         onChange={(e) => setFormData({ ...formData, job: e.target.value })}
                       />
@@ -361,12 +403,13 @@ export function Settings() {
                 <CardContent className="space-y-6">
                   {/* Color mode */}
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main">{t('settings.color_mode')}</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <span id="settings-color-mode-label" className="text-sm font-medium text-text-main">{t('settings.color_mode')}</span>
+                    <div role="group" aria-labelledby="settings-color-mode-label" className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => setColorMode('light')}
+                        aria-pressed={colorMode === 'light'}
                         className={cn(
-                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]",
                           colorMode === 'light'
                             ? "border-accent bg-accent/5 text-accent"
                             : "border-border text-text-muted hover:border-text-muted/30"
@@ -376,8 +419,9 @@ export function Settings() {
                       </button>
                       <button
                         onClick={() => setColorMode('dark')}
+                        aria-pressed={colorMode === 'dark'}
                         className={cn(
-                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]",
                           colorMode === 'dark'
                             ? "border-accent bg-accent/5 text-accent"
                             : "border-border text-text-muted hover:border-text-muted/30"
@@ -390,14 +434,15 @@ export function Settings() {
 
                   {/* Style theme */}
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main">{t('settings.style_theme')}</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <span id="settings-style-theme-label" className="text-sm font-medium text-text-main">{t('settings.style_theme')}</span>
+                    <div role="group" aria-labelledby="settings-style-theme-label" className="grid grid-cols-2 gap-3">
                       {themes.map((th) => (
                         <button
                           key={th}
                           onClick={() => setTheme(th)}
+                          aria-pressed={theme === th}
                           className={cn(
-                            "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                            "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]",
                             theme === th
                               ? "border-accent bg-accent/5 text-accent"
                               : "border-border text-text-muted hover:border-text-muted/30"
@@ -416,7 +461,12 @@ export function Settings() {
 
         {/* Version Tab */}
         {activeTab === 'version' && (
-          <div className="flex flex-col gap-6">
+          <div
+            id="settings-version-panel"
+            role="tabpanel"
+            aria-labelledby="settings-version-tab"
+            className="flex flex-col gap-6"
+          >
             {/* Version info */}
             <Card>
               <CardHeader>

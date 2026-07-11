@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Input } from '@/src/components/ui/Input';
@@ -32,7 +32,6 @@ function approvalIssueText(pack: Pack): string {
 
 export function Packs() {
   const t = useT();
-  const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
   const isLoading = useAppStore(state => state.isLoading);
   const loadPacks = useAppStore(state => state.loadPacks);
@@ -91,11 +90,14 @@ export function Packs() {
             {filteredPacks.map(pack => (
               <Card
                 key={pack.id}
-                className="cursor-pointer transition-all hover:shadow-[var(--shadow-md)]"
-                onClick={() => navigate(panelRoutes.packDetail(pack.id))}
+                className="transition-all hover:shadow-[var(--shadow-md)] focus-within:shadow-[var(--shadow-md)]"
               >
-                <div className="flex items-center justify-between p-5">
-                  <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <Link
+                    to={panelRoutes.packDetail(pack.id)}
+                    aria-label={`Open ${pack.name} details`}
+                    className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col gap-1.5 rounded-l-xl p-5 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ring-color)]"
+                  >
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-semibold text-text-main">{pack.name}</h3>
                       <Badge variant="outline">{pack.version}</Badge>
@@ -119,12 +121,13 @@ export function Packs() {
                         <span className="truncate">{approvalIssueText(pack)}</span>
                       </div>
                     )}
-                  </div>
-                  <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  </Link>
+                  <div className="mx-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center">
                     <Switch
                       checked={pack.enabled}
                       onCheckedChange={() => togglePack(pack.id)}
                       aria-label={`Toggle ${pack.name}`}
+                      className="relative after:absolute after:-inset-2.5"
                     />
                   </div>
                 </div>
