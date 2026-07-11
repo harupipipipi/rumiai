@@ -42,8 +42,6 @@ QrPayload parseQrPayload(String raw) {
             baseUrl: (json['baseUrl'] as String?)?.trim() ?? '',
             token: (json['token'] as String?)?.trim() ?? '',
           );
-        case 'rumi_api':
-          return QrUnknown(trimmed);
         case 'rumi_mobile_pair_v1':
         case 'rumi_pair_v2':
           return QrPairingV2(PairingV2Payload.fromJson(json));

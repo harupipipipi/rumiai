@@ -64,7 +64,7 @@ def _decrypt_delivery_envelope(private_key, envelope: dict, *, pairing_id: str, 
     return json.loads(clear.decode("utf-8"))
 
 
-def test_mobile_contract_port_registers_minimal_pairing_and_chat_routes():
+def test_mobile_contract_port_registers_secure_mobile_routes():
     from ecosystem.defaultspack.domain.mobile.contract import mobile_route_manifest
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
@@ -77,10 +77,13 @@ def test_mobile_contract_port_registers_minimal_pairing_and_chat_routes():
     assert "/api/mobile/v1/conversations" in patterns
     assert "/api/mobile/v1/conversations/{id}/messages" in patterns
 
-    assert "/api/mobile/v1/capabilities" not in patterns
-    assert "/api/mobile/v1/tools" not in patterns
-    assert "/api/mobile/v1/cloud/tools/invoke" not in patterns
-    assert not any(pattern.startswith("/api/mobile/v1/credential-transfers") for pattern in patterns)
+    assert "/api/mobile/v1/capabilities" in patterns
+    assert "/api/mobile/v1/tools" in patterns
+    assert "/api/mobile/v1/cloud/tools/invoke" in patterns
+    assert not any(
+        pattern.startswith("/api/mobile/v1/credential-transfers")
+        for pattern in patterns
+    )
 
     registry_patterns = {
         (spec.method, spec.pattern)
