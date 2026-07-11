@@ -1508,6 +1508,36 @@
     },
     {
       "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-exchanges",
+      "function_id": "managed_runtime_desktop_exchange_issue",
+      "description": "Issue a one-time scoped desktop exchange code"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktop-access/exchange",
+      "function_id": "managed_runtime_desktop_exchange_redeem",
+      "description": "Redeem a one-time desktop exchange code"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}/access-grants",
+      "function_id": "managed_runtime_desktop_grants_list",
+      "description": "List desktop access grant metadata without secrets"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/desktops/{seat_id}/access-grants/{grant_id}",
+      "function_id": "managed_runtime_desktop_grant_revoke",
+      "description": "Revoke a desktop access grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktop-access/expire",
+      "function_id": "managed_runtime_desktop_grants_expire",
+      "description": "Expire elapsed desktop access grants"
+    },
+    {
+      "method": "POST",
       "path": "/api/desktops/{seat_id}/control/acquire",
       "function_id": "managed_runtime_desktop_control_acquire",
       "description": "Acquire a desktop human-control lease"
