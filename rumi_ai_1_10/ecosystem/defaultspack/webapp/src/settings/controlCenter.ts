@@ -316,6 +316,29 @@ const JA_FIELD_COPY: Record<string, LocalizedFieldCopy> = {
   "*.ai_request_logging": { label: "AIへのリクエストを記録" },
 };
 
+const JA_SOURCE_SECTION_COPY: Record<string, string> = {
+  general: "表示と操作",
+  preview: "プレビュー",
+  chat_rendering: "会話の表示",
+  models: "モデル",
+  apis: "API接続",
+  accounts_connections: "アカウントと接続",
+  tools: "機能とMCP",
+  computer_use_haze: "コンピュータ操作中の表示",
+};
+
+/** Return user-facing source copy without exposing registry labels in Japanese. */
+export function localizedSettingsSourceLabel(
+  sourceSectionId: string,
+  sourceLabel: unknown,
+  locale: LocaleSetting = "en",
+): string {
+  if (normalizeLocale(locale) !== "ja") {
+    return safeSettingsLabel(sourceLabel, sourceSectionId);
+  }
+  return JA_SOURCE_SECTION_COPY[sourceSectionId] ?? "拡張機能の設定";
+}
+
 function localizedSectionMeta(locale: LocaleSetting): Array<Omit<ControlCenterSection, "fields" | "sourceSections">> {
   if (normalizeLocale(locale) !== "ja") return SECTION_META;
   return SECTION_META.map((section) => ({ ...section, ...JA_SECTION_COPY[section.id] }));
@@ -470,7 +493,11 @@ export function buildControlCenterSections(settingsSections: SettingsSection[], 
       const field = normalizeSettingsField(rawField, sourceSection.id, locale) as ControlCenterField;
       field.controlSectionId = targetId;
       field.sourceSectionId = sourceSection.id;
-      field.sourceSectionLabel = safeSettingsLabel(sourceSection.label, sourceSection.id);
+      field.sourceSectionLabel = localizedSettingsSourceLabel(
+        sourceSection.id,
+        sourceSection.label,
+        locale,
+      );
       field.sourceSectionDescription = sourceSection.description;
       target.fields.push(field);
     }
@@ -595,14 +622,34 @@ const GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS: AccountConnectionScopeModeOption[] = 
   },
 ];
 
-function accountScopeModeOptions(value: unknown): AccountConnectionScopeModeOption[] {
+const JA_GOOGLE_SCOPE_COPY: Record<string, Pick<AccountConnectionScopeModeOption, "label" | "description" | "warning">> = {
+  google_identity: { label: "Googleへのログインのみ", description: "氏名やメールアドレスなど、ログインに必要な基本情報だけを使います。", warning: "" },
+  google_drive: { label: "選択したGoogle Driveファイル", description: "Rumiで明示的に選択または共有したファイルだけを扱います。", warning: "" },
+  google_gmail_labels: { label: "Gmailのラベル", description: "メール本文を読まず、Gmailのラベルだけを取得します。", warning: "" },
+  google_gmail_metadata: { label: "Gmailの検索とメタデータ", description: "メールの検索とメタデータを扱います。本文は読みません。", warning: "この権限は制限付きです。セルフホストでの明示的な承認、またはGoogleの審査が必要になる場合があります。" },
+  google_gmail_readonly: { label: "Gmail本文の読み取り", description: "Gmailのメール本文を読み取ります。メールの変更や送信は行いません。", warning: "メール本文がRumiに共有されます。この権限はGoogleのセキュリティ審査が必要になる場合があります。" },
+};
+
+function localizeScopeMode(
+  option: AccountConnectionScopeModeOption,
+  locale: LocaleSetting,
+): AccountConnectionScopeModeOption {
+  if (normalizeLocale(locale) !== "ja") return option;
+  const copy = JA_GOOGLE_SCOPE_COPY[option.id];
+  return copy ? { ...option, ...copy } : option;
+}
+
+function accountScopeModeOptions(
+  value: unknown,
+  locale: LocaleSetting = "en",
+): AccountConnectionScopeModeOption[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     const row = recordValue(item);
     const id = String(row.id ?? "").trim();
     const surface = String(row.surface ?? "").trim();
     if (!id || !GOOGLE_ACCOUNT_SCOPE_MODE_IDS.has(id) || surface === "models_api") return [];
-    return [{
+    return [localizeScopeMode({
       id,
       label: String(row.label || id),
       description: String(row.description || ""),
@@ -610,8 +657,31 @@ function accountScopeModeOptions(value: unknown): AccountConnectionScopeModeOpti
       services: stringList(row.services),
       restricted: Boolean(row.restricted),
       warning: String(row.warning || ""),
-    }];
+    }, locale)];
   });
+}
+
+const JA_CONNECTION_STATUS: Record<string, string> = {
+  connected: "接続済み",
+  disconnected: "未接続",
+  not_connected: "未接続",
+  missing_scope_config: "接続設定が必要",
+  missing_self_host_config: "OAuthクライアント設定が必要",
+  needs_official_app: "公式アプリが必要",
+  missing_token: "アクセストークンが必要",
+  ready: "接続できます",
+};
+
+function localizedConnectionStatus(
+  status: string,
+  connected: boolean,
+  fallback: unknown,
+  locale: LocaleSetting,
+): string {
+  if (normalizeLocale(locale) !== "ja") {
+    return String(fallback || (connected ? "Connected" : "Disconnected"));
+  }
+  return JA_CONNECTION_STATUS[status] ?? (connected ? "接続済み" : "設定を確認してください");
 }
 
 function oauthStatusForProvider(settingsValues: SettingsValues, providerId: string): Record<string, unknown> {
@@ -625,7 +695,11 @@ function oauthStatusForProvider(settingsValues: SettingsValues, providerId: stri
   return recordValue(connections[providerId]);
 }
 
-export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {}): AccountConnectionPreludeCard[] {
+export function buildAccountConnectionPrelude(
+  settingsValues: SettingsValues = {},
+  locale: LocaleSetting = "en",
+): AccountConnectionPreludeCard[] {
+  const japanese = normalizeLocale(locale) === "ja";
   const definitions: Array<{
     providerId: AccountConnectionPreludeCard["providerId"];
     label: string;
@@ -726,10 +800,11 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     const canConnect = Boolean(status.connect_enabled);
     const credential = definition.credential?.(status);
     const disabledReason = connected || canConnect ? "" : String(status.disabled_reason || status.status_label || "Configure self-host OAuth");
+    const providedScopeModes = accountScopeModeOptions(status.scope_modes, locale);
     const scopeModes = definition.providerId === "google"
-      ? accountScopeModeOptions(status.scope_modes).length
-        ? accountScopeModeOptions(status.scope_modes)
-        : GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS
+      ? providedScopeModes.length
+        ? providedScopeModes
+        : GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS.map((option) => localizeScopeMode(option, locale))
       : [];
     const requestedScopeMode = String(status.scope_mode || definition.scopeMode || "").trim();
     const selectedScopeMode = scopeModes.some((option) => option.id === requestedScopeMode)
@@ -745,28 +820,47 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       authMethods: Array.isArray(status.auth_methods) ? status.auth_methods.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [],
       platformApiKeyRequired: Boolean(status.platform_api_key_required),
       label: definition.label,
-      description: definition.description,
+      description: japanese ? {
+        cloudflare: "このコンピュータがオフラインの間も、Cloudflare上でRumiのタスクを継続します。",
+        google: "Googleへのログイン、選択したDriveファイル、または明示的に選んだGmail権限を接続します。",
+        github: "GitHubのアカウント、リポジトリ、ワークフロー権限を認証情報セットで接続します。",
+        codex: "Codexワークフロー用のアクセストークンをこの端末へ安全に保存します。",
+      }[definition.providerId] ?? "外部サービスへの接続を管理します。" : definition.description,
       connected,
-      statusLabel: String(status.status_label || (connected ? "Connected" : "Disconnected")),
+      statusLabel: localizedConnectionStatus(
+        String(status.connection_status || (connected ? "connected" : "disconnected")),
+        connected,
+        status.status_label,
+        locale,
+      ),
       status: String(status.connection_status || (connected ? "connected" : "disconnected")),
       canConnect,
       connectAction: canConnect && !credential
         ? { providerId: definition.providerId, scopeMode: selectedScopeMode, services: selectedServices }
         : undefined,
-      primaryLabel: definition.providerId === "google"
-        ? connected ? "Reconnect selected mode" : "Connect selected mode"
-        : connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
-      disabledReason,
+      primaryLabel: japanese
+        ? definition.providerId === "google"
+          ? connected ? "選択した権限で再接続" : "選択した権限で接続"
+          : connected ? `${definition.label}を再接続` : `${definition.label}に接続`
+        : definition.providerId === "google"
+          ? connected ? "Reconnect selected mode" : "Connect selected mode"
+          : connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
+      disabledReason: japanese && disabledReason ? "接続するには設定が必要です。" : disabledReason,
       officialAppDescription: credential
-        ? "Stored through local secret storage and only exposed as configured status."
-        : "Official app required for hosted broker mode.",
+        ? japanese ? "この端末の秘密情報ストレージへ保存し、画面には設定済みかどうかだけを表示します。" : "Stored through local secret storage and only exposed as configured status."
+        : japanese ? "ホスト型の接続を使うには公式アプリが必要です。" : "Official app required for hosted broker mode.",
       selfHostDescription: credential
-        ? "Separate from Platform API keys and Workspace Agent tokens."
+        ? japanese ? "モデル用のAPIキーやWorkspace Agentトークンとは別に管理されます。" : "Separate from Platform API keys and Workspace Agent tokens."
         : disabledReason === "Configure self-host OAuth"
-        ? "Configure self-host OAuth with explicit scopes before connecting."
-        : "Self-host OAuth remains available when a client and scopes are configured.",
+        ? japanese ? "セルフホストでは、利用する権限を明示してOAuthクライアントを設定してください。" : "Configure self-host OAuth with explicit scopes before connecting."
+        : japanese ? "セルフホストでもOAuthクライアントと権限を設定すれば接続できます。" : "Self-host OAuth remains available when a client and scopes are configured.",
       configureSectionId: definition.configureSectionId,
-      configureLabel: definition.configureLabel,
+      configureLabel: japanese ? {
+        cloudflare: "セルフホストOAuthを設定",
+        google: "セルフホストOAuthを設定",
+        github: "認証情報を読み込む",
+        codex: "認証情報の扱いを確認",
+      }[definition.providerId] ?? "接続設定を開く" : definition.configureLabel,
       scopeMode: selectedScopeMode,
       services: selectedServices,
       scopes: selectedScopeModeOption?.scopes.length ? selectedScopeModeOption.scopes : stringList(status.scopes),
@@ -777,7 +871,12 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       credentialRef: String(credentialRef.credential_id || ""),
       expiresAt: String(status.expires_at || ""),
       scopeModes,
-      credential,
+      credential: credential && japanese ? {
+        ...credential,
+        placeholder: "Codexアクセストークン",
+        saveLabel: credential.configured ? "トークンを更新" : "トークンを保存",
+        clearLabel: "トークンを削除",
+      } : credential,
     };
   });
 }

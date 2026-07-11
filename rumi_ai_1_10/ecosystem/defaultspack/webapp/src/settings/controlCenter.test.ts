@@ -8,6 +8,7 @@ import {
   buildAccountConnectionPrelude,
   buildControlCenterSections,
   controlCenterSectionForField,
+  localizedSettingsSourceLabel,
   safeSettingsLabel,
 } from "./controlCenter";
 
@@ -54,6 +55,12 @@ test("Japanese settings use task-oriented copy while preserving technical search
   assert.equal(semanticField?.advanced, true);
   assert.match(settingsFieldSearchText(semanticField!), /semantic_backend/);
   assert.match(settingsFieldSearchText(semanticField!), /embedding/);
+});
+
+test("Japanese placement and provenance labels never expose raw registry copy", () => {
+  assert.equal(localizedSettingsSourceLabel("general", "General", "ja"), "表示と操作");
+  assert.equal(localizedSettingsSourceLabel("unknown_extension", "Internal Vector Registry", "ja"), "拡張機能の設定");
+  assert.equal(localizedSettingsSourceLabel("general", "General", "en"), "General");
 });
 
 test("settings control center separates computer control from tools", () => {
@@ -304,6 +311,52 @@ test("account connection prelude treats Codex as a redacted credential", () => {
   assert.equal(codex?.credential?.configured, true);
   assert.equal(codex?.credential?.canClear, true);
   assert.doesNotMatch(JSON.stringify(codex), new RegExp(rawToken));
+});
+
+test("Japanese account connection copy covers every provider and OAuth variant", () => {
+  const cards = buildAccountConnectionPrelude({
+    accounts_connections: {
+      providers: {
+        google: {
+          connect_enabled: true,
+          connection_status: "not_connected",
+          status_label: "Ready to connect",
+          scope_mode: "google_gmail_metadata",
+          scope_modes: [
+            {
+              id: "google_gmail_metadata",
+              label: "Gmail metadata/search",
+              description: "Restricted metadata/search scope for Gmail.",
+              warning: "Restricted Gmail scopes require explicit review.",
+              restricted: true,
+              scopes: ["https://www.googleapis.com/auth/gmail.metadata"],
+              services: ["gmail_metadata"],
+            },
+          ],
+        },
+      },
+    },
+  }, "ja");
+
+  assert.deepEqual(cards.map((card) => card.providerId), ["cloudflare", "google", "github", "codex"]);
+  for (const card of cards) {
+    const visibleCopy = [
+      card.description,
+      card.statusLabel,
+      card.primaryLabel,
+      card.disabledReason,
+      card.officialAppDescription,
+      card.selfHostDescription,
+      card.configureLabel,
+      card.credential?.saveLabel ?? "",
+      card.credential?.clearLabel ?? "",
+    ].join(" ");
+    assert.doesNotMatch(visibleCopy, /Connect|Credential|Token needed|Client config|Official app|required|Import JSON|Review credential/i);
+  }
+  const gmail = cards.find((card) => card.providerId === "google")?.scopeModes[0];
+  assert.equal(gmail?.label, "Gmailの検索とメタデータ");
+  assert.match(gmail?.description ?? "", /メールの検索/);
+  assert.doesNotMatch(`${gmail?.label} ${gmail?.description} ${gmail?.warning}`, /Restricted|metadata\/search|scope/i);
 });
 
 test("Codex App Server prelude maps safe Tools & MCP status", () => {
