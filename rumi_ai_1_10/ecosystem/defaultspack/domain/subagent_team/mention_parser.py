@@ -3,19 +3,25 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..mention import extract_mention_values, iter_mention_tokens
 
-AGENT_MENTION_RE = re.compile(r"(?<![\w.])@([A-Za-z0-9_][A-Za-z0-9_-]*)")
 ANGLE_AGENT_RE = re.compile(r"<@!?([A-Za-z0-9_][A-Za-z0-9_-]*)>")
 CHANNEL_RE = re.compile(r"(?<![\w.])#([A-Za-z0-9_][A-Za-z0-9_-]*)")
 COMMAND_RE = re.compile(r"(^|\s)/([A-Za-z0-9_][A-Za-z0-9_-]*)")
 
 
-def parse_mentions(text: str) -> dict[str, Any]:
+def parse_mentions(
+    text: str,
+    known_agent_ids: list[str] | None = None,
+) -> dict[str, Any]:
     content = str(text or "")
     agents = _dedupe(
         [
             *(match.group(1).lower() for match in ANGLE_AGENT_RE.finditer(content)),
-            *(match.group(1).lower() for match in AGENT_MENTION_RE.finditer(content)),
+            *(
+                value.lower()
+                for value in extract_mention_values(content, known_agent_ids)
+            ),
         ]
     )
     channels = _dedupe(match.group(1).lower() for match in CHANNEL_RE.finditer(content))
@@ -30,7 +36,13 @@ def parse_mentions(text: str) -> dict[str, Any]:
 
 def sanitize_agent_mentions_for_gate(text: str) -> str:
     content = ANGLE_AGENT_RE.sub(lambda match: "at " + match.group(1), str(text or ""))
-    return AGENT_MENTION_RE.sub(lambda match: "at " + match.group(1), content)
+    for mention in reversed(iter_mention_tokens(content)):
+        content = (
+            content[: mention.start]
+            + f"at {mention.value}"
+            + content[mention.end :]
+        )
+    return content
 
 
 def _dedupe(values) -> list[str]:

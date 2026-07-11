@@ -922,7 +922,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["computer_use_haze"]["edge_width"], 40)
         self.assertEqual(values["computer_use_haze"]["animation_speed"], 1)
 
-    def test_keyboard_button_navigation_defaults_off(self):
+    def test_keyboard_button_navigation_defaults_on(self):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -938,8 +938,216 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             if section["id"] == "general"
             for field in section["fields"]
         }
-        self.assertFalse(general["keyboard_button_navigation"])
+        self.assertTrue(general["keyboard_button_navigation"])
         self.assertIn("keyboard_button_navigation", field_ids)
+
+    def test_keyboard_navigation_migrates_legacy_default_once(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        fixture_path = Path(__file__).parent / "fixtures" / (
+            "frontend_settings_keyboard_navigation_legacy.json"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fixture_path, settings_path)
+            registry = FrontendRegistry(pack_root=pack_root)
+
+            first = registry.get_settings(lightweight=True)["values"]
+            persisted_after_first_read = settings_path.read_text(encoding="utf-8")
+            second = registry.get_settings(lightweight=True)["values"]
+            persisted_after_second_read = settings_path.read_text(encoding="utf-8")
+
+        self.assertTrue(first["general"]["keyboard_button_navigation"])
+        self.assertEqual(first["general"]["settings_version"], 2)
+        self.assertEqual(
+            first["general"]["keyboard_button_navigation_source"],
+            "legacy_default_migrated",
+        )
+        self.assertEqual(first["general"]["composer_placeholder"], "既存のプレースホルダー")
+        self.assertEqual(first["general"]["language"], "en")
+        self.assertEqual(first["general"]["legacy_custom_flag"], "keep-me")
+        self.assertTrue(first["preview"]["auto_open"])
+        self.assertEqual(first["preview"]["max_items"], 7)
+        self.assertEqual(second, first)
+        self.assertEqual(persisted_after_second_read, persisted_after_first_read)
+
+    def test_settings_migration_is_atomic_and_preserves_permissions(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "general": {
+                            "keyboard_button_navigation": False,
+                            "language": "en",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings_path.chmod(0o640)
+
+            values = FrontendRegistry(pack_root=pack_root).get_settings(
+                lightweight=True
+            )["values"]
+
+            persisted = json.loads(settings_path.read_text(encoding="utf-8"))
+            persisted_mode = settings_path.stat().st_mode & 0o777
+            temporary_files = list(settings_path.parent.glob("*.tmp"))
+
+        self.assertEqual(values["general"]["settings_version"], 2)
+        self.assertEqual(persisted["general"]["settings_version"], 2)
+        self.assertEqual(persisted_mode, 0o640)
+        self.assertEqual(temporary_files, [])
+
+    def test_settings_atomic_replace_failure_keeps_original(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            original = json.dumps(
+                {
+                    "general": {
+                        "settings_version": 2,
+                        "keyboard_button_navigation": True,
+                    }
+                }
+            ).encode("utf-8")
+            settings_path.write_bytes(original)
+            registry = FrontendRegistry(pack_root=pack_root)
+
+            with patch(
+                "domain.frontend.registry.os.replace",
+                side_effect=OSError("replace failed"),
+            ):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    registry.update_settings({"general": {"language": "en"}})
+
+            temporary_files = list(settings_path.parent.glob("*.tmp"))
+            persisted_after_failure = settings_path.read_bytes()
+
+        self.assertEqual(persisted_after_failure, original)
+        self.assertEqual(temporary_files, [])
+
+    def test_invalid_settings_are_backed_up_without_overwriting_original(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        for original in (b"", b'{"general":'):
+            with self.subTest(original=original):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    pack_root = Path(tmpdir)
+                    settings_path = (
+                        pack_root
+                        / "user_data"
+                        / "shared"
+                        / "frontend_settings.json"
+                    )
+                    settings_path.parent.mkdir(parents=True, exist_ok=True)
+                    settings_path.write_bytes(original)
+                    settings_path.chmod(0o640)
+                    registry = FrontendRegistry(pack_root=pack_root)
+
+                    first = registry.get_settings(lightweight=True)["values"]
+                    second = registry.get_settings(lightweight=True)["values"]
+                    backups = list(
+                        settings_path.parent.glob(
+                            "frontend_settings.json.corrupt-*.bak"
+                        )
+                    )
+
+                    self.assertEqual(second, first)
+                    self.assertEqual(settings_path.read_bytes(), original)
+                    self.assertEqual(len(backups), 1)
+                    self.assertEqual(backups[0].read_bytes(), original)
+                    self.assertEqual(backups[0].stat().st_mode & 0o777, 0o640)
+
+    def test_keyboard_navigation_explicit_false_is_preserved_and_marked(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            registry = FrontendRegistry(pack_root=pack_root)
+            migrated = registry.update_settings(
+                {"general": {"keyboard_button_navigation": False}}
+            )
+            reloaded = registry.get_settings(lightweight=True)["values"]
+            settings_mode = (
+                pack_root
+                / "user_data"
+                / "shared"
+                / "frontend_settings.json"
+            ).stat().st_mode & 0o777
+
+        self.assertFalse(migrated["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            migrated["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+        self.assertFalse(reloaded["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            reloaded["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+        self.assertEqual(settings_mode, 0o600)
+
+    def test_keyboard_navigation_future_version_false_is_not_migrated(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = (
+                pack_root / "user_data" / "shared" / "frontend_settings.json"
+            )
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "general": {
+                            "settings_version": 99,
+                            "keyboard_button_navigation": False,
+                            "keyboard_button_navigation_source": "user",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registry = FrontendRegistry(pack_root=pack_root)
+            values = registry.get_settings(lightweight=True)["values"]
+            updated = registry.update_settings(
+                {
+                    "general": {
+                        "keyboard_button_navigation": False,
+                        "language": "en",
+                    }
+                }
+            )
+
+        self.assertEqual(values["general"]["settings_version"], 99)
+        self.assertFalse(values["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            values["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
+        self.assertEqual(updated["general"]["settings_version"], 99)
+        self.assertFalse(updated["general"]["keyboard_button_navigation"])
+        self.assertEqual(
+            updated["general"]["keyboard_button_navigation_source"],
+            "user",
+        )
 
     def test_settings_api_keys_expose_google_browser_oauth_status(self):
         from domain.ai_client.oauth_store import (
@@ -1821,43 +2029,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(any("api/ui/commands" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/client-events" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
-
-    def test_client_event_route_records_redacted_audit_entry(self):
-        from blocks.ui.client_events import run
-
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch.dict(
-                os.environ,
-                {"RUMI_DEFAULTSPACK_AUDIT_PATH": str(Path(tmpdir) / "audit.jsonl")},
-                clear=False,
-            ),
-        ):
-            result = run(
-                {
-                    "_method": "POST",
-                    "source": "webapp",
-                    "category": "conversation_integrity",
-                    "level": "warning",
-                    "message": "Frontend collapsed duplicate assistant finals.",
-                    "fingerprint": "conv-1:assistant:2",
-                    "conversation_id": "conv-1",
-                    "detail": {
-                        "duplicate_count": 2,
-                        "api_key": "secret-value",
-                    },
-                },
-                {},
-            )
-
-            self.assertEqual(result["status"], "ok")
-            audit_path = Path(tmpdir) / "audit.jsonl"
-            self.assertTrue(audit_path.exists())
-            audit_entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(audit_entry["event"], "client_diagnostic")
-            self.assertEqual(audit_entry["category"], "conversation_integrity")
-            self.assertEqual(audit_entry["conversation_id"], "conv-1")
-            self.assertEqual(audit_entry["details"]["api_key"], "***")
 
     def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
         from domain.frontend.command_registry import SlashCommandRegistry

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, CheckCircle2, ListTree, Loader2, Save, TriangleAlert } from 'lucide-react';
 
 import { Button } from '@/src/components/ui/Button';
@@ -17,6 +17,7 @@ import type {
 } from '@/src/lib/apiTypes';
 import { cn } from '@/src/lib/utils';
 import { useAppStore } from '@/src/store';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 type GraphViewMode = 'readable' | 'json';
 
@@ -221,11 +222,17 @@ export function GraphEditor() {
   const [graphs, setGraphs] = useState<ApiCapabilityGraph[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedGraphId, setSelectedGraphId] = useState('');
+  const [loadedGraphId, setLoadedGraphId] = useState('');
   const [source, setSource] = useState('');
+  const [baselineSource, setBaselineSource] = useState('');
   const [viewMode, setViewMode] = useState<GraphViewMode>('readable');
   const [preview, setPreview] = useState<CapabilityGraphCompileResponseData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [failedGraphId, setFailedGraphId] = useState('');
+  const graphRequestRef = useRef(0);
 
   const parsedGraph = useMemo(() => {
     try {
@@ -235,6 +242,12 @@ export function GraphEditor() {
       return null;
     }
   }, [source]);
+  const sourceGraphId = typeof parsedGraph?.graph_id === 'string' ? parsedGraph.graph_id : '';
+  const graphMatchesSelection = Boolean(
+    selectedGraphId
+      && loadedGraphId === selectedGraphId
+      && sourceGraphId === selectedGraphId,
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -251,9 +264,16 @@ export function GraphEditor() {
         setSelectedProfileId(profileData.profiles[0]?.profile_id ?? '');
         const graph = graphData.graphs[0] ?? null;
         setSelectedGraphId(graph?.graph_id ?? '');
-        setSource(formatGraph(graph));
+        setLoadedGraphId(graph?.graph_id ?? '');
+        const nextSource = formatGraph(graph);
+        setSource(nextSource);
+        setBaselineSource(nextSource);
+        setLoadError(null);
+        setFailedGraphId('');
       } catch (error) {
-        addToast(error instanceof Error ? error.message : 'Failed to load graphs', 'error');
+        const message = error instanceof Error ? error.message : 'Failed to load graphs';
+        setLoadError(message);
+        addToast(message, 'error');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -265,24 +285,51 @@ export function GraphEditor() {
   }, [addToast]);
 
   async function loadGraph(graphId: string) {
-    setSelectedGraphId(graphId);
-    setPreview(null);
+    if (graphId === selectedGraphId) return;
+    if (graphMatchesSelection && source !== baselineSource) {
+      const discard = window.confirm('Discard unsaved graph edits and switch graphs?');
+      if (!discard) return;
+    }
     if (!graphId) {
+      setSelectedGraphId('');
+      setLoadedGraphId('');
       setSource('');
+      setBaselineSource('');
       return;
     }
-    const result = await fetchCapabilityGraph(graphId);
-    setSource(formatGraph(result.graph));
+    const requestId = graphRequestRef.current + 1;
+    graphRequestRef.current = requestId;
+    setGraphLoading(true);
+    setLoadError(null);
+    setFailedGraphId('');
+    try {
+      const result = await fetchCapabilityGraph(graphId);
+      if (graphRequestRef.current !== requestId) return;
+      setSelectedGraphId(graphId);
+      setLoadedGraphId(result.graph.graph_id);
+      const nextSource = formatGraph(result.graph);
+      setSource(nextSource);
+      setBaselineSource(nextSource);
+      setPreview(null);
+    } catch (error) {
+      if (graphRequestRef.current !== requestId) return;
+      const message = error instanceof Error ? error.message : 'Failed to load graph';
+      setLoadError(message);
+      setFailedGraphId(graphId);
+      addToast(message, 'error');
+    } finally {
+      if (graphRequestRef.current === requestId) setGraphLoading(false);
+    }
   }
 
   async function runPreview(kind: 'validate' | 'compile') {
-    if (!parsedGraph || !selectedProfileId) {
+    if (!parsedGraph || !selectedProfileId || !graphMatchesSelection) {
       addToast('Graph JSON and profile are required', 'error');
       return;
     }
     setBusy(true);
     try {
-      const graphId = String(parsedGraph.graph_id || selectedGraphId || 'draft');
+      const graphId = selectedGraphId;
       const result = kind === 'validate'
         ? await validateCapabilityGraph(graphId, selectedProfileId, parsedGraph)
         : await compileCapabilityGraph(graphId, selectedProfileId, parsedGraph);
@@ -295,8 +342,8 @@ export function GraphEditor() {
   }
 
   async function saveGraph() {
-    if (!parsedGraph) {
-      addToast('Graph JSON is invalid', 'error');
+    if (!parsedGraph || !graphMatchesSelection) {
+      addToast('Loaded graph and editor source do not match', 'error');
       return;
     }
     setBusy(true);
@@ -305,6 +352,10 @@ export function GraphEditor() {
       const saved = await saveCapabilityGraph(parsedGraph, created);
       addToast(created ? 'Graph created' : 'Graph saved', 'success');
       setSelectedGraphId(saved.graph.graph_id);
+      setLoadedGraphId(saved.graph.graph_id);
+      const nextSource = formatGraph(saved.graph);
+      setSource(nextSource);
+      setBaselineSource(nextSource);
       const graphData = await fetchCapabilityGraphs();
       setGraphs(graphData.graphs);
     } catch (error) {
@@ -356,7 +407,7 @@ export function GraphEditor() {
           </div>
           <Button
             onClick={saveGraph}
-            disabled={busy || !parsedGraph || viewMode !== 'json'}
+            disabled={busy || graphLoading || !parsedGraph || !graphMatchesSelection || viewMode !== 'json'}
             title={viewMode === 'json' ? 'Save JSON graph' : 'Switch to JSON to edit and save'}
           >
             <Save className="w-4 h-4 mr-2" />
@@ -390,22 +441,48 @@ export function GraphEditor() {
           </select>
 
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => void runPreview('validate')} disabled={busy || !parsedGraph}>
+            <Button variant="secondary" onClick={() => void runPreview('validate')} disabled={busy || graphLoading || !graphMatchesSelection}>
               Validate
             </Button>
-            <Button variant="secondary" onClick={() => void runPreview('compile')} disabled={busy || !parsedGraph}>
+            <Button variant="secondary" onClick={() => void runPreview('compile')} disabled={busy || graphLoading || !graphMatchesSelection}>
               Compile
             </Button>
           </div>
         </aside>
 
         <main className="min-h-0">
-          {viewMode === 'json' ? (
+          {loadError ? (
+            <div className="p-4">
+              <InlineLoadError
+                title={graphs.length ? 'Graph could not be loaded' : 'Capability graphs could not be loaded'}
+                message={loadError}
+                onRetry={() => graphs.length
+                  ? void loadGraph(failedGraphId || selectedGraphId || graphs[0]?.graph_id || '')
+                  : window.location.reload()}
+                retrying={graphLoading || loading}
+                stale={Boolean(source)}
+              />
+            </div>
+          ) : null}
+          {graphLoading ? (
+            <div role="status" className="flex items-center gap-2 border-b border-border px-4 py-2 text-sm text-text-muted">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading selected graph…
+            </div>
+          ) : null}
+          {!loadError && graphs.length === 0 ? (
+            <div className="flex min-h-[520px] items-center justify-center p-6 text-center">
+              <div>
+                <h2 className="text-base font-semibold text-text-main">No capability graphs</h2>
+                <p className="mt-1 text-sm text-text-muted">Graphs available to this runtime will appear here.</p>
+              </div>
+            </div>
+          ) : viewMode === 'json' ? (
             <textarea
               className="h-full min-h-[520px] w-full resize-none bg-bg-main p-4 font-mono text-sm text-text-main outline-none"
               value={source}
               spellCheck={false}
               onChange={event => setSource(event.target.value)}
+              disabled={graphLoading || !loadedGraphId}
             />
           ) : (
             <ReadableCapabilityGraph graph={parsedGraph} />

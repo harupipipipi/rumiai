@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Input } from '@/src/components/ui/Input';
@@ -8,6 +8,7 @@ import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
 import { AlertTriangle, Search, Package, Loader2, ShieldCheck } from 'lucide-react';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
 
@@ -32,9 +33,9 @@ function approvalIssueText(pack: Pack): string {
 
 export function Packs() {
   const t = useT();
-  const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
   const isLoading = useAppStore(state => state.isLoading);
+  const apiError = useAppStore(state => state.apiError);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const [search, setSearch] = useState('');
@@ -65,6 +66,16 @@ export function Packs() {
           <p className="mt-1 text-sm text-text-muted">Manage installed packs and their capabilities.</p>
         </div>
 
+        {apiError ? (
+          <InlineLoadError
+            title="Packs could not be loaded"
+            message={apiError}
+            onRetry={() => void loadPacks()}
+            retrying={isLoading}
+            stale={packs.length > 0}
+          />
+        ) : null}
+
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
@@ -78,24 +89,31 @@ export function Packs() {
         </div>
 
         {/* Pack list */}
-        {filteredPacks.length === 0 ? (
+        {apiError && packs.length === 0 ? null : filteredPacks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-hover">
               <Package className="h-5 w-5 text-text-muted" />
             </div>
-            <h3 className="mt-4 text-base font-medium text-text-main">{t('packs.not_found')}</h3>
-            <p className="mt-1 text-sm text-text-muted">{t('packs.try_different')}</p>
+            <h3 className="mt-4 text-base font-medium text-text-main">
+              {search.trim() ? t('packs.not_found') : 'No packs installed'}
+            </h3>
+            <p className="mt-1 text-sm text-text-muted">
+              {search.trim() ? t('packs.try_different') : 'Installed packs will appear here.'}
+            </p>
           </div>
         ) : (
           <div className="grid gap-3">
             {filteredPacks.map(pack => (
               <Card
                 key={pack.id}
-                className="cursor-pointer transition-all hover:shadow-[var(--shadow-md)]"
-                onClick={() => navigate(panelRoutes.packDetail(pack.id))}
+                className="transition-all hover:shadow-[var(--shadow-md)] focus-within:shadow-[var(--shadow-md)]"
               >
-                <div className="flex items-center justify-between p-5">
-                  <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <Link
+                    to={panelRoutes.packDetail(pack.id)}
+                    aria-label={`Open ${pack.name} details`}
+                    className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col gap-1.5 rounded-l-xl p-5 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ring-color)]"
+                  >
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-semibold text-text-main">{pack.name}</h3>
                       <Badge variant="outline">{pack.version}</Badge>
@@ -119,12 +137,13 @@ export function Packs() {
                         <span className="truncate">{approvalIssueText(pack)}</span>
                       </div>
                     )}
-                  </div>
-                  <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  </Link>
+                  <div className="mx-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center">
                     <Switch
                       checked={pack.enabled}
                       onCheckedChange={() => togglePack(pack.id)}
                       aria-label={`Toggle ${pack.name}`}
+                      className="relative after:absolute after:-inset-2.5"
                     />
                   </div>
                 </div>

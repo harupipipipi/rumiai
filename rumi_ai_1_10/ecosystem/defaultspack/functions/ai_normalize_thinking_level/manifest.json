@@ -16,7 +16,6 @@
     "defaultspack.ai.normalize_thinking_level",
     "defaults.ai.normalize.thinking.level",
     "defaultspack.ai.normalize.thinking.level",
-    "defaults.model_runtime.normalize_thinking_level",
     "defaultspack.model_runtime.normalize_thinking_level"
   ],
   "input_schema": {

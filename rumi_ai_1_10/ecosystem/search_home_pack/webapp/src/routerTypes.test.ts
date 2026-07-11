@@ -80,6 +80,8 @@ test("blocks non-web, relative, credentialed, and malformed destinations", () =>
     "https://user:secret@example.com/",
     " https://example.com/",
     "https://example.com/\u0000bad",
+    "https://example.com/%0d%0aheader",
+    "https:\\example.com\\path",
   ]) {
     assert.equal(reviewRouteDestination(value).ok, false, value);
   }
@@ -146,13 +148,26 @@ test("stored decisions discard arbitrary metadata and unsafe URLs", () => {
   assert.equal(JSON.stringify(sanitized).includes("javascript:"), false);
 });
 
-test("browser companion message is bounded and omits query and candidate details", () => {
+test("browser companion message is origin-bound, expiring, and secret-free", () => {
   const message = buildBrowserCompanionRouteMessage(decision, 2);
-  assert.equal(message.type, "rumi:search-home-route-state");
-  assert.equal(message.version, 1);
+  assert.equal(message.type, "rumi:search-home:set-route-state");
+  assert.equal(message.source, "rumi-search-home");
   assert.equal(message.payload.target_url, "https://example.com/c");
-  assert.equal(message.payload.candidate_count, 3);
-  assert.equal("query" in message.payload, false);
-  assert.equal("target_candidates" in message.payload, false);
-  assert.ok(Date.parse(message.payload.expires_at) > Date.parse(message.payload.updated_at));
+  assert.equal(message.payload.target_candidates.length, 3);
+  assert.match(message.payload.state_id, /^[a-f0-9]{32}$/);
+  assert.ok(Date.parse(message.payload.expires_at) > Date.parse(message.payload.issued_at));
+});
+
+test("session state never persists fragments or credential-like query values", () => {
+  const secret = "fake-secret-do-not-store";
+  const state = buildRouteSessionState({
+    ...decision,
+    query: `https://example.com/?access_token=${secret}`,
+    target_url: `https://example.com/?access_token=${secret}`,
+    fallback_url: "https://www.google.com/search?q=safe",
+    target_candidates: [{ url: `https://example.com/path#${secret}` }],
+  });
+  assert.equal(JSON.stringify(state).includes(secret), false);
+  assert.equal(state.target_candidates.length, 0);
+  assert.equal(state.target_url, state.fallback_url);
 });

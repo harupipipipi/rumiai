@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
   atMentionMenuKeyAction,
+  AtMentionMenu,
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
@@ -44,6 +45,20 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
   });
 });
 
+test("composer known dotted mention keeps Japanese-adjacent cursor parity", () => {
+  const result = insertAtMentionText(
+    "確認@README.md",
+    "確認@README.md".length,
+    "README.md",
+    ["README.md"],
+  );
+
+  assert.deepEqual(result, {
+    value: "確認@README.md ",
+    cursor: "確認@README.md ".length,
+  });
+});
+
 test("composer tool mentions resolve searchable tools and JSON metadata", () => {
   const tools = [
     {
@@ -66,6 +81,20 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
   assert.deepEqual(filterComposerToolMentions(tools, "workspace").map((tool) => tool.id), ["coding_file_read"]);
   assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
   assert.deepEqual(toolMentionIdsFromText("Use @web_search then @Read_File.", tools), ["web_search", "coding_file_read"]);
+  assert.deepEqual(
+    toolMentionIdsFromText(
+      "お願い@mcp.server",
+      [...tools, { id: "mcp.server", label: "MCP Server" }],
+    ),
+    ["mcp.server"],
+  );
+  assert.deepEqual(
+    toolMentionIdsFromText(
+      "ユーザー@example.com",
+      [...tools, { id: "mcp.server", label: "MCP Server" }],
+    ),
+    [],
+  );
   assert.deepEqual(composerToolMentionWidget(tools[0]), {
     id: "web_search",
     type: "tool",
@@ -79,7 +108,10 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
     metadata: {
       source: "composer_at_mention",
       mention: {
-        syntax: "@web_search",
+        id: "web_search",
+        kind: "tool",
+        label: "Web Search",
+        syntax: "@Web Search",
         tool_id: "web_search",
       },
       tool: {
@@ -123,6 +155,7 @@ test("composer mention filters retain known tools and files while typing", () =>
   assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
   assert.deepEqual(filterComposerToolMentions(tools, "calculator").map((tool) => tool.id), ["calculator"]);
   assert.deepEqual(filterComposerToolMentions(tools, "browser").map((tool) => tool.id), ["browser_computer"]);
+  assert.deepEqual(filterComposerToolMentions([{ ...tools[0], disabled: true }], "web"), []);
   assert.deepEqual(filterAtMentionFiles(["src/App.tsx", "README.md"], "README"), ["README.md"]);
 });
 
@@ -138,21 +171,79 @@ test("composer mention Enter selects candidates and does not submit raw unmatche
     index: 1,
   });
   assert.deepEqual(atMentionMenuKeyAction("Enter", false, 0, 0), {
-    handled: true,
-    type: "block",
+    handled: false,
   });
   assert.deepEqual(atMentionMenuKeyAction("Tab", false, 0, 0), {
-    handled: true,
-    type: "block",
+    handled: false,
   });
   assert.deepEqual(atMentionMenuKeyAction("Escape", false, 0, 0), {
     handled: true,
     type: "close",
   });
-  assert.deepEqual(insertAtMentionText("Use @web", 8, "web_search"), {
-    value: "Use @web_search ",
+  assert.deepEqual(insertAtMentionText("Use @web", 8, "Web Search"), {
+    value: "Use @Web Search ",
     cursor: 16,
   });
+  assert.deepEqual(atMentionMenuKeyAction("Enter", true, 0, 2), { handled: false });
+  assert.deepEqual(atMentionMenuKeyAction("Tab", true, 0, 2), { handled: false });
+});
+
+test("empty mention listbox is visible and announced", () => {
+  const html = renderToStaticMarkup(createElement(AtMentionMenu, {
+    candidates: [],
+    activeIndex: 0,
+    onActiveIndexChange: () => undefined,
+    onSelect: () => undefined,
+    onClose: () => undefined,
+  }));
+
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /一致する候補はありません/);
+  assert.doesNotMatch(html, /role="option"/);
+});
+
+test("selected references render inline while explicit drops keep the widget row", () => {
+  const baseProps = {
+    input: "Use @web_search then review",
+    placeholder: "Message Rumi...",
+    isGenerating: false,
+    selectedProfile: {
+      profile_id: "stub/default",
+      display_name: "Stub Default",
+      provider_id: "stub",
+      model_id: "default",
+    },
+    favoriteProfiles: [],
+    inlineExtensions: [{ id: "web_search", label: "Web Search", category: "tool" }],
+    belowExtensions: [],
+    thinkingLevel: null,
+    contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+    onModelProfileSelect: () => undefined,
+    onThinkingLevelChange: () => undefined,
+  };
+  const referenceHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    entityReferences: [{ kind: "tool", id: "web_search", syntax: "@web_search" }],
+  }));
+
+  assert.match(referenceHtml, /data-composer-inline-reference="tool:web_search"/);
+  assert.match(referenceHtml, />Web Search</);
+  assert.match(referenceHtml, /text-sky-200/);
+  assert.match(referenceHtml, /text-transparent caret-transparent/);
+  assert.doesNotMatch(referenceHtml, /metadata=|composer_at_mention/);
+
+  const droppedHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    entityReferences: [],
+    droppedWidgets: [{ id: "web_search", type: "tool", label: "Web Search", enabled: true }],
+    selectedToolIds: ["web_search"],
+  }));
+  assert.doesNotMatch(droppedHtml, /data-composer-inline-reference/);
+  assert.match(droppedHtml, /border-emerald-600\/50[^>]*>[\s\S]*Web Search/);
 });
 
 test("model candidate menu keyboard helpers cycle and select", () => {

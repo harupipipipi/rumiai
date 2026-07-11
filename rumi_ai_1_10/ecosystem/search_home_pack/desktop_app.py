@@ -111,9 +111,27 @@ def route_state_path(*, root: Path | None = None) -> Path:
 def persist_route_state(state: dict[str, Any], *, root: Path | None = None) -> Path:
     path = route_state_path(root=root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = dict(state or {})
+    payload = _sanitize_route_state_for_persistence(dict(state or {}))
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _sanitize_route_state_for_persistence(value: Any, key: str = "") -> Any:
+    """Remove secret-bearing URLs from backend-restored route state."""
+    from ecosystem.search_home_pack.domain.safe_url import url_safe_for_persistence
+
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_route_state_for_persistence(child, str(child_key))
+            for child_key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_route_state_for_persistence(child, key) for child in value]
+    if isinstance(value, str) and (key.endswith("_url") or key == "url"):
+        return url_safe_for_persistence(value)
+    if isinstance(value, str) and key == "query" and "://" in value:
+        return value if url_safe_for_persistence(value) else ""
+    return value
 
 
 def load_route_state(*, root: Path | None = None) -> dict[str, Any]:

@@ -45,6 +45,9 @@ export type RouteSessionState = {
   selected_index: number;
   target_candidates: RouteSessionCandidate[];
   updated_at: string;
+  state_id: string;
+  issued_at: string;
+  expires_at: string;
 };
 
 export type RouteDestinationBlockCode =
@@ -78,22 +81,19 @@ export type RouteDestinationReview =
 
 export type BrowserCompanionRouteMessage = {
   type: typeof ROUTE_BROWSER_MESSAGE_TYPE;
-  version: 1;
-  payload: {
-    target_url: string;
-    selected_index: number;
-    candidate_count: number;
-    updated_at: string;
-    expires_at: string;
-  };
+  source: typeof ROUTE_BROWSER_MESSAGE_SOURCE;
+  payload: RouteSessionState;
 };
 
 export const ROUTE_SESSION_STORAGE_KEY = "rumi-search-home-route-state";
-export const ROUTE_BROWSER_MESSAGE_TYPE = "rumi:search-home-route-state";
+export const ROUTE_BROWSER_MESSAGE_TYPE = "rumi:search-home:set-route-state";
+export const ROUTE_BROWSER_MESSAGE_SOURCE = "rumi-search-home";
 
 const MAX_ROUTE_URL_LENGTH = 4096;
 const MAX_ROUTE_QUERY_LENGTH = 2048;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const ENCODED_CONTROL_PATTERN = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i;
+const SECRET_QUERY_KEY_PATTERN = /(?:^|[_-])(token|secret|password|passwd|key|signature|credential|auth|code)(?:$|[_-])/i;
 const ABSOLUTE_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 
 function parseIpv4(hostname: string): [number, number, number, number] | null {
@@ -180,8 +180,11 @@ export function reviewRouteDestination(input: string): RouteDestinationReview {
   if (input !== input.trim()) {
     return block(input, "whitespace", "移動先URLの前後に空白が含まれています。");
   }
-  if (CONTROL_CHARACTER_PATTERN.test(input)) {
+  if (CONTROL_CHARACTER_PATTERN.test(input) || ENCODED_CONTROL_PATTERN.test(input)) {
     return block(input, "control_characters", "移動先URLに制御文字が含まれています。");
+  }
+  if (input.includes("\\")) {
+    return block(input, "malformed_url", "曖昧な区切り文字を含む移動先URLは開けません。");
   }
   if (!ABSOLUTE_SCHEME_PATTERN.test(input)) {
     return block(input, "relative_url", "絶対URLではない移動先は開けません。");
@@ -267,37 +270,70 @@ export function cycleCandidateIndex(decision: RouteDecision, currentIndex: numbe
 }
 
 function safeSessionCandidate(candidate: RouteCandidate): RouteSessionCandidate | null {
-  const review = reviewRouteDestination(candidate.final_url || candidate.url);
-  if (!review.ok) {
+  const url = safeUrlForStorage(candidate.url || candidate.final_url || "");
+  const finalUrl = safeUrlForStorage(candidate.final_url || candidate.url || "");
+  const review = reviewRouteDestination(finalUrl);
+  if (!url || !finalUrl || !review.ok) {
     return null;
   }
   return {
-    url: review.url,
-    final_url: review.url,
+    url,
+    final_url: finalUrl,
     title: candidate.title || "",
     domain: review.host,
   };
 }
 
+function safeUrlForStorage(input: string): string {
+  try {
+    if (new URL(input).hash) return "";
+  } catch {
+    return "";
+  }
+  const review = reviewRouteDestination(input);
+  if (!review.ok) return "";
+  const parsed = new URL(review.url);
+  if (parsed.hash) return "";
+  for (const key of parsed.searchParams.keys()) {
+    if (SECRET_QUERY_KEY_PATTERN.test(key)) return "";
+  }
+  return review.url;
+}
+
+function safeQueryForStorage(query: string): string {
+  const bounded = query.slice(0, MAX_ROUTE_QUERY_LENGTH);
+  return bounded.includes("://") && !safeUrlForStorage(bounded) ? "" : bounded;
+}
+
+function createRouteStateId(): string {
+  const random = globalThis.crypto?.getRandomValues?.(new Uint8Array(16));
+  if (!random) throw new Error("Secure randomness is required for route state.");
+  return Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function buildRouteSessionState(decision: RouteDecision, selectedIndex = decision.selected_index): RouteSessionState {
   const normalizedOriginalIndex = normalizeSelectedIndex(decision, selectedIndex);
   const selectedRawUrl = selectedCandidateUrl(decision, normalizedOriginalIndex);
-  const selectedReview = reviewRouteDestination(selectedRawUrl);
-  const fallbackReview = reviewRouteDestination(decision.fallback_url);
+  const selectedUrl = safeUrlForStorage(selectedRawUrl);
+  const fallbackUrl = safeUrlForStorage(decision.fallback_url);
   const candidates = decision.target_candidates
     .map((candidate) => safeSessionCandidate(candidate))
     .filter((candidate): candidate is RouteSessionCandidate => candidate !== null);
-  const safeSelectedIndex = selectedReview.ok
-    ? candidates.findIndex((candidate) => candidate.final_url === selectedReview.url)
+  const safeSelectedIndex = selectedUrl
+    ? candidates.findIndex((candidate) => candidate.final_url === selectedUrl)
     : -1;
+  const issuedAt = new Date();
 
   return {
-    query: decision.query.slice(0, MAX_ROUTE_QUERY_LENGTH),
-    target_url: selectedReview.ok ? selectedReview.url : fallbackReview.ok ? fallbackReview.url : "",
-    fallback_url: fallbackReview.ok ? fallbackReview.url : "",
+    query: safeQueryForStorage(decision.query),
+    target_url: selectedUrl || fallbackUrl,
+    fallback_url: fallbackUrl,
     selected_index: safeSelectedIndex,
     target_candidates: candidates,
-    updated_at: new Date().toISOString(),
+    updated_at: issuedAt.toISOString(),
+    state_id: createRouteStateId(),
+    issued_at: issuedAt.toISOString(),
+    expires_at: new Date(issuedAt.getTime() + 5 * 60 * 1000).toISOString(),
   };
 }
 
@@ -337,18 +373,9 @@ export function buildBrowserCompanionRouteMessage(
   decision: RouteDecision,
   selectedIndex = decision.selected_index,
 ): BrowserCompanionRouteMessage {
-  const state = buildRouteSessionState(decision, selectedIndex);
-  const updatedAt = new Date(state.updated_at);
-  const expiresAt = new Date(updatedAt.getTime() + 5 * 60 * 1000);
   return {
     type: ROUTE_BROWSER_MESSAGE_TYPE,
-    version: 1,
-    payload: {
-      target_url: state.target_url,
-      selected_index: state.selected_index,
-      candidate_count: state.target_candidates.length,
-      updated_at: state.updated_at,
-      expires_at: expiresAt.toISOString(),
-    },
+    source: ROUTE_BROWSER_MESSAGE_SOURCE,
+    payload: buildRouteSessionState(decision, selectedIndex),
   };
 }

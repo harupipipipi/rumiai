@@ -8,10 +8,14 @@ const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
 type ApiMockOptions = {
+  beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
+  initialSettingsValues?: Record<string, Record<string, unknown>>;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
   conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
   onApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
+  codingApprovalAfterTerminal?: boolean;
+  codingApprovalAfterRestore?: boolean;
 };
 
 function ok(data: unknown) {
@@ -34,8 +38,8 @@ function smokeConversation() {
       {
         id: "m-user",
         role: "user",
-        content: [{ type: "text", text: "Show the current tool state." }],
-        raw_text: "Show the current tool state.",
+        content: [{ type: "text", text: "Show the current @Web Search state." }],
+        raw_text: "Show the current @Web Search state.",
         created_at: now - 20_000,
         conversation_id: "c-smoke",
         parent_id: null,
@@ -44,6 +48,14 @@ function smokeConversation() {
         finish_reason: null,
         usage: null,
         widget: null,
+        metadata: {
+          mentions: [{
+            id: "web_search",
+            kind: "tool",
+            label: "Web Search",
+            syntax: "@Web Search",
+          }],
+        },
       },
       {
         id: "m-assistant",
@@ -229,6 +241,21 @@ const sidebarItems = [
       kind: "tool",
       title: "GitHub Issues",
       notes: ["Mocked for service-level selection coverage."],
+    },
+  },
+  {
+    id: "𐐀tool",
+    label: "𐐀tool",
+    category: "tool",
+    description: "Supplementary-plane Unicode tool.",
+    tags: ["unicode"],
+    risk: "low",
+    ui: {
+      group_id: "research",
+      group_label: "Research",
+      widget_kind: "tool_toggle",
+      drop_capabilities: ["composer.toggle_chip"],
+      composer_label: "𐐀tool",
     },
   },
   {
@@ -449,8 +476,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     sessionStorage.clear();
   });
 
-  let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
+  let currentSettingsValues: Record<string, Record<string, unknown>> = JSON.parse(JSON.stringify({
+    ...settingsValues,
+    ...(options.initialSettingsValues ?? {}),
+    general: {
+      ...settingsValues.general,
+      ...(options.initialSettingsValues?.general ?? {}),
+    },
+  }));
   let conversationToolPreferences: Record<string, unknown> = {};
+  let codingApprovalRequest: Record<string, unknown> | null = null;
+  const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
+    ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
+    : [];
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
@@ -487,7 +525,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/ui/settings" && method === "PUT") {
-      const payload = request.postDataJSON() as { values?: typeof settingsValues };
+      const payload = request.postDataJSON() as {
+        values?: Record<string, Record<string, unknown>>;
+      };
       currentSettingsValues = JSON.parse(JSON.stringify(payload.values ?? currentSettingsValues));
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
@@ -668,6 +708,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
+    if (path === "/api/coding/files/read" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      await options.beforeWorkspaceFileReadResponse?.(payload);
+      return fulfill(route, {
+        path: String(payload.path ?? "README.md"),
+        content: "# Fixture\n",
+        size: 10,
+        encoding: "utf-8",
+        workspace_id: "ws-main",
+        workspace_root: "/repo",
+      });
+    }
+
     if (path === "/api/coding/git/branch") {
       return fulfill(route, { branch: "main", branches: ["main", "codex/pr97"], workspace_id: "ws-main" });
     }
@@ -683,6 +736,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("approve", payload);
+      if (codingApprovalRequest?.request_id === payload.approval_request_id) {
+        codingApprovalRequest = { ...codingApprovalRequest, status: "approved" };
+      }
       return fulfill(route, {
         request_id: payload.approval_request_id,
         approved: true,
@@ -696,12 +752,67 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { request_id: payload.approval_request_id, approved: false, status: "denied" });
     }
 
+    if (path === "/api/coding/terminal/exec" && method === "POST" && options.codingApprovalAfterTerminal) {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      codingApprovalRequest = {
+        request_id: "apr-terminal-write",
+        operation: "terminal.exec",
+        risk_level: "high",
+        status: "pending",
+        display_summary: "terminal.exec: write qa-file.txt",
+        created_at: now,
+      };
+      return fulfill(route, {
+        command: String(payload.command ?? ""),
+        classification: "high",
+        risk_reasons: ["write"],
+        approval_required: true,
+        approval_request_id: "apr-terminal-write",
+        exit_code: null,
+        stdout: "",
+        stderr: "",
+      });
+    }
+
+    if (path === "/api/coding/files/restore" && method === "POST" && options.codingApprovalAfterRestore) {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const snapshotId = String(payload.snapshot_id ?? "checkpoint-1");
+      if (payload.approval_token) {
+        return fulfill(route, { restored: true, snapshot_id: snapshotId });
+      }
+      codingApprovalRequest = {
+        request_id: `apr-${snapshotId}-restore`,
+        operation: "file.restore",
+        risk_level: "high",
+        status: "pending",
+        display_summary: `file.restore: ${snapshotId}`,
+        created_at: now,
+      };
+      return fulfill(route, {
+        approval_required: true,
+        approval_request: codingApprovalRequest,
+      });
+    }
+
     if (path === "/api/coding/approvals") {
-      return fulfill(route, { requests: [], pending: [], count: 0 });
+      const requests = codingApprovalRequest ? [codingApprovalRequest] : [];
+      return fulfill(route, { requests, pending: requests, count: requests.length });
     }
 
     if (path === "/api/coding/checkpoints") {
-      return fulfill(route, { checkpoints: [], workspace_id: "ws-main", workspace_root: "/repo" });
+      if (method === "POST") {
+        const checkpoint = {
+          snapshot_id: "checkpoint-2",
+          path: "/repo/.rumi/checkpoints/checkpoint-2",
+        };
+        codingCheckpoints.unshift(checkpoint);
+        return fulfill(route, { checkpoint, workspace_id: "ws-main", workspace_root: "/repo" });
+      }
+      return fulfill(route, {
+        checkpoints: codingCheckpoints,
+        workspace_id: "ws-main",
+        workspace_root: "/repo",
+      });
     }
 
     if (path === "/api/coding/rumi-log") {
@@ -792,8 +903,8 @@ async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOpti
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
-async function openCodingWidget(page: Page) {
-  await openDefaultspack(page, "/chat");
+async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
+  await openDefaultspack(page, "/chat", options);
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
@@ -801,6 +912,7 @@ async function openCodingWidget(page: Page) {
   await expect(codingWidgetButton).toBeVisible();
   await codingWidgetButton.click();
   await expect(page.locator(".coding-cockpit")).toBeVisible();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
 
 test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
@@ -998,7 +1110,7 @@ test("tool hub service selections can be scoped to the conversation and survive 
   await expect(reloadedGithubCard).toContainText("会話固定");
 });
 
-test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {
+test("composer at mention selects tools skills and services with semantic metadata", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
@@ -1009,36 +1121,53 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Web Search");
-  await expect(mentions).toContainText("web_search");
+  await expect(mentions).not.toContainText("web_search");
 
   await composer.press("Enter");
-  await expect(composer).toHaveValue("Use @web_search ");
+  await expect(composer).toHaveValue("Use @Web Search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
   await composer.pressSequentially("@live");
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Live Review");
-  await expect(mentions).toContainText("feedback/live-review");
-  await page.getByRole("option", { name: /feedback\/live-review|@live review/i }).click();
-  await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
+  await expect(mentions).not.toContainText("feedback/live-review");
+  await page.getByRole("option", { name: /@live review/i }).click();
+  await expect(composer).toHaveValue("Use @Web Search @Live Review ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
+
+  await composer.press("End");
+  await composer.pressSequentially("@gith");
+  await expect(mentions).toBeVisible();
+  const githubService = page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" });
+  await expect(githubService).toBeVisible();
+  await githubService.click();
+  await expect(composer).toHaveValue("Use @Web Search @Live Review @GitHub ");
 
   await page.locator(".rumi-send-button").click();
   await expect.poll(() => streamRequests.length).toBe(1);
 
   const request = streamRequests[0];
-  expect(request.tools).toEqual(["web_search"]);
+  expect(request.tools).toEqual(["web_search", "github_issue_search"]);
   const params = request.params as Record<string, unknown>;
   const toolSelection = params.tool_selection as Record<string, unknown>;
   expect(toolSelection.mode).toBe("manual");
   expect(toolSelection.scope).toBe("turn");
-  expect(toolSelection.include).toEqual([{ kind: "tool", id: "web_search" }]);
+  expect(toolSelection.include).toEqual([
+    { kind: "tool", id: "web_search" },
+    { kind: "tool", id: "github_issue_search" },
+  ]);
 
   const message = request.message as Record<string, unknown>;
+  expect(message.content).toBe("Use @Web Search @Live Review @GitHub");
   const metadata = message.metadata as Record<string, unknown>;
-  expect(metadata.selected_tools).toEqual(["web_search"]);
+  expect(metadata.selected_tools).toEqual(["web_search", "github_issue_search"]);
   expect(metadata.skills).toEqual(["feedback/live-review"]);
   expect(metadata.skill_mentions).toEqual([{ id: "feedback/live-review", label: "Live Review" }]);
+  expect(metadata.mentions).toEqual([
+    { id: "web_search", kind: "tool", label: "Web Search", syntax: "@Web Search" },
+    { id: "feedback/live-review", kind: "skill", label: "Live Review", syntax: "@Live Review" },
+    { id: "github", kind: "service", label: "GitHub", syntax: "@GitHub" },
+  ]);
   expect(metadata.dropped_widgets).toEqual([
     expect.objectContaining({
       id: "web_search",
@@ -1048,7 +1177,13 @@ test("composer at mention selects tools and skills and sends mention metadata", 
       sourceItemId: "web_search",
       metadata: expect.objectContaining({
         source: "composer_at_mention",
-        mention: { syntax: "@web_search", tool_id: "web_search" },
+        mention: {
+          id: "web_search",
+          kind: "tool",
+          label: "Web Search",
+          syntax: "@Web Search",
+          tool_id: "web_search",
+        },
         tool: expect.objectContaining({
           id: "web_search",
           label: "Web Search",
@@ -1064,7 +1199,13 @@ test("composer at mention selects tools and skills and sends mention metadata", 
       sourceItemId: "feedback/live-review",
       metadata: expect.objectContaining({
         source: "composer_at_mention",
-        mention: { syntax: "@feedback/live-review", skill_id: "feedback/live-review" },
+        mention: {
+          id: "feedback/live-review",
+          kind: "skill",
+          label: "Live Review",
+          syntax: "@Live Review",
+          skill_id: "feedback/live-review",
+        },
         skill: expect.objectContaining({
           id: "feedback/live-review",
           label: "Live Review",
@@ -1072,7 +1213,516 @@ test("composer at mention selects tools and skills and sends mention metadata", 
         }),
       }),
     }),
+    expect.objectContaining({
+      id: "mention-service:github",
+      type: "service",
+      label: "GitHub",
+      widgetKind: "service_reference",
+      sourceItemId: "github",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: {
+          id: "github",
+          kind: "service",
+          label: "GitHub",
+          syntax: "@GitHub",
+        },
+        service: {
+          id: "github",
+          label: "GitHub",
+          tool_ids: ["github_issue_search"],
+        },
+      }),
+    }),
   ]);
+});
+
+test("composer removes semantic tool state after an escaped edit", async ({ page }) => {
+  const escapedRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => escapedRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @web");
+  await composer.press("Enter");
+  await composer.fill("Use \\@Web Search");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => escapedRequests.length).toBe(1);
+
+  const escapedRequest = escapedRequests[0];
+  expect(escapedRequest.tools).toBeUndefined();
+  const escapedSelection = (escapedRequest.params as Record<string, unknown>)
+    .tool_selection as Record<string, unknown>;
+  expect(escapedSelection).toMatchObject({ mode: "manual", include: [] });
+  const escapedMetadata = (escapedRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(escapedMetadata.mentions).toBeUndefined();
+  expect(escapedMetadata.selected_tools).toBeUndefined();
+  expect(escapedMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer removes semantic tool state after its chip is toggled off", async ({ page }) => {
+  const chipRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => chipRequests.push(payload),
+  });
+  const chipComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await chipComposer.fill("Use @web");
+  await chipComposer.press("Enter");
+  await page.locator('.rumi-composer-frame button[title="Search the web."]').click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => chipRequests.length).toBe(1);
+  const chipRequest = chipRequests[0];
+  expect(chipRequest.tools).toBeUndefined();
+  const chipMetadata = (chipRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(chipMetadata.mentions).toBeUndefined();
+  expect(chipMetadata.selected_tools).toBeUndefined();
+  expect(chipMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer reconciles removed service tools before submit", async ({ page }) => {
+  const serviceRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => serviceRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @gith");
+  await page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" }).click();
+  await page.getByRole("button", { name: "GitHub Issues の今回指定を解除" }).click();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => serviceRequests.length).toBe(1);
+  const serviceRequest = serviceRequests[0];
+  expect(serviceRequest.tools).toBeUndefined();
+  const serviceMetadata = (serviceRequest.message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(serviceMetadata.mentions).toBeUndefined();
+  expect(serviceMetadata.selected_tools).toBeUndefined();
+  expect(serviceMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer removes file mention metadata when its attachment is removed", async ({ page }) => {
+  const fileRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => fileRequests.push(payload),
+  });
+  const fileComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await fileComposer.fill("/coding");
+  await fileComposer.press("Enter");
+  await fileComposer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toBeVisible();
+  await page.getByRole("button", { name: "README.md を削除" }).click();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => fileRequests.length).toBe(1);
+  const fileMessage = fileRequests[0].message as Record<string, unknown>;
+  expect(fileMessage.attachments).toBeUndefined();
+  const fileMetadata = fileMessage.metadata as Record<string, unknown>;
+  expect(fileMetadata.mentions).toBeUndefined();
+  expect(fileMetadata.attachments).toEqual([]);
+  expect(fileMetadata.dropped_widgets).toEqual([]);
+});
+
+test("composer supplementary-plane mention keeps textarea and parser indices aligned", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("先𐐀 @𐐀");
+  await expect(page.getByRole("option", { name: /@𐐀tool/i })).toBeVisible();
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("先𐐀 @𐐀tool ");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  expect(streamRequests[0].tools).toEqual(["𐐀tool"]);
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "𐐀tool", kind: "tool", label: "𐐀tool", syntax: "@𐐀tool" },
+  ]);
+});
+
+test("composer keeps a no-space mention disabled after its chip is toggled off", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
+  await composer.press("End");
+  await composer.pressSequentially(" and summarize the result");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  expect(streamRequests[0].tools).toBeUndefined();
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toBeUndefined();
+  expect(metadata.selected_tools).toBeUndefined();
+  expect(metadata.dropped_widgets).toEqual([]);
+});
+
+test("editing and reselecting a dismissed no-space mention restores it", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.fill("Use @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await composer.fill("Use again @𐐀");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  expect(streamRequests[0].tools).toEqual(["𐐀tool"]);
+  const metadata = (streamRequests[0].message as Record<string, unknown>)
+    .metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "𐐀tool", kind: "tool", label: "𐐀tool", syntax: "@𐐀tool" },
+  ]);
+});
+
+test("workspace mention waits for its attachment before submit", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+
+  const pendingSend = page.getByRole("button", { name: "ファイルを読み込み中" });
+  await expect(pendingSend).toBeDisabled();
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" }).first()).toBeVisible();
+  await composer.press("Enter");
+  expect(streamRequests).toHaveLength(0);
+
+  releaseRead();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toBeVisible();
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toEqual([
+    expect.objectContaining({ name: "README.md", sourcePath: "README.md" }),
+  ]);
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "README.md", kind: "file", label: "README.md", syntax: "@README.md" },
+  ]);
+});
+
+test("cancelling a pending workspace mention discards its late result", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await page.getByRole("button", { name: "README.md の読み込みを取り消す" }).click();
+
+  releaseRead();
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toBeUndefined();
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toBeUndefined();
+  expect(metadata.attachments).toEqual([]);
+});
+
+test("cancelling one pending workspace mention preserves another transaction", async ({ page }) => {
+  let releaseReadme!: () => void;
+  let releaseApp!: () => void;
+  const readmeGate = new Promise<void>((resolve) => { releaseReadme = resolve; });
+  const appGate = new Promise<void>((resolve) => { releaseApp = resolve; });
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: (payload) => (
+      payload.path === "README.md" ? readmeGate : appGate
+    ),
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await composer.press("End");
+  await composer.pressSequentially(" @src");
+  await page.getByRole("option").filter({ hasText: "@src/App.tsx" }).click();
+
+  await page.getByRole("button", { name: "README.md の読み込みを取り消す" }).click();
+  releaseApp();
+  await expect(page.getByRole("button", { name: "App.tsx を削除" })).toBeVisible();
+  releaseReadme();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  const message = streamRequests[0].message as Record<string, unknown>;
+  expect(message.attachments).toEqual([
+    expect.objectContaining({ name: "src/App.tsx", sourcePath: "src/App.tsx" }),
+  ]);
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "src/App.tsx", kind: "file", label: "src/App.tsx", syntax: "@src/App.tsx" },
+  ]);
+});
+
+test("starting a new draft discards a pending workspace mention result", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  await page.getByTitle("New Chat").first().click();
+  await expect(page.locator(".rumi-new-chat-stage")).toBeVisible();
+
+  releaseRead();
+  await expect(page.getByRole("button", { name: "README.md を削除" })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "README.md を読み込み中" })).toHaveCount(0);
+});
+
+test("migrated keyboard navigation marker keeps composer controls reachable", async ({ page }) => {
+  await openDefaultspack(page, "/chat", {
+    initialSettingsValues: {
+      general: {
+        settings_version: 2,
+        keyboard_button_navigation: true,
+        keyboard_button_navigation_source: "legacy_default_migrated",
+        composer_placeholder: "Migrated placeholder",
+      },
+    },
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.focus();
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
+});
+
+test("composer mention keyboard and ARIA contracts stay predictable at Unicode and empty boundaries", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const mentions = page.getByTestId("composer-at-mention-candidates");
+
+  await composer.fill("@");
+  await expect(mentions).toBeVisible();
+  await expect(mentions.getByRole("option").first()).toBeVisible();
+
+  await composer.fill("調べて@web");
+  await expect(mentions).toBeVisible();
+  await expect(composer).toHaveAttribute("aria-expanded", "true");
+  await expect(composer).toHaveAttribute("aria-controls", "composer-at-mention-listbox");
+  await expect(composer).toHaveAttribute("aria-activedescendant", "composer-at-mention-option-0");
+  await expect(page.getByRole("option", { name: /@web search/i })).toHaveAttribute("aria-selected", "true");
+
+  await composer.fill("調べて @web_search。");
+  await expect(mentions).toBeHidden();
+  await expect(composer).toHaveAttribute("aria-expanded", "false");
+
+  await composer.fill("mail@example.com https://example.com/@name \\@web_search @@web_search");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("ユーザー@example.com https://example.com/日本@pm");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("https://example.com。@web");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
+
+  await composer.fill("https://example.com)@web");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await expect(mentions).toBeVisible();
+  await expect(page.getByTestId("composer-at-mention-empty")).toBeVisible();
+  await expect(composer).not.toHaveAttribute("aria-activedescendant");
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
+
+  await composer.focus();
+  await composer.press("Escape");
+  await expect(mentions).toBeHidden();
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await composer.press("Shift+Enter");
+  await expect(composer).toHaveValue("@this_candidate_does_not_exist\n");
+  expect(streamRequests).toHaveLength(0);
+
+  await composer.fill("@this_candidate_does_not_exist");
+  await composer.press("Enter");
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const sentMessage = streamRequests[0].message as Record<string, unknown>;
+  expect(sentMessage.content).toBe("@this_candidate_does_not_exist");
+});
+
+test("coding file mentions keep stable semantic metadata through submit", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+  await composer.fill("確認@README.md");
+  const readmeOption = page.getByRole("option").filter({ hasText: "@README.md" });
+  await expect(readmeOption).toBeVisible();
+  await readmeOption.click();
+  await expect(composer).toHaveValue("確認@README.md ");
+  await expect(page.locator(".rumi-composer-frame")).toContainText("README.md");
+
+  await page.getByRole("button", { name: "メッセージを送信" }).click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+  const sentMessage = streamRequests[0].message as Record<string, unknown>;
+  const metadata = sentMessage.metadata as Record<string, unknown>;
+  expect(metadata.mentions).toEqual([
+    { id: "README.md", kind: "file", label: "README.md", syntax: "@README.md" },
+  ]);
+  expect(metadata.dropped_widgets).toEqual([
+    expect.objectContaining({
+      id: "mention-file:README.md",
+      type: "file",
+      label: "README.md",
+      sourceItemId: "README.md",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: {
+          file_path: "README.md",
+          id: "README.md",
+          kind: "file",
+          label: "README.md",
+          syntax: "@README.md",
+        },
+      }),
+    }),
+  ]);
+});
+
+test("composer controls are keyboard reachable, visibly named, and at least 44px", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.focus();
+  await composer.press("Tab");
+  await expect(composer).not.toBeFocused();
+
+  for (const control of [
+    page.getByRole("button", { name: "ファイルを添付" }),
+    page.getByRole("button", { name: "音声入力を開始" }),
+    page.getByRole("button", { name: "アクションの承認方法" }),
+    page.getByRole("button", { name: /^モデル:/ }),
+    page.getByRole("button", { name: "メッセージを送信" }),
+  ]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("attachment remove and cancel actions expose 44px visible focus targets", async ({ page }) => {
+  let releaseRead!: () => void;
+  const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+  await openDefaultspack(page, "/chat", {
+    beforeWorkspaceFileReadResponse: () => readGate,
+  });
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+
+  const cancel = page.getByRole("button", { name: "README.md の読み込みを取り消す" });
+  const cancelBox = await cancel.boundingBox();
+  expect(cancelBox).not.toBeNull();
+  expect(cancelBox!.width).toBeGreaterThanOrEqual(44);
+  expect(cancelBox!.height).toBeGreaterThanOrEqual(44);
+  await cancel.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(cancel).toBeFocused();
+  expect(await cancel.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+
+  releaseRead();
+  const inlineRemove = page.getByRole("button", { name: "README.md を削除" });
+  await expect(inlineRemove).toBeVisible();
+  const inlineBox = await inlineRemove.boundingBox();
+  expect(inlineBox).not.toBeNull();
+  expect(inlineBox!.width).toBeGreaterThanOrEqual(44);
+  expect(inlineBox!.height).toBeGreaterThanOrEqual(44);
+  await inlineRemove.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(inlineRemove).toBeFocused();
+  expect(await inlineRemove.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+
+  await page.getByTitle("New Chat").first().click();
+  const newComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await newComposer.fill("Review @REA");
+  await page.getByRole("option").filter({ hasText: "@README.md" }).click();
+  const cardRemove = page.getByRole("button", { name: "README.md を削除" });
+  const cardBox = await cardRemove.boundingBox();
+  expect(cardBox).not.toBeNull();
+  expect(cardBox!.width).toBeGreaterThanOrEqual(44);
+  expect(cardBox!.height).toBeGreaterThanOrEqual(44);
+  await cardRemove.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(cardRemove).toBeFocused();
+  const focusedCardStyle = await cardRemove.evaluate((element) => ({
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    opacity: getComputedStyle(element).opacity,
+  }));
+  expect(focusedCardStyle.opacity).toBe("1");
+  expect(focusedCardStyle.outlineStyle).not.toBe("none");
+});
+
+test("history reload restores localized semantic mention badges", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
 });
 
 test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
@@ -1100,8 +1750,11 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await homeComposer.fill("/coding");
   await expect(page.getByText("Commands")).toBeVisible();
 
-  await openDefaultspack(page, "/coding");
+  await openDefaultspack(page, "/chat");
   const codingComposer = page.locator("textarea.rumi-composer-textarea");
+  await codingComposer.fill("/coding");
+  await codingComposer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
   await codingComposer.fill("@REA");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
@@ -1116,7 +1769,6 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   await expect(mentions).toBeHidden();
 
   await page.setViewportSize({ width: 390, height: 820 });
-  await openDefaultspack(page, "/coding");
   const workspacePicker = page.locator(".rumi-workspace-picker");
   await expect(workspacePicker).toBeVisible();
   await expect(workspacePicker.locator("svg.text-emerald-300").first()).toBeVisible();
@@ -1269,7 +1921,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {
@@ -1407,4 +2059,37 @@ test("mocked coding cockpit registers approves and connects an MCP server", asyn
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
+});
+
+test("coding approval queue refreshes immediately after terminal requests approval", async ({ page }) => {
+  await openCodingWidget(page, { codingApprovalAfterTerminal: true });
+
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  await terminal.locator("input").fill("echo qa-file");
+  await terminal.getByTitle("Run command").click();
+
+  await expect(terminal).toContainText("Approval required");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("terminal.exec");
+  await expect(approvals.getByRole("button", { name: /許可|Approve/ })).toBeVisible();
+  await expect(approvals.getByRole("button", { name: /拒否|Deny/ })).toBeVisible();
+});
+
+test("checkpoint create selects the new snapshot and approved restore settles successfully", async ({ page }) => {
+  await openCodingWidget(page, { codingApprovalAfterRestore: true });
+
+  const checkpoints = page.getByRole("region", { name: "Checkpoints", exact: true });
+  await expect(checkpoints.locator("select")).toHaveValue("checkpoint-1");
+  await checkpoints.getByTitle("Create checkpoint").click();
+  await expect(checkpoints.locator("select")).toHaveValue("checkpoint-2");
+  await expect(checkpoints).toContainText("Created checkpoint-2");
+  await checkpoints.getByTitle("Review checkpoint restore").click();
+  await checkpoints.getByRole("button", { name: "Confirm restore" }).click();
+
+  await expect(checkpoints).toContainText("Approval required");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("file.restore");
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
+  await expect(checkpoints).toContainText("Restored checkpoint-2");
+  await expect(checkpoints).not.toContainText("Approval required");
 });

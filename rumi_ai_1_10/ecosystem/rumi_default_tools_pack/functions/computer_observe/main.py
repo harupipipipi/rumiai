@@ -4,15 +4,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import ComputerSeatService, create_default_computer_seat_service
+from domain.computer import ComputerToolService, create_default_computer_tool_service
 
-_service: ComputerSeatService | None = None
+_service: ComputerToolService | None = None
 
 
-def _get_service() -> ComputerSeatService:
+def _get_service() -> ComputerToolService:
     global _service
     if _service is None:
-        _service = create_default_computer_seat_service()
+        _service = create_default_computer_tool_service()
     return _service
 
 

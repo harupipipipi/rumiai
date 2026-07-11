@@ -42,6 +42,7 @@ from domain.chat.tool_selection_schema import (
     normalize_tool_target,
     normalize_tool_targets,
 )
+from domain.mention import extract_mention_values
 from domain.chat.tool_selection_service import ToolSelectionService
 from domain.chat.tool_selection_preview import (
     ToolSelectionPreviewAccessError,
@@ -107,7 +108,6 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
-_TOOL_MENTION_RE = re.compile(r"@([A-Za-z0-9_.:-]+)")
 _COMPUTER_USE_TOOL_IDS = {"computer_use", "browser_computer", "browser_use"}
 _CODING_PR_REQUEST_RE = re.compile(
     r"pull\s*request|draft\s*pr|github\.com|git\s*hub|プルリク|"
@@ -271,6 +271,9 @@ def prepare_chat_run(
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         raise ValueError("Conversation not found")
+    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    if conversation_metadata.get("shared_read_only") is True:
+        raise ValueError("This imported conversation is read-only. Create a continue copy to send messages.")
     active_startup_profile = _load_active_startup_profile()
     conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 
@@ -2679,10 +2682,18 @@ def _tool_mention_ids_from_text(user_text: str) -> list[str]:
         registry = ToolRegistry()
     except Exception:
         return []
+    try:
+        known_tool_ids = [
+            str(tool.get("tool_id") or "").strip()
+            for tool in registry.list_tools()
+            if isinstance(tool, dict) and str(tool.get("tool_id") or "").strip()
+        ]
+    except (AttributeError, TypeError):
+        known_tool_ids = []
     tool_ids: list[str] = []
     seen: set[str] = set()
-    for match in _TOOL_MENTION_RE.finditer(user_text):
-        tool_id = str(match.group(1) or "").strip()
+    for value in extract_mention_values(user_text, known_tool_ids):
+        tool_id = str(value or "").strip()
         if not tool_id or tool_id in seen:
             continue
         try:

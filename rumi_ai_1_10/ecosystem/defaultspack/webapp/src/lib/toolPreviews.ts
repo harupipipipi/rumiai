@@ -59,13 +59,16 @@ export function collectArtifactPaths(value: unknown, paths: string[] = [], seen 
   }
   if (!isRecord(value)) return paths;
 
-  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
+  const preferredPath = stringValue(value.model_image_path)
+    || stringValue(value.screenshot_path)
+    || stringValue(value.workspace_path)
+    || stringValue(value.path);
   if (preferredPath && !seen.has(preferredPath)) {
     seen.add(preferredPath);
     paths.push(preferredPath);
   }
   Object.entries(value).forEach(([key, entry]) => {
-    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") return;
+    if (key === "path" || key === "workspace_path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") return;
     collectArtifactPaths(entry, paths, seen);
   });
   return paths;

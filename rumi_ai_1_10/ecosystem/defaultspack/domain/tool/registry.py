@@ -47,23 +47,49 @@ def _search_metadata_from_manifest(manifest: dict, config: dict) -> dict:
 class ToolRegistry:
     """ツール定義の登録・管理（シングルトン・インメモリ + 永続化）"""
     _instance = None
+    _instance_lock = threading.Lock()
 
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+                cls._instance._initializing = False
+                cls._instance._initializing_thread_id = None
+                cls._instance._initialization_condition = threading.Condition()
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
-        self._tools = {}
-        self._mcp_servers = {}
-        self._lock = threading.Lock()
-        self._tools_dir = self._resolve_tools_dir()
-        self._load_pack_tools()
-        self._load_dynamic_tools()
+        current_thread_id = threading.get_ident()
+        with self._initialization_condition:
+            while self._initializing and self._initializing_thread_id != current_thread_id:
+                self._initialization_condition.wait()
+            if self._initialized:
+                return
+            if self._initializing_thread_id == current_thread_id:
+                return
+            self._initializing = True
+            self._initializing_thread_id = current_thread_id
+
+        try:
+            self._tools = {}
+            self._mcp_servers = {}
+            self._lock = threading.Lock()
+            self._tools_dir = self._resolve_tools_dir()
+            self._load_pack_tools()
+            self._load_dynamic_tools()
+        except BaseException:
+            with self._initialization_condition:
+                self._initializing = False
+                self._initializing_thread_id = None
+                self._initialization_condition.notify_all()
+            raise
+
+        with self._initialization_condition:
+            self._initialized = True
+            self._initializing = False
+            self._initializing_thread_id = None
+            self._initialization_condition.notify_all()
 
     # ------------------------------------------------------------------
     # tools directory resolution
