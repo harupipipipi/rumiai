@@ -87,14 +87,15 @@ class BrowserComputerController:
         self._approval_path = pack_root / "user_data" / "shared" / "browser_computer_approvals.json"
         self._browser_root = pack_root / "user_data" / "shared" / "browser"
         self._profile_root = self._browser_root / "profiles"
-        # Lazy-initialized ComputerSeatService
+        # Lazy-initialized pack service over the canonical ComputerHost boundary.
         self._computer_seat: Any = None
 
     def _get_computer_seat(self):
-        """Lazy-create the ComputerSeatService to avoid import cycles."""
+        """Lazy-create the ComputerToolService to avoid import cycles."""
         if self._computer_seat is None:
-            from ..computer.factory import create_default_computer_seat_service
-            self._computer_seat = create_default_computer_seat_service()
+            from ..computer.factory import create_default_computer_tool_service
+
+            self._computer_seat = create_default_computer_tool_service()
         return self._computer_seat
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
@@ -1518,6 +1519,8 @@ class BrowserComputerController:
             "browser_tab_id": payload.get("browser_tab_id") or payload.get("tab_id"),
             "url": payload.get("url"),
             "coordinate_space": coordinate_space,
+            "surface_id": payload.get("surface_id"),
+            "observation_revision": payload.get("observation_revision"),
         }
         if resolution_error:
             target["_target_resolution_error"] = resolution_error
@@ -1711,7 +1714,7 @@ class BrowserComputerController:
         try:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)
-            result = svc.observe(target)
+            svc.observe(target)
             # If observe returned a screenshot, we could use it – but for now
             # we only add metadata. The legacy _screenshot path handles the
             # actual capture with all its crop/model logic.

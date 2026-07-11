@@ -4,12 +4,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import create_default_computer_seat_service
+from domain.computer import create_default_computer_tool_service
 
 
 def run(context, args):
     try:
-        svc = create_default_computer_seat_service()
+        svc = create_default_computer_tool_service()
         base = svc.doctor()
 
         checks: list[dict] = []
@@ -67,7 +67,7 @@ def run(context, args):
             except Exception as e:
                 checks.append({"name": "screen_capture_kit", "status": "fail", "reason": str(e)})
         else:
-            checks.append({"name": "platform", "status": "warn", "reason": f"Platform {sys.platform} – Mac checks skipped"})
+            checks.append({"name": "platform", "status": "warn", "reason": f"Platform {sys.platform} 窶・Mac checks skipped"})
 
         return {
             "platform": sys.platform,
