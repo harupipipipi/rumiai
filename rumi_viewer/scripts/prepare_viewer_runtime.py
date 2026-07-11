@@ -184,6 +184,7 @@ def prepare_dev(repo_root: Path, target: str) -> Path:
     copy_dev_uv(source, destination)
     staged_version = verify_uv_binary(destination)
     if staged_version != source_version:
+        destination.unlink(missing_ok=True)
         raise RuntimeError(
             "Staged development uv reported a different version: "
             f"source={source_version!r}, staged={staged_version!r}"
