@@ -93,6 +93,63 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
 
 
+def test_simple_model_slots_sync_existing_runtime_settings(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+
+    settings = service.update_settings(
+        {
+            "main_model": "google/gemini-2.5-pro",
+            "lightweight_model": "google/gemini-2.5-flash",
+        }
+    )
+
+    assert settings["main_model"] == "google/gemini-2.5-pro"
+    assert settings["preferred_model"] == "google/gemini-2.5-pro"
+    assert settings["model_slots"] == {
+        "main": "google/gemini-2.5-pro",
+        "lightweight": "google/gemini-2.5-flash",
+    }
+    assert settings["utility_models"]["fast_reply"] == "google/gemini-2.5-flash"
+    assert settings["utility_models"]["subagent_default"] == "google/gemini-2.5-flash"
+
+
+def test_simple_model_slots_preserve_advanced_utility_roles_and_allow_override(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    service.update_settings(
+        {
+            "utility_models": {
+                "tool_selector": "custom/tools",
+                "vision_ocr": "custom/vision",
+            },
+            "lightweight_model": "custom/fast",
+        }
+    )
+
+    advanced = service.update_settings(
+        {
+            "utility_models": {
+                "tool_selector": "custom/tools",
+                "vision_ocr": "custom/vision",
+                "fast_reply": "custom/fast-v2",
+                "subagent_default": "custom/subagent",
+            }
+        }
+    )
+
+    assert advanced["utility_models"]["tool_selector"] == "custom/tools"
+    assert advanced["utility_models"]["vision_ocr"] == "custom/vision"
+    assert advanced["utility_models"]["fast_reply"] == "custom/fast-v2"
+    assert advanced["utility_models"]["subagent_default"] == "custom/subagent"
+    assert advanced["lightweight_model"] == "custom/fast-v2"
+
+    cleared = service.update_settings({"lightweight_model": ""})
+    assert cleared["utility_models"]["fast_reply"] == ""
+    assert cleared["utility_models"]["subagent_default"] == ""
+    assert cleared["model_slots"]["lightweight"] == ""
+
+
 def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL

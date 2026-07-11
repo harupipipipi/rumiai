@@ -1042,12 +1042,29 @@ class FrontendRegistry:
                 "description": "会話で使うモデルと thinking 設定。",
                 "fields": [
                     {
+                        "id": "main_model",
+                        "label": "Main Model",
+                        "type": "model_select",
+                        "default": "stub/default",
+                        "options": self._model_options(lightweight=lightweight),
+                        "help": "Default model for normal conversations and new chats.",
+                    },
+                    {
+                        "id": "lightweight_model",
+                        "label": "Lightweight Model",
+                        "type": "model_select",
+                        "default": "",
+                        "options": self._model_options(lightweight=lightweight),
+                        "help": "Fast model for quick replies and delegated rough work. Leave empty for automatic selection.",
+                    },
+                    {
                         "id": "preferred_model",
                         "label": "Preferred Model",
                         "type": "select",
                         "default": "stub/default",
                         "options": self._model_options(lightweight=lightweight),
                         "help": "新しい会話と composer の既定モデルです。",
+                        "advanced": True,
                     },
                     {
                         "id": "preferred_model_group",
@@ -2425,11 +2442,12 @@ class FrontendRegistry:
                 item = dict(field)
                 field_id = str(item.get("id") or "").strip()
                 field_type = str(item.get("type") or "").strip()
-                if section_id == "models" and field_id == "preferred_model":
+                if section_id == "models" and field_id in {"preferred_model", "main_model", "lightweight_model"}:
                     if model_options is None:
                         model_options = self._model_options()
                     item["options"] = model_options
-                    item.setdefault("type", "model_select")
+                    if field_id != "preferred_model":
+                        item.setdefault("type", "model_select")
                     item.setdefault("renderer", "model_select")
                 elif str(item.get("type") or "").strip() == "model_select":
                     if model_options is None:

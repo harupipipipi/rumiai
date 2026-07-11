@@ -1600,6 +1600,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             for field in section["fields"]
         }
         self.assertEqual(model_fields["preferred_model"]["type"], "select")
+        self.assertEqual(model_fields["main_model"]["type"], "model_select")
+        self.assertEqual(model_fields["lightweight_model"]["type"], "model_select")
+        self.assertFalse(model_fields["main_model"].get("advanced", False))
+        self.assertFalse(model_fields["lightweight_model"].get("advanced", False))
+        self.assertTrue(model_fields["preferred_model"]["advanced"])
+        self.assertTrue(model_fields["utility_models"]["advanced"])
         self.assertGreaterEqual(len(model_fields["preferred_model"]["options"]), 1)
         model_option_values = {
             option["value"] for option in model_fields["preferred_model"]["options"]
