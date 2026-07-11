@@ -19,3 +19,9 @@ test("chat structured content owns horizontal scrolling", () => {
   assert.match(indexCss, /\.markdown-body pre code\s*\{[^}]*width:\s*max-content;[^}]*white-space:\s*pre;/s);
   assert.match(indexCss, /\.markdown-body table\s*\{[^}]*overflow-x:\s*auto;/s);
 });
+
+test("document keeps vertical scroll fallback for fragile panes", () => {
+  assert.doesNotMatch(indexCss, /body\s*\{[^}]*overflow:\s*hidden\b/s);
+  assert.match(indexCss, /body\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
+  assert.match(indexCss, /\.rumi-app-shell\s*\{[^}]*min-height:\s*100dvh;[^}]*overflow-x:\s*hidden;/s);
+});
