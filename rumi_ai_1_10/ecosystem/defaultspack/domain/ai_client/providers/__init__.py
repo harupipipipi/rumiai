@@ -888,11 +888,11 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
     default_base_url = str(entry.get("default_base_url", "") or "").strip()
     if provider_id and provider_has_oauth_connection(provider_id):
         return True, "browser_oauth"
-    if provider_id and provider_has_api_key(provider_id):
-        return True, "defaultspack_secret"
     for env_name in entry.get("env_vars", []):
         if _truthy_env(env_name):
             return True, env_name
+    if provider_id and provider_has_api_key(provider_id):
+        return True, "defaultspack_secret"
     if not credential_required:
         for env_name in entry.get("base_url_envs", []):
             if _truthy_env(env_name):

@@ -56,6 +56,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.catalog",
     "blocks.ui.commands",
     "blocks.ui.conversation_preview",
+    "blocks.ui.provider_health",
     "blocks.ui.settings",
 }
 
@@ -85,6 +86,7 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
 _DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.catalog",
     "blocks.ui.conversation_preview",
+    "blocks.ui.provider_health",
     "blocks.ui.settings",
 }
 _DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS = 10.0
