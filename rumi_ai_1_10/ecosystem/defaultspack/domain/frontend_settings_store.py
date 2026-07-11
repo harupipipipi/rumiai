@@ -95,6 +95,7 @@ class FrontendSettingsStore:
                     yield
                 finally:
                     _unlock_file(lock_file)
+
     def _read_locked(self, *, recover: bool) -> dict[str, Any]:
         if not self.path.exists():
             return {}
