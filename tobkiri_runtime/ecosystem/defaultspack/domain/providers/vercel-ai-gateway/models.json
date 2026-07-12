@@ -1,4 +1,5 @@
 {
+  "snapshot": {"source": "https://ai-gateway.vercel.sh/v1/models", "verified_at": "2026-07-13", "lifecycle": "active"},
   "models": [
     {
       "id": "vercel-ai-gateway/google/gemma-4-31b-it",

@@ -1,0 +1,10 @@
+{
+  "snapshot": {
+    "source": "https://docs.helicone.ai/gateway/overview",
+    "verified_at": "2026-07-13",
+    "strategy": "configured_routes_only",
+    "observability_is_not_inventory": true,
+    "note": "Gateway owns routes, not upstream model capabilities."
+  },
+  "models": []
+}

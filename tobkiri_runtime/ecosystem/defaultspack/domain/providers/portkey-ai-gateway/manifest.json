@@ -1,0 +1,66 @@
+{
+  "id": "portkey-ai-gateway",
+  "provider_id": "portkey-ai-gateway",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Portkey AI Gateway",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/gateway_providers.py",
+    "models": "models.json"
+  },
+  "description": "Portkey AI Gateway with explicit upstream routing policy.",
+  "provider_metadata": {
+    "display_name": "Portkey AI Gateway",
+    "kind": "gateway",
+    "env_vars": [
+      "PORTKEY_API_KEY"
+    ],
+    "base_url_envs": [
+      "PORTKEY_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://api.portkey.ai/v1",
+    "default_model_for": {},
+    "catalog_features": [
+      "gateway",
+      "explicit_upstream_routes"
+    ]
+  },
+  "provider_manifest": {
+    "id": "portkey-ai-gateway",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Portkey AI Gateway",
+    "enabled": true,
+    "priority": 450,
+    "adapter": "portkey_gateway",
+    "api_key_env": "PORTKEY_API_KEY",
+    "base_url_env": "PORTKEY_BASE_URL",
+    "default_base_url": "https://api.portkey.ai/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.gateway_providers:PortkeyGatewayProvider",
+    "config": {
+      "configured_routes_env": "RUMI_GATEWAY_ROUTES_JSON",
+      "inventory_strategy": "gateway_config_and_catalog",
+      "observability_is_not_inventory": true,
+      "upstream_selection_separate": true,
+      "source_docs": "https://portkey.ai/docs/product/model-catalog"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "portkey-ai-gateway"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "gateway",
+    "explicit_upstream_routes"
+  ]
+}
