@@ -1,0 +1,86 @@
+{
+  "id": "cloudflare-workers-ai",
+  "provider_id": "cloudflare-workers-ai",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Cloudflare Workers AI",
+  "description": "Cloudflare Workers AI typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "Cloudflare Workers AI",
+    "kind": "cloud",
+    "env_vars": [
+      "CLOUDFLARE_API_TOKEN"
+    ],
+    "base_url_envs": [
+      "CLOUDFLARE_WORKERS_AI_BASE_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "account://cloudflare-workers-ai",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding",
+      "rerank",
+      "image",
+      "stt",
+      "tts"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "rerank",
+      "image",
+      "stt",
+      "tts",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "cloudflare-workers-ai",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Cloudflare Workers AI",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "workers_ai",
+    "api_key_env": "CLOUDFLARE_API_TOKEN",
+    "base_url_env": "CLOUDFLARE_WORKERS_AI_BASE_URL",
+    "default_base_url": "account://cloudflare-workers-ai",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "native_catalog",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding",
+        "rerank",
+        "image",
+        "stt",
+        "tts"
+      ],
+      "source_docs": "https://developers.cloudflare.com/workers-ai/models/"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "cloudflare-workers-ai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "rerank",
+    "image",
+    "stt",
+    "tts",
+    "typed_inventory"
+  ]
+}

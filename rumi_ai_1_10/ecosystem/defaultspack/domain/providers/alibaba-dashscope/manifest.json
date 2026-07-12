@@ -1,0 +1,74 @@
+{
+  "id": "alibaba-dashscope",
+  "provider_id": "alibaba-dashscope",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Alibaba DashScope",
+  "description": "Alibaba DashScope typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "Alibaba DashScope",
+    "kind": "cloud",
+    "env_vars": [
+      "DASHSCOPE_API_KEY"
+    ],
+    "base_url_envs": [
+      "ALIBABA_DASHSCOPE_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding",
+      "image"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "image",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "alibaba-dashscope",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Alibaba DashScope",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "base_url_env": "ALIBABA_DASHSCOPE_BASE_URL",
+    "default_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding",
+        "image"
+      ],
+      "source_docs": "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "alibaba-dashscope"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "image",
+    "typed_inventory"
+  ]
+}
