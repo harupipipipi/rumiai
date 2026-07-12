@@ -329,13 +329,13 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
     "openai_compatible": {
         "display_name": "OpenAI Compatible",
         "kind": "custom",
-        "description": "Generic OpenAI-compatible endpoint.",
+        "description": "User-defined OpenAI-compatible connections.",
         "env_vars": ["OPENAI_COMPATIBLE_API_KEY"],
         "base_url_envs": ["OPENAI_COMPATIBLE_BASE_URL"],
-        "catalog_only": True,
-        "supports_invoke": False,
-        "default_model": "custom-model",
-        "capabilities": ["chat", "tool_calls", "embedding", "openai_compatible"],
+        "catalog_only": False,
+        "supports_invoke": True,
+        "default_model": "",
+        "capabilities": ["openai_compatible", "multiple_connections"],
     },
     "rumi": {
         "display_name": "Rumi",
@@ -511,9 +511,7 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "gpt-oss-20b", "name": "GPT OSS 20B", "type": "chat"},
     ],
     "llamacpp": [{"model_id": "local-gguf", "name": "Local GGUF Model", "type": "chat"}],
-    "openai_compatible": [
-        {"model_id": "custom-model", "name": "Custom Model", "type": "chat"},
-    ],
+    "openai_compatible": [],
 }
 
 _BEST_MODEL_BY_PROVIDER = {
@@ -542,7 +540,6 @@ _BEST_MODEL_BY_PROVIDER = {
     "lmstudio": "deepseek-r1",
     "vllm": "deepseek-r1",
     "llamacpp": "local-gguf",
-    "openai_compatible": "custom-model",
     "rumi": "rumi",
 }
 
