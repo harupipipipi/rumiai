@@ -18,6 +18,7 @@ CATALOG_CONTRACT = "rumi.resource.ai.model.catalog.v1"
 GENERATE_PROVIDER_CONTRACT = "rumi.service.ai.provider.generate.v1"
 STREAM_PROVIDER_CONTRACT = "rumi.service.ai.provider.stream.v1"
 HEALTH_CONTRACT = "rumi.resource.ai.provider.health.v1"
+USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -201,6 +202,7 @@ def _invoke(
             )
             if streaming:
                 events = _normalize_stream(value, request_id)
+                _attach_stream_usage_cost(client, events, attempt_candidate)
                 return {
                     "request_id": request_id,
                     "model_id": attempt_candidate.model_id,
@@ -209,6 +211,12 @@ def _invoke(
                     "attempts": attempts,
                 }
             result = _normalize_result(value, request_id, attempt_candidate)
+            result["usage_cost"] = _usage_cost(
+                client,
+                result["usage"],
+                attempt_candidate,
+                result["usage_provenance"],
+            )
             result["attempts"] = attempts
             return result
         except GlobalContractUnavailable as exc:
@@ -520,6 +528,44 @@ def _normalize_stream(value: Any, request_id: str) -> list[dict[str, Any]]:
             }
         )
     return normalized
+
+
+def _attach_stream_usage_cost(
+    client: GlobalContractClient,
+    events: list[dict[str, Any]],
+    candidate: Candidate,
+) -> None:
+    for event in events:
+        usage = event.get("usage")
+        if event.get("type") == "usage" and isinstance(usage, Mapping):
+            event["usage_cost"] = _usage_cost(
+                client,
+                usage,
+                candidate,
+                "provider_reported",
+            )
+
+
+def _usage_cost(
+    client: GlobalContractClient,
+    usage: Mapping[str, Any],
+    candidate: Candidate,
+    provenance: str,
+) -> dict[str, Any]:
+    return client.invoke(
+        USAGE_CONTRACT,
+        "calculate",
+        {
+            "usage": dict(usage),
+            "usage_provenance": provenance,
+            "pricing": {
+                "input": candidate.input_cost,
+                "output": candidate.output_cost,
+                "currency": str(candidate.raw.get("currency") or "USD"),
+            },
+            "pricing_revision": candidate.catalog_revision,
+        },
+    )
 
 
 def _record_diagnostic(
