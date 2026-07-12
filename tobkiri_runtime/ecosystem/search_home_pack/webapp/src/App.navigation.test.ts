@@ -48,3 +48,13 @@ test("blocked destinations retain a safe copy-details action", () => {
   assert.match(appSource, /Search Home blocked destination:/);
   assert.doesNotMatch(appSource, /blocked destination:.*destination\.input/);
 });
+
+test("AI answers are committed to explicit accessible memory-only result states", () => {
+  assert.match(appSource, /normalizeAnswerResponse\(payload\)/);
+  assert.match(appSource, /aria-labelledby="search-answer-title"/);
+  assert.match(appSource, /Answer text is kept in memory only/);
+  assert.match(appSource, /Open conversation \/ Continue in Rumi/);
+  assert.match(appSource, /Retry intentionally/);
+  assert.doesNotMatch(appSource, /localStorage.*answer|sessionStorage.*answer/i);
+  assert.equal(appSource.includes("dangerouslySet" + "InnerHTML"), false);
+});
