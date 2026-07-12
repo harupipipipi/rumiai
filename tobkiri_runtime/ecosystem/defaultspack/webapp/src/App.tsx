@@ -1846,6 +1846,15 @@ function isCancelledStreamError(errorValue: unknown): boolean {
   return message.trim().toLowerCase() === "cancelled";
 }
 
+function isLikelyTransportFailure(errorValue: unknown): boolean {
+  if (errorValue instanceof ChatStreamInterruptedError) return true;
+  const name = errorValue && typeof errorValue === "object" && "name" in errorValue
+    ? String((errorValue as { name?: unknown }).name ?? "")
+    : "";
+  const message = errorValue instanceof Error ? errorValue.message : String(errorValue ?? "");
+  return name === "TypeError" || /network|fetch|connection|timeout|timed out|load failed/i.test(message);
+}
+
 function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamEvent {
   return (
     event.type === "status"
@@ -5836,8 +5845,21 @@ function ChatApp() {
         const interruptedConversationId = submittedConversationId ?? submittedConversationRuntimeId;
         markInterruptedAssistant?.(submitError);
         if (interruptedConversationId) {
-          forgetPendingRequest(interruptedConversationId);
-          replaceChatIdInUrl(interruptedConversationId, false);
+          // A stream close is transport-ambiguous: the backend may already
+          // have committed the turn. Keep the persisted operation id and
+          // pending URL so a retry replays this logical send.
+          updatePendingRequests((current) => {
+            const existing = current[interruptedConversationId];
+            return existing
+              ? {
+                  ...current,
+                  [interruptedConversationId]: {
+                    ...existing,
+                    status: "応答ストリームが切れました。再試行すると結果を確認します",
+                  },
+                }
+              : current;
+          });
         }
         setBackendConnectionState("degraded");
         setBackendConnectionNote("応答 stream が途中で閉じました。ここまで届いた内容を保持しつつ、backend の回復を待っています。");
@@ -5864,7 +5886,8 @@ function ChatApp() {
         setIsNewChatLaunching(false);
         return;
       }
-      if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
+      const preserveOperationForRetry = isLikelyTransportFailure(submitError);
+      if (submittedConversationId && !preserveOperationForRetry && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
         replaceChatIdInUrl(submittedConversationId, false);
         await refreshConversations(submittedConversationId).catch(console.error);
