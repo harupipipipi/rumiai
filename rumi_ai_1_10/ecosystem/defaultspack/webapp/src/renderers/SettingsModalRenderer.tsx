@@ -132,7 +132,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
   if (!info) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm leading-6 text-zinc-400">
-        Rumi Viewer の権限状態を取得できませんでした。Rumi Viewerを起動し、Accessibility / Screen Recording / Input Monitoring を許可してください。
+        Tobkiri Launcher の権限状態を取得できませんでした。Tobkiri Launcherを起動し、Accessibility / Screen Recording / Input Monitoring を許可してください。
       </div>
     );
   }
@@ -157,8 +157,8 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
         <div>
           <h4 className="text-sm font-medium text-zinc-100">Permission Host</h4>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            macOSの承認対象は {info.permission_subject || "Rumi Viewer"} です。
-            DefaultspackはRumi Viewer経由で、許可された操作だけを実行します。
+            macOSの承認対象は {info.permission_subject || "Tobkiri Launcher"} です。
+            DefaultspackはTobkiri Launcher経由で、許可された操作だけを実行します。
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
@@ -169,7 +169,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
       </section>
       {unverified ? (
         <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
-          Viewer permission status is unverified. Open Rumi Viewer or reconnect Viewer broker.
+          Viewer permission status is unverified. Open Tobkiri Launcher or reconnect Viewer broker.
         </section>
       ) : (
       <section className="space-y-3">
@@ -1110,7 +1110,7 @@ function importPlaceholderForProvider(providerId: string, locale: "en" | "ja" = 
   if (providerId === "google") {
     return locale === "ja" ? "Google OAuthクライアントJSONまたは認証情報セットJSONを貼り付けます。トークンは安全に保存され、再表示されません。" : "Paste Google OAuth client JSON or a credential bundle JSON. Token values are stored in SecretsStore and never echoed back.";
   }
-  return locale === "ja" ? "認証情報セットJSONまたは環境変数形式のトークンを貼り付けます。秘密情報はRumiの秘密情報ストレージだけに保存します。" : "Paste credential bundle JSON or .env-style token lines. Raw secrets are stored only in Rumi secret storage.";
+  return locale === "ja" ? "認証情報セットJSONまたは環境変数形式のトークンを貼り付けます。秘密情報はTobkiriの秘密情報ストレージだけに保存します。" : "Paste credential bundle JSON or .env-style token lines. Raw secrets are stored only in Rumi secret storage.";
 }
 
 function connectionDraftHelp(providerId: string, locale: "en" | "ja" = "en"): string {
@@ -3703,7 +3703,7 @@ export function SettingsModalRenderer({
             </div>
             <div className="grid gap-3 border-t border-zinc-800 px-4 py-3 text-[11px] text-zinc-500 sm:grid-cols-3 sm:px-5">
               <div><span className="text-zinc-300">{localizedCopy("1. Connect", "1. 接続")}</span> — {localizedCopy("Use browser sign-in or import a credential bundle.", "ブラウザでログインするか、認証情報セットを読み込みます。")}</div>
-              <div><span className="text-zinc-300">{localizedCopy("2. Store", "2. 保存")}</span> — {localizedCopy("Raw secrets stay in Rumi secret storage.", "秘密情報そのものはRumiの秘密情報ストレージに保存します。")}</div>
+              <div><span className="text-zinc-300">{localizedCopy("2. Store", "2. 保存")}</span> — {localizedCopy("Raw secrets stay in Rumi secret storage.", "秘密情報そのものはTobkiriの秘密情報ストレージに保存します。")}</div>
               <div><span className="text-zinc-300">{localizedCopy("3. Govern", "3. 権限管理")}</span> — {localizedCopy("High-risk capabilities require approval.", "影響の大きい操作には承認が必要です。")}</div>
             </div>
           </div>

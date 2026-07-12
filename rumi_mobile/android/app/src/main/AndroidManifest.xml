@@ -5,7 +5,7 @@
 
     <application
         android:name="${applicationName}"
-        android:label="Rumi Remote"
+        android:label="Tobkiri"
         android:icon="@drawable/launch_background"
         android:usesCleartextTraffic="${usesCleartextTraffic}"
         android:networkSecurityConfig="@xml/network_security_config">

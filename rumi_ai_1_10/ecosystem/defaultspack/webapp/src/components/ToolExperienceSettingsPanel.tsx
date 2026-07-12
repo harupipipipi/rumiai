@@ -285,7 +285,7 @@ function ModelPicker({
           >
             <span>
               <span className="block font-medium">自動（おすすめ）</span>
-              <span className="block text-xs text-zinc-500">Rumiのモデル設定から選びます</span>
+              <span className="block text-xs text-zinc-500">Tobkiriのモデル設定から選びます</span>
             </span>
             {!value && <Check size={16} />}
           </button>

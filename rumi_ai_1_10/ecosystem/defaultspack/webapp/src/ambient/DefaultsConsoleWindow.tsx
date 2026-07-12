@@ -72,7 +72,7 @@ export function DefaultsConsoleWindow() {
       <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
         <section className="grid gap-2 sm:grid-cols-3">
           <StatusTile label="合図待ち" ready={Boolean(status?.ambient_monitor.enabled)} readyText="使用中" idleText="停止中" />
-          <StatusTile label="Rumi許可" ready={rumiReady} readyText="OK" idleText="確認が必要" />
+          <StatusTile label="Tobkiri許可" ready={rumiReady} readyText="OK" idleText="確認が必要" />
           <StatusTile label="Mac許可" ready={osReady} readyText="OK" idleText="確認が必要" />
         </section>
 

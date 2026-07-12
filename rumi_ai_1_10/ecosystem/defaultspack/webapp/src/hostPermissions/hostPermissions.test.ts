@@ -21,7 +21,7 @@ function desktopInfo(overrides: Partial<DesktopSystemInfo> = {}): DesktopSystemI
   return {
     source: "viewer_tauri",
     reliable: true,
-    app_name: "Rumi AI",
+    app_name: "Tobkiri",
     display_version: "1.0.0",
     viewer_version: "1.0.0",
     build_channel: "dev",

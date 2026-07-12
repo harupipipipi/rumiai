@@ -174,7 +174,7 @@ export async function openExternalUrl(url: string): Promise<void> {
 export async function sendToBackground(): Promise<void> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {
-    throw new Error('Background control is only available in Rumi Viewer.');
+    throw new Error('Background control is only available in Tobkiri Launcher.');
   }
 
   await invoke<void>('send_to_background');
@@ -183,7 +183,7 @@ export async function sendToBackground(): Promise<void> {
 export async function showAppWindow(): Promise<void> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {
-    throw new Error('Window restore is only available in Rumi Viewer.');
+    throw new Error('Window restore is only available in Tobkiri Launcher.');
   }
 
   await invoke<void>('show_app_window');
@@ -210,7 +210,7 @@ export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null
 export async function launchDefaultspackDesktop(): Promise<string> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {
-    throw new Error('Defaultspack desktop launch is only available in Rumi Viewer.');
+    throw new Error('Defaultspack desktop launch is only available in Tobkiri Launcher.');
   }
 
   try {

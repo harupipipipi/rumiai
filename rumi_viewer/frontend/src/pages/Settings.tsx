@@ -590,7 +590,7 @@ export function Settings() {
                   </div>
                   {desktopInfoBusy && permissionRows.length === 0 && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Reading macOS permission status from Rumi Viewer...
+                      Reading macOS permission status from Tobkiri Launcher...
                     </p>
                   )}
                   {desktopInfoError && permissionRows.length === 0 && (
@@ -600,12 +600,12 @@ export function Settings() {
                   )}
                   {!desktopInfoBusy && !desktopInfoError && desktopInfo && permissionRows.length === 0 && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Rumi Viewer returned no macOS permission rows. Use Refresh after changing System Settings.
+                      Tobkiri Launcher returned no macOS permission rows. Use Refresh after changing System Settings.
                     </p>
                   )}
                   {!desktopInfoBusy && !desktopInfoError && !desktopInfo && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Click Refresh to read macOS permission status from Rumi Viewer.
+                      Click Refresh to read macOS permission status from Tobkiri Launcher.
                     </p>
                   )}
                 </CardContent>

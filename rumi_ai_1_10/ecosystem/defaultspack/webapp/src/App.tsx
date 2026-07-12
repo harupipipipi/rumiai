@@ -4967,11 +4967,11 @@ function ChatApp() {
     try {
       const opened = await openAuthorityApprovalWindow(authorityApproval.requestId);
       if (!opened) {
-        setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer に戻り、ポップアップを許可して再試行してください。");
+        setError("専用の承認ウィンドウを開けませんでした。Tobkiri Launcher に戻り、ポップアップを許可して再試行してください。");
       }
     } catch (openError) {
       console.error(openError);
-      setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer から再試行してください。");
+      setError("専用の承認ウィンドウを開けませんでした。Tobkiri Launcher から再試行してください。");
     }
   };
 
@@ -6602,7 +6602,7 @@ function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
       <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
         {fallbackVisible && (
           <div className="max-w-64 rounded-lg border border-amber-300/25 bg-zinc-950/95 px-3 py-2 text-xs leading-5 text-amber-50 shadow-xl shadow-black/40">
-            Rumi Viewerから開くと、指録音は専用ウィンドウで表示されます。
+            Tobkiri Launcherから開くと、指録音は専用ウィンドウで表示されます。
           </div>
         )}
         <button

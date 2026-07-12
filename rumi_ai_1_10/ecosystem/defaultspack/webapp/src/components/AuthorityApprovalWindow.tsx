@@ -118,7 +118,7 @@ async function returnToFingerRecordingAfterApproval() {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
-    // Fall back below when the approval page is not inside Rumi Viewer.
+    // Fall back below when the approval page is not inside Tobkiri Launcher.
   }
   window.close();
   window.setTimeout(() => {
@@ -131,7 +131,7 @@ async function closeAuthorityApprovalWindow(fallbackReturnTo = "") {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
-    // Fall back below when the approval page is not inside Rumi Viewer.
+    // Fall back below when the approval page is not inside Tobkiri Launcher.
   }
   window.close();
   if (!fallbackReturnTo) return;
@@ -168,7 +168,7 @@ function authorityHostExecutionSummary(value: unknown): Record<string, unknown> 
 function authorityApprovalErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || "");
   if (message.includes("AUTHORITY_BROWSER_TEST_DISABLED")) {
-    return "このDefaultspackではブラウザ承認が無効です。Rumi Viewerの専用ウィンドウから開き直してください。";
+    return "このDefaultspackではブラウザ承認が無効です。Tobkiri Launcherの専用ウィンドウから開き直してください。";
   }
   if (message.includes("EXPIRED") || message.includes("HTTP 410")) {
     return "承認セッションの有効期限が切れたか、取り消されました。再読み込みしてやり直してください。";
@@ -180,13 +180,13 @@ function authorityApprovalErrorMessage(error: unknown): string {
     return "この承認セッションはすでに使用されています。再読み込みしてやり直してください。";
   }
   if (message.includes("AUTHORITY_UI_OPERATOR_UNAVAILABLE")) {
-    return "承認操作に必要なRumi Viewerの署名secretがありません。Rumi Viewerから起動した承認ウィンドウで承認するか、ブラウザQA用に同じ署名secretを渡して起動し直してください。";
+    return "承認操作に必要なTobkiri Launcherの署名secretがありません。Tobkiri Launcherから起動した承認ウィンドウで承認するか、ブラウザQA用に同じ署名secretを渡して起動し直してください。";
   }
   return message || "authority 承認に失敗しました。";
 }
 
 function windowTitle(request: AuthorityRequest | null): string {
-  if (!request) return "Rumiの許可";
+  if (!request) return "Tobkiriの許可";
   return request.display_metadata?.title || authorityApprovalTitle(requestToApproval(request));
 }
 
@@ -210,7 +210,7 @@ export function AuthorityApprovalWindow() {
   const settlementBroadcastedRef = useRef(new Set<string>());
 
   const approval = useMemo(() => request ? requestToApproval(request) : null, [request]);
-  const title = request ? windowTitle(request) : "Rumiの許可";
+  const title = request ? windowTitle(request) : "Tobkiriの許可";
   const detailRows = useMemo(() => {
     if (!request) return [];
     const resource = request.resource ?? {};
@@ -592,7 +592,7 @@ export function AuthorityApprovalWindow() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[11px] font-medium text-amber-200">
               <ShieldAlert size={14} />
-              Rumiの許可
+              Tobkiriの許可
             </div>
             <h1 className="mt-2 break-words text-xl font-semibold text-zinc-50">{title}</h1>
             <p className="mt-1 text-xs leading-5 text-zinc-500">{request?.display_metadata?.summary || request?.reason || "pending request"}</p>
@@ -685,7 +685,7 @@ export function AuthorityApprovalWindow() {
                   <div className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 p-3">
                     <p className="text-[11px] font-semibold text-red-200">重要な確認</p>
                     <p className="mt-2 text-xs leading-5 text-red-100/85">
-                      この操作はRumiの外側に触れる可能性があります。続けるには次の文字をそのまま入力してください。
+                      この操作はTobkiriの外側に触れる可能性があります。続けるには次の文字をそのまま入力してください。
                     </p>
                     <code className="mt-2 block rounded-md border border-red-400/25 bg-black/35 px-2 py-1.5 font-mono text-xs text-red-100">
                       {confirmationPhrase || "confirmation phrase missing"}
@@ -765,7 +765,7 @@ export function AuthorityApprovalWindow() {
               ) : !displayedSettledStatus ? (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400">
                   {request.status === "pending" && !approvalContextAvailable
-                    ? "承認操作は Rumi Viewer の専用ウィンドウで実行してください。"
+                    ? "承認操作は Tobkiri Launcher の専用ウィンドウで実行してください。"
                     : `このリクエストは ${request.status} のため、この画面では操作できません。`}
                 </div>
               ) : null}
@@ -831,7 +831,7 @@ function AmbientPackAuthorityApprovalWindow() {
   };
 
   useEffect(() => {
-    document.title = "Rumiの許可";
+    document.title = "Tobkiriの許可";
     void reloadStatus();
   }, []);
 
@@ -891,7 +891,7 @@ function AmbientPackAuthorityApprovalWindow() {
       }
       finishAmbientApproval(next ?? await ambientTriggerClient.status());
     } catch (approvalError) {
-      setError(approvalError instanceof Error ? approvalError.message : "Rumi許可を保存できませんでした。");
+      setError(approvalError instanceof Error ? approvalError.message : "Tobkiri許可を保存できませんでした。");
     } finally {
       setAction(null);
     }
@@ -915,11 +915,11 @@ function AmbientPackAuthorityApprovalWindow() {
     try {
       const opened = await openFingerRecordingWindow();
       if (!opened) {
-        setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
+        setMessage("Tobkiri Launcherから開くと、指で録音は別ウィンドウで表示されます。");
       }
     } catch (openError) {
       console.info("[ambient] ambient trigger window unavailable", openError);
-      setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
+      setMessage("Tobkiri Launcherから開くと、指で録音は別ウィンドウで表示されます。");
     } finally {
       window.setTimeout(() => setAction(null), 300);
     }
@@ -934,7 +934,7 @@ function AmbientPackAuthorityApprovalWindow() {
               <ShieldAlert size={14} />
               Rumi内の許可
             </div>
-            <h1 className="mt-1 break-words text-base font-semibold leading-5 text-zinc-50">Rumiの許可</h1>
+            <h1 className="mt-1 break-words text-base font-semibold leading-5 text-zinc-50">Tobkiriの許可</h1>
             <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">
               指で録音をRumi内で使えるようにします。Macのマイク/カメラ許可は別に確認します。
             </p>

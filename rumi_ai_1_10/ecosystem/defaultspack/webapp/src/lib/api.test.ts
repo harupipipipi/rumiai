@@ -1060,7 +1060,7 @@ test("browser authority QA disabled errors explain the launch requirement", () =
 
   assert.match(message, /AUTHORITY_BROWSER_TEST_DISABLED/);
   assert.match(message, /ブラウザ承認/);
-  assert.match(message, /Rumi Viewer/);
+  assert.match(message, /Tobkiri Launcher/);
   assert.doesNotMatch(message, /対象の会話、モデル、ファイル/);
 });
 

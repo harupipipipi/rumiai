@@ -147,7 +147,7 @@ test("ambient renderable message keeps actionable problems and hides routine sta
     "失敗: 送信できませんでした。",
   );
   assert.equal(
-    ambientRenderableMessage("承認待ち: Rumiの許可がそろってから録音できます。"),
-    "承認待ち: Rumiの許可がそろってから録音できます。",
+    ambientRenderableMessage("承認待ち: Tobkiriの許可がそろってから録音できます。"),
+    "承認待ち: Tobkiriの許可がそろってから録音できます。",
   );
 });

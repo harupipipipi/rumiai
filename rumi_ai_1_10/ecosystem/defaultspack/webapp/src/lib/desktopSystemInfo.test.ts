@@ -86,7 +86,7 @@ describe("desktopSystemInfo", () => {
       const payload = {
         status: "ok",
         data: {
-          app_name: "Rumi AI",
+          app_name: "Tobkiri",
           source: "viewer_broker",
           reliable: true,
           display_version: "1.0.0",
@@ -107,7 +107,7 @@ describe("desktopSystemInfo", () => {
       try {
         const result = await fetchDesktopSystemInfo();
         assert.notEqual(result, null);
-        assert.equal(result!.app_name, "Rumi AI");
+        assert.equal(result!.app_name, "Tobkiri");
         assert.equal(result!.source, "viewer_broker");
         assert.equal(result!.reliable, true);
         assert.equal(result!.permissions.length, 1);
@@ -121,7 +121,7 @@ describe("desktopSystemInfo", () => {
       setupWindowMock();
       const savedFetch = globalThis.fetch;
       const payload = {
-        app_name: "Rumi AI",
+        app_name: "Tobkiri",
         source: "fallback",
         reliable: false,
         display_version: "",
@@ -139,7 +139,7 @@ describe("desktopSystemInfo", () => {
       try {
         const result = await fetchDesktopSystemInfo();
         assert.notEqual(result, null);
-        assert.equal(result!.app_name, "Rumi AI");
+        assert.equal(result!.app_name, "Tobkiri");
         assert.equal(result!.reliable, false);
       } finally {
         globalThis.fetch = savedFetch;
@@ -150,7 +150,7 @@ describe("desktopSystemInfo", () => {
       setupWindowMock();
       const savedFetch = globalThis.fetch;
       const payload = {
-        app_name: "Rumi AI",
+        app_name: "Tobkiri",
         display_version: "",
         viewer_version: "1.0.0",
         build_channel: "beta",

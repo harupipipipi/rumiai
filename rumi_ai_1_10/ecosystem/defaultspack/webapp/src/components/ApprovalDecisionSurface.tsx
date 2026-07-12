@@ -69,7 +69,7 @@ export function ApprovalDecisionSurface({ approval, onApprove, onDeny, onOpenTru
 
       {actionable && approval.trustedWindowRequired && onOpenTrustedWindow && (
         <div className="mt-3 rounded-lg border border-sky-500/25 bg-sky-500/5 p-2.5">
-          <p className="text-xs leading-5 text-zinc-300">安全な許可範囲を選ぶため、Rumi Viewer の専用ウィンドウで判断します。内容と会話の位置は引き継がれます。</p>
+          <p className="text-xs leading-5 text-zinc-300">安全な許可範囲を選ぶため、Tobkiri Launcher の専用ウィンドウで判断します。内容と会話の位置は引き継がれます。</p>
           <button type="button" disabled={busy} onClick={onOpenTrustedWindow} className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><ExternalLink size={14} />専用ウィンドウで確認</button>
         </div>
       )}

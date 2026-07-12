@@ -236,7 +236,7 @@ const JA_FIELD_COPY: Record<string, LocalizedFieldCopy> = {
   "general.spotlight_shortcut_enabled": { label: "会話検索のショートカットを使う", help: "どの画面からでもショートカットで会話検索を開けます。" },
   "general.spotlight_shortcut": { label: "会話検索のキー", help: "会話検索を開くキーの組み合わせを指定します。" },
   "general.spotlight_shortcut_text_input": { label: "入力中も会話検索を開く", help: "入力欄にカーソルがあるときも会話検索のショートカットを使えます。" },
-  "general.language": { label: "表示言語", help: "Rumiの画面で使う言語を選びます。拡張機能に翻訳がない場合は元の文言を表示します。", options: { auto: "端末に合わせる" } },
+  "general.language": { label: "表示言語", help: "Tobkiriの画面で使う言語を選びます。拡張機能に翻訳がない場合は元の文言を表示します。", options: { auto: "端末に合わせる" } },
   "preview.default_mode": { label: "プレビューの表示方法" },
   "chat_rendering.unknown_block_strategy": { label: "未対応の内容の表示", help: "Rumiがまだ対応していない形式を受け取ったときの表示方法です。", options: { json: "元データを表示" } },
   "models.preferred_model": { label: "普段使うモデル", help: "新しい会話で最初に使うモデルを選びます。" },
@@ -821,7 +821,7 @@ export function buildAccountConnectionPrelude(
       platformApiKeyRequired: Boolean(status.platform_api_key_required),
       label: definition.label,
       description: japanese ? {
-        cloudflare: "このコンピュータがオフラインの間も、Cloudflare上でRumiのタスクを継続します。",
+        cloudflare: "このコンピュータがオフラインの間も、Cloudflare上でTobkiriのタスクを継続します。",
         google: "Googleへのログイン、選択したDriveファイル、または明示的に選んだGmail権限を接続します。",
         github: "GitHubのアカウント、リポジトリ、ワークフロー権限を認証情報セットで接続します。",
         codex: "Codexワークフロー用のアクセストークンをこの端末へ安全に保存します。",

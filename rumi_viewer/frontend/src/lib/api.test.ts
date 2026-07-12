@@ -110,13 +110,13 @@ function installBrowser(href: string): MemoryStorage {
           if (command === 'get_desktop_system_info') {
             tauriDesktopInfoCount += 1;
             return {
-              app_name: 'Rumi AI',
+              app_name: 'Tobkiri',
               display_version: RUMI_DISPLAY_VERSION,
               viewer_version: '1.0.0-beta.1',
               build_channel: 'beta',
               platform: 'macos',
               platform_release: '15.0',
-              permission_subject: 'Rumi Viewer',
+              permission_subject: 'Tobkiri Launcher',
               host_broker: {
                 enabled: true,
                 available: true,
@@ -153,7 +153,7 @@ function installBrowser(href: string): MemoryStorage {
 
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
-    value: {title: 'Rumi AI'} as Pick<Document, 'title'>,
+    value: {title: 'Tobkiri'} as Pick<Document, 'title'>,
     writable: true,
   });
   Object.defineProperty(globalThis, 'sessionStorage', {
@@ -508,7 +508,7 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
   assert.equal(tauriDesktopInfoCount, 1);
   assert.equal(info?.display_version, RUMI_DISPLAY_VERSION);
   assert.equal(info?.viewer_version, '1.0.0-beta.1');
-  assert.equal(info?.permission_subject, 'Rumi Viewer');
+  assert.equal(info?.permission_subject, 'Tobkiri Launcher');
   assert.equal(info?.host_broker?.status, 'running');
   assert.equal(info?.permissions[0]?.id, 'accessibility');
   assert.equal(info?.permissions[0]?.granted, true);

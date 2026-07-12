@@ -547,7 +547,7 @@ test("authority approval window explains disabled browser QA approval", () => {
   assert.match(source, /AUTHORITY_BROWSER_TEST_DISABLED/);
   assert.match(source, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
   assert.match(source, /このDefaultspackではブラウザ承認が無効です。/);
-  assert.match(source, /承認操作に必要なRumi Viewerの署名secretがありません。/);
+  assert.match(source, /承認操作に必要なTobkiri Launcherの署名secretがありません。/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(approvalError\)\)/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(rejectionError\)\)/);
 });
