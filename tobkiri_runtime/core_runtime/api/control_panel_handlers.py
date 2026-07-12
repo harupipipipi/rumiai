@@ -467,7 +467,9 @@ class ControlPanelHandlersMixin:
 
     def _panel_get_startup_profile_tool_permissions(self, profile_id: str) -> Dict[str, Any]:
         try:
-            from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
+            from ecosystem.defaultspack.domain.tool.catalog_contract_client import (
+                ContractToolCatalog as ToolRegistry,
+            )
             from ecosystem.defaultspack.domain.tool_policy.profile_permission import (
                 normalize_tool_permission_policy,
                 resolve_profile_tool_permission,

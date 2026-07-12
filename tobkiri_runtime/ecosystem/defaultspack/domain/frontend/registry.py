@@ -37,7 +37,7 @@ from domain.frontend_settings_store import (
     FrontendSettingsCorruptError,
     FrontendSettingsStore,
 )
-from domain.tool.registry import ToolRegistry
+from domain.tool.catalog_contract_client import ContractToolCatalog as ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import (
     component_http_route_specs,

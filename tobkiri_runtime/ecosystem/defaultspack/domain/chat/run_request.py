@@ -69,7 +69,7 @@ from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.temporal_context import add_temporal_context_message, current_datetime_context
 from domain.tool.loading import split_tools_by_loading
-from domain.tool.registry import ToolRegistry
+from domain.tool.catalog_contract_client import ContractToolCatalog as ToolRegistry
 from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
     adapt_tool_definitions,
