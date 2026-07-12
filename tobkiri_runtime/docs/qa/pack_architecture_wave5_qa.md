@@ -44,9 +44,17 @@
 - capability/modality/tool/thinking/context/residency/cost policy routing
 - unknown costをmaximum-cost routeが選ばないこと
 - generateとstreamの別contract、event normalization、usage provenance
+- request preparationとfailover providerを個別に交換・削除した時のfail closed
+- tokenizer estimateがexactを名乗らず、unknown usage/costを0へ潰さないこと
+- embedding/image/audioでmissing providerとinvalid resultを区別すること
+- human handoffがcontextをコピーせず自己承認・authority付与しないこと
+- AI tool intentが未承認・未実行descriptorだけを返すこと
+- eval planがproviderを実行せず、不完全証拠でpromotionしないこと
 - deadline、quota、invalid response、network error
 - replay-safe failoverのみ許可されること
 - migration source drift rejection、partial writeなし、rollback
+- saved conversationのlegacy model referenceとaliasが同じprofile/modelへ解決すること
+- provider削除時に`unresolved_profile`とcandidate除外理由が得られること
 - catalog/registry/adapter/gatewayの各pack削除時にsurfaceがfail closedすること
 - Provider追加やcatalog entry変更がないこと
 

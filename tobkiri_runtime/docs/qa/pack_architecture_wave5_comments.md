@@ -9,7 +9,7 @@ Wave 5 AI Runtime Ownershipをローカルprogram branchへ実装しました。
 
 ## Wave Issue #1151
 
-Wave 5のローカル実装では、provider-neutral routing、distinct generate/stream contracts、capability/cost/health policy、replay-safe failover、digest-pinned declarative catalog、revision-guarded registries、encrypted scoped credential handles、source-hash migration/rollback、approved defaultspack compatibility writesを追加しました。remote healthは検証前に`unknown`です。具体的Providerやcatalog entryは追加していません。
+Wave 5のローカル実装では、provider-neutral routing、distinct generate/stream contracts、独立request pipeline/stream/usage/modality/tool-intent/eval contracts、capability/cost/health policy、replay-safe failover、digest-pinned declarative catalog、revision-guarded registries、encrypted scoped credential handles、source-hash migration/rollback、saved-reference alias resolution、approved defaultspack compatibility writesを追加しました。remote healthは検証前に`unknown`です。具体的Providerやcatalog entryは追加していません。
 
 このWaveの実装担当Codexはテスト、build、起動確認を実行していません。
 PR作成後、独立したQA IssueでこのPRを実環境でテストしてください。

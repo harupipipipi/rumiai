@@ -6,9 +6,9 @@ provider or change a catalog entry.
 
 ## Authoritative boundaries
 
-- `rumi_ai_gateway_pack`: provider-neutral generate/stream routing, capability
-  matching, cost/health policy, normalized results, diagnostics, and replay-safe
-  failover.
+- `rumi_ai_gateway_pack`: provider-neutral generate/stream orchestration and
+  redacted diagnostics. It consumes replaceable routing, pipeline, stream,
+  usage, and tool-intent contracts.
 - `rumi_model_catalog_pack`: immutable provider/model descriptors. Catalog
   resources are digest verified and never import execution code.
 - `rumi_model_registry_pack`: saved model profiles and finite aliases with
@@ -19,6 +19,16 @@ provider or change a catalog entry.
   provider instance, scope, and expiry.
 - `rumi_provider_adapters_pack`: registry-selected protocol execution only. It
   owns no catalog, connection, or credential state.
+- `rumi_ai_routing_pack`: pure capability, health, cost, and policy matching.
+- `rumi_ai_pipeline_pack`: deterministic request preparation and replay-safe
+  failover decisions.
+- `rumi_ai_stream_pack`: typed stream schema and terminal-event normalization.
+- `rumi_ai_usage_pack`: explicit token estimates and usage-cost normalization.
+- `rumi_ai_modality_pack`: embedding, image, transcription, and speech gateways.
+- `rumi_ai_tool_bridge_pack`: non-authoritative AI tool-intent descriptors.
+- `rumi_human_operator_provider_pack`: identifier-only human handoff intents.
+- `rumi_model_evals_pack`: immutable eval catalog, non-executing plans, and pure
+  evidence scoring.
 
 Defaultspack retains finite response-shape and HTTP/function adapters. Catalog,
 completion, stream, provider status, health, and approved provider-key writes
@@ -43,6 +53,20 @@ SHA-256 digest rather than persisting or replaying secret material.
 - `rumi.action.credential.manage.v1`
 - `rumi.action.credential.migrate.v1`
 - `rumi.resource.credential.status.v1`
+- `rumi.service.ai.route.v1`
+- `rumi.service.ai.request.prepare.v1`
+- `rumi.service.ai.failover.decide.v1`
+- `rumi.service.ai.stream.normalize.v1`
+- `rumi.service.ai.tokenize.v1`
+- `rumi.service.ai.usage.cost.v1`
+- `rumi.service.ai.embedding.v1`
+- `rumi.service.ai.image.v1`
+- `rumi.service.ai.audio.transcribe.v1`
+- `rumi.service.ai.audio.speech.v1`
+- `rumi.service.ai.tool_intent.normalize.v1`
+- `rumi.resource.ai.eval.catalog.v1`
+- `rumi.action.ai.eval.plan.v1`
+- `rumi.service.ai.eval.score.v1`
 
 Catalog selection and adapter execution use independent artifact revisions.
 The gateway contains no concrete provider or provider-pack-ID branch. Cost
@@ -82,6 +106,13 @@ writers; the active compatibility routes use the new owners.
 | model profiles/aliases | `rumi_model_registry_pack` | model-registry v1 | pack/profile namespace | owner-only | source-hash explicit import | marker-bound | until delete/rollback | contract JSON |
 | provider/model catalog | `rumi_model_catalog_pack` | catalog v2 | signed/digest-pinned pack resources | git/artifact revision | mechanical ownership relocation | pinned pack revision | pack version | declarative JSON |
 | AI routing diagnostics | `rumi_ai_gateway_pack` | diagnostics v1 | bounded in-memory projection | none | none | restart/remove pack | process lifetime | redacted read-only |
+| AI route policy | `rumi_ai_routing_pack` | route v1 | none | none | contract replacement | select prior provider | request lifetime | diagnostic result |
+| AI request/failover policy | `rumi_ai_pipeline_pack` | pipeline v1 | none | none | contract replacement | select prior provider | request lifetime | result envelope |
+| AI stream schema | `rumi_ai_stream_pack` | stream normalize v1 | none | none | contract replacement | select prior provider | request lifetime | normalized events |
+| AI usage/cost | `rumi_ai_usage_pack` | usage v1 | none | none | contract replacement | select prior provider | request lifetime | result envelope |
+| AI modality gateway | `rumi_ai_modality_pack` | modality v1 | none | none | contract replacement | select prior provider | request lifetime | typed results |
+| AI tool intents | `rumi_ai_tool_bridge_pack` | intent v1 | none | none | provider payload normalization | discard unexecuted intents | request lifetime | operation descriptor |
+| evaluation evidence | `rumi_model_evals_pack` | eval v1 | caller-owned observations | caller policy | declarative catalog adoption | remove runtime contracts | caller policy | score result |
 | artifacts | existing artifact owner | existing | unchanged | unchanged | later Wave | later Wave | unchanged | unchanged |
 | schedules | defaultspack pending Wave 9 | existing | unchanged | unchanged | Wave 9 | Wave 9 | unchanged | unchanged |
 | memory | defaultspack pending Wave 7 | existing | unchanged | unchanged | Wave 7 | Wave 7 | unchanged | unchanged |
