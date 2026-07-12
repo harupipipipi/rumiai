@@ -7,6 +7,7 @@ from dataclasses import asdict
 from threading import RLock
 from typing import Any, Callable
 
+from .canonical import content_identity
 from .models import (
     Cardinality,
     ContractRequirement,
@@ -15,7 +16,6 @@ from .models import (
     ProviderDescriptor,
 )
 from .semver import is_compatible
-from .canonical import content_identity
 
 Operation = Callable[[str, dict[str, Any]], Any]
 
@@ -58,7 +58,11 @@ class ContractRegistry:
         expected_revision: str | None = None,
     ) -> ContractResult[tuple[ProviderDescriptor, ...]]:
         """Resolve providers with deterministic, explicit cardinality semantics."""
-        revision = self.resolution_identity()
+        with self._lock:
+            revision = self._resolution_identity_locked()
+            candidates = tuple(
+                self._providers.get(requirement.contract_id, {}).values()
+            )
         if expected_revision is not None and expected_revision != revision:
             return ContractResult(
                 ContractStatus.STALE_RESOLUTION,
@@ -67,8 +71,6 @@ class ContractRegistry:
                 ),
                 metadata={"revision": revision},
             )
-        with self._lock:
-            candidates = tuple(self._providers.get(requirement.contract_id, {}).values())
         compatible_items: list[ProviderDescriptor] = []
         invalid_versions: list[str] = []
         for provider in candidates:
@@ -214,7 +216,22 @@ class ContractRegistry:
 
     def resolution_identity(self) -> str:
         """Return a stable identity for the current data-only registry snapshot."""
-        return content_identity([asdict(provider) for provider in self.snapshot()])
+        with self._lock:
+            return self._resolution_identity_locked()
+
+    def _resolution_identity_locked(self) -> str:
+        providers = [
+            provider
+            for contract_providers in self._providers.values()
+            for provider in contract_providers.values()
+        ]
+        providers.sort(
+            key=lambda provider: (
+                provider.contract.contract_id,
+                provider.provider_instance_id,
+            )
+        )
+        return content_identity([asdict(provider) for provider in providers])
 
 
 def _order_chain(

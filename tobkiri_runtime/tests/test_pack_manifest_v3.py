@@ -147,6 +147,32 @@ def test_manifest_discovery_does_not_import_entrypoint(tmp_path: Path) -> None:
     assert not sentinel.exists()
 
 
+def test_manifest_semantic_validation_rejects_unprovided_entrypoint(
+    tmp_path: Path,
+) -> None:
+    """Entrypoints may only activate contracts declared by the same manifest."""
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["entrypoints"][0]["contract_id"] = "rumi.service.missing.v1"
+    path = tmp_path / "ecosystem.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = load_manifest(path)
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert "not provided" in result.diagnostics[0]
+
+
+def test_manifest_semantic_validation_rejects_major_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    """A v1 contract identifier must not claim a version with major 2."""
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["contracts"]["provides"][0]["version"] = "2.0.0"
+    path = tmp_path / "ecosystem.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = load_manifest(path)
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert "major" in result.diagnostics[0]
+
+
 def test_one_resolution_rejects_equal_priority_ambiguity() -> None:
     """Filesystem or pack ID order must not decide an ambiguous one contract."""
     registry = ContractRegistry()
