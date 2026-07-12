@@ -4,8 +4,10 @@ export type Theme = (typeof VALID_THEMES)[number];
 export const VALID_COLOR_MODES = ['light', 'dark'] as const;
 export type ColorMode = (typeof VALID_COLOR_MODES)[number];
 
-export const THEME_STORAGE_KEY = 'rumi-theme';
-export const COLOR_MODE_STORAGE_KEY = 'rumi-color-mode';
+export const THEME_STORAGE_KEY = 'tobkiri-theme';
+export const COLOR_MODE_STORAGE_KEY = 'tobkiri-color-mode';
+export const LEGACY_THEME_STORAGE_KEY = 'rumi-theme';
+export const LEGACY_COLOR_MODE_STORAGE_KEY = 'rumi-color-mode';
 
 export interface Appearance {
   theme: Theme;
@@ -28,7 +30,9 @@ export function normalizeColorMode(value: unknown): ColorMode {
   return value === 'light' || value === 'dark' ? value : 'dark';
 }
 
-function readStorageValue(storage: Pick<Storage, 'getItem'> | null | undefined, key: string): string | null {
+type AppearanceStorage = Pick<Storage, 'getItem'> & Partial<Pick<Storage, 'setItem'>>;
+
+function readStorageValue(storage: AppearanceStorage | null | undefined, key: string): string | null {
   try {
     return storage?.getItem(key) ?? null;
   } catch {
@@ -36,7 +40,7 @@ function readStorageValue(storage: Pick<Storage, 'getItem'> | null | undefined, 
   }
 }
 
-function getBrowserStorage(): Pick<Storage, 'getItem'> | null {
+function getBrowserStorage(): AppearanceStorage | null {
   try {
     return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
@@ -44,11 +48,35 @@ function getBrowserStorage(): Pick<Storage, 'getItem'> | null {
   }
 }
 
-export function readStoredAppearance(storage?: Pick<Storage, 'getItem'> | null): Appearance {
+function readValidatedMigratedValue<T extends string>(
+  storage: AppearanceStorage | null | undefined,
+  canonicalKey: string,
+  legacyKey: string,
+  isValid: (value: string) => value is T,
+): T | null {
+  const canonical = readStorageValue(storage, canonicalKey);
+  if (canonical !== null) return isValid(canonical) ? canonical : null;
+  const legacy = readStorageValue(storage, legacyKey);
+  if (legacy === null || !isValid(legacy)) return null;
+  try { storage?.setItem?.(canonicalKey, legacy); } catch { /* reads remain usable */ }
+  return legacy;
+}
+
+export function readStoredAppearance(storage?: AppearanceStorage | null): Appearance {
   const effectiveStorage = storage === undefined ? getBrowserStorage() : storage;
   return {
-    theme: normalizeTheme(readStorageValue(effectiveStorage, THEME_STORAGE_KEY)),
-    colorMode: normalizeColorMode(readStorageValue(effectiveStorage, COLOR_MODE_STORAGE_KEY)),
+    theme: normalizeTheme(readValidatedMigratedValue(
+      effectiveStorage,
+      THEME_STORAGE_KEY,
+      LEGACY_THEME_STORAGE_KEY,
+      (value): value is Theme => (VALID_THEMES as readonly string[]).includes(value),
+    )),
+    colorMode: normalizeColorMode(readValidatedMigratedValue(
+      effectiveStorage,
+      COLOR_MODE_STORAGE_KEY,
+      LEGACY_COLOR_MODE_STORAGE_KEY,
+      (value): value is ColorMode => value === 'light' || value === 'dark',
+    )),
   };
 }
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   applyAppearanceToRoot,
@@ -7,9 +8,26 @@ import {
   readStoredAppearance,
 } from './appearance';
 
-function fakeStorage(values: Record<string, string | null>): Pick<Storage, 'getItem'> {
+type FakeStorageOptions = {
+  throwGet?: boolean;
+  throwGetKey?: string;
+  throwSet?: boolean;
+};
+
+function fakeStorage(values: Record<string, string> = {}, options: FakeStorageOptions = {}) {
+  const data = new Map(Object.entries(values));
   return {
-    getItem: (key) => values[key] ?? null,
+    data,
+    storage: {
+      getItem: (key: string) => {
+        if (options.throwGet || options.throwGetKey === key) throw new Error('get blocked');
+        return data.get(key) ?? null;
+      },
+      setItem: (key: string, value: string) => {
+        if (options.throwSet) throw new Error('set blocked');
+        data.set(key, value);
+      },
+    },
   };
 }
 
@@ -43,6 +61,35 @@ function fakeRoot() {
   };
 }
 
+function runPrebootAppearance(storage: Pick<Storage, 'getItem' | 'setItem'>) {
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, 'preboot appearance script not found');
+
+  const classes = new Set<string>();
+  const style: Record<string, string> = {};
+  const execute = new Function('document', 'localStorage', script);
+  execute({
+    documentElement: {
+      classList: { add: (...names: string[]) => names.forEach((name) => classes.add(name)) },
+      style,
+    },
+  }, storage);
+
+  const themeByClass = {
+    'theme-rumi': 'Rumi',
+    'theme-minimal': 'Minimal',
+    'theme-standard': 'Standard',
+    'theme-rounded': 'Rounded',
+  } as const;
+  const themeClass = [...classes].find((name) => name in themeByClass);
+  assert.ok(themeClass, 'preboot theme class not applied');
+  return {
+    theme: themeByClass[themeClass as keyof typeof themeByClass],
+    colorMode: style.colorScheme === 'light' ? 'light' : 'dark',
+  };
+}
+
 test('appearance normalization falls back to the startup-safe defaults', () => {
   assert.equal(normalizeTheme('Rounded'), 'Rounded');
   assert.equal(normalizeTheme('Unknown'), 'Rumi');
@@ -50,21 +97,46 @@ test('appearance normalization falls back to the startup-safe defaults', () => {
   assert.equal(normalizeColorMode('sepia'), 'dark');
 });
 
-test('stored appearance reads the shared Viewer storage keys defensively', () => {
-  assert.deepEqual(
-    readStoredAppearance(fakeStorage({
-      'rumi-theme': 'Minimal',
-      'rumi-color-mode': 'light',
-    })),
-    { theme: 'Minimal', colorMode: 'light' },
-  );
-  assert.deepEqual(
-    readStoredAppearance(fakeStorage({
-      'rumi-theme': 'Bogus',
-      'rumi-color-mode': 'Bogus',
-    })),
-    { theme: 'Rumi', colorMode: 'dark' },
-  );
+test('canonical appearance keys win when canonical and legacy values differ', () => {
+  const { storage } = fakeStorage({
+    'tobkiri-theme': 'Rounded', 'rumi-theme': 'Minimal',
+    'tobkiri-color-mode': 'dark', 'rumi-color-mode': 'light',
+  });
+  assert.deepEqual(readStoredAppearance(storage), { theme: 'Rounded', colorMode: 'dark' });
+});
+
+test('legacy appearance keys migrate without deletion and remain idempotent', () => {
+  const { storage, data } = fakeStorage({ 'rumi-theme': 'Minimal', 'rumi-color-mode': 'light' });
+  assert.deepEqual(readStoredAppearance(storage), { theme: 'Minimal', colorMode: 'light' });
+  assert.equal(data.get('tobkiri-theme'), 'Minimal');
+  assert.equal(data.get('tobkiri-color-mode'), 'light');
+  assert.equal(data.get('rumi-theme'), 'Minimal');
+  assert.deepEqual(readStoredAppearance(storage), { theme: 'Minimal', colorMode: 'light' });
+});
+
+test('malformed legacy appearance values are not copied', () => {
+  const { storage, data } = fakeStorage({ 'rumi-theme': 'Bogus', 'rumi-color-mode': 'sepia' });
+  assert.deepEqual(readStoredAppearance(storage), { theme: 'Rumi', colorMode: 'dark' });
+  assert.equal(data.has('tobkiri-theme'), false);
+  assert.equal(data.has('tobkiri-color-mode'), false);
+});
+
+test('appearance migration falls back safely when storage access throws', () => {
+  assert.deepEqual(readStoredAppearance(fakeStorage({}, { throwGet: true }).storage), { theme: 'Rumi', colorMode: 'dark' });
+  const throwingSet = fakeStorage({ 'rumi-theme': 'Minimal', 'rumi-color-mode': 'light' }, { throwSet: true });
+  assert.deepEqual(readStoredAppearance(throwingSet.storage), { theme: 'Minimal', colorMode: 'light' });
+  assert.equal(throwingSet.data.has('tobkiri-theme'), false);
+});
+
+test('preboot and React preserve independent values when one canonical read fails', () => {
+  const { storage } = fakeStorage({
+    'tobkiri-theme': 'Rounded',
+    'rumi-theme': 'Minimal',
+    'rumi-color-mode': 'light',
+  }, { throwGetKey: 'tobkiri-color-mode' });
+  const expected = { theme: 'Rounded', colorMode: 'light' };
+  assert.deepEqual(readStoredAppearance(storage), expected);
+  assert.deepEqual(runPrebootAppearance(storage), expected);
 });
 
 test('appearance application keeps one theme class and toggles dark before paint', () => {

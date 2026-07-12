@@ -37,15 +37,42 @@
         var theme = 'Rumi';
         var mode = 'dark';
 
-        try {
-          var storedTheme = localStorage.getItem('rumi-theme');
-          var storedMode = localStorage.getItem('rumi-color-mode');
-          if (themes[storedTheme]) theme = storedTheme;
-          if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
-        } catch (error) {
-          theme = 'Rumi';
-          mode = 'dark';
+        function safeGetItem(key) {
+          try {
+            return localStorage.getItem(key);
+          } catch (error) {
+            return null;
+          }
         }
+
+        function safeSetItem(key, value) {
+          try {
+            localStorage.setItem(key, value);
+          } catch (error) {
+            // Appearance reads remain usable when persistence is unavailable.
+          }
+        }
+
+        var storedTheme = safeGetItem('tobkiri-theme');
+        if (storedTheme === null) {
+          var legacyTheme = safeGetItem('rumi-theme');
+          if (themes[legacyTheme]) {
+            storedTheme = legacyTheme;
+            safeSetItem('tobkiri-theme', legacyTheme);
+          }
+        }
+
+        var storedMode = safeGetItem('tobkiri-color-mode');
+        if (storedMode === null) {
+          var legacyMode = safeGetItem('rumi-color-mode');
+          if (legacyMode === 'light' || legacyMode === 'dark') {
+            storedMode = legacyMode;
+            safeSetItem('tobkiri-color-mode', legacyMode);
+          }
+        }
+
+        if (themes[storedTheme]) theme = storedTheme;
+        if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
 
         root.classList.add(themes[theme]);
         if (mode === 'dark') {

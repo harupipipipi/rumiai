@@ -9,6 +9,7 @@ description = "Rumi AI runtime package"
 requires-python = ">=3.10"
 dependencies = [
   "cryptography>=42.0.0",
+  "PyYAML>=6.0.2",
 ]
 
 [project.optional-dependencies]
@@ -28,10 +29,11 @@ browser-cdp = [
 
 [tool.setuptools]
 include-package-data = true
+py-modules = ["app"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core_runtime*", "backend_core*", "rumi_setup*"]
+include = ["core_runtime*", "backend_core*", "rumi_setup*", "tobkiri*", "rumi_ai*"]
 
 [tool.ruff]
 line-length = 100
