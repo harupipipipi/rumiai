@@ -290,6 +290,50 @@ test('apiFetch quarantines a stale URL code before one desktop reauthorization',
   assert.equal(lastReplacedUrl, '/panel/?view=packs#ready');
 });
 
+test('concurrent panel requests share stale-code recovery and the fresh exchange', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code&view=packs#ready');
+
+  let requestCount = 0;
+  fetchHandler = async (input: string | URL | Request, init?: RequestInit) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      panelExchangeCount += 1;
+      const payload = JSON.parse(String(init?.body)) as {code?: string};
+      if (payload.code === 'stale-code') {
+        return new Response(
+          JSON.stringify({error: 'Invalid or expired code', success: false}),
+          {headers: {'Content-Type': 'application/json'}, status: 401},
+        );
+      }
+      assert.equal(payload.code, 'desktop-refresh-code');
+      return new Response(
+        JSON.stringify({data: {csrf_token: 'fresh-csrf'}, success: true}),
+        {headers: {'Content-Type': 'application/json'}, status: 200},
+      );
+    }
+
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({data: {ok: true}, success: true}),
+      {headers: {'Content-Type': 'application/json'}, status: 200},
+    );
+  };
+
+  const [packs, dashboard] = await Promise.all([
+    apiFetch<{ok: boolean}>('/api/panel/packs'),
+    apiFetch<{ok: boolean}>('/api/panel/dashboard'),
+  ]);
+
+  assert.deepEqual(packs, {ok: true});
+  assert.deepEqual(dashboard, {ok: true});
+  assert.equal(requestCount, 2);
+  assert.equal(panelExchangeCount, 2);
+  assert.equal(tauriReauthorizeCount, 1);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs#ready');
+});
+
 test('a rejected bootstrap code is scrubbed without exposing the code in the error', async () => {
   installBrowser('http://127.0.0.1:8765/panel/?code=secret-code');
   fetchHandler = async () => new Response(
@@ -303,6 +347,16 @@ test('a rejected bootstrap code is scrubbed without exposing the code in the err
   );
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
   assert.equal(lastReplacedUrl, '/panel/');
+});
+
+test('an empty bootstrap code is scrubbed without an exchange attempt', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=&view=packs#ready');
+
+  await bootstrapPanelSession();
+
+  assert.equal(panelExchangeCount, 0);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs#ready');
+  assert.equal(lastReplacedUrl, '/panel/?view=packs#ready');
 });
 
 test('hasPendingPanelBootstrapCode only reports true when the URL includes a code', () => {
@@ -535,6 +589,44 @@ test('apiFetch recovers an expired panel session for setup APIs and retries once
   assert.equal(panelExchangeCount, 1);
   assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'csrf-from-server');
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/setup?v=42');
+});
+
+test('apiFetch stops after one retry when reauthorization does not restore the session', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/packs?v=42');
+
+  let requestCount = 0;
+  fetchHandler = async (input: string | URL | Request, init?: RequestInit) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      panelExchangeCount += 1;
+      return new Response(
+        JSON.stringify({
+          data: {csrf_token: 'csrf-from-server'},
+          success: true,
+        }),
+        {
+          headers: {'Content-Type': 'application/json'},
+          status: 200,
+        },
+      );
+    }
+
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({error: 'Invalid or expired code', success: false}),
+      {headers: {'Content-Type': 'application/json'}, status: 401},
+    );
+  };
+
+  await assert.rejects(
+    apiFetch<{ok: boolean}>('/api/panel/packs'),
+    /Invalid or expired code/,
+  );
+  assert.equal(requestCount, 2);
+  assert.equal(tauriReauthorizeCount, 1);
+  assert.equal(panelExchangeCount, 1);
 });
 
 test('openExternalUrl uses the desktop shell when Tauri is available', async () => {

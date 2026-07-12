@@ -284,8 +284,14 @@ async function recoverExpiredPanelSession(): Promise<boolean> {
 
 export async function bootstrapPanelSession(): Promise<void> {
   const url = new URL(window.location.href);
-  const code = url.searchParams.get('code');
+  if (!url.searchParams.has('code')) {
+    return;
+  }
+  const code = url.searchParams.get('code') ?? '';
   if (!code) {
+    // Treat an empty query value as invalid one-time state and remove it so
+    // panel startup cannot repeatedly attempt to recover a blank code.
+    scrubPanelBootstrapCode();
     return;
   }
 
