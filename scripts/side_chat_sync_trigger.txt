@@ -1,1 +1,1 @@
-Trigger the pull_request workflow after the PR leaves draft state.
+Side chat implementation integration is in progress.
