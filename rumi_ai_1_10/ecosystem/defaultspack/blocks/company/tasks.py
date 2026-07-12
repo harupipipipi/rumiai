@@ -69,6 +69,16 @@ def run(input_data, context):
             if task is None:
                 return error("task not found: " + str(task_id), "NOT_FOUND")
             return ok(task)
+        if action in {"delete", "remove"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
+            task_id = input_data.get("task_id") or input_data.get("id")
+            if not task_id:
+                return invalid("task_id is required")
+            if not store.delete(company_id, str(task_id)):
+                return error("task not found: " + str(task_id), "NOT_FOUND")
+            return ok({"deleted": True, "task_id": str(task_id)})
         return invalid("unsupported tasks action: " + action)
     except Exception as exc:
         return error("company tasks failed: " + str(exc), "COMPANY_TASKS_ERROR")

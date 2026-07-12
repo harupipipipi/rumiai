@@ -153,6 +153,27 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /Visible MiniMax result/);
 });
 
+test("company task board exposes chosen-status moves and confirmed deletion entry", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyTaskBoard, {
+      agents: [],
+      tasks: [{
+        id: "task-blocked",
+        company_id: "operations-company",
+        title: "Recover blocked work",
+        status: "blocked",
+      }],
+      onUpdateTask: () => {},
+      onDeleteTask: () => {},
+    }),
+  );
+
+  assert.match(html, /aria-label="Move Recover blocked work to status"/);
+  assert.match(html, /<option value="queued">queued<\/option>/);
+  assert.match(html, /<option value="completed">completed<\/option>/);
+  assert.match(html, /aria-label="Delete Recover blocked work"/);
+});
+
 test("company workspace renders a visible empty state before a chat exists", () => {
   const html = renderToStaticMarkup(
     createElement(CompanyWorkspacePanel, {
@@ -615,8 +636,25 @@ test("company p2p panel disables durable actions while p2p is disabled", () => {
   );
 
   assert.match(html, /P2P is disabled/);
+  assert.match(html, /RUMI_DEFAULTSPACK_P2P_ENABLED=1/);
+  assert.match(html, /restart the backend/);
+  assert.match(html, /<input[^>]*disabled[^>]*placeholder="peer label"/);
   assert.match(html, /<button[^>]*disabled[^>]*title="Start pairing"/);
   assert.match(html, /<button[^>]*disabled[^>]*title="Send P2P message"/);
+});
+
+test("company p2p panel fails closed while p2p status is unavailable", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyP2PPanel, {
+      status: null,
+      peers: [],
+      onStartPairing: () => {},
+    }),
+  );
+
+  assert.match(html, /P2P status is unavailable/);
+  assert.match(html, /Pairing and messaging stay disabled until status loads/);
+  assert.match(html, /<button[^>]*disabled[^>]*title="Start pairing"/);
 });
 
 test("company workspace does not create p2p identity details while disabled", async () => {
