@@ -8,12 +8,12 @@ The authoritative GitHub tracker is **#1069**. Detailed defects remain split int
 
 | Surface | Primary source root | Typical runtime |
 |---|---|---|
-| Rumi Viewer | `rumi_viewer/frontend` | React/Tauri/browser |
-| defaultspack Web | `rumi_ai_1_10/ecosystem/defaultspack/webapp` | React/browser/WebView |
-| Search Home | `rumi_ai_1_10/ecosystem/search_home_pack/webapp` | React/browser |
-| Rumi Mobile | `rumi_ai_1_10/ecosystem/rumi_mobile` | Flutter/iOS/Android |
-| Browser Companion | `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions` | Chromium extension |
-| Core setup/approval surfaces | `rumi_ai_1_10/core_runtime` and related entry points | browser/WebView |
+| Rumi Viewer | `tobkiri_launcher/frontend` | React/Tauri/browser |
+| defaultspack Web | `tobkiri_runtime/ecosystem/defaultspack/webapp` | React/browser/WebView |
+| Search Home | `tobkiri_runtime/ecosystem/search_home_pack/webapp` | React/browser |
+| Rumi Mobile | `tobkiri_runtime/ecosystem/tobkiri_mobile` | Flutter/iOS/Android |
+| Browser Companion | `tobkiri_runtime/ecosystem/defaultspack/browser_extensions` | Chromium extension |
+| Core setup/approval surfaces | `tobkiri_runtime/core_runtime` and related entry points | browser/WebView |
 
 ## What this change adds
 
