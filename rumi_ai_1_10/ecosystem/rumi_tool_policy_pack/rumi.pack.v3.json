@@ -2,10 +2,10 @@
   "pack_api_version": "rumi.pack.v3",
   "pack": {"id": "rumi.tool_policy", "version": "1.0.0", "kind": "service", "display_name": "Rumi Tool Policy", "description": "Authority-operation policy independent from concrete tool IDs."},
   "contracts": {"provides": [{"id": "rumi.service.tool.policy.evaluate.v1", "version": "1.0.0", "provider_instance_id": "tool-policy.evaluate", "cardinality": "one", "security": "restricted", "failure": "fail_closed", "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "profile-owner"}, "schemas": {"input": {"type": "object"}, "output": {"type": "object"}}, "isolation": "in_process", "required_capabilities": ["tool.policy.evaluate"]}], "requires": []},
-  "entrypoints": [{"id": "tool-policy-evaluate", "contract_id": "rumi.service.tool.policy.evaluate.v1", "loader": "python", "module": "ecosystem.rumi_tool_policy_pack.runtime.policy", "symbol": "create_policy_operation", "artifact_hash": "sha256:b67da8ea9b90c57dd967f2d4c7ea0e32fb3c4427214c81da4c5a5fe5d082c4fa"}],
+  "entrypoints": [{"id": "tool-policy-evaluate", "contract_id": "rumi.service.tool.policy.evaluate.v1", "loader": "python", "module": "ecosystem.rumi_tool_policy_pack.runtime.policy", "symbol": "create_policy_operation", "artifact_hash": "sha256:0430ceed47117dd66e40293a468b90bfd480a2152ec5f14b0efb191dd2b2bdc2"}],
   "resources": [], "storage": [],
   "permissions": [{"capability": "tool.policy.evaluate", "access": "execute", "approval_required": false}],
-  "provenance": {"content_hash": "sha256:b67da8ea9b90c57dd967f2d4c7ea0e32fb3c4427214c81da4c5a5fe5d082c4fa", "build_identity": "rumi-tool-policy-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:0430ceed47117dd66e40293a468b90bfd480a2152ec5f14b0efb191dd2b2bdc2", "build_identity": "rumi-tool-policy-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {"from": ["defaultspack.domain.tool.permission_resolver", "defaultspack.backend.tool.permission_policy"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Select the pinned prior policy provider."},
   "extensions": {"rumi.tool_policy.boundary": {"tool_id_rules": false, "approval_issue": false, "execution": false, "unknown_authority": "deny"}}
 }

@@ -19,6 +19,11 @@ _AUTHORITIES = frozenset(
         "desktop.control",
         "clipboard.read",
         "clipboard.write",
+        "service.invoke",
+        "service.mutate",
+        "remote.invoke",
+        "mcp.invoke",
+        "service.mutate",
     }
 )
 _APPROVAL_REQUIRED = frozenset(
@@ -31,6 +36,8 @@ _APPROVAL_REQUIRED = frozenset(
         "desktop.control",
         "clipboard.read",
         "clipboard.write",
+        "remote.invoke",
+        "mcp.invoke",
     }
 )
 
