@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "OCI Generative AI",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/enterprise_native_providers.py",
+    "models": "models.json"
+  },
   "description": "OCI Generative AI enterprise control-plane provider with scoped deployment identity.",
   "provider_metadata": {
     "display_name": "OCI Generative AI",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "OCI_REGION"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "control-plane://oci-generative-ai",
     "default_model_for": {},
@@ -45,9 +49,15 @@
     "base_url_env": "OCI_REGION",
     "default_base_url": "control-plane://oci-generative-ai",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.enterprise_native_providers:OCIProvider",
     "config": {
+      "credential_chain_activation_envs": [
+        "OCI_CONFIG_FILE",
+        "OCI_RESOURCE_PRINCIPAL_VERSION",
+        "OCI_CLI_AUTH"
+      ],
       "inventory_strategy": "ListModels",
       "inventory_scope": "account_project_region",
       "identity_fields": [

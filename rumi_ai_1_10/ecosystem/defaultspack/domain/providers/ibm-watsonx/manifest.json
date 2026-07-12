@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "IBM watsonx.ai",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/enterprise_native_providers.py",
+    "models": "models.json"
+  },
   "description": "IBM watsonx.ai enterprise control-plane provider with scoped deployment identity.",
   "provider_metadata": {
     "display_name": "IBM watsonx.ai",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "WATSONX_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "control-plane://watsonx",
     "default_model_for": {},
@@ -43,8 +47,9 @@
     "base_url_env": "WATSONX_URL",
     "default_base_url": "control-plane://watsonx",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.enterprise_native_providers:WatsonxProvider",
     "config": {
       "inventory_strategy": "/ml/v1/foundation_model_specs",
       "inventory_scope": "account_project_region",

@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Amazon Bedrock",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/enterprise_native_providers.py",
+    "models": "models.json"
+  },
   "description": "Amazon Bedrock enterprise control-plane provider with scoped deployment identity.",
   "provider_metadata": {
     "display_name": "Amazon Bedrock",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "AWS_REGION"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "control-plane://aws-bedrock",
     "default_model_for": {},
@@ -44,9 +48,18 @@
     "base_url_env": "AWS_REGION",
     "default_base_url": "control-plane://aws-bedrock",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.enterprise_native_providers:BedrockProvider",
     "config": {
+      "credential_chain_activation_envs": [
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI"
+      ],
       "inventory_strategy": "ListFoundationModels+ListInferenceProfiles",
       "inventory_scope": "account_project_region",
       "identity_fields": [
