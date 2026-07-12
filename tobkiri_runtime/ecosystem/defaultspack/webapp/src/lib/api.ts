@@ -591,6 +591,18 @@ export type McpServerRecord = {
   tools?: unknown[];
   permissions?: Record<string, unknown>;
   config?: Record<string, unknown>;
+  inspect?: {
+    server_id?: string;
+    name?: string;
+    transport?: string;
+    status?: string;
+    connected?: boolean;
+    command?: string | null;
+    args?: string[];
+    endpoint?: string | null;
+    tools?: string[];
+    updated_at?: string;
+  };
 };
 
 export type CodingAgentSession = {
@@ -4612,6 +4624,18 @@ export const api = {
     workspace_id?: string | null;
   }) {
     return request<McpConnectResponse>("/api/tools/mcp/connect", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  manageMcpServer(payload: {
+    action: "disconnect" | "reconnect" | "remove";
+    server_id: string;
+    confirm?: boolean;
+    approval_token?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/tools/mcp", {
       method: "POST",
       body: JSON.stringify(payload),
     });

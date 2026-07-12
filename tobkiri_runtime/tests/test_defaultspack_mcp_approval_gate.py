@@ -394,3 +394,101 @@ def test_mcp_list_redacts_sensitive_runtime_registry_config(monkeypatch):
     assert config["env"] == {"API_TOKEN": "<redacted>"}
     assert config["headers"] == {"Authorization": "<redacted>"}
     assert "secret-value" not in json.dumps(result)
+
+
+def test_mcp_lifecycle_binds_approval_to_config_and_preserves_disconnect_grant(monkeypatch):
+    from blocks.tool import mcp_registry as lifecycle
+    from domain.safety import approval
+    from domain.tool.mcp_registry import McpRegistry
+
+    registry = McpRegistry()
+    registry.add_server({
+        "server_id": "lifecycle-server",
+        "name": "lifecycle-server",
+        "config": {"transport": "stdio", "command": sys.executable, "args": ["server.py"]},
+    })
+    registry.mark_connected("lifecycle-server", tools=["mcp.lifecycle.read"], approved=True)
+
+    disconnected = []
+    removed = []
+
+    class FakeClient:
+        def disconnect(self, server_name):
+            disconnected.append(server_name)
+
+    class FakeToolRegistry:
+        def unregister_mcp_server(self, server_name):
+            removed.append(server_name)
+            return ["mcp.lifecycle.read"]
+
+    monkeypatch.setattr(lifecycle, "McpClient", FakeClient)
+    monkeypatch.setattr(lifecycle, "ToolRegistry", FakeToolRegistry)
+
+    requested = lifecycle.run({"action": "disconnect", "server_id": "lifecycle-server"}, {})
+    token = approval.approve(requested["data"]["approval_request_id"])["token"]
+
+    registry.add_server({
+        "server_id": "lifecycle-server",
+        "name": "lifecycle-server",
+        "config": {"transport": "stdio", "command": sys.executable, "args": ["changed.py"]},
+    })
+    stale = lifecycle.run({
+        "action": "disconnect",
+        "server_id": "lifecycle-server",
+        "approval_token": token,
+    }, {})
+    assert stale["status"] == "error"
+    assert stale["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
+    assert disconnected == []
+
+    registry.mark_connected("lifecycle-server", tools=["mcp.lifecycle.read"], approved=True)
+    fresh = lifecycle.run({"action": "disconnect", "server_id": "lifecycle-server"}, {})
+    fresh_token = approval.approve(fresh["data"]["approval_request_id"])["token"]
+    result = lifecycle.run({
+        "action": "disconnect",
+        "server_id": "lifecycle-server",
+        "approval_token": fresh_token,
+    }, {})
+    assert result["status"] == "ok"
+    server = registry.get_server("lifecycle-server")
+    assert server["status"] == "disconnected"
+    assert server["permissions"]["approved"] is True
+    assert disconnected == ["lifecycle-server"]
+    assert removed == ["lifecycle-server"]
+
+
+def test_mcp_remove_requires_confirmation_and_approved_request(monkeypatch):
+    from blocks.tool import mcp_registry as lifecycle
+    from domain.safety import approval
+    from domain.tool.mcp_registry import McpRegistry
+
+    registry = McpRegistry()
+    registry.add_server({
+        "server_id": "remove-server",
+        "name": "remove-server",
+        "config": {"transport": "stdio", "command": sys.executable},
+    })
+
+    class FakeClient:
+        def disconnect(self, server_name):
+            return None
+
+    class FakeToolRegistry:
+        def unregister_mcp_server(self, server_name):
+            return []
+
+    monkeypatch.setattr(lifecycle, "McpClient", FakeClient)
+    monkeypatch.setattr(lifecycle, "ToolRegistry", FakeToolRegistry)
+
+    missing_confirm = lifecycle.run({"action": "remove", "server_id": "remove-server"}, {})
+    assert missing_confirm["error"]["code"] == "CONFIRMATION_REQUIRED"
+    requested = lifecycle.run({"action": "remove", "server_id": "remove-server", "confirm": True}, {})
+    token = approval.approve(requested["data"]["approval_request_id"])["token"]
+    removed = lifecycle.run({
+        "action": "remove",
+        "server_id": "remove-server",
+        "confirm": True,
+        "approval_token": token,
+    }, {})
+    assert removed["status"] == "ok"
+    assert registry.get_server("remove-server") is None
