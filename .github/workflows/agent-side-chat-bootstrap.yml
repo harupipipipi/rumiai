@@ -1,0 +1,25 @@
+name: Agent side chat bootstrap
+
+on:
+  pull_request:
+    branches: [soon]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload implementation source
+        uses: actions/upload-artifact@v4
+        with:
+          name: side-chat-source
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            rumi_ai_1_10/ecosystem/defaultspack
+            rumi_ai_1_10/tests
+            rumi_ai_1_10/pyproject.toml
+            rumi_ai_1_10/pytest.ini
