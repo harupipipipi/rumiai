@@ -9,10 +9,11 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_root_entrypoint_targets_legacy_app_main():
+def test_root_entrypoint_targets_canonical_tobkiri_main():
     entrypoint = _read(ROOT / "rumi_ai" / "__main__.py")
-    assert "_LEGACY_ROOT" in entrypoint
-    assert "from rumi_ai_1_10.app import main" in entrypoint
+    assert "_RUNTIME_ROOT" in entrypoint
+    assert "from tobkiri.runtime import main" in entrypoint
+    assert "from rumi_ai_1_10.app import main" not in entrypoint
     assert 'if __name__ == "__main__":' in entrypoint
 
 
