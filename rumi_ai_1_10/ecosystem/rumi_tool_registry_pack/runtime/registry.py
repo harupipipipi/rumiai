@@ -222,7 +222,13 @@ def _definition(value: Mapping[str, Any]) -> dict[str, Any]:
         "description": str(value.get("description") or "")[:4000],
         "input_schema": _json_object(schema),
         "result_schema": _json_object(value.get("result_schema") or {}),
-        "execution": {"kind": kind, "contract_id": contract_id},
+        "execution": {
+            "kind": kind,
+            "contract_id": contract_id,
+            "provider_instance_id": str(
+                execution.get("provider_instance_id") or ""
+            ).strip(),
+        },
         "authority": _identifier(authority),
         "risk": str(value.get("risk") or "unknown"),
         "policy_tags": sorted({str(item) for item in value.get("policy_tags") or []}),
