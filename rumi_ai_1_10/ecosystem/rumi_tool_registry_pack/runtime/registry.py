@@ -228,6 +228,8 @@ def _definition(value: Mapping[str, Any]) -> dict[str, Any]:
             "provider_instance_id": str(
                 execution.get("provider_instance_id") or ""
             ).strip(),
+            "namespace": str(execution.get("namespace") or "").strip(),
+            "operation": str(execution.get("operation") or "").strip(),
         },
         "authority": _identifier(authority),
         "risk": str(value.get("risk") or "unknown"),
