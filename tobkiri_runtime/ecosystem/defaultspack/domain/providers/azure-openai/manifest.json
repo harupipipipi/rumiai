@@ -1,0 +1,69 @@
+{
+  "id": "azure-openai",
+  "provider_id": "azure-openai",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Azure OpenAI",
+  "description": "Azure OpenAI enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Azure OpenAI",
+    "kind": "enterprise",
+    "env_vars": [
+      "AZURE_OPENAI_API_KEY"
+    ],
+    "base_url_envs": [
+      "AZURE_OPENAI_ENDPOINT"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://example.openai.azure.com/openai/v1",
+    "default_model_for": {},
+    "identity_fields": [
+      "resource",
+      "deployment"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "azure-openai",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Azure OpenAI",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "openai_compatible",
+    "api_key_env": "AZURE_OPENAI_API_KEY",
+    "base_url_env": "AZURE_OPENAI_ENDPOINT",
+    "default_base_url": "https://example.openai.azure.com/openai/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "/openai/models?api-version=2024-10-21",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "resource",
+        "deployment"
+      ],
+      "source_docs": "https://learn.microsoft.com/en-us/rest/api/azureopenai/models/list?view=rest-azureopenai-2024-10-21"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "azure-openai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}

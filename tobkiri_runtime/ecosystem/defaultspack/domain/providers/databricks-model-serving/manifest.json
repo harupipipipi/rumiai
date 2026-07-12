@@ -1,0 +1,69 @@
+{
+  "id": "databricks-model-serving",
+  "provider_id": "databricks-model-serving",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Databricks Model Serving",
+  "description": "Databricks Model Serving enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Databricks Model Serving",
+    "kind": "enterprise",
+    "env_vars": [
+      "DATABRICKS_TOKEN"
+    ],
+    "base_url_envs": [
+      "DATABRICKS_HOST"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://example.databricks.com/serving-endpoints",
+    "default_model_for": {},
+    "identity_fields": [
+      "workspace",
+      "endpoint"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "databricks-model-serving",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Databricks Model Serving",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "openai_compatible",
+    "api_key_env": "DATABRICKS_TOKEN",
+    "base_url_env": "DATABRICKS_HOST",
+    "default_base_url": "https://example.databricks.com/serving-endpoints",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "/api/2.0/serving-endpoints",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "workspace",
+        "endpoint"
+      ],
+      "source_docs": "https://docs.databricks.com/aws/en/machine-learning/model-serving/manage-serving-endpoints"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "databricks-model-serving"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}
