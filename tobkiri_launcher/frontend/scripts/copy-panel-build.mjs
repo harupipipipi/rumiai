@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -17,6 +17,9 @@ export async function copyPanelBuild({
   await rm(panelDir, { recursive: true, force: true });
   await mkdir(panelDir, { recursive: true });
   await cp(distDir, panelDir, { recursive: true });
+  const indexPath = resolve(panelDir, "index.html");
+  const indexHtml = await readFile(indexPath, "utf8");
+  await writeFile(indexPath, indexHtml.replace(/\r\n?/g, "\n"), "utf8");
   return { distDir, panelDir };
 }
 
