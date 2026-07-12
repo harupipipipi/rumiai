@@ -23,11 +23,11 @@ def create_route_operation(client: Any):
         providers = providers if isinstance(providers, list) else []
         health = health if isinstance(health, Mapping) else {}
         requirements = requirements if isinstance(requirements, Mapping) else {}
-        provider_ids = {
-            str(item.get("provider_instance_id") or "")
+        provider_descriptors = [
+            dict(item)
             for item in providers
             if isinstance(item, Mapping)
-        }
+        ]
         candidates: list[dict[str, Any]] = []
         excluded: list[dict[str, str]] = []
         for model in models:
@@ -35,7 +35,7 @@ def create_route_operation(client: Any):
                 continue
             candidate, reason = _candidate(
                 model,
-                provider_ids,
+                provider_descriptors,
                 health,
                 requirements,
                 decision_time,
@@ -63,16 +63,20 @@ def create_route_operation(client: Any):
 
 def _candidate(
     model: Mapping[str, Any],
-    execution_providers: set[str],
+    execution_providers: list[Mapping[str, Any]],
     health: Mapping[str, Any],
     requirements: Mapping[str, Any],
     decision_time: float,
 ) -> tuple[dict[str, Any] | None, str]:
     model_id = str(model.get("model_id") or "").strip()
-    execution_id = str(model.get("execution_provider_instance_id") or "").strip()
     provider_id = str(model.get("provider_id") or "").strip()
-    if not model_id or execution_id not in execution_providers:
-        return None, "execution_provider_unresolved"
+    execution_id, execution_error = _execution_provider(
+        provider_id,
+        str(model.get("execution_provider_instance_id") or "").strip(),
+        execution_providers,
+    )
+    if not model_id or not execution_id:
+        return None, execution_error or "execution_provider_unresolved"
     if model.get("available", True) is False:
         return None, "model_unavailable"
     modalities = _strings(model.get("modalities"))
@@ -169,6 +173,37 @@ def _sort_key(
         str(candidate.get("provider_id") or ""),
         str(candidate.get("catalog_revision") or ""),
     )
+
+
+def _execution_provider(
+    provider_id: str,
+    hinted_provider_id: str,
+    providers: list[Mapping[str, Any]],
+) -> tuple[str, str]:
+    exact = []
+    wildcard = []
+    by_id = {}
+    for provider in providers:
+        instance_id = str(provider.get("provider_instance_id") or "")
+        if not instance_id:
+            continue
+        by_id[instance_id] = provider
+        keys = _strings(provider.get("routing_keys"))
+        if provider_id and provider_id in keys:
+            exact.append(instance_id)
+        if "*" in keys:
+            wildcard.append(instance_id)
+    if len(exact) == 1:
+        return exact[0], ""
+    if len(exact) > 1:
+        return "", "execution_provider_ambiguous"
+    if hinted_provider_id in by_id:
+        return hinted_provider_id, ""
+    if len(wildcard) == 1:
+        return wildcard[0], ""
+    if len(wildcard) > 1:
+        return "", "execution_provider_ambiguous"
+    return "", "execution_provider_unresolved"
 
 
 def _strings(value: Any) -> set[str]:

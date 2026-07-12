@@ -8,12 +8,12 @@
     "requires": []
   },
   "entrypoints": [
-    {"id": "ai-route", "contract_id": "rumi.service.ai.route.v1", "loader": "python", "module": "ecosystem.rumi_ai_routing_pack.runtime.router", "symbol": "create_route_operation", "artifact_hash": "sha256:68d1f67478780c1b960fb08e1807b9054b21e8f05922c3ea850ffe5a056952a5"}
+    {"id": "ai-route", "contract_id": "rumi.service.ai.route.v1", "loader": "python", "module": "ecosystem.rumi_ai_routing_pack.runtime.router", "symbol": "create_route_operation", "artifact_hash": "sha256:1c1a2206613d3466310d7c19ce59ac7dba5ef9e23d190fa572f0994086ba34a7"}
   ],
   "resources": [],
   "storage": [],
   "permissions": [{"capability": "ai.route", "access": "execute", "approval_required": false}],
-  "provenance": {"content_hash": "sha256:68d1f67478780c1b960fb08e1807b9054b21e8f05922c3ea850ffe5a056952a5", "build_identity": "rumi-ai-routing-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:1c1a2206613d3466310d7c19ce59ac7dba5ef9e23d190fa572f0994086ba34a7", "build_identity": "rumi-ai-routing-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {"from": ["defaultspack.ai_client.router", "rumi_ai_gateway_pack.runtime.gateway._candidate"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Select the pinned prior routing provider in the resolved profile."},
   "extensions": {"rumi.ai_routing.boundary": {"catalog_discovery": false, "provider_execution": false, "provider_pack_id_branches": false, "remote_capability_optimism": false}}
 }

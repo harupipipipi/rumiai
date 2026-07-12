@@ -57,3 +57,29 @@ def test_maximum_cost_rejects_unknown_cost() -> None:
 
     assert result["selected"] is None
     assert result["excluded"][0]["reason"] == "cost_unknown"
+
+
+def test_exact_routing_key_precedes_wildcard_without_core_branch() -> None:
+    result = create_route_operation(None)(
+        "route",
+        {
+            "models": [_model("human", provider_id="human-operator")],
+            "execution_providers": [
+                {
+                    "provider_instance_id": "provider.compatibility",
+                    "routing_keys": ["*"],
+                },
+                {
+                    "provider_instance_id": "provider.human-operator",
+                    "routing_keys": ["human-operator"],
+                },
+            ],
+            "requirements": {},
+            "decision_time": 1000.0,
+        },
+    )
+
+    assert (
+        result["selected"]["execution_provider_instance_id"]
+        == "provider.human-operator"
+    )

@@ -322,6 +322,13 @@ def _register_v3_contract_bindings(
             "trust_class": str(manifest.get("provenance", {}).get("trust_class") or "untrusted"),
             "isolation": str(provider.get("isolation") or loader),
             "required_capabilities": list(provider.get("required_capabilities") or []),
+            "routing_keys": sorted(
+                {
+                    str(value)
+                    for value in provider.get("routing_keys", [])
+                    if str(value).strip()
+                }
+            ),
             "operation": operation,
         }
         interface_registry.register(
