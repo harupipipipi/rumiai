@@ -36,38 +36,38 @@ def _mcp_config_path():
 
 
 def _load_saved_mcp_config(server_identifier):
-    registry_server = McpRegistry().get_server(server_identifier)
+    config_path = _mcp_config_path()
+    if config_path.is_file():
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = None
+        modern = raw.get("mcpServers", {}) if isinstance(raw, dict) else {}
+        if isinstance(modern, dict):
+            candidate = modern.get(server_identifier)
+            if isinstance(candidate, dict):
+                return dict(candidate)
+        servers = raw.get("servers", []) if isinstance(raw, dict) else raw
+        if isinstance(servers, dict):
+            servers = list(servers.values())
+        if isinstance(servers, list):
+            for server in servers:
+                if not isinstance(server, dict):
+                    continue
+                candidates = {
+                    str(server.get("server_id", "") or "").strip(),
+                    str(server.get("name", "") or "").strip(),
+                }
+                if server_identifier in candidates:
+                    return dict(server)
+    registry = McpRegistry()
+    get_server_config = getattr(registry, "get_server_config", None)
+    registry_config = get_server_config(server_identifier) if callable(get_server_config) else None
+    if registry_config:
+        return registry_config
+    registry_server = registry.get_server(server_identifier)
     if registry_server:
         return dict(registry_server.get("config") or {})
-    config_path = _mcp_config_path()
-    if not config_path.is_file():
-        return None
-    try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    if isinstance(raw, dict):
-        servers = raw.get("servers", [])
-    elif isinstance(raw, list):
-        servers = raw
-    else:
-        return None
-
-    if isinstance(servers, dict):
-        servers = list(servers.values())
-    if not isinstance(servers, list):
-        return None
-
-    for server in servers:
-        if not isinstance(server, dict):
-            continue
-        candidates = {
-            str(server.get("server_id", "") or "").strip(),
-            str(server.get("name", "") or "").strip(),
-        }
-        if server_identifier in candidates:
-            return dict(server)
     return None
 
 
@@ -206,6 +206,10 @@ def run(input_data, context):
     )
 
     mcp_client = McpClient()
+    registry = ToolRegistry()
+    unregister = getattr(registry, "unregister_mcp_server", None)
+    if callable(unregister):
+        unregister(server_name)
     try:
         tools_added = mcp_client.connect(server_name, effective_config)
     except Exception:
@@ -282,6 +286,7 @@ def run(input_data, context):
         OPERATION, RISK, approval_input, server_name=server_name, tools_added=tools_added
     )
     mcp_registry.mark_connected(server_name, tools=registered_tools, approved=True)
+    inspect = mcp_registry.inspect_server(server_name)
     return ok(
         {
             "server_id": str(effective_config.get("server_id", "") or server_name),
@@ -295,6 +300,7 @@ def run(input_data, context):
                 "transport": transport,
                 "config": dict(snapshot["review"]["config"]),
                 "config_digest": snapshot["config_digest"],
+                "inspect": inspect,
             },
         }
     )
