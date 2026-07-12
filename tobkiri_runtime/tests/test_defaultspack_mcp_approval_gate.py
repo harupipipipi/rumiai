@@ -362,3 +362,35 @@ def test_mcp_start_failure_is_recoverable_and_requires_fresh_approval(
     fresh = mcp_connect.run(args, {})
     assert fresh["data"]["approval_required"] is True
     assert fresh["data"]["approval_request_id"] != requested["data"]["approval_request_id"]
+
+
+def test_mcp_list_redacts_sensitive_runtime_registry_config(monkeypatch):
+    from blocks.tool import mcp_list
+
+    monkeypatch.setattr(
+        mcp_list.ToolRegistry,
+        "list_mcp_servers",
+        lambda _self: {
+            "qa-server": {
+                "server_id": "qa-server",
+                "env": {"API_TOKEN": "secret-value"},
+                "headers": {"Authorization": "Bearer secret-value"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mcp_list.McpClient,
+        "list_servers",
+        lambda _self: [{"name": "qa-server", "status": "connected", "tools": []}],
+    )
+    monkeypatch.setattr(mcp_list.McpClient, "get_server_tools", lambda _self, _name: [])
+    monkeypatch.setattr(mcp_list.McpRegistry, "get_server", lambda _self, _name: None)
+    monkeypatch.setattr(mcp_list.McpRegistry, "list_servers", lambda _self: [])
+
+    result = mcp_list.run({}, {})
+
+    assert result["status"] == "ok"
+    config = result["data"]["servers"][0]["registered_config"]
+    assert config["env"] == {"API_TOKEN": "<redacted>"}
+    assert config["headers"] == {"Authorization": "<redacted>"}
+    assert "secret-value" not in json.dumps(result)

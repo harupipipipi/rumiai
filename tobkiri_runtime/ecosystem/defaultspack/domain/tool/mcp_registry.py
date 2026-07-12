@@ -164,6 +164,11 @@ class McpRegistry:
         permissions = server.get("permissions") if isinstance(server, dict) else {}
         return bool(isinstance(permissions, dict) and permissions.get("approved"))
 
+    @staticmethod
+    def public_config(config: Any) -> dict[str, Any]:
+        """Return the client-safe representation of an MCP server config."""
+        return _public_config(config)
+
     def _read(self) -> dict[str, Any]:
         with self._lock:
             if not self.path.is_file():

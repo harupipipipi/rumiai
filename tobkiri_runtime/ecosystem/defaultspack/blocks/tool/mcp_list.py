@@ -29,7 +29,9 @@ def run(input_data, context):
     for srv in servers:
         server_name = srv.get("name", "")
         persistent = mcp_registry.get_server(server_name) or {}
-        registered_config = registry_servers.get(server_name, {}) or persistent.get("config", {})
+        registered_config = McpRegistry.public_config(
+            registry_servers.get(server_name, {}) or persistent.get("config", {})
+        )
         server_id = str(registered_config.get("server_id", "") or server_name)
         seen_server_ids.add(server_id)
         if requested_server and requested_server not in {server_name, server_id}:
@@ -79,7 +81,7 @@ def run(input_data, context):
                 "connected": False,
                 "tools": server.get("tools", []),
                 "tool_details": [],
-                "registered_config": server.get("config", {}),
+                "registered_config": McpRegistry.public_config(server.get("config", {})),
                 "permissions": server.get("permissions", {}),
             }
         )
