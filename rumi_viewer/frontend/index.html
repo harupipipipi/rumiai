@@ -38,8 +38,22 @@
         var mode = 'dark';
 
         try {
-          var storedTheme = localStorage.getItem('rumi-theme');
-          var storedMode = localStorage.getItem('rumi-color-mode');
+          var storedTheme = localStorage.getItem('tobkiri-theme');
+          var storedMode = localStorage.getItem('tobkiri-color-mode');
+          if (storedTheme === null) {
+            var legacyTheme = localStorage.getItem('rumi-theme');
+            if (themes[legacyTheme]) {
+              storedTheme = legacyTheme;
+              try { localStorage.setItem('tobkiri-theme', legacyTheme); } catch (error) {}
+            }
+          }
+          if (storedMode === null) {
+            var legacyMode = localStorage.getItem('rumi-color-mode');
+            if (legacyMode === 'light' || legacyMode === 'dark') {
+              storedMode = legacyMode;
+              try { localStorage.setItem('tobkiri-color-mode', legacyMode); } catch (error) {}
+            }
+          }
           if (themes[storedTheme]) theme = storedTheme;
           if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
         } catch (error) {

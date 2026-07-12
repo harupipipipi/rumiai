@@ -48,20 +48,35 @@ function getBrowserStorage(): AppearanceStorage | null {
   }
 }
 
-function readMigratedValue(storage: AppearanceStorage | null | undefined, canonicalKey: string, legacyKey: string): string | null {
+function readValidatedMigratedValue<T extends string>(
+  storage: AppearanceStorage | null | undefined,
+  canonicalKey: string,
+  legacyKey: string,
+  isValid: (value: string) => value is T,
+): T | null {
   const canonical = readStorageValue(storage, canonicalKey);
-  if (canonical !== null) return canonical;
+  if (canonical !== null) return isValid(canonical) ? canonical : null;
   const legacy = readStorageValue(storage, legacyKey);
-  if (legacy === null) return null;
-  try { storage?.setItem?.(canonicalKey, legacy); } catch { /* storage is optional */ }
+  if (legacy === null || !isValid(legacy)) return null;
+  try { storage?.setItem?.(canonicalKey, legacy); } catch { /* reads remain usable */ }
   return legacy;
 }
 
 export function readStoredAppearance(storage?: AppearanceStorage | null): Appearance {
   const effectiveStorage = storage === undefined ? getBrowserStorage() : storage;
   return {
-    theme: normalizeTheme(readMigratedValue(effectiveStorage, THEME_STORAGE_KEY, LEGACY_THEME_STORAGE_KEY)),
-    colorMode: normalizeColorMode(readMigratedValue(effectiveStorage, COLOR_MODE_STORAGE_KEY, LEGACY_COLOR_MODE_STORAGE_KEY)),
+    theme: normalizeTheme(readValidatedMigratedValue(
+      effectiveStorage,
+      THEME_STORAGE_KEY,
+      LEGACY_THEME_STORAGE_KEY,
+      (value): value is Theme => (VALID_THEMES as readonly string[]).includes(value),
+    )),
+    colorMode: normalizeColorMode(readValidatedMigratedValue(
+      effectiveStorage,
+      COLOR_MODE_STORAGE_KEY,
+      LEGACY_COLOR_MODE_STORAGE_KEY,
+      (value): value is ColorMode => value === 'light' || value === 'dark',
+    )),
   };
 }
 
