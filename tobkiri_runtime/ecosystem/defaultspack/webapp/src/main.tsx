@@ -1,6 +1,5 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import {
   cleanupLegacyApprovalCredentialsEarly,
@@ -12,10 +11,17 @@ cleanupLegacyApprovalCredentialsEarly();
 
 installGlobalClientDiagnostics();
 
+// Wave 3 compatibility projection. Product surfaces live in a separate chunk;
+// the root host bundle imports no feature screen. Wave 10 removes this alias
+// after every builtin screen is represented by a profile-scoped contribution.
+const CompatibilitySurface = lazy(() => import("./App"));
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <App />
+      <Suspense fallback={<main role="status">Loading selected interface…</main>}>
+        <CompatibilitySurface />
+      </Suspense>
     </AppErrorBoundary>
   </React.StrictMode>,
 );

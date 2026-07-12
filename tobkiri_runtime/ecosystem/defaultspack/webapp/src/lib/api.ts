@@ -1908,6 +1908,7 @@ export type SkillCatalogItem = {
 };
 
 export type UICatalog = {
+  dynamic_host?: import("../host/frontendContracts").FrontendCatalog | null;
   app?: {
     id: string;
     name: string;
