@@ -8,6 +8,7 @@ from _common import error, ok  # noqa: E402
 from domain.tool.permission_checker import PermissionChecker  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool.broker_contract_client import invoke as invoke_global_tool  # noqa: E402
 from domain.tool_policy.internal_context import (
     internal_tool_decision,
     sanitize_tool_context,
@@ -101,6 +102,32 @@ def run(input_data, context):
     allowlist = _effective_tool_allowlist(context)
     if allowlist and tool_name not in allowlist:
         return _blocked_by_profile_error(tool_name, context)
+
+    try:
+        global_result = invoke_global_tool(tool_name, arguments, context)
+    except Exception as exc:
+        from core_runtime.global_contract_dispatch import GlobalContractUnavailable
+
+        if not isinstance(exc, GlobalContractUnavailable):
+            return error("Global tool invocation failed", "GLOBAL_TOOL_ERROR")
+    else:
+        return ok(
+            {
+                "result": global_result.get("result"),
+                "is_error": bool(global_result.get("is_error")),
+                "widget": global_result.get("widget"),
+                "tool_name": global_result.get("tool_id") or tool_name,
+                "status": global_result.get("status"),
+                "error": global_result.get("error"),
+                "approval": global_result.get("approval"),
+                "permission": {
+                    "action": "global_broker",
+                    "allowed": not bool(global_result.get("is_error")),
+                    "matched_by": "resolved_profile_contract",
+                    "matched_value": "rumi.service.tool.invoke.v1",
+                },
+            }
+        )
 
     sealed_decision = internal_tool_decision(context)
     clean_context = sanitize_tool_context(context)
