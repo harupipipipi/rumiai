@@ -18,6 +18,7 @@ import {
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
 import { classifyChatLink, openChatLink } from "../lib/chatLinkPolicy";
 import { classifyUntrustedImageUrl, extractImageBlockUrl, imageBlockAttachmentId } from "../lib/untrustedImagePolicy";
+import { safeUnknownBlockDetails } from "../lib/chatBlockPresentation";
 import type { ChatMessagesRendererProps } from "./types";
 
 export { AUTHORITY_FOLLOWUP_TEXT, sanitizeAssistantAuthorityBoilerplate };
@@ -507,12 +508,26 @@ function MessageBlock({
     return <UntrustedImageBlock block={block} blockType={blockType} onOpenImagePreview={onOpenImagePreview} />;
   }
 
-  if (unknownStrategy === "hidden") return null;
-  if (unknownStrategy === "text") return <p>{JSON.stringify(block)}</p>;
   return (
-    <pre className="max-w-full overflow-x-auto overflow-y-auto whitespace-pre rounded-lg bg-zinc-900 p-3 font-mono text-[11px] text-zinc-400">
-      {JSON.stringify(block, null, 2)}
-    </pre>
+    <section
+      className="max-w-full rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-amber-50"
+      data-testid="unsupported-chat-block"
+      role="status"
+      aria-label="未対応のメッセージ内容"
+    >
+      <p className="text-sm font-medium">この内容は現在のRumiでは表示できません</p>
+      <p className="mt-1 text-xs leading-5 text-amber-100/80">
+        Rumiを更新して再試行するか、安全な添付ファイルとしてダウンロードできるか送信元に確認してください。
+      </p>
+      {unknownStrategy === "debug" ? (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer font-medium">開発者向けの制限済み情報</summary>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/25 p-2 font-mono text-[11px] text-amber-100/75">
+            {safeUnknownBlockDetails(block)}
+          </pre>
+        </details>
+      ) : null}
+    </section>
   );
 }
 
