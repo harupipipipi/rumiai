@@ -1,6 +1,6 @@
-import { version } from '../../../package.json';
+import packageMetadata from '../../../package.json' with { type: 'json' };
 
-export const RUMI_VIEWER_VERSION = version;
+export const RUMI_VIEWER_VERSION = packageMetadata.version;
 
 export function ViewerVersionLabel() {
   return (
