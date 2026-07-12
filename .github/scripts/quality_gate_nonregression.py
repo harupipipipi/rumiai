@@ -85,7 +85,7 @@ def _check_non_regression(name: str, base_count: int, head_count: int) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-ref", default="origin/master")
-    parser.add_argument("--package-dir", default="rumi_ai_1_10")
+    parser.add_argument("--package-dir", default="tobkiri_runtime")
     parser.add_argument("--ruff-target", action="append", default=[])
     parser.add_argument("--mypy-target", action="append", default=[])
     args = parser.parse_args()
