@@ -135,15 +135,16 @@ class ToolDefinitionRegistry:
         expected_source_hash: str,
     ) -> dict[str, Any]:
         """Atomically import one deterministic legacy registry snapshot."""
-        normalized = [_definition(item) for item in definitions]
-        normalized.sort(key=lambda item: item["tool_id"])
-        normalized_aliases = {
-            _identifier(alias): _identifier(target)
-            for alias, target in aliases.items()
+        raw_definitions = [dict(item) for item in definitions]
+        raw_definitions.sort(
+            key=lambda item: str(item.get("tool_id") or item.get("name") or "")
+        )
+        raw_aliases = {
+            str(alias): str(target) for alias, target in aliases.items()
         }
         source = {
-            "definitions": normalized,
-            "aliases": dict(sorted(normalized_aliases.items())),
+            "definitions": raw_definitions,
+            "aliases": dict(sorted(raw_aliases.items())),
         }
         source_hash = hashlib.sha256(
             json.dumps(source, sort_keys=True, separators=(",", ":")).encode(
@@ -152,12 +153,23 @@ class ToolDefinitionRegistry:
         ).hexdigest()
         if source_hash != str(expected_source_hash or ""):
             raise RuntimeError("tool registry migration source changed")
+        normalized = [_definition(item) for item in raw_definitions]
+        normalized.sort(key=lambda item: item["tool_id"])
+        normalized_aliases = {
+            _identifier(alias): _identifier(target)
+            for alias, target in raw_aliases.items()
+        }
         with NamedLock(self.lock_root, "tool-definitions"):
             if self.path.is_file():
                 raise RuntimeError("tool registry target is already initialized")
             tool_ids = {item["tool_id"] for item in normalized}
             if any(target not in tool_ids for target in normalized_aliases.values()):
                 raise ValueError("tool alias target is missing")
+            if any(
+                alias in tool_ids and alias != target
+                for alias, target in normalized_aliases.items()
+            ):
+                raise ValueError("tool alias collides with a definition")
             migration_id = f"migration-{uuid.uuid4().hex}"
             backup = self.backup_root / migration_id
             backup.mkdir(parents=True, exist_ok=False)

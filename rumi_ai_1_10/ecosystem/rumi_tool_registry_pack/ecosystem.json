@@ -11,6 +11,6 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:81635555a33aacff2f31115c8aa52ce82aaff4136fe75811e1c62df60287d1cf", "build_identity": "rumi-tool-registry-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:69a6db32cfa9c9de05955b11b8af4469e29f4ddc57230533693f17e8bcc7a71c", "build_identity": "rumi-tool-registry-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {"authoritative_owner": true, "owner_surfaces": ["tool_definitions", "tool_aliases"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"executes_tools": false, "grants_authority": false}}
 }
