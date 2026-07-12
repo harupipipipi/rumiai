@@ -1132,6 +1132,27 @@ export type P2PStatusResponse = {
   approved_peer_count: number;
 };
 
+export type MobilePairingStatus = {
+  pairing_id: string;
+  status: string;
+  expires_at?: number;
+  token_pickup_consumed_at?: number;
+};
+
+export type MobilePairingReview = {
+  pairing: { pairing_id: string; status: string; expires_at: number; claimed_at?: number };
+  claim: {
+    device_label: string;
+    device_id_preview?: string;
+    requested_scopes: string[];
+    allowed_scopes: string[];
+    verification_code?: string;
+  };
+  claim_hash: string;
+};
+
+export type MobilePairingApprovePayload = { claim_hash: string; scopes?: string[] };
+
 export type ConversationListOptions = {
   tag?: string;
   tags?: string[];
@@ -4169,6 +4190,34 @@ export const api = {
     return request<{ transfer: CredentialTransfer }>(`/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/revoke`, {
       method: "POST", body: JSON.stringify({ reason: "revoked by PC user" }),
     });
+  },
+
+  getMobilePairingStatus(pairingId: string) {
+    return request<MobilePairingStatus>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/status`,
+      { cache: "no-store" },
+    );
+  },
+
+  getMobilePairingReview(pairingId: string) {
+    return request<MobilePairingReview>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/review`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveMobilePairing(pairingId: string, payload: MobilePairingApprovePayload) {
+    return request<{ pairing?: MobilePairingStatus }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+
+  rejectMobilePairing(pairingId: string, reason?: string) {
+    return request<{ pairing?: MobilePairingStatus }>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    );
   },
 
   sendP2PMessage(peerId: string, payload: {

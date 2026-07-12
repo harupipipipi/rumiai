@@ -902,6 +902,21 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "mobile",
+                "label": "Mobile",
+                "description": "スマホ接続要求をauthoritative pairing recordで確認します。",
+                "fields": [
+                    {
+                        "id": "pairing_review_id",
+                        "label": "Mobile Pairing Review",
+                        "type": "mobile_pairing_review",
+                        "renderer": "MobilePairingApproval",
+                        "default": "",
+                        "help": "PCで作成したpairing IDを入力し、保留・拒否・キャンセルを明示的に選びます。",
+                    },
+                ],
+            },
+            {
                 "id": "calendar",
                 "label": "Calendar",
                 "description": "カレンダー画面のクリック追加、週表示、予定色を調整します。",
