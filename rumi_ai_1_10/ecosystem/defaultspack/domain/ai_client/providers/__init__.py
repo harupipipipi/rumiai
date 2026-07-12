@@ -1355,6 +1355,11 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
         )
     if entrypoint:
         provider_cls = _import_provider_entrypoint(entrypoint)
+        if bool(getattr(provider_cls, "manifest_factory", False)):
+            return provider_cls.from_manifest(
+                manifest,
+                model_manifests=_load_model_manifests(provider_id),
+            )
         return provider_cls()
     return None
 
