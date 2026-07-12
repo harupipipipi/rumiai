@@ -39,7 +39,7 @@ export function CompanyP2PPanel({
       {!enabled && (
         <p role="status" className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-200/80">
           {status
-            ? "P2P is disabled. Enable it in backend configuration before creating pairing state or sending messages."
+            ? "P2P is disabled. Set RUMI_DEFAULTSPACK_P2P_ENABLED=1 and restart the backend before creating pairing state or sending messages."
             : "P2P status is unavailable. Pairing and messaging stay disabled until status loads."}
         </p>
       )}
