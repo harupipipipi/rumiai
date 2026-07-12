@@ -40,8 +40,30 @@ class _Response:
 
 
 def _manifest(provider_id: str):
-    payload = json.loads((DEFAULTSPACK / "domain" / "providers" / provider_id / "manifest.json").read_text(encoding="utf-8"))
+    directory = "gemini" if provider_id == "google" else provider_id
+    payload = json.loads(
+        (
+            DEFAULTSPACK / "domain" / "providers" / directory / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
     return payload["provider_manifest"]
+
+
+def test_all_direct_hosted_providers_have_one_canonical_executable_component():
+    legacy_root = (
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "extensions"
+        / "llm"
+        / "providers"
+    )
+    for provider_id in DIRECT_HOSTED_IDS:
+        manifest = _manifest(provider_id)
+        assert manifest["id"] == provider_id
+        assert manifest["supports_invoke"] is True
+        assert manifest["catalog_only"] is False
+        assert not (legacy_root / provider_id / "manifest.json").exists()
 
 
 def test_direct_hosted_matrix_has_one_enabled_owner_and_no_invented_defaults():
