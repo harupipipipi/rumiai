@@ -46,6 +46,7 @@ def run(input_data, context):
             {
                 "request_id": request_id,
                 "messages": messages,
+                "model_reference": model,
                 "tools": tools,
                 "parameters": params,
                 "requirements": {

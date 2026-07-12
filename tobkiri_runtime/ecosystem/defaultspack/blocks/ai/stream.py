@@ -29,6 +29,7 @@ def run(input_data, context):
         chunks = stream(
             {
                 "messages": messages,
+                "model_reference": model,
                 "tools": tools,
                 "parameters": params,
                 "requirements": {

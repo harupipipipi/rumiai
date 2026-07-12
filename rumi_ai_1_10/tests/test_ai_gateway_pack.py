@@ -10,6 +10,7 @@ from ecosystem.rumi_ai_gateway_pack.runtime.gateway import (
     CATALOG_CONTRACT,
     GENERATE_PROVIDER_CONTRACT,
     HEALTH_CONTRACT,
+    MODEL_PROFILE_CONTRACT,
     FAILOVER_CONTRACT,
     ROUTING_CONTRACT,
     REQUEST_PREPARE_CONTRACT,
@@ -97,6 +98,17 @@ class FakeContractClient:
             return create_prepare_operation(None)(operation, payload)
         if contract_id == FAILOVER_CONTRACT:
             return create_failover_operation(None)(operation, payload)
+        if contract_id == MODEL_PROFILE_CONTRACT:
+            if payload.get("identifier") != "saved-default":
+                raise GlobalContractInvocationError("unknown", "unknown profile")
+            return {
+                "resolved_profile_id": "saved-default",
+                "profile": {
+                    "model_id": "model-a",
+                    "requirements": {"thinking": True},
+                    "parameters": {"temperature": 0.1},
+                },
+            }
         if contract_id == GENERATE_PROVIDER_CONTRACT:
             if self.fail_first and provider_instance_id == "adapter-a":
                 raise GlobalContractInvocationError(
@@ -254,3 +266,21 @@ def test_gateway_rejects_raw_credential_value() -> None:
         )
 
     assert captured.value.code == "denied"
+
+
+def test_saved_model_reference_resolves_profile_before_routing() -> None:
+    client = FakeContractClient()
+    result = create_generate_operation(client)(
+        "generate",
+        {
+            "model_profile_id": "saved-default",
+            "messages": [],
+            "requirements": {"modalities": ["text", "image"]},
+        },
+    )
+
+    assert result["model_id"] == "model-a"
+    provider_call = next(
+        item for item in client.calls if item[0] == GENERATE_PROVIDER_CONTRACT
+    )
+    assert provider_call[3]["parameters"]["temperature"] == 0.1

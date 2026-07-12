@@ -11,6 +11,6 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:ac0a26fc6dbce4d7baf68ecb17c18c5a96c4c1442b409d34c9ca2fb1ae2bd508", "build_identity": "rumi-ai-pipeline-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:d6dd88530a12991bc3794a4b918b321dd66e52bad3f41511780d3e0ae47322f7", "build_identity": "rumi-ai-pipeline-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {"authoritative_owner": true, "owner_surfaces": ["ai_request_normalization", "ai_failover_policy"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"network": false, "raw_credentials": false, "tool_replay": false, "unbound_retry": false}}
 }

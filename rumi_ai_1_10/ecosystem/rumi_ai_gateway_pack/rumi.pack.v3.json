@@ -106,6 +106,12 @@
         "version_range": ">=1.0.0 <2.0.0",
         "cardinality": "one",
         "optional": false
+      },
+      {
+        "id": "rumi.resource.ai.model.profile.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
       }
     ]
   },
@@ -116,7 +122,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
       "symbol": "create_generate_operation",
-      "artifact_hash": "sha256:daf403fc6001ea68429cccfbb1095ef9a25a8dddcf18e0dfd675c71ecec8d9f5"
+      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
     },
     {
       "id": "ai-gateway-stream",
@@ -124,7 +130,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
       "symbol": "create_stream_operation",
-      "artifact_hash": "sha256:daf403fc6001ea68429cccfbb1095ef9a25a8dddcf18e0dfd675c71ecec8d9f5"
+      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
     },
     {
       "id": "ai-gateway-routing-diagnostics",
@@ -132,7 +138,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
       "symbol": "create_routing_diagnostics_operation",
-      "artifact_hash": "sha256:daf403fc6001ea68429cccfbb1095ef9a25a8dddcf18e0dfd675c71ecec8d9f5"
+      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
     }
   ],
   "resources": [],

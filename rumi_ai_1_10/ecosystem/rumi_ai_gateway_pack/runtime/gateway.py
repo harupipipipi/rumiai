@@ -24,6 +24,7 @@ STREAM_NORMALIZE_CONTRACT = "rumi.service.ai.stream.normalize.v1"
 TOOL_BRIDGE_CONTRACT = "rumi.service.ai.tool_intent.normalize.v1"
 REQUEST_PREPARE_CONTRACT = "rumi.service.ai.request.prepare.v1"
 FAILOVER_CONTRACT = "rumi.service.ai.failover.decide.v1"
+MODEL_PROFILE_CONTRACT = "rumi.resource.ai.model.profile.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -127,6 +128,7 @@ def _invoke(
             "invalid_response", "AI pipeline returned an invalid request"
         )
     request = dict(prepared)
+    _resolve_model_reference(client, request)
     request_id = str(request["request_id"])
     deadline = float(request["deadline"])
     requirement = _requirement(request)
@@ -158,6 +160,11 @@ def _invoke(
             selected=None,
             policy_revision=str(request.get("policy_revision") or ""),
         )
+        if request.get("model_profile_id") or request.get("model_reference"):
+            raise GlobalContractInvocationError(
+                "unresolved_profile",
+                "saved model reference has no selected executable provider",
+            )
         raise GlobalContractInvocationError(
             "capability_mismatch",
             "no selected model satisfies the request requirements",
@@ -324,6 +331,82 @@ def _requirement(request: Mapping[str, Any]) -> RouteRequirement:
             _optional_float(requirement.get("health_max_age")) or 60.0,
         ),
     )
+
+
+def _resolve_model_reference(
+    client: GlobalContractClient,
+    request: dict[str, Any],
+) -> None:
+    explicit = str(request.get("model_profile_id") or "").strip()
+    legacy = str(request.get("model_reference") or "").strip()
+    identifier = explicit or legacy
+    if not identifier:
+        return
+    try:
+        resolved = client.invoke(
+            MODEL_PROFILE_CONTRACT,
+            "resolve",
+            {"identifier": identifier},
+        )
+    except GlobalContractInvocationError:
+        if explicit:
+            raise
+        requirements = dict(request.get("requirements") or {})
+        requirements.setdefault("preferred_model_id", legacy)
+        request["requirements"] = requirements
+        return
+    profile = resolved.get("profile") if isinstance(resolved, Mapping) else None
+    if not isinstance(profile, Mapping):
+        raise GlobalContractInvocationError(
+            "unresolved_profile",
+            "model profile owner returned an invalid record",
+        )
+    request["model_profile_id"] = str(
+        resolved.get("resolved_profile_id") or identifier
+    )
+    request["requirements"] = _merge_requirements(
+        profile.get("requirements"),
+        request.get("requirements"),
+        model_id=str(profile.get("model_id") or ""),
+    )
+    parameters = dict(profile.get("parameters") or {})
+    parameters.update(dict(request.get("parameters") or {}))
+    request["parameters"] = parameters
+    if request.get("credential_handle") is None:
+        request["credential_handle"] = profile.get("credential_handle")
+
+
+def _merge_requirements(
+    profile_value: Any,
+    request_value: Any,
+    *,
+    model_id: str,
+) -> dict[str, Any]:
+    profile = dict(profile_value) if isinstance(profile_value, Mapping) else {}
+    request = dict(request_value) if isinstance(request_value, Mapping) else {}
+    result = {**profile, **request}
+    for key in ("modalities", "capabilities"):
+        values = _strings(profile.get(key)) | _strings(request.get(key))
+        if values:
+            result[key] = sorted(values)
+    for key in ("tool_calling", "thinking"):
+        result[key] = bool(profile.get(key)) or bool(request.get(key))
+    result["minimum_context"] = max(
+        int(profile.get("minimum_context") or 0),
+        int(request.get("minimum_context") or 0),
+    )
+    costs = [
+        value
+        for value in (
+            _optional_float(profile.get("maximum_cost")),
+            _optional_float(request.get("maximum_cost")),
+        )
+        if value is not None
+    ]
+    if costs:
+        result["maximum_cost"] = min(costs)
+    result.setdefault("preferred_model_id", model_id)
+    return result
 
 
 def _health(client: GlobalContractClient) -> dict[str, dict[str, Any]]:

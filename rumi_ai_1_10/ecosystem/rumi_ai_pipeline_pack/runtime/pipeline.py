@@ -72,6 +72,7 @@ def create_prepare_operation(
             "policy_revision": str(payload.get("policy_revision") or ""),
             "conversation_id": payload.get("conversation_id"),
             "model_profile_id": payload.get("model_profile_id"),
+            "model_reference": payload.get("model_reference"),
         }
 
     return operation
