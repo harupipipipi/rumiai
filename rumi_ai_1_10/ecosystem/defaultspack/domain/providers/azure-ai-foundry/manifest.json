@@ -1,0 +1,69 @@
+{
+  "id": "azure-ai-foundry",
+  "provider_id": "azure-ai-foundry",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Azure AI Foundry",
+  "description": "Azure AI Foundry enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Azure AI Foundry",
+    "kind": "enterprise",
+    "env_vars": [
+      "AZURE_AI_FOUNDRY_API_KEY"
+    ],
+    "base_url_envs": [
+      "AZURE_AI_FOUNDRY_ENDPOINT"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://example.services.ai.azure.com/models",
+    "default_model_for": {},
+    "identity_fields": [
+      "project",
+      "deployment"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "azure-ai-foundry",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Azure AI Foundry",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "openai_compatible",
+    "api_key_env": "AZURE_AI_FOUNDRY_API_KEY",
+    "base_url_env": "AZURE_AI_FOUNDRY_ENDPOINT",
+    "default_base_url": "https://example.services.ai.azure.com/models",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "/models",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "project",
+        "deployment"
+      ],
+      "source_docs": "https://learn.microsoft.com/azure/ai-foundry/model-inference/reference/reference-model-inference-api"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "azure-ai-foundry"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}

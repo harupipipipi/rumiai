@@ -1,0 +1,71 @@
+{
+  "id": "aws-bedrock",
+  "provider_id": "aws-bedrock",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Amazon Bedrock",
+  "description": "Amazon Bedrock enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Amazon Bedrock",
+    "kind": "enterprise",
+    "env_vars": [
+      "AWS_PROFILE"
+    ],
+    "base_url_envs": [
+      "AWS_REGION"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "control-plane://aws-bedrock",
+    "default_model_for": {},
+    "identity_fields": [
+      "account",
+      "region",
+      "inference_profile"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "aws-bedrock",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Amazon Bedrock",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "bedrock_converse",
+    "api_key_env": "AWS_PROFILE",
+    "base_url_env": "AWS_REGION",
+    "default_base_url": "control-plane://aws-bedrock",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "ListFoundationModels+ListInferenceProfiles",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "account",
+        "region",
+        "inference_profile"
+      ],
+      "source_docs": "https://docs.aws.amazon.com/bedrock/latest/userguide/models-get-info.html"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "aws-bedrock"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}

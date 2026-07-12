@@ -1,0 +1,69 @@
+{
+  "id": "ibm-watsonx",
+  "provider_id": "ibm-watsonx",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "IBM watsonx.ai",
+  "description": "IBM watsonx.ai enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "IBM watsonx.ai",
+    "kind": "enterprise",
+    "env_vars": [
+      "WATSONX_API_KEY"
+    ],
+    "base_url_envs": [
+      "WATSONX_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "control-plane://watsonx",
+    "default_model_for": {},
+    "identity_fields": [
+      "project_or_space",
+      "region"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "ibm-watsonx",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "IBM watsonx.ai",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "watsonx_native",
+    "api_key_env": "WATSONX_API_KEY",
+    "base_url_env": "WATSONX_URL",
+    "default_base_url": "control-plane://watsonx",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "/ml/v1/foundation_model_specs",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "project_or_space",
+        "region"
+      ],
+      "source_docs": "https://www.ibm.com/docs/en/watsonx/saas?topic=models-get-model-information-code"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "ibm-watsonx"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}

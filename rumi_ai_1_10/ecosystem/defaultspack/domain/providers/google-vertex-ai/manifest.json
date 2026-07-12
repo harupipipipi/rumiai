@@ -1,0 +1,71 @@
+{
+  "id": "google-vertex-ai",
+  "provider_id": "google-vertex-ai",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Google Vertex AI",
+  "description": "Google Vertex AI enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Google Vertex AI",
+    "kind": "enterprise",
+    "env_vars": [
+      "GOOGLE_APPLICATION_CREDENTIALS"
+    ],
+    "base_url_envs": [
+      "GOOGLE_CLOUD_LOCATION"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "control-plane://vertex-ai",
+    "default_model_for": {},
+    "identity_fields": [
+      "project",
+      "location",
+      "endpoint"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "google-vertex-ai",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Google Vertex AI",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "google_native",
+    "api_key_env": "GOOGLE_APPLICATION_CREDENTIALS",
+    "base_url_env": "GOOGLE_CLOUD_LOCATION",
+    "default_base_url": "control-plane://vertex-ai",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "projects.locations.publishers.models",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "project",
+        "location",
+        "endpoint"
+      ],
+      "source_docs": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "google-vertex-ai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}
