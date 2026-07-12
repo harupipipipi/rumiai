@@ -212,6 +212,9 @@ def _definition(value: Mapping[str, Any]) -> dict[str, Any]:
     ).strip()
     if not contract_id:
         raise ValueError("tool execution contract_id is required")
+    authority = str(value.get("authority") or "").strip()
+    if not authority:
+        raise ValueError("tool authority operation is required")
     aliases = value.get("aliases") if isinstance(value.get("aliases"), list) else []
     normalized = {
         "tool_id": tool_id,
@@ -220,6 +223,7 @@ def _definition(value: Mapping[str, Any]) -> dict[str, Any]:
         "input_schema": _json_object(schema),
         "result_schema": _json_object(value.get("result_schema") or {}),
         "execution": {"kind": kind, "contract_id": contract_id},
+        "authority": _identifier(authority),
         "risk": str(value.get("risk") or "unknown"),
         "policy_tags": sorted({str(item) for item in value.get("policy_tags") or []}),
         "aliases": sorted({_identifier(item) for item in aliases}),
