@@ -166,6 +166,7 @@ def _invoke(
     invocation = {
         "request_id": request_id,
         "model_id": selected.model_id,
+        "provider_id": str(selected.raw.get("provider_id") or ""),
         "messages": request.get("messages") or [],
         "input": request.get("input"),
         "parameters": dict(request.get("parameters") or {}),
@@ -182,6 +183,10 @@ def _invoke(
     replay_safe = bool(request.get("idempotency_key")) and not invocation["tools"]
     for attempt_number, attempt_candidate in enumerate(ordered, 1):
         invocation["attempt"] = attempt_number
+        invocation["model_id"] = attempt_candidate.model_id
+        invocation["provider_id"] = str(
+            attempt_candidate.raw.get("provider_id") or ""
+        )
         try:
             value = client.invoke(
                 provider_contract,
@@ -386,7 +391,9 @@ def _candidate(
     input_cost = _optional_float(raw.get("input_cost"))
     output_cost = _optional_float(raw.get("output_cost"))
     if requirement.maximum_cost is not None:
-        cost = (input_cost or 0.0) + (output_cost or 0.0)
+        if input_cost is None or output_cost is None:
+            return None, "cost_unknown"
+        cost = input_cost + output_cost
         if cost > requirement.maximum_cost:
             return None, "cost_policy_mismatch"
     return Candidate(
@@ -425,7 +432,7 @@ def _candidate_sort_key(
         preferred_provider,
         preferred_model,
         health_order.get(candidate.health, 3),
-        -candidate.priority,
+        candidate.priority,
         candidate.input_cost if candidate.input_cost is not None else float("inf"),
         candidate.output_cost if candidate.output_cost is not None else float("inf"),
         candidate.model_id,

@@ -74,7 +74,7 @@ def _load_catalog() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                     provider_metadata.get("catalog_features")
                     or manifest.get("catalog_features")
                 ),
-                "execution_provider_instance_id": f"provider.{provider_id}",
+                "execution_provider_instance_id": "provider.compatibility",
                 "available": bool(provider_manifest.get("enabled", True)),
                 "catalog_revision": CATALOG_REVISION,
         }
@@ -101,7 +101,7 @@ def _load_catalog() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "display_name": str(manifest.get("display_name") or provider_id),
             "kind": str(manifest.get("kind") or "unknown"),
             "capabilities": _strings(manifest.get("catalog_features")),
-            "execution_provider_instance_id": f"provider.{provider_id}",
+            "execution_provider_instance_id": "provider.compatibility",
             "available": bool(manifest.get("enabled", True)),
             "catalog_revision": CATALOG_REVISION,
         }
@@ -146,7 +146,7 @@ def _model(
     return {
         "model_id": raw_model_id,
         "provider_id": provider_id,
-        "execution_provider_instance_id": f"provider.{provider_id}",
+        "execution_provider_instance_id": "provider.compatibility",
         "display_name": str(value.get("display_name") or raw_model_id),
         "capabilities": capabilities,
         "modalities": modalities,
