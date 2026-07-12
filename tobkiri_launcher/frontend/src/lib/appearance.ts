@@ -1,4 +1,4 @@
-export const VALID_THEMES = ['Rumi', 'Minimal', 'Standard', 'Rounded'] as const;
+export const VALID_THEMES = ['Minimal', 'Rounded'] as const;
 export type Theme = (typeof VALID_THEMES)[number];
 
 export const VALID_COLOR_MODES = ['light', 'dark'] as const;
@@ -14,7 +14,9 @@ export interface Appearance {
   colorMode: ColorMode;
 }
 
-export const THEME_CLASS_NAMES = VALID_THEMES.map(themeClassName);
+// Remove legacy classes too so a stored Rumi/Standard selection cannot leave
+// stale styling on the document after it migrates to Rounded.
+export const THEME_CLASS_NAMES = ['theme-rumi', 'theme-minimal', 'theme-standard', 'theme-rounded'];
 
 export function themeClassName(theme: Theme): string {
   return `theme-${theme.toLowerCase()}`;
@@ -23,7 +25,7 @@ export function themeClassName(theme: Theme): string {
 export function normalizeTheme(value: unknown): Theme {
   return typeof value === 'string' && (VALID_THEMES as readonly string[]).includes(value)
     ? (value as Theme)
-    : 'Rumi';
+    : 'Rounded';
 }
 
 export function normalizeColorMode(value: unknown): ColorMode {
@@ -64,13 +66,19 @@ function readValidatedMigratedValue<T extends string>(
 
 export function readStoredAppearance(storage?: AppearanceStorage | null): Appearance {
   const effectiveStorage = storage === undefined ? getBrowserStorage() : storage;
+  const canonicalTheme = readStorageValue(effectiveStorage, THEME_STORAGE_KEY);
+  const legacyTheme = canonicalTheme === null
+    ? readStorageValue(effectiveStorage, LEGACY_THEME_STORAGE_KEY)
+    : null;
+  const storedTheme = canonicalTheme ?? legacyTheme;
+  const theme = normalizeTheme(storedTheme);
+  if (storedTheme !== null && storedTheme !== theme) {
+    try { effectiveStorage?.setItem?.(THEME_STORAGE_KEY, theme); } catch { /* reads remain usable */ }
+  } else if (canonicalTheme === null && legacyTheme !== null) {
+    try { effectiveStorage?.setItem?.(THEME_STORAGE_KEY, theme); } catch { /* reads remain usable */ }
+  }
   return {
-    theme: normalizeTheme(readValidatedMigratedValue(
-      effectiveStorage,
-      THEME_STORAGE_KEY,
-      LEGACY_THEME_STORAGE_KEY,
-      (value): value is Theme => (VALID_THEMES as readonly string[]).includes(value),
-    )),
+    theme,
     colorMode: normalizeColorMode(readValidatedMigratedValue(
       effectiveStorage,
       COLOR_MODE_STORAGE_KEY,

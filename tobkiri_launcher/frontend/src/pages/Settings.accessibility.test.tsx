@@ -82,7 +82,8 @@ test('Settings exposes field names and visual selector state in English and Japa
       const themeGroup = page.container.querySelector('[aria-labelledby="settings-style-theme-label"]');
       assert.equal(colorGroup?.querySelectorAll('button[aria-pressed]').length, 2);
       assert.equal(colorGroup?.querySelectorAll('button[aria-pressed="true"]').length, 1);
-      assert.equal(themeGroup?.querySelectorAll('button[aria-pressed]').length, 4);
+      const themeButtons = Array.from(themeGroup?.querySelectorAll<HTMLButtonElement>('button[aria-pressed]') ?? []);
+      assert.deepEqual(themeButtons.map(button => button.textContent?.trim()), ['Rounded', 'Minimal']);
       assert.equal(themeGroup?.querySelectorAll('button[aria-pressed="true"]').length, 1);
     } finally {
       await page.cleanup();

@@ -57,7 +57,9 @@ function fakeRoot() {
 
 test('appearance normalization falls back to the startup-safe defaults', () => {
   assert.equal(normalizeTheme('Rounded'), 'Rounded');
-  assert.equal(normalizeTheme('Unknown'), 'Rumi');
+  assert.equal(normalizeTheme('Rumi'), 'Rounded');
+  assert.equal(normalizeTheme('Standard'), 'Rounded');
+  assert.equal(normalizeTheme('Unknown'), 'Rounded');
   assert.equal(normalizeColorMode('light'), 'light');
   assert.equal(normalizeColorMode('sepia'), 'dark');
 });
@@ -81,13 +83,13 @@ test('legacy appearance keys migrate without deletion and remain idempotent', ()
 
 test('malformed legacy appearance values are not copied', () => {
   const { storage, data } = fakeStorage({ 'rumi-theme': 'Bogus', 'rumi-color-mode': 'sepia' });
-  assert.deepEqual(readStoredAppearance(storage), { theme: 'Rumi', colorMode: 'dark' });
-  assert.equal(data.has('tobkiri-theme'), false);
+  assert.deepEqual(readStoredAppearance(storage), { theme: 'Rounded', colorMode: 'dark' });
+  assert.equal(data.get('tobkiri-theme'), 'Rounded');
   assert.equal(data.has('tobkiri-color-mode'), false);
 });
 
 test('appearance migration falls back safely when storage access throws', () => {
-  assert.deepEqual(readStoredAppearance(fakeStorage({}, { throwGet: true }).storage), { theme: 'Rumi', colorMode: 'dark' });
+  assert.deepEqual(readStoredAppearance(fakeStorage({}, { throwGet: true }).storage), { theme: 'Rounded', colorMode: 'dark' });
   const throwingSet = fakeStorage({ 'rumi-theme': 'Minimal', 'rumi-color-mode': 'light' }, { throwSet: true });
   assert.deepEqual(readStoredAppearance(throwingSet.storage), { theme: 'Minimal', colorMode: 'light' });
   assert.equal(throwingSet.data.has('tobkiri-theme'), false);
@@ -97,7 +99,7 @@ test('preboot appearance migration uses the same canonical-first contract', () =
   const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   assert.ok(html.indexOf("getItem('tobkiri-theme')") < html.indexOf("getItem('rumi-theme')"));
   assert.ok(html.indexOf("getItem('tobkiri-color-mode')") < html.indexOf("getItem('rumi-color-mode')"));
-  assert.match(html, /themes\[legacyTheme\][\s\S]*setItem\('tobkiri-theme'/);
+  assert.match(html, /normalizeTheme\(storedTheme\)[\s\S]*setItem\('tobkiri-theme'/);
   assert.match(html, /legacyMode === 'light' \|\| legacyMode === 'dark'[\s\S]*setItem\('tobkiri-color-mode'/);
 });
 
@@ -119,7 +121,7 @@ test('appearance application clears preboot inline colors after React takes over
   root.element.style.backgroundColor = '#ffffff';
   root.element.style.color = '#111827';
 
-  applyAppearanceToRoot(root.element, { theme: 'Rumi', colorMode: 'dark' });
+  applyAppearanceToRoot(root.element, { theme: 'Rounded', colorMode: 'dark' });
 
   assert.equal(root.element.style.backgroundColor, '');
   assert.equal(root.element.style.color, '');
