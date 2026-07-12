@@ -38,3 +38,7 @@ frontend-check:
 # Run the defaultspack integrity scan used by CI.
 integrity:
     cd tobkiri_runtime && python scripts/quality/scan_defaultspack_integrity.py
+
+# Run the Wave 1 repository-wide pack architecture boundary gate.
+pack-architecture:
+    python scripts/quality/scan_pack_architecture.py
