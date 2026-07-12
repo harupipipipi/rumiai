@@ -20,13 +20,16 @@ def task_models_from_fixture(provider_id: str, fixture: dict[str, Any]) -> list[
     if provider not in PROVIDER_TASK_ENDPOINTS:
         raise ValueError(f"Unknown task provider: {provider}")
     models = fixture.get("models") if isinstance(fixture, dict) else None
+    snapshot = fixture.get("snapshot") if isinstance(fixture, dict) else None
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
     output = []
     seen: set[tuple[str, str]] = set()
     for raw in models if isinstance(models, list) else []:
         if not isinstance(raw, dict):
             continue
         model_id = str(raw.get("model_id") or "").strip()
-        task = str(raw.get("task") or "").strip().lower()
+        raw_metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+        task = str(raw.get("task") or raw_metadata.get("task") or "").strip().lower()
         if not model_id or task not in PROVIDER_TASK_ENDPOINTS[provider] or (task, model_id) in seen:
             continue
         seen.add((task, model_id))
@@ -36,11 +39,18 @@ def task_models_from_fixture(provider_id: str, fixture: dict[str, Any]) -> list[
             "provider_id": provider,
             "model_id": model_id,
             "display_name": str(raw.get("display_name") or model_id),
-            "type": task,
+            "type": "transcription" if task == "stt" else task,
             "capabilities": _task_capabilities(task, raw),
             "metadata": {
-                "source": str(fixture.get("source") or "official_fixture"),
-                "verified_at": fixture.get("verified_at"),
+                "source": str(
+                    fixture.get("source")
+                    or snapshot.get("source")
+                    or raw_metadata.get("source")
+                    or "official_fixture"
+                ),
+                "verified_at": fixture.get("verified_at")
+                or snapshot.get("verified_at")
+                or raw_metadata.get("verified_at"),
                 "task": task,
                 "languages": deepcopy(raw.get("languages")) if isinstance(raw.get("languages"), list) else [],
             },
@@ -57,7 +67,8 @@ def task_request_route(provider_id: str, task: str, model_id: str, **identity: s
     template = PROVIDER_TASK_ENDPOINTS.get(provider, {}).get(task_name)
     if not template or not model:
         raise ValueError(f"Unsupported {provider} task: {task_name}")
-    values = {"model": urllib.parse.quote(model, safe=""), **identity}
+    model_path = urllib.parse.quote(model, safe="/" if provider == "fal-ai" else "")
+    values = {"model": model_path, **identity}
     missing = [field for field in ("voice_id",) if "{" + field + "}" in template and not values.get(field)]
     if missing:
         raise ValueError(f"Missing task route identity: {', '.join(missing)}")
@@ -65,6 +76,7 @@ def task_request_route(provider_id: str, task: str, model_id: str, **identity: s
 
 
 def _task_capabilities(task: str, raw: dict[str, Any]) -> dict[str, Any]:
+    declared = raw.get("capabilities") if isinstance(raw.get("capabilities"), dict) else {}
     return {
         "chat": False,
         "text_input": task in {"tts", "music", "image", "video"},
@@ -72,6 +84,6 @@ def _task_capabilities(task: str, raw: dict[str, Any]) -> dict[str, Any]:
         "audio_output": task in {"tts", "music"},
         "image_output": task == "image",
         "video_output": task == "video",
-        "streaming": raw.get("streaming") if "streaming" in raw else None,
+        "streaming": raw.get("streaming", declared.get("streaming")),
         "tool_calling": False,
     }

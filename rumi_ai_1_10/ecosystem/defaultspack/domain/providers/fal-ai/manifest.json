@@ -6,6 +6,9 @@
   "version": "1",
   "status": "experimental",
   "display_name": "fal.ai",
+  "entrypoints": {
+    "models": "models.json"
+  },
   "description": "fal.ai task-specific media/speech provider.",
   "provider_metadata": {
     "display_name": "fal.ai",
@@ -16,8 +19,8 @@
     "base_url_envs": [
       "FAL_AI_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://queue.fal.run",
     "default_model_for": {},
@@ -46,8 +49,8 @@
     "base_url_env": "FAL_AI_BASE_URL",
     "default_base_url": "https://queue.fal.run",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "config": {
       "inventory_strategy": "model_registry_api",
       "task_types": [
@@ -56,7 +59,7 @@
         "audio"
       ],
       "exclude_from_chat_picker": true,
-      "fixture": "tests/fixtures/provider_tasks/fal-ai.json",
+      "fixture": "ecosystem/defaultspack/domain/providers/fal-ai/models.json",
       "source_docs": "https://docs.fal.ai/model-apis"
     }
   },

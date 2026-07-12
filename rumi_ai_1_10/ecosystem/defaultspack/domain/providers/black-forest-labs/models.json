@@ -1,0 +1,75 @@
+{
+  "snapshot": {
+    "source": "https://docs.bfl.ai/quick_start/generating_images",
+    "verified_at": "2026-07-12",
+    "lifecycle_policy": "refresh from official model inventory or documentation before retirement"
+  },
+  "models": [
+    {
+      "id": "black-forest-labs/image/flux-pro-1.1",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "black-forest-labs",
+      "model_id": "flux-pro-1.1",
+      "display_name": "FLUX 1.1 Pro",
+      "type": "image",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.bfl.ai/quick_start/generating_images",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "black-forest-labs/image/flux-kontext-pro",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "black-forest-labs",
+      "model_id": "flux-kontext-pro",
+      "display_name": "FLUX Kontext Pro",
+      "type": "image",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.bfl.ai/quick_start/generating_images",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

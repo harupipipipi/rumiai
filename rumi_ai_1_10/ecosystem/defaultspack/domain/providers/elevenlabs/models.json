@@ -1,0 +1,141 @@
+{
+  "snapshot": {
+    "source": "https://elevenlabs.io/docs/overview/models",
+    "verified_at": "2026-07-12",
+    "lifecycle_policy": "refresh from official model inventory or documentation before retirement"
+  },
+  "models": [
+    {
+      "id": "elevenlabs/tts/eleven_v3",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "elevenlabs",
+      "model_id": "eleven_v3",
+      "display_name": "Eleven v3",
+      "type": "tts",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": true,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": true
+      },
+      "metadata": {
+        "source": "https://elevenlabs.io/docs/overview/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "tts",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "elevenlabs/tts/eleven_multilingual_v2",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "elevenlabs",
+      "model_id": "eleven_multilingual_v2",
+      "display_name": "Eleven Multilingual v2",
+      "type": "tts",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": true,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": true
+      },
+      "metadata": {
+        "source": "https://elevenlabs.io/docs/overview/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "tts",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "elevenlabs/stt/scribe_v2",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "elevenlabs",
+      "model_id": "scribe_v2",
+      "display_name": "Scribe v2",
+      "type": "transcription",
+      "enabled": true,
+      "priority": 3,
+      "capabilities": {
+        "text_input": false,
+        "image_input": false,
+        "audio_input": true,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://elevenlabs.io/docs/overview/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "stt",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "elevenlabs/music/music_v2",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "elevenlabs",
+      "model_id": "music_v2",
+      "display_name": "Eleven Music v2",
+      "type": "music",
+      "enabled": true,
+      "priority": 4,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": true,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://elevenlabs.io/docs/overview/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "music",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

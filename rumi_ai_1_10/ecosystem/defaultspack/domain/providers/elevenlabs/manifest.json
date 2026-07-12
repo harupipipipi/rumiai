@@ -6,6 +6,9 @@
   "version": "1",
   "status": "experimental",
   "display_name": "ElevenLabs",
+  "entrypoints": {
+    "models": "models.json"
+  },
   "description": "ElevenLabs task-specific media/speech provider.",
   "provider_metadata": {
     "display_name": "ElevenLabs",
@@ -16,8 +19,8 @@
     "base_url_envs": [
       "ELEVENLABS_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.elevenlabs.io",
     "default_model_for": {},
@@ -46,8 +49,8 @@
     "base_url_env": "ELEVENLABS_BASE_URL",
     "default_base_url": "https://api.elevenlabs.io",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "config": {
       "inventory_strategy": "native_models_api",
       "task_types": [
@@ -56,7 +59,7 @@
         "music"
       ],
       "exclude_from_chat_picker": true,
-      "fixture": "tests/fixtures/provider_tasks/elevenlabs.json",
+      "fixture": "ecosystem/defaultspack/domain/providers/elevenlabs/models.json",
       "source_docs": "https://elevenlabs.io/docs/api-reference/models/list"
     }
   },

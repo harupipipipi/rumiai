@@ -1,0 +1,75 @@
+{
+  "snapshot": {
+    "source": "https://fal.ai/models",
+    "verified_at": "2026-07-12",
+    "lifecycle_policy": "refresh from official model inventory or documentation before retirement"
+  },
+  "models": [
+    {
+      "id": "fal-ai/image/fal-ai/flux/dev",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "fal-ai",
+      "model_id": "fal-ai/flux/dev",
+      "display_name": "FLUX.1 dev",
+      "type": "image",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://fal.ai/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "fal-ai/video/fal-ai/wan/v2.2-a14b/text-to-video",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "fal-ai",
+      "model_id": "fal-ai/wan/v2.2-a14b/text-to-video",
+      "display_name": "Wan 2.2 Text to Video",
+      "type": "video",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://fal.ai/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "video",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

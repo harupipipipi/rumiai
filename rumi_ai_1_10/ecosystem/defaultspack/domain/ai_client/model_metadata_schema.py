@@ -9,6 +9,9 @@ CANONICAL_MODEL_CAPABILITY_KEYS = {
     "image_input",
     "audio_input",
     "text_output",
+    "image_output",
+    "audio_output",
+    "video_output",
     "tool_calling",
     "parallel_tool_calls",
     "json_schema",
@@ -27,6 +30,11 @@ MODEL_ENDPOINT_TYPES = {
     "tts",
     "transcription",
     "moderation",
+    "image",
+    "video",
+    "audio",
+    "music",
+    "rerank",
 }
 LEGACY_CONTEXT_KEYS = ("max_context", "max_context_tokens")
 CONTEXT_KEYS = ("context_window", *LEGACY_CONTEXT_KEYS)

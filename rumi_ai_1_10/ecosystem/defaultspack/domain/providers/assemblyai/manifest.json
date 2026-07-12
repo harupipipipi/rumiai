@@ -6,6 +6,9 @@
   "version": "1",
   "status": "experimental",
   "display_name": "AssemblyAI",
+  "entrypoints": {
+    "models": "models.json"
+  },
   "description": "AssemblyAI task-specific media/speech provider.",
   "provider_metadata": {
     "display_name": "AssemblyAI",
@@ -16,8 +19,8 @@
     "base_url_envs": [
       "ASSEMBLYAI_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.assemblyai.com",
     "default_model_for": {},
@@ -42,15 +45,15 @@
     "base_url_env": "ASSEMBLYAI_BASE_URL",
     "default_base_url": "https://api.assemblyai.com",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "config": {
       "inventory_strategy": "generated_official_snapshot",
       "task_types": [
         "stt"
       ],
       "exclude_from_chat_picker": true,
-      "fixture": "tests/fixtures/provider_tasks/assemblyai.json",
+      "fixture": "ecosystem/defaultspack/domain/providers/assemblyai/models.json",
       "source_docs": "https://www.assemblyai.com/docs/getting-started/models"
     }
   },

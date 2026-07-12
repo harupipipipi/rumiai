@@ -6,6 +6,9 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Black Forest Labs",
+  "entrypoints": {
+    "models": "models.json"
+  },
   "description": "Black Forest Labs task-specific media/speech provider.",
   "provider_metadata": {
     "display_name": "Black Forest Labs",
@@ -16,8 +19,8 @@
     "base_url_envs": [
       "BLACK_FOREST_LABS_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.bfl.ai",
     "default_model_for": {},
@@ -42,15 +45,15 @@
     "base_url_env": "BLACK_FOREST_LABS_BASE_URL",
     "default_base_url": "https://api.bfl.ai",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "config": {
       "inventory_strategy": "generated_official_snapshot",
       "task_types": [
         "image"
       ],
       "exclude_from_chat_picker": true,
-      "fixture": "tests/fixtures/provider_tasks/black-forest-labs.json",
+      "fixture": "ecosystem/defaultspack/domain/providers/black-forest-labs/models.json",
       "source_docs": "https://docs.bfl.ai/"
     }
   },

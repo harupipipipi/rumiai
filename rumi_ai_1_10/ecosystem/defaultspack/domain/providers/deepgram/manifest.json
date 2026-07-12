@@ -6,6 +6,9 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Deepgram",
+  "entrypoints": {
+    "models": "models.json"
+  },
   "description": "Deepgram task-specific media/speech provider.",
   "provider_metadata": {
     "display_name": "Deepgram",
@@ -16,8 +19,8 @@
     "base_url_envs": [
       "DEEPGRAM_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.deepgram.com",
     "default_model_for": {},
@@ -44,8 +47,8 @@
     "base_url_env": "DEEPGRAM_BASE_URL",
     "default_base_url": "https://api.deepgram.com",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "config": {
       "inventory_strategy": "native_models_api",
       "task_types": [
@@ -53,7 +56,7 @@
         "tts"
       ],
       "exclude_from_chat_picker": true,
-      "fixture": "tests/fixtures/provider_tasks/deepgram.json",
+      "fixture": "ecosystem/defaultspack/domain/providers/deepgram/models.json",
       "source_docs": "https://developers.deepgram.com/reference/manage/models/list"
     }
   },
