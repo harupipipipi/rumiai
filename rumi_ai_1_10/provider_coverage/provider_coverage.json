@@ -1,0 +1,150 @@
+{
+  "authoritative_fixture_count": 0,
+  "failure_count": 61,
+  "failures": {
+    "duplicate_canonical_owners": [
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/anthropic/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/anthropic/manifest.json"
+        ],
+        "provider_id": "anthropic"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/cerebras/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/cerebras/manifest.json"
+        ],
+        "provider_id": "cerebras"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/deepseek/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/deepseek/manifest.json"
+        ],
+        "provider_id": "deepseek"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/gitlawb-opengateway/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/gitlawb-opengateway/manifest.json"
+        ],
+        "provider_id": "gitlawb-opengateway"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/gemini/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/google/manifest.json"
+        ],
+        "provider_id": "google"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/groq/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/groq/manifest.json"
+        ],
+        "provider_id": "groq"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/moonshotai/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/moonshotai/manifest.json"
+        ],
+        "provider_id": "moonshotai"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/nvidia/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/nvidia/manifest.json"
+        ],
+        "provider_id": "nvidia"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/ollama/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/ollama/manifest.json"
+        ],
+        "provider_id": "ollama"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/openai/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/openai/manifest.json"
+        ],
+        "provider_id": "openai"
+      },
+      {
+        "owners": [
+          "ecosystem/defaultspack/domain/providers/openrouter/manifest.json",
+          "ecosystem/rumi_model_catalog_pack/extensions/llm/providers/openrouter/manifest.json"
+        ],
+        "provider_id": "openrouter"
+      }
+    ],
+    "invalid_defaults": [],
+    "missing_authoritative_model_ids": [],
+    "missing_providers": [
+      "ai21",
+      "alibaba-dashscope",
+      "assemblyai",
+      "avian",
+      "aws-bedrock",
+      "azure-ai-foundry",
+      "azure-openai",
+      "baidu-qianfan",
+      "black-forest-labs",
+      "cloudflare-ai-gateway",
+      "cloudflare-workers-ai",
+      "cohere",
+      "databricks-model-serving",
+      "deepgram",
+      "deepinfra",
+      "elevenlabs",
+      "fal-ai",
+      "fireworks",
+      "friendli",
+      "github-models",
+      "google-vertex-ai",
+      "helicone-gateway",
+      "huggingface-inference",
+      "huggingface-tgi",
+      "hyperbolic",
+      "ibm-watsonx",
+      "inference-net",
+      "jan",
+      "jina-ai",
+      "litellm-proxy",
+      "llamacpp",
+      "llamafile",
+      "localai",
+      "mlc-llm-server",
+      "mlx-lm-server",
+      "nebius",
+      "novita",
+      "oracle-oci-generative-ai",
+      "portkey-ai-gateway",
+      "replicate",
+      "sambanova",
+      "sglang",
+      "siliconflow",
+      "snowflake-cortex",
+      "stability-ai",
+      "tencent-hunyuan",
+      "text-generation-webui",
+      "upstage",
+      "voyage-ai"
+    ],
+    "secret_bearing_caches": [],
+    "stale_invokable_model_ids": [],
+    "unmapped_registered_providers": [
+      "llama_cpp"
+    ]
+  },
+  "matrix_generated_at": "2026-07-11",
+  "matrix_schema_version": 2,
+  "passed": false,
+  "provider_count_expected": 82,
+  "provider_count_registered": 34,
+  "provider_count_required": 79,
+  "schema_version": 1
+}

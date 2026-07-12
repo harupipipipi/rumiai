@@ -38,3 +38,8 @@ frontend-check:
 # Run the defaultspack integrity scan used by CI.
 integrity:
     cd rumi_ai_1_10 && python scripts/quality/scan_defaultspack_integrity.py
+
+# Generate the matrix-driven provider report. It becomes blocking only when
+# provider_coverage/gate.json is switched on after all migration PRs land.
+provider-coverage *args:
+    cd rumi_ai_1_10 && python scripts/quality/check_provider_coverage.py --json-output provider_coverage/provider_coverage.json --markdown-output provider_coverage/provider_coverage.md "$@"

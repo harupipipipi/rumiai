@@ -90,6 +90,21 @@ jobs:
               )
           PY
 
+      - name: Generate provider coverage report
+        working-directory: rumi_ai_1_10
+        run: |
+          python scripts/quality/check_provider_coverage.py \
+            --json-output provider_coverage/provider_coverage.json \
+            --markdown-output provider_coverage/provider_coverage.md
+
+      - name: Upload provider coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            rumi_ai_1_10/provider_coverage/provider_coverage.json
+            rumi_ai_1_10/provider_coverage/provider_coverage.md
+
       # Contract tests are marker-discovered. Add pytest.mark.contract to any
       # new test that belongs in this CI cluster instead of editing this workflow.
       - name: Run contract cluster pytest

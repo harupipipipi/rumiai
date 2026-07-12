@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "required": false,
+  "activation": "Set required=true only after all provider migration PRs land on soon."
+}
