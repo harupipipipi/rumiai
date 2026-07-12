@@ -1,4 +1,4 @@
-import packageMetadata from '../../../package.json' with { type: 'json' };
+import packageMetadata from '../../../package.json';
 
 export const RUMI_VIEWER_VERSION = packageMetadata.version;
 

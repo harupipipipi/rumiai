@@ -28,7 +28,7 @@ test('viewer package, Tauri, and Cargo versions stay aligned', () => {
   const cargoLock = readFileSync(resolve(viewerRoot, 'src-tauri', 'Cargo.lock'), 'utf8');
   const cargoVersion = cargoManifest.match(/^version = "([^"]+)"$/m)?.[1];
   const cargoLockVersion = cargoLock.match(
-    /\[\[package\]\]\nname = "rumi-viewer"\nversion = "([^"]+)"/,
+    /\[\[package\]\]\r?\nname = "rumi-viewer"\r?\nversion = "([^"]+)"/,
   )?.[1];
 
   assert.equal(RUMI_VIEWER_VERSION, packageMetadata.version);
