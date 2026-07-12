@@ -1,0 +1,70 @@
+{
+  "id": "longcat",
+  "provider_id": "longcat",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Longcat",
+  "description": "Longcat direct hosted provider with canonical account inventory.",
+  "entrypoints": {
+    "adapter": "../ai_client/providers/openai_compatible_provider.py",
+    "models": "models.json"
+  },
+  "security": {
+    "credential_required": true
+  },
+  "provider_metadata": {
+    "display_name": "Longcat",
+    "kind": "cloud",
+    "env_vars": [
+      "LONGCAT_API_KEY"
+    ],
+    "base_url_envs": [
+      "LONGCAT_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "LongCat-Flash-Chat",
+    "default_base_url": "https://api.longcat.chat/openai/v1",
+    "default_model_for": {},
+    "catalog_features": [
+      "chat",
+      "streaming"
+    ]
+  },
+  "provider_manifest": {
+    "id": "longcat",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Longcat",
+    "enabled": true,
+    "priority": 100,
+    "adapter": "openai_compatible",
+    "api_key_env": "LONGCAT_API_KEY",
+    "base_url_env": "LONGCAT_BASE_URL",
+    "default_base_url": "https://api.longcat.chat/openai/v1",
+    "credential_required": true,
+    "default_model": "LongCat-Flash-Chat",
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "authenticated_models_api",
+      "inventory_scope": "account",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "model_cache_ttl_seconds": 21600,
+      "source_docs": "https://longcat.chat/platform/docs/"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "longcat"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming"
+  ]
+}
