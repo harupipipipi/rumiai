@@ -446,7 +446,7 @@ mod tests {
             "beta 1.2.3"
         );
         assert!(!info.viewer_version.is_empty());
-        assert_eq!(info.permission_subject, "Rumi Viewer");
+        assert_eq!(info.permission_subject, "Tobkiri Launcher");
         assert_eq!(info.source, "launcher_tauri");
         assert!(info.reliable);
         assert!(info

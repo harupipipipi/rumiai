@@ -10,4 +10,4 @@ def test_installed_canonical_and_legacy_modules_are_discoverable():
 
 
 def test_canonical_version_matches_project_metadata():
-    assert tobkiri.__version__ == version("rumi-ai")
+    assert tobkiri.__version__ == version("tobkiri-runtime")

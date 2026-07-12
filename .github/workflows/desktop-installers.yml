@@ -213,7 +213,7 @@ jobs:
       - name: Upload desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: rumi-ai-${{ matrix.artifact_suffix }}-installer-${{ github.sha }}
+          name: tobkiri-${{ matrix.artifact_suffix }}-installer-${{ github.sha }}
           path: |
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe

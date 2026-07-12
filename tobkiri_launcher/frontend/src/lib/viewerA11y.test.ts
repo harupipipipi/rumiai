@@ -40,9 +40,18 @@ test('viewer shell has a mobile navigation fallback and persistent desktop sideb
   assert.match(header, /role="presentation"/);
   assert.match(header, /viewerNavGroups\.map/);
   assert.match(header, /aria-label=\{t\('nav.mobile_navigation'\)\}/);
-  assert.match(store, /SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open'/);
-  assert.match(store, /readLocalStorage\(SIDEBAR_STORAGE_KEY\) !== 'false'/);
+  assert.match(store, /SIDEBAR_STORAGE_KEY = 'tobkiri-launcher-sidebar-open'/);
+  assert.match(
+    store,
+    /readLocalStorage\(SIDEBAR_STORAGE_KEY\) \?\? readLocalStorage\(LEGACY_SIDEBAR_STORAGE_KEY\)/,
+  );
   assert.match(store, /writeLocalStorage\(SIDEBAR_STORAGE_KEY, String\(open\)\)/);
+  assert.match(store, /SETUP_STORAGE_KEY = 'tobkiri-launcher-setup'/);
+  assert.match(
+    store,
+    /readLocalStorage\(SETUP_STORAGE_KEY\) \?\? readLocalStorage\(LEGACY_SETUP_STORAGE_KEY\)/,
+  );
+  assert.match(store, /writeLocalStorage\(SETUP_STORAGE_KEY, String\(done\)\)/);
 });
 
 test('viewer async dialogs keep the modal open while confirm is pending', () => {

@@ -3352,7 +3352,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rumi-viewer"
+name = "tobkiri-launcher"
 version = "1.0.0-beta.2"
 dependencies = [
  "anyhow",

@@ -73,7 +73,7 @@ fn fetch_latest_release() -> Result<GitHubRelease> {
     let version = env!("CARGO_PKG_VERSION");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .user_agent(format!("rumi-viewer/{version}"))
+        .user_agent(format!("tobkiri-launcher/{version}"))
         .build()
         .context("failed to build HTTP client")?;
 

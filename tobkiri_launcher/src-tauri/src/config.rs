@@ -599,7 +599,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_config_debug_staged_{unique}"));
+        let root =
+            std::env::temp_dir().join(format!("tobkiri_launcher_config_debug_staged_{unique}"));
         let resource = root
             .join("tobkiri_launcher")
             .join("src-tauri")
@@ -701,7 +702,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_uv_appdata_ignored_{unique}"));
+        let root =
+            std::env::temp_dir().join(format!("tobkiri_launcher_uv_appdata_ignored_{unique}"));
         let resource = root.join("resources");
         let appdata = root.join("appdata");
 
@@ -814,7 +816,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_pack_shell_staged_{unique}"));
+        let root =
+            std::env::temp_dir().join(format!("tobkiri_launcher_pack_shell_staged_{unique}"));
         let resource = root.join("resources");
         let appdata = root.join("appdata");
         let app_py = root.join("tobkiri_runtime").join("app.py");
@@ -929,7 +932,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_defaultspack_appdata_{unique}"));
+        let root =
+            std::env::temp_dir().join(format!("tobkiri_launcher_defaultspack_appdata_{unique}"));
         let resource = root.join("resources");
         let appdata = root.join("appdata");
         let bundled = resource.join("app").join("ecosystem").join("defaultspack");
@@ -980,7 +984,10 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("tobkiri_launcher_defaultspack_dev_{unique}"));
-        let resource = root.join("tobkiri_launcher").join("src-tauri").join("resources");
+        let resource = root
+            .join("tobkiri_launcher")
+            .join("src-tauri")
+            .join("resources");
         let appdata = root.join("appdata");
         let repo_defaultspack = root
             .join("tobkiri_runtime")

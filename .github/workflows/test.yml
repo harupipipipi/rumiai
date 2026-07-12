@@ -50,7 +50,7 @@ jobs:
           path: ${{ runner.temp }}/root-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
 
-  rumi-ai-contract-checks:
+  tobkiri-contract-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -139,7 +139,7 @@ jobs:
         run: |
           pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py -v
 
-  rumi-ai-security-audit:
+  tobkiri-security-audit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -232,7 +232,7 @@ jobs:
         if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         run: git diff --exit-code -- tobkiri_runtime/ecosystem/defaultspack/ui
 
-  rumi-ai-static-checks:
+  tobkiri-static-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -274,7 +274,7 @@ jobs:
             --mypy-target ecosystem/defaultspack/blocks/coding \
             --mypy-target app.py
 
-  rumi-ai-package-pytest:
+  tobkiri-package-pytest:
     strategy:
       fail-fast: false
       matrix:
@@ -349,7 +349,7 @@ jobs:
             sleep $((attempt * 10))
           done
 
-  rumi-viewer-macos:
+  tobkiri-launcher-macos:
     if: >
       github.event_name != 'pull_request' ||
       (
@@ -386,7 +386,7 @@ jobs:
       - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rumi-viewer-macos
+          shared-key: tobkiri-launcher-macos
           workspaces: tobkiri_launcher/src-tauri -> target
 
       - name: Bundle uv binary for offline startup
@@ -531,7 +531,7 @@ jobs:
         run: |
           pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_coding_hardening.py -v
 
-  rumi-viewer-windows:
+  tobkiri-launcher-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout

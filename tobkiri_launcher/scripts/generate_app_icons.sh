@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_ICON="${ROOT_DIR}/assets/app-icon/rumiviewer-icon.png"
+SOURCE_ICON="${ROOT_DIR}/assets/app-icon/tobkiri-launcher-icon.png"
 ICONS_DIR="${ROOT_DIR}/src-tauri/icons"
 
 if ! command -v magick >/dev/null 2>&1; then

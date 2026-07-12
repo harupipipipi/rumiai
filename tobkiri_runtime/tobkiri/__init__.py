@@ -1,5 +1,9 @@
 """Canonical Tobkiri runtime package."""
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = version("rumi-ai")
+try:
+    __version__ = version("tobkiri-runtime")
+except PackageNotFoundError:
+    # Stacked source-layout upgrades can run against Phase 3A/3B editable metadata.
+    __version__ = version("rumi-ai")

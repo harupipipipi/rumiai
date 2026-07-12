@@ -150,7 +150,10 @@ export interface UpdateInfo {
 }
 
 export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
-const SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open';
+const SIDEBAR_STORAGE_KEY = 'tobkiri-launcher-sidebar-open';
+const LEGACY_SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open';
+const SETUP_STORAGE_KEY = 'tobkiri-launcher-setup';
+const LEGACY_SETUP_STORAGE_KEY = 'rumi-setup';
 
 interface AppState {
   theme: Theme;
@@ -277,13 +280,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ colorMode: mode });
   },
 
-  isSetupDone: readLocalStorage('rumi-setup') === 'true',
+  isSetupDone:
+    (readLocalStorage(SETUP_STORAGE_KEY) ?? readLocalStorage(LEGACY_SETUP_STORAGE_KEY)) === 'true',
   setSetupDone: (done) => {
-    writeLocalStorage('rumi-setup', String(done));
+    writeLocalStorage(SETUP_STORAGE_KEY, String(done));
     set({ isSetupDone: done });
   },
 
-  isSidebarOpen: readLocalStorage(SIDEBAR_STORAGE_KEY) !== 'false',
+  isSidebarOpen: (readLocalStorage(SIDEBAR_STORAGE_KEY) ?? readLocalStorage(LEGACY_SIDEBAR_STORAGE_KEY)) !== 'false',
   setSidebarOpen: (open) => {
     writeLocalStorage(SIDEBAR_STORAGE_KEY, String(open));
     set({ isSidebarOpen: open });
