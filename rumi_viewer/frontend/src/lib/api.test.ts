@@ -248,6 +248,63 @@ test('bootstrapPanelSession deduplicates concurrent exchanges for the same code'
   assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'csrf-from-server');
 });
 
+test('apiFetch quarantines a stale URL code before one desktop reauthorization', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code&view=packs#ready');
+
+  let requestCount = 0;
+  fetchHandler = async (input: string | URL | Request, init?: RequestInit) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      panelExchangeCount += 1;
+      const payload = JSON.parse(String(init?.body)) as {code?: string};
+      if (payload.code === 'stale-code') {
+        return new Response(
+          JSON.stringify({error: 'Invalid or expired code', success: false}),
+          {headers: {'Content-Type': 'application/json'}, status: 401},
+        );
+      }
+      assert.equal(payload.code, 'desktop-refresh-code');
+      return new Response(
+        JSON.stringify({data: {csrf_token: 'fresh-csrf'}, success: true}),
+        {headers: {'Content-Type': 'application/json'}, status: 200},
+      );
+    }
+
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({data: {ok: true}, success: true}),
+      {headers: {'Content-Type': 'application/json'}, status: 200},
+    );
+  };
+
+  const response = await apiFetch<{ok: boolean}>('/api/panel/packs');
+
+  assert.deepEqual(response, {ok: true});
+  assert.equal(requestCount, 1);
+  assert.equal(panelExchangeCount, 2);
+  assert.equal(tauriReauthorizeCount, 1);
+  assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'fresh-csrf');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs#ready');
+  assert.equal(lastReplacedUrl, '/panel/?view=packs#ready');
+});
+
+test('a rejected bootstrap code is scrubbed without exposing the code in the error', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=secret-code');
+  fetchHandler = async () => new Response(
+    JSON.stringify({error: 'Invalid secret-code; please retry', success: false}),
+    {headers: {'Content-Type': 'application/json'}, status: 401},
+  );
+
+  await assert.rejects(
+    bootstrapPanelSession(),
+    (error: unknown) => error instanceof Error && !error.message.includes('secret-code'),
+  );
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+  assert.equal(lastReplacedUrl, '/panel/');
+});
+
 test('hasPendingPanelBootstrapCode only reports true when the URL includes a code', () => {
   assert.equal(hasPendingPanelBootstrapCode('http://127.0.0.1:8765/panel/?code=abc'), true);
   assert.equal(hasPendingPanelBootstrapCode('http://127.0.0.1:8765/panel/'), false);

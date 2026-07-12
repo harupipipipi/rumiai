@@ -92,6 +92,19 @@ export function hasPendingPanelBootstrapCode(href = window.location.href): boole
   return new URL(href).searchParams.has('code');
 }
 
+/** Remove a one-time bootstrap code from the address bar without creating history. */
+function scrubPanelBootstrapCode(code?: string): void {
+  const url = new URL(window.location.href);
+  if (code !== undefined && url.searchParams.get('code') !== code) {
+    return;
+  }
+  if (!url.searchParams.has('code')) {
+    return;
+  }
+  url.searchParams.delete('code');
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
+
 async function exchangePanelBootstrapCode(code: string): Promise<void> {
   const url = new URL(window.location.href);
   if (!code) {
@@ -117,12 +130,18 @@ async function exchangePanelBootstrapCode(code: string): Promise<void> {
     } catch {
       // fall back to default message
     }
-    throw new Error(errorMessage);
+    // A rejected code is one-time state and must never keep panel recovery
+    // pinned to a stale URL.  Scrub it before surfacing the error; this also
+    // ensures a code cannot be copied from the address bar after failure.
+    scrubPanelBootstrapCode(code);
+    throw new Error(errorMessage.replaceAll(code, '[redacted]'));
   }
 
   const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
   if (!envelope.success || !envelope.data?.csrf_token) {
-    throw new Error(envelope.error || 'Panel bootstrap failed');
+    scrubPanelBootstrapCode(code);
+    const errorMessage = envelope.error || 'Panel bootstrap failed';
+    throw new Error(errorMessage.replaceAll(code, '[redacted]'));
   }
 
   setStoredPanelCsrfToken(envelope.data.csrf_token);
@@ -295,7 +314,18 @@ async function ensurePanelSessionForRequest(path: string, method: string): Promi
   }
 
   if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
-    await bootstrapPanelSession();
+    try {
+      await bootstrapPanelSession();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        isRecoverablePanelAuthError(401, errorMessage) &&
+        await recoverExpiredPanelSession()
+      ) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 
