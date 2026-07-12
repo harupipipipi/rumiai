@@ -63,14 +63,23 @@ def normalize_model_prompt_preferences(value: Any) -> dict[str, dict[str, int]]:
 
 
 def merge_model_prompt_preferences(*values: Any) -> dict[str, dict[str, int]]:
-    """Merge preference layers from broad defaults to exact overrides."""
+    """Merge preference layers from broad defaults to exact overrides.
+
+    A later declaration owns both the weight and polarity for every tag it
+    mentions. This lets an exact model reverse a provider-level default rather
+    than accidentally retaining the tag in both ``prefer`` and ``avoid``.
+    """
 
     prefer: dict[str, int] = {}
     avoid: dict[str, int] = {}
     for value in values:
         normalized = normalize_model_prompt_preferences(value)
-        prefer.update(normalized["prefer"])
-        avoid.update(normalized["avoid"])
+        for tag, weight in normalized["prefer"].items():
+            avoid.pop(tag, None)
+            prefer[tag] = weight
+        for tag, weight in normalized["avoid"].items():
+            prefer.pop(tag, None)
+            avoid[tag] = weight
     return {"prefer": prefer, "avoid": avoid}
 
 
@@ -250,17 +259,17 @@ def select_prompt_variants(
 
     selected.sort(
         key=lambda item: (
-            int(item.get("slot_priority") or 100),
+            _sort_int(item.get("slot_priority"), default=100),
             str(item.get("slot") or ""),
-            -int(item.get("score") or 0),
+            -_sort_int(item.get("score"), default=0),
             str(item.get("prompt_id") or ""),
         )
     )
     disabled.sort(
         key=lambda item: (
-            int(item.get("slot_priority") or 100),
+            _sort_int(item.get("slot_priority"), default=100),
             str(item.get("slot") or ""),
-            -int(item.get("score") or 0),
+            -_sort_int(item.get("score"), default=0),
             str(item.get("prompt_id") or ""),
         )
     )
@@ -429,3 +438,10 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return bool(value)
+
+
+def _sort_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
