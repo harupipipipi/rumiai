@@ -3781,11 +3781,11 @@ export function SettingsModalRenderer({
 
           <div className="grid gap-4 xl:grid-cols-2">
             {accountConnectionCards.map((card) => {
+              const oauthReview = connectionOAuthReviews[card.providerId];
+              const draftReview = connectionDraftReviews[card.providerId];
               const isBusy = connectionBusy === `${card.providerId}:start` || Boolean(oauthReview);
               const jsonBusy = connectionBusy === `${card.providerId}:save_json`;
               const message = connectionMessages[card.providerId];
-              const oauthReview = connectionOAuthReviews[card.providerId];
-              const draftReview = connectionDraftReviews[card.providerId];
               const selectedScopeOption = selectedConnectionScopeMode(card);
               const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
               const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;

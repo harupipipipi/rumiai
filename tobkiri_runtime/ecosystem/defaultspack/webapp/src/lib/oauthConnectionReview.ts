@@ -32,7 +32,7 @@ const destinationPolicies: Record<string, { hosts: string[]; path: (pathname: st
   },
 };
 
-const secretFieldPattern = /(access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|password|credential|secret|token)/i;
+const secretFieldPattern = /^(access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|password|credential|secret|token)$/i;
 const endpointFieldPattern = /(?:^|_)(?:auth|token|issuer|redirect|endpoint|url|uri)(?:_|$)/i;
 const scopeFieldPattern = /^(?:scope|scopes|permissions|capabilities)$/i;
 
@@ -119,11 +119,12 @@ export function reviewConnectionDraft(draft: string): CredentialImportReview {
     .map(([, item]) => safeEndpointHost(item))
     .filter((host): host is string => Boolean(host));
   const scopes = entries.filter(([key]) => scopeFieldPattern.test(key.slice(key.lastIndexOf(".") + 1))).flatMap(([, item]) => stringList(item));
+  const isSecretField = (key: string) => secretFieldPattern.test(key.slice(key.lastIndexOf(".") + 1));
   return {
     kind,
-    fields: entries.map(([key]) => key).filter((key) => !secretFieldPattern.test(key)).sort().slice(0, 20),
+    fields: entries.map(([key]) => key).filter((key) => !isSecretField(key)).sort().slice(0, 20),
     scopes: [...new Set(scopes)],
     endpoints: [...new Set(endpoints)],
-    secretFieldCount: entries.filter(([key]) => secretFieldPattern.test(key)).length,
+    secretFieldCount: entries.filter(([key]) => isSecretField(key)).length,
   };
 }

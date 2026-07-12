@@ -13,7 +13,7 @@ test("OAuth destination review permits only the selected provider authorization 
     "https://user:pass@accounts.google.com/o/oauth2/v2/auth", "https://localhost/o/oauth2/v2/auth",
     "https://127.0.0.1/o/oauth2/v2/auth", "https://evil.example/o/oauth2/v2/auth",
     "https://accounts.google.com/not-oauth",
-  ]) assert.throws(() => reviewOAuthDestination("google", unsafe), undefined, unsafe);
+  ]) assert.throws(() => reviewOAuthDestination("google", unsafe), Error, unsafe);
 });
 
 test("credential review redacts secrets and does not retain secret values", () => {
@@ -34,6 +34,6 @@ test("credential review redacts secrets and does not retain secret values", () =
 
 test("credential review rejects ambiguous, malformed, and non-object JSON", () => {
   for (const draft of ["not-json", "[]", "{}", JSON.stringify({ token_uri: "https://oauth.example.test/token" })]) {
-    assert.throws(() => reviewConnectionDraft(draft), undefined, draft);
+    assert.throws(() => reviewConnectionDraft(draft), Error, draft);
   }
 });
