@@ -3,7 +3,7 @@ import 'package:rumi_remote_app/src/qr/pairing_payload.dart';
 
 void main() {
   test('parses rumi_pair_v2 payload', () {
-    final payload = parseQrPayload(
+    final payload = parsePairingPayload(
       '{"kind":"rumi_pair_v2","pairingId":"p1","code":"abc","baseUrls":["http://192.168.1.10:8765"],"serverPublicKey":"pk-1","expiresAt":9999999999999}',
     );
     expect(payload, isA<QrPairingV2>());
@@ -17,7 +17,7 @@ void main() {
   });
 
   test('parses rumi_mobile_pair_v1 payload', () {
-    final payload = parseQrPayload(
+    final payload = parsePairingPayload(
       '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"p1","code":"abc","pickupSecret":"pup_123","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"pk-1","expiresAt":9999999999999}',
     );
     expect(payload, isA<QrPairingV2>());
@@ -32,7 +32,7 @@ void main() {
   });
 
   test('QrPairingV2 isExpired when past', () {
-    final payload = parseQrPayload(
+    final payload = parsePairingPayload(
       '{"kind":"rumi_pair_v2","pairingId":"p1","code":"abc","baseUrls":[],"serverPublicKey":"","expiresAt":1000}',
     );
     expect(payload, isA<QrPairingV2>());
@@ -40,7 +40,7 @@ void main() {
   });
 
   test('QrPairingV2 with missing fields defaults gracefully', () {
-    final payload = parseQrPayload('{"kind":"rumi_pair_v2"}');
+    final payload = parsePairingPayload('{"kind":"rumi_pair_v2"}');
     expect(payload, isA<QrPairingV2>());
     final p = payload as QrPairingV2;
     expect(p.payload.pairingId, '');

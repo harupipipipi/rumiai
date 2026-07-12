@@ -1,6 +1,11 @@
 import packageMetadata from '../../../package.json';
 
-export const RUMI_VIEWER_VERSION = packageMetadata.version;
+const importedMetadata = packageMetadata as typeof packageMetadata & {
+  default?: { version?: string };
+};
+
+export const RUMI_VIEWER_VERSION =
+  importedMetadata.version ?? importedMetadata.default?.version ?? 'unknown';
 
 export function ViewerVersionLabel() {
   return (

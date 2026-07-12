@@ -1,26 +1,26 @@
 import 'dart:convert';
 import '../data/pc/device_store.dart';
 
-sealed class QrPayload {
-  const QrPayload();
+sealed class ScannedPairingPayload {
+  const ScannedPairingPayload();
 }
 
-class QrPairingV2 extends QrPayload {
+class QrPairingV2 extends ScannedPairingPayload {
   const QrPairingV2(this.payload);
   final PairingV2Payload payload;
 }
 
-class QrUrl extends QrPayload {
+class QrUrl extends ScannedPairingPayload {
   const QrUrl(this.url);
   final String url;
 }
 
-class QrUnknown extends QrPayload {
+class QrUnknown extends ScannedPairingPayload {
   const QrUnknown(this.raw);
   final String raw;
 }
 
-QrPayload parseQrPayload(String raw) {
+ScannedPairingPayload parsePairingPayload(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return const QrUnknown('');
   if (trimmed.startsWith('{')) {

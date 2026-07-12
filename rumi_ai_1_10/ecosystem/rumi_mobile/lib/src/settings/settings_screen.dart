@@ -162,7 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _scanPc() async {
-    final result = await Navigator.of(context).push<(QrPayload, bool)>(
+    final result = await Navigator.of(context).push<(ScannedPairingPayload, bool)>(
       MaterialPageRoute(
         builder: (_) => const QrScannerScreen(
           purpose: QrScanPurpose.general,

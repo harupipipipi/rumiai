@@ -48,7 +48,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     QrScanPurpose.general => 'QRスキャン',
   };
 
-  bool _matchesPurpose(QrPayload payload) {
+  bool _matchesPurpose(ScannedPairingPayload payload) {
     switch (widget.purpose) {
       case QrScanPurpose.pcConnect:
         return payload is QrPairingV2;
@@ -62,7 +62,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     raw = raw.trim();
     if (raw.isEmpty) return;
     _handled = true;
-    final payload = parseQrPayload(raw);
+    final payload = parsePairingPayload(raw);
     final mismatch = !_matchesPurpose(payload);
     Navigator.of(context).pop((payload, mismatch));
   }

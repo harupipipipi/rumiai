@@ -10,7 +10,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows has no advisory flock API.
+    fcntl = None  # type: ignore[assignment]
 
 
 REVISION_KEY = "_settings_revision"
@@ -65,11 +68,13 @@ class FrontendSettingsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with _thread_lock(self.path):
             with self.lock_path.open("a+b") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
                 try:
                     yield
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    if fcntl is not None:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _read_locked(self, *, recover: bool) -> dict[str, Any]:
         if not self.path.exists():
