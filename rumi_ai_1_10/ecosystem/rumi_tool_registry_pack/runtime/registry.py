@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -32,6 +33,7 @@ class ToolDefinitionRegistry:
         )
         self.path = self.root / "tool-definitions.json"
         self.lock_root = self.root / "locks"
+        self.backup_root = self.root / "migration_backups"
 
     def snapshot(self) -> dict[str, Any]:
         """Return definitions and aliases in deterministic order."""
@@ -45,6 +47,9 @@ class ToolDefinitionRegistry:
                 for key in sorted(state["definitions"])
             ],
             "aliases": dict(sorted(state["aliases"].items())),
+            "migration": dict(state["migration"])
+            if isinstance(state.get("migration"), dict)
+            else None,
         }
 
     def resolve(self, tool_id: str) -> dict[str, Any] | None:
@@ -123,15 +128,78 @@ class ToolDefinitionRegistry:
             "registry_revision": state["revision"],
         }
 
+    def migrate(
+        self,
+        definitions: list[Mapping[str, Any]],
+        aliases: Mapping[str, Any],
+        expected_source_hash: str,
+    ) -> dict[str, Any]:
+        """Atomically import one deterministic legacy registry snapshot."""
+        normalized = [_definition(item) for item in definitions]
+        normalized.sort(key=lambda item: item["tool_id"])
+        normalized_aliases = {
+            _identifier(alias): _identifier(target)
+            for alias, target in aliases.items()
+        }
+        source = {
+            "definitions": normalized,
+            "aliases": dict(sorted(normalized_aliases.items())),
+        }
+        source_hash = hashlib.sha256(
+            json.dumps(source, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        if source_hash != str(expected_source_hash or ""):
+            raise RuntimeError("tool registry migration source changed")
+        with NamedLock(self.lock_root, "tool-definitions"):
+            if self.path.is_file():
+                raise RuntimeError("tool registry target is already initialized")
+            tool_ids = {item["tool_id"] for item in normalized}
+            if any(target not in tool_ids for target in normalized_aliases.values()):
+                raise ValueError("tool alias target is missing")
+            migration_id = f"migration-{uuid.uuid4().hex}"
+            backup = self.backup_root / migration_id
+            backup.mkdir(parents=True, exist_ok=False)
+            os.chmod(backup, 0o700)
+            _atomic_json(backup / "legacy-tool-registry.json", source)
+            state = self._empty()
+            state["definitions"] = {
+                item["tool_id"]: item for item in normalized
+            }
+            state["aliases"] = normalized_aliases
+            state["revision"] = 1
+            state["migration"] = {
+                "migration_id": migration_id,
+                "source_hash": source_hash,
+                "backup": str(backup),
+            }
+            self._write(state)
+        return {
+            "migration_id": migration_id,
+            "source_hash": source_hash,
+            "definitions": len(normalized),
+            "aliases": len(normalized_aliases),
+            "registry_revision": 1,
+        }
+
+    def rollback_migration(self, migration_id: str) -> dict[str, Any]:
+        """Remove migrated owner state only for the exact migration marker."""
+        with NamedLock(self.lock_root, "tool-definitions"):
+            state = self._read()
+            marker = state.get("migration")
+            if (
+                not isinstance(marker, Mapping)
+                or marker.get("migration_id") != migration_id
+            ):
+                raise ValueError("tool registry migration marker mismatch")
+            _atomic_json(self.root / f"rollback-{migration_id}.json", state)
+            self.path.unlink(missing_ok=True)
+        return {"migration_id": migration_id, "rolled_back": True}
+
     def _read(self) -> dict[str, Any]:
         if not self.path.is_file():
-            return {
-                "version": STORE_VERSION,
-                "profile_id": self.profile_id,
-                "revision": 0,
-                "definitions": {},
-                "aliases": {},
-            }
+            return self._empty()
         value = json.loads(self.path.read_text(encoding="utf-8"))
         if (
             not isinstance(value, dict)
@@ -142,6 +210,16 @@ class ToolDefinitionRegistry:
         ):
             raise ValueError("tool definition registry is invalid")
         return value
+
+    def _empty(self) -> dict[str, Any]:
+        return {
+            "version": STORE_VERSION,
+            "profile_id": self.profile_id,
+            "revision": 0,
+            "definitions": {},
+            "aliases": {},
+            "migration": None,
+        }
 
     def _write(self, state: Mapping[str, Any]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -195,6 +273,31 @@ def create_manage_operation(client: Any) -> Callable[[str, Mapping[str, Any]], A
                 expected,
             )
         raise ValueError(f"unknown tool definition management operation: {name}")
+
+    return operation
+
+
+def create_migrate_operation(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
+    """Create explicit source-hash migration and marker-bound rollback."""
+    del client
+
+    def operation(name: str, payload: Mapping[str, Any]) -> Any:
+        registry = ToolDefinitionRegistry(_profile_id(payload))
+        if name == "migrate":
+            definitions = payload.get("definitions")
+            aliases = payload.get("aliases")
+            if not isinstance(definitions, list) or not isinstance(aliases, Mapping):
+                raise ValueError("tool migration source is invalid")
+            return registry.migrate(
+                [item for item in definitions if isinstance(item, Mapping)],
+                aliases,
+                str(payload.get("expected_source_hash") or ""),
+            )
+        if name == "rollback":
+            return registry.rollback_migration(
+                str(payload.get("migration_id") or "")
+            )
+        raise ValueError(f"unknown tool registry migration operation: {name}")
 
     return operation
 
@@ -266,3 +369,20 @@ def _profile_id(payload: Mapping[str, Any]) -> str:
 def _assert_revision(state: Mapping[str, Any], expected: int) -> None:
     if int(state.get("revision") or 0) != expected:
         raise RuntimeError("tool definition registry revision is stale")
+
+
+def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}-", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)

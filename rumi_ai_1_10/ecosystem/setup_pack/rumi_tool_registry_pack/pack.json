@@ -8,7 +8,7 @@
   "risk_level": "high",
   "supports_all_ok": false,
   "depends_on": [],
-  "required_permissions": ["tool.definition.read", "tool.definition.manage"],
+  "required_permissions": ["tool.definition.read", "tool.definition.manage", "tool.definition.migrate"],
   "conflicts_with": [],
   "compatibility": {"python": ">=3.10", "platforms": ["macos", "linux", "windows"]},
   "marketplace": {"id": "rumi.tool_registry", "registry": "bundled", "publisher": "rumi-ai", "status": "verified", "category": "tool-runtime", "channel": "experimental"},
