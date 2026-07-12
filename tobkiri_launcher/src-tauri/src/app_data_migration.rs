@@ -56,7 +56,11 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let source_path = entry.path();
-        reject_symlink(&source_path)?;
+        if entry.file_type()?.is_symlink() {
+            // Never follow links from legacy storage; valid runtime installs
+            // contain interpreter links, which are recreated by setup.
+            continue;
+        }
         let destination_path: PathBuf = destination.join(entry.file_name());
         if entry.file_type()?.is_dir() {
             copy_tree(&source_path, &destination_path)?;
@@ -123,15 +127,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rejects_symlinks_without_creating_destination() {
+    fn skips_symlinks_without_following_them() {
         use std::os::unix::fs::symlink;
         let root = root("symlink");
         let old = root.join("dev.rumiai.app");
         let new = root.join("dev.tobkiri.launcher");
         fs::create_dir_all(&old).unwrap();
         symlink("/tmp", old.join("unsafe")).unwrap();
-        assert!(migrate_legacy_app_data(&new).is_err());
-        assert!(!new.exists());
+        assert!(migrate_legacy_app_data(&new).unwrap());
+        assert!(!new.join("unsafe").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
