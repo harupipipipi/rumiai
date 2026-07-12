@@ -1097,6 +1097,35 @@ export type P2PPairing = {
   reason?: string;
 };
 
+export type MobileDevice = {
+  device_id: string;
+  label: string;
+  profile_id?: string;
+  platform?: string;
+  scopes?: string[];
+  status?: string;
+  encryption_key_configured?: boolean;
+};
+
+export type MobileDevicesResponse = { devices: MobileDevice[]; count?: number };
+
+export type CredentialTransferStatus =
+  | "awaiting_confirmation" | "pending" | "accepted" | "completed"
+  | "rejected" | "expired" | "revoked" | "cancelled";
+
+export type CredentialTransfer = {
+  transfer_id: string;
+  status: CredentialTransferStatus;
+  device_id: string;
+  device_label: string;
+  profile_id: string;
+  provider_id: string;
+  api_id: string;
+  provider_label: string;
+  created_at: number;
+  expires_at: number;
+};
+
 export type P2PStatusResponse = {
   p2p: P2PSettings;
   peer_count: number;
@@ -4107,6 +4136,38 @@ export const api = {
     return request<{ ok: boolean; pairing: P2PPairing }>("/api/p2p/pairing/reject", {
       method: "POST",
       body: JSON.stringify({ code, reason }),
+    });
+  },
+
+  listMobileDevices() {
+    return request<MobileDevicesResponse>("/api/mobile/v1/devices", { cache: "no-store" });
+  },
+
+  createCredentialTransfer(payload: { device_id: string; provider_id: string; api_id: string; provider_label?: string }) {
+    return request<{ transfer: CredentialTransfer }>("/api/mobile/v1/credential-transfers", {
+      method: "POST", body: JSON.stringify(payload),
+    });
+  },
+
+  confirmCredentialTransfer(transferId: string, payload: { device_id: string; provider_id: string; api_id: string; user_confirmed: true }) {
+    return request<{ transfer: CredentialTransfer }>(`/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/confirm`, {
+      method: "POST", body: JSON.stringify(payload),
+    });
+  },
+
+  getCredentialTransferStatus(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(`/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/status`, { cache: "no-store" });
+  },
+
+  cancelCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(`/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/cancel`, {
+      method: "POST", body: JSON.stringify({ reason: "cancelled by PC user" }),
+    });
+  },
+
+  revokeCredentialTransfer(transferId: string) {
+    return request<{ transfer: CredentialTransfer }>(`/api/mobile/v1/credential-transfers/${encodeURIComponent(transferId)}/revoke`, {
+      method: "POST", body: JSON.stringify({ reason: "revoked by PC user" }),
     });
   },
 
