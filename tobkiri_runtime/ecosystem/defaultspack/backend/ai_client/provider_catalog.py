@@ -1,21 +1,19 @@
-"""Pack-aggregated provider and model catalog loader.
+"""Finite legacy projection over selected AI catalog and registry owners.
 
-defaultspack owns the loader only. Concrete provider/model entries live in
-installed packs such as rumi_model_catalog_pack under extensions/llm/providers.
+defaultspack owns no catalog or connection state. The active resolved profile
+selects the global owners; this module only preserves legacy response fields.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List
 
-from ecosystem.defaultspack.domain.ai_client.providers import (
-    build_profile_catalog,
-    get_all_known_models,
-    get_provider_catalog,
-    validate_provider_catalog_coverage,
+from core_runtime.di_container import get_container
+from core_runtime.global_contract_dispatch import (
+    GlobalContractInvocationError,
+    GlobalContractUnavailable,
+    invoke_global_contract,
 )
-from ecosystem.defaultspack.domain.ai_client.api_key_store import provider_named_api_keys
 from ecosystem.defaultspack.domain.ai_client.model_capabilities import (
     flatten_capability_fields,
 )
@@ -24,34 +22,94 @@ from ecosystem.defaultspack.domain.ai_client.model_capability_schema import (
 )
 from ecosystem.defaultspack.domain.ai_client.model_metadata_schema import context_window_value
 
+_MODEL_CATALOG_CONTRACT = "rumi.resource.ai.model.catalog.v1"
+_MODEL_PROFILE_CONTRACT = "rumi.resource.ai.model.profile.v1"
+_PROVIDER_REGISTRY_CONTRACT = "rumi.resource.ai.provider.registry.v1"
+
+
+def _invoke(contract_id: str, operation: str, payload: Dict[str, Any]) -> Any:
+    registry = get_container().get_or_none("interface_registry")
+    if registry is None:
+        raise GlobalContractUnavailable("interface registry is unavailable")
+    return invoke_global_contract(registry, contract_id, operation, payload)
+
 
 def list_provider_catalog() -> List[Dict[str, Any]]:
-    return [_with_legacy_provider_fields(provider) for provider in get_provider_catalog()]
+    try:
+        catalog = _invoke(_MODEL_CATALOG_CONTRACT, "list", {})
+        connections = _invoke(_PROVIDER_REGISTRY_CONTRACT, "list", {})
+    except (GlobalContractInvocationError, GlobalContractUnavailable):
+        return []
+    providers = catalog.get("providers") if isinstance(catalog, dict) else None
+    providers = providers if isinstance(providers, list) else []
+    connection_items = (
+        connections.get("providers") if isinstance(connections, dict) else None
+    )
+    connection_items = connection_items if isinstance(connection_items, list) else []
+    configured = {
+        str(item.get("provider_instance_id") or "")
+        for item in connection_items
+        if isinstance(item, dict) and item.get("enabled", True)
+    }
+    return [
+        _with_legacy_provider_fields(
+            provider,
+            configured=f"provider.{provider.get('provider_id')}" in configured,
+        )
+        for provider in providers
+        if isinstance(provider, dict)
+    ]
 
 
 def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
-    models = get_all_known_models()
-    if provider:
-        models = [model for model in models if model.get("provider_id") == provider or model.get("provider") == provider]
+    try:
+        result = _invoke(
+            _MODEL_CATALOG_CONTRACT,
+            "list",
+            {"provider_id": provider} if provider else {},
+        )
+    except (GlobalContractInvocationError, GlobalContractUnavailable):
+        return []
+    models = result.get("models") if isinstance(result, dict) else None
+    models = models if isinstance(models, list) else []
     return [_with_legacy_model_fields(model) for model in models]
 
 
 def list_profile_catalog() -> List[Dict[str, Any]]:
-    return [_with_legacy_profile_fields(profile) for profile in build_profile_catalog()]
+    try:
+        result = _invoke(_MODEL_PROFILE_CONTRACT, "list", {})
+    except (GlobalContractInvocationError, GlobalContractUnavailable):
+        return []
+    profiles = result.get("profiles") if isinstance(result, dict) else None
+    profiles = profiles if isinstance(profiles, list) else []
+    return [
+        _with_legacy_profile_fields(profile)
+        for profile in profiles
+        if isinstance(profile, dict)
+    ]
 
 
 def validate_catalog_coverage() -> List[Dict[str, Any]]:
-    return validate_provider_catalog_coverage()
+    providers = {item.get("provider_id") for item in list_provider_catalog()}
+    return [
+        {
+            "code": "catalog_provider_missing",
+            "model_id": item.get("model_id"),
+            "provider_id": item.get("provider_id"),
+        }
+        for item in list_model_catalog()
+        if item.get("provider_id") not in providers
+    ]
 
 
-def _with_legacy_provider_fields(provider: Dict[str, Any]) -> Dict[str, Any]:
+def _with_legacy_provider_fields(
+    provider: Dict[str, Any],
+    *,
+    configured: bool,
+) -> Dict[str, Any]:
     item = dict(provider)
     availability = dict(item.get("availability", {}))
-    configuration_source = availability.get("configuration_source")
-    env_source = next((env_name for env_name in item.get("env_vars", []) if os.environ.get(str(env_name))), None)
-    if env_source:
-        configuration_source = env_source
-    configured_envs = [configuration_source] if configuration_source else []
+    configured_envs: List[str] = []
     capabilities = set(item.get("capabilities", []))
     kind = str(item.get("kind") or "")
     metadata = dict(item.get("metadata", {}))
@@ -60,15 +118,14 @@ def _with_legacy_provider_fields(provider: Dict[str, Any]) -> Dict[str, Any]:
         item["default_model_for"] = {str(key): str(value) for key, value in default_model_for.items()}
         metadata["default_model_for"] = dict(item["default_model_for"])
     item.setdefault("category", kind)
-    item["configured"] = bool(availability.get("configured"))
+    item["configured"] = configured
     item["configured_envs"] = configured_envs
     item["local"] = kind == "local" or "local" in capabilities
     item["openai_compatible"] = "openai_compatible" in capabilities or bool(metadata.get("openai_compatible"))
     item["catalog_only"] = bool(metadata.get("catalog_only", availability.get("catalog_only", False)))
     item["supports_invoke"] = bool(metadata.get("supports_invoke", availability.get("supports_invoke", False)))
-    named_apis = provider_named_api_keys(str(item.get("provider_id") or item.get("id") or ""))
-    item["configured_api_count"] = len([api for api in named_apis if api.get("configured")])
-    item["named_apis"] = named_apis
+    item["configured_api_count"] = 1 if configured else 0
+    item["named_apis"] = []
     return item
 
 
@@ -99,6 +156,36 @@ def _supports_thinking(model: Dict[str, Any]) -> bool:
 
 
 def _capability_enrichment(model: Dict[str, Any]) -> Dict[str, Any]:
+    declared = model.get("capabilities")
+    if isinstance(declared, list):
+        values = {str(item) for item in declared}
+        supports_thinking = "thinking" in values
+        return {
+            "supports_vision": "image_input" in values,
+            "supports_image_input": "image_input" in values,
+            "supports_audio": "audio_input" in values,
+            "supports_audio_input": "audio_input" in values,
+            "supports_tool_calling": "tool_calling" in values,
+            "supports_fast": "fast" in values,
+            "supports_thinking": supports_thinking,
+            "thinking_levels": (
+                ["low", "medium", "high", "xhigh"]
+                if supports_thinking else []
+            ),
+            "default_thinking_level": (
+                "medium" if supports_thinking else None
+            ),
+            "speed_tier": "balanced",
+            "quality_tier": "unknown",
+            "knowledge_level": 0,
+            "knowledge_band": knowledge_band_for_level(0),
+            "cost_tier": "unknown",
+            "latency_tier": "medium",
+            "capability_tags": sorted(values),
+            "allowed_roles": ["primary_chat"],
+            "recommended_roles": ["primary_chat"],
+            "model_capabilities": {key: True for key in sorted(values)},
+        }
     try:
         return flatten_capability_fields(model)
     except Exception:

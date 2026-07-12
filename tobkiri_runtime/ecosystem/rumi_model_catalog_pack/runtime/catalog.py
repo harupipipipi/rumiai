@@ -144,7 +144,8 @@ def _model(
     pricing = value.get("pricing")
     pricing = pricing if isinstance(pricing, Mapping) else {}
     return {
-        "model_id": raw_model_id,
+        "model_id": str(value.get("id") or f"{provider_id}/{raw_model_id}"),
+        "provider_model_id": raw_model_id,
         "provider_id": provider_id,
         "execution_provider_instance_id": "provider.compatibility",
         "display_name": str(value.get("display_name") or raw_model_id),

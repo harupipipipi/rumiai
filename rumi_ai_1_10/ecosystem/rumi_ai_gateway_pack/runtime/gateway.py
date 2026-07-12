@@ -165,7 +165,9 @@ def _invoke(
         )
     invocation = {
         "request_id": request_id,
-        "model_id": selected.model_id,
+        "model_id": str(
+            selected.raw.get("provider_model_id") or selected.model_id
+        ),
         "provider_id": str(selected.raw.get("provider_id") or ""),
         "messages": request.get("messages") or [],
         "input": request.get("input"),
@@ -183,7 +185,10 @@ def _invoke(
     replay_safe = bool(request.get("idempotency_key")) and not invocation["tools"]
     for attempt_number, attempt_candidate in enumerate(ordered, 1):
         invocation["attempt"] = attempt_number
-        invocation["model_id"] = attempt_candidate.model_id
+        invocation["model_id"] = str(
+            attempt_candidate.raw.get("provider_model_id")
+            or attempt_candidate.model_id
+        )
         invocation["provider_id"] = str(
             attempt_candidate.raw.get("provider_id") or ""
         )

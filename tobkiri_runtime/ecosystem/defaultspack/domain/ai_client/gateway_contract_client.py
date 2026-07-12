@@ -1,0 +1,47 @@
+"""Finite legacy projection over the active provider-neutral AI gateway."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from core_runtime.di_container import get_container
+from core_runtime.global_contract_dispatch import (
+    GlobalContractUnavailable,
+    invoke_global_contract,
+)
+
+_GENERATE_CONTRACT = "rumi.service.ai.generate.v1"
+_STREAM_CONTRACT = "rumi.service.ai.stream.v1"
+
+
+def generate(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Invoke the selected gateway and project its result to legacy fields."""
+    value = _invoke(_GENERATE_CONTRACT, "generate", payload)
+    if not isinstance(value, dict):
+        raise RuntimeError("AI gateway returned an invalid result")
+    return {
+        **value,
+        "content": value.get("output"),
+        "tool_calls": list(value.get("tool_intents") or []),
+    }
+
+
+def stream(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Invoke the distinct stream contract and return normalized events."""
+    value = _invoke(_STREAM_CONTRACT, "stream", payload)
+    events = value.get("events") if isinstance(value, dict) else None
+    if not isinstance(events, list):
+        raise RuntimeError("AI gateway returned an invalid stream")
+    return [dict(item) for item in events if isinstance(item, dict)]
+
+
+def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
+    registry = get_container().get_or_none("interface_registry")
+    if registry is None:
+        raise GlobalContractUnavailable("interface registry is unavailable")
+    return invoke_global_contract(
+        registry,
+        contract_id,
+        operation,
+        dict(payload),
+    )
