@@ -69,6 +69,8 @@
 - catalog code importがないこと
 - environment secret injectionがないこと
 - dual-writeがないこと
+- function dispatcherのcredential writeが専用approvalを要求すること
+- UI/model settingsへcredential値を送っても旧storeへ保存されないこと
 
 ## 必須証拠
 

@@ -34,6 +34,10 @@ Defaultspack retains finite response-shape and HTTP/function adapters. Catalog,
 completion, stream, provider status, health, and approved provider-key writes
 are forwarded through selected global contracts. Provider-key approval binds a
 SHA-256 digest rather than persisting or replaying secret material.
+Function-dispatch credential mutations use that same approved adapter and
+preserve its signed approval context. Generic UI/model settings updates discard
+submitted credential values because those routes cannot prove the dedicated
+credential-management approval; they are not alternate secret writers.
 
 ## Contracts
 
@@ -90,6 +94,12 @@ revoke it if the revision-guarded registry write fails.
 Legacy defaultspack AI modules remain migration/compatibility source until the
 Wave 10 facade cleanup. They must not be used as authoritative operational
 writers; the active compatibility routes use the new owners.
+
+Source inspection after the compatibility cutover finds no calls to legacy
+provider-key create, update, rename, delete, or custom-provider registration
+outside the legacy store implementation itself. Remaining legacy reads serve
+finite status/migration compatibility or code scheduled for Wave 10 removal;
+they are not authoritative writes.
 
 ## Data ownership matrix
 
