@@ -25,7 +25,7 @@ test('viewer package, Tauri, and Cargo versions stay aligned', () => {
   const packageLock = JSON.parse(readFileSync(resolve(frontendRoot, 'package-lock.json'), 'utf8'));
   const tauriConfig = JSON.parse(readFileSync(resolve(viewerRoot, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const cargoManifest = readFileSync(resolve(viewerRoot, 'src-tauri', 'Cargo.toml'), 'utf8');
-  const cargoLock = readFileSync(resolve(viewerRoot, 'src-tauri', 'Cargo.lock'), 'utf8');
+  const cargoLock = readFileSync(resolve(viewerRoot, 'src-tauri', 'Cargo.lock'), 'utf8').replaceAll('\r\n', '\n');
   const cargoVersion = cargoManifest.match(/^version = "([^"]+)"$/m)?.[1];
   const cargoLockVersion = cargoLock.match(
     /\[\[package\]\]\nname = "rumi-viewer"\nversion = "([^"]+)"/,
