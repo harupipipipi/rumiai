@@ -21,6 +21,7 @@ HEALTH_CONTRACT = "rumi.resource.ai.provider.health.v1"
 USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
 ROUTING_CONTRACT = "rumi.service.ai.route.v1"
 STREAM_NORMALIZE_CONTRACT = "rumi.service.ai.stream.normalize.v1"
+TOOL_BRIDGE_CONTRACT = "rumi.service.ai.tool_intent.normalize.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -220,6 +221,7 @@ def _invoke(
                         "stream normalizer returned an invalid result",
                     )
                 _attach_stream_usage_cost(client, events, attempt_candidate)
+                _attach_stream_tool_intents(client, events, request_id)
                 return {
                     "request_id": request_id,
                     "model_id": attempt_candidate.model_id,
@@ -228,6 +230,11 @@ def _invoke(
                     "attempts": attempts,
                 }
             result = _normalize_result(value, request_id, attempt_candidate)
+            result["tool_intents"] = _tool_intents(
+                client,
+                result["tool_intents"],
+                request_id,
+            )
             result["usage_cost"] = _usage_cost(
                 client,
                 result["usage"],
@@ -476,6 +483,38 @@ def _attach_stream_usage_cost(
                 candidate,
                 "provider_reported",
             )
+
+
+def _attach_stream_tool_intents(
+    client: GlobalContractClient,
+    events: list[dict[str, Any]],
+    request_id: str,
+) -> None:
+    for event in events:
+        intent = event.get("tool_intent")
+        if event.get("type") == "tool_intent_delta" and isinstance(
+            intent, Mapping
+        ):
+            normalized = _tool_intents(client, [intent], request_id)
+            event["tool_intent"] = normalized[0]
+
+
+def _tool_intents(
+    client: GlobalContractClient,
+    intents: list[Any],
+    request_id: str,
+) -> list[dict[str, Any]]:
+    result = client.invoke(
+        TOOL_BRIDGE_CONTRACT,
+        "normalize",
+        {"request_id": request_id, "intents": intents},
+    )
+    values = result.get("intents") if isinstance(result, Mapping) else None
+    if not isinstance(values, list):
+        raise GlobalContractInvocationError(
+            "invalid_response", "AI tool bridge returned an invalid result"
+        )
+    return [dict(item) for item in values if isinstance(item, Mapping)]
 
 
 def _usage_cost(
