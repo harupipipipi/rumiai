@@ -1,0 +1,78 @@
+{
+  "id": "elevenlabs",
+  "provider_id": "elevenlabs",
+  "category": "providers",
+  "kind": "task_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "ElevenLabs",
+  "entrypoints": {
+    "models": "models.json"
+  },
+  "description": "ElevenLabs task-specific media/speech provider.",
+  "provider_metadata": {
+    "display_name": "ElevenLabs",
+    "kind": "task_specific",
+    "env_vars": [
+      "ELEVENLABS_API_KEY"
+    ],
+    "base_url_envs": [
+      "ELEVENLABS_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://api.elevenlabs.io",
+    "default_model_for": {},
+    "task_types": [
+      "tts",
+      "stt",
+      "music"
+    ],
+    "exclude_from_chat_picker": true,
+    "catalog_features": [
+      "tts",
+      "stt",
+      "music",
+      "task_specific"
+    ]
+  },
+  "provider_manifest": {
+    "id": "elevenlabs",
+    "category": "task_provider",
+    "version": "1",
+    "display_name": "ElevenLabs",
+    "enabled": true,
+    "priority": 500,
+    "adapter": "elevenlabs_tasks",
+    "api_key_env": "ELEVENLABS_API_KEY",
+    "base_url_env": "ELEVENLABS_BASE_URL",
+    "default_base_url": "https://api.elevenlabs.io",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "native_models_api",
+      "task_types": [
+        "tts",
+        "stt",
+        "music"
+      ],
+      "exclude_from_chat_picker": true,
+      "fixture": "ecosystem/defaultspack/domain/providers/elevenlabs/models.json",
+      "source_docs": "https://elevenlabs.io/docs/api-reference/models/list"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "elevenlabs"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "tts",
+    "stt",
+    "music",
+    "task_specific"
+  ]
+}

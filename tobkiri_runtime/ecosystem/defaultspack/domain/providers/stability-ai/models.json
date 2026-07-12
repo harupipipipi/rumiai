@@ -1,0 +1,75 @@
+{
+  "snapshot": {
+    "source": "https://platform.stability.ai/docs/api-reference",
+    "verified_at": "2026-07-12",
+    "lifecycle_policy": "refresh from official model inventory or documentation before retirement"
+  },
+  "models": [
+    {
+      "id": "stability-ai/image/core",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "stability-ai",
+      "model_id": "core",
+      "display_name": "Stable Image Core",
+      "type": "image",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://platform.stability.ai/docs/api-reference",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "stability-ai/image/ultra",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "stability-ai",
+      "model_id": "ultra",
+      "display_name": "Stable Image Ultra",
+      "type": "image",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://platform.stability.ai/docs/api-reference",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

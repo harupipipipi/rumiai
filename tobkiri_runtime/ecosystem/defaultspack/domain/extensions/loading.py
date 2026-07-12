@@ -26,12 +26,16 @@ def normalize_module_name(module_name: str) -> str:
 
 
 def _register_aliases(module: ModuleType, original_name: str, canonical_name: str) -> None:
-    sys.modules.setdefault(canonical_name, module)
-    sys.modules.setdefault(original_name, module)
+    aliases = {canonical_name, original_name}
     for legacy_prefix, canonical_prefix in _LEGACY_PREFIXES.items():
         if canonical_name.startswith(canonical_prefix):
-            legacy_name = legacy_prefix + canonical_name[len(canonical_prefix) :]
-            sys.modules.setdefault(legacy_name, module)
+            aliases.add(legacy_prefix + canonical_name[len(canonical_prefix) :])
+    for alias in aliases:
+        registered = sys.modules.setdefault(alias, module)
+        parent_name, separator, child_name = alias.rpartition(".")
+        parent = sys.modules.get(parent_name) if separator else None
+        if parent is not None:
+            setattr(parent, child_name, registered)
 
 
 def import_module(module_name: str) -> ModuleType:

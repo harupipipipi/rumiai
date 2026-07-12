@@ -1,0 +1,18 @@
+{
+  "source": "https://docs.bfl.ai/quick_start/generating_images",
+  "verified_at": "2026-07-12",
+  "models": [
+    {
+      "model_id": "flux-pro-1.1",
+      "task": "image",
+      "display_name": "FLUX 1.1 Pro",
+      "streaming": false
+    },
+    {
+      "model_id": "flux-kontext-pro",
+      "task": "image",
+      "display_name": "FLUX Kontext Pro",
+      "streaming": false
+    }
+  ]
+}

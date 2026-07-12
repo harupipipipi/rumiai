@@ -1,0 +1,18 @@
+{
+  "source": "https://platform.stability.ai/docs/api-reference",
+  "verified_at": "2026-07-12",
+  "models": [
+    {
+      "model_id": "core",
+      "task": "image",
+      "display_name": "Stable Image Core",
+      "streaming": false
+    },
+    {
+      "model_id": "ultra",
+      "task": "image",
+      "display_name": "Stable Image Ultra",
+      "streaming": false
+    }
+  ]
+}

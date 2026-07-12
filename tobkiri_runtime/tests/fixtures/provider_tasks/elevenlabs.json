@@ -1,0 +1,30 @@
+{
+  "source": "https://elevenlabs.io/docs/overview/models",
+  "verified_at": "2026-07-12",
+  "models": [
+    {
+      "model_id": "eleven_v3",
+      "task": "tts",
+      "display_name": "Eleven v3",
+      "streaming": true
+    },
+    {
+      "model_id": "eleven_multilingual_v2",
+      "task": "tts",
+      "display_name": "Eleven Multilingual v2",
+      "streaming": true
+    },
+    {
+      "model_id": "scribe_v2",
+      "task": "stt",
+      "display_name": "Scribe v2",
+      "streaming": false
+    },
+    {
+      "model_id": "music_v2",
+      "task": "music",
+      "display_name": "Eleven Music v2",
+      "streaming": false
+    }
+  ]
+}
