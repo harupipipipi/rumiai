@@ -248,6 +248,7 @@ def test_mcp_executor_rejects_missing_namespace_before_gateway_call() -> None:
         execute(
             "execute",
             {
+                "_contract_consumer_pack_id": "rumi_tool_broker_pack",
                 "definition": {
                     "execution": {
                         "contract_id": "rumi.service.mcp.tool.call.v1",
@@ -258,6 +259,12 @@ def test_mcp_executor_rejects_missing_namespace_before_gateway_call() -> None:
                 "arguments": {},
             },
         )
+
+
+def test_mcp_executor_rejects_nonbroker_consumer() -> None:
+    execute = create_mcp_execute_operation(_McpClient())
+    with pytest.raises(PermissionError, match="consumer"):
+        execute("execute", {"_contract_consumer_pack_id": "untrusted-pack"})
 
 
 def test_broker_source_has_no_concrete_tool_or_service_branches() -> None:

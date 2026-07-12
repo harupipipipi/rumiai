@@ -48,6 +48,12 @@ Domain services remain independently available. Adapter removal removes only
 their tool exposure. New tools publish a definition and an adapter provider;
 the broker does not change.
 
+Core/profile/frontend/chat/context/API-map consumers read definitions through
+the finite global catalog client instead of importing the legacy ToolRegistry.
+Direct legacy-registry imports remain only inside the old tool subsystem,
+read/write compatibility blocks, and the catalog client's no-provider fallback;
+those paths are scheduled for the Wave 10 facade cleanup.
+
 ## Global contracts
 
 - `rumi.resource.tool.definition.v1`
@@ -97,6 +103,13 @@ argument hash, caller, profile, expiry, and replay policy. It returns an approva
 request descriptor when no token is supplied and never trusts client `approved`
 flags. Defaultspack removes caller/profile/token identities from untrusted
 payload context before forwarding.
+
+Every executor accepts calls only from `rumi_tool_broker_pack`. For the finite
+legacy projection, the broker passes a secret-free authorization receipt through
+the selected local executor. The projection converts it to the old internal
+approval marker only after rechecking `authorized`, `consumed`, tool ID, caller,
+profile, canonical argument hash, and one-shot replay policy. This avoids a
+second legacy approval prompt without accepting a client-forged marker.
 
 ## Migration and rollback
 

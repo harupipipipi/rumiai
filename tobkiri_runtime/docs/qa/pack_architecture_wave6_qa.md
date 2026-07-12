@@ -48,6 +48,7 @@
 - browser observe/control、desktop observe/control、clipboard read/writeの分離
 - unknown authorityとmissing permissionの拒否
 - one-shot tokenのoperation/args hash/caller/profile/expiry/replay binding
+- executorのnon-broker consumer拒否とlegacy authorization receipt再照合
 - token missing、changed args、wrong caller/profile、expired、replayedの拒否
 - exact execution kind/provider selectionとdeterministic tie break
 - local adapter omissionでservice本体が残りtool exposureだけ消えること
