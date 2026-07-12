@@ -45,10 +45,12 @@ class FakeManagedUbuntuCli:
         self.guest_exists = False
         self.deps_installed = False
         self.desktop_running = False
+        self.desktop_start_result: GuestCommandResult | None = None
         self.guest_displays_in_use: set[str] = set()
         self.imported_rootfs_path: str | None = None
         self.imported_install_dir: str | None = None
         self.port_probe_returncode = 0
+        self.wsl_list_stdout: str | None = None
 
     def __call__(
         self,
@@ -93,6 +95,8 @@ class FakeManagedUbuntuCli:
         if cmd[1:] == ["--version"]:
             return GuestCommandResult(returncode=0, stdout="WSL version: 2.0\n")
         if cmd[1:] == ["-l", "-q"]:
+            if self.wsl_list_stdout is not None:
+                return GuestCommandResult(returncode=0, stdout=self.wsl_list_stdout)
             return GuestCommandResult(returncode=0, stdout=f"{self.runtime_name}\n" if self.guest_exists else "")
         if len(cmd) >= 7 and cmd[1:3] == ["--import", self.runtime_name]:
             self.guest_exists = True
@@ -145,6 +149,8 @@ class FakeManagedUbuntuCli:
                         display = line.split("DISPLAY_ID=", 1)[1].strip().strip("'\"")
                         if display:
                             self.guest_displays_in_use.add(display)
+                if self.desktop_start_result is not None:
+                    return self.desktop_start_result
                 self.desktop_running = True
                 return GuestCommandResult(returncode=0)
             if "command -v" in script:
@@ -414,6 +420,38 @@ def test_managed_ubuntu_desktop_create_skips_guest_occupied_displays(monkeypatch
     assert ":100" in fake.guest_displays_in_use
 
 
+def test_windows_wsl_desktop_start_fails_when_xvfb_does_not_survive(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.guest_exists = True
+    fake.deps_installed = True
+    fake.desktop_start_result = GuestCommandResult(
+        returncode=126,
+        stderr=(
+            "Desktop Xvfb failed to stay running.\n"
+            "_XSERVTransmkdir: Mode of /tmp/.X11-unix should be set to 1777\n"
+        ),
+    )
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+    instance = provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+
+    with pytest.raises(SandboxContractError) as exc:
+        provider.start(instance)
+
+    desktop_script = next(script for script in fake.guest_scripts if "DISPLAY_ID=':98'" in script)
+    assert exc.value.code == "RUNTIME_PROVIDER_UNAVAILABLE"
+    assert "Managed Ubuntu guest command failed" in str(exc.value)
+    assert "Desktop Xvfb failed to stay running" in str(exc.value.details)
+    assert fake.desktop_running is False
+    assert provider.reconcile(instance).instance.state == "stopped"
+    assert "mkdir -p /tmp/.X11-unix" in desktop_script
+    assert "chmod 1777 /tmp/.X11-unix" in desktop_script
+    assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in desktop_script
+    assert "rumi_pidfile_alive" in desktop_script
+    assert "Desktop Xvfb failed to stay running." in desktop_script
+    assert "Desktop openbox failed to stay running." in desktop_script
+
+
 def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
     rootfs = tmp_path / "rumi-ubuntu-rootfs.tar"
@@ -631,6 +669,24 @@ def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(m
     assert "managed_guest" in status.missing_requirements
 
 
+def test_windows_wsl_provider_detects_nul_separated_rumi_distribution(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.guest_exists = True
+    fake.deps_installed = True
+    fake.wsl_list_stdout = (
+        "\ufeffd\x00o\x00c\x00k\x00e\x00r\x00-\x00d\x00e\x00s\x00k\x00t\x00o\x00p\x00\n\x00"
+        "R\x00u\x00m\x00i\x00U\x00b\x00u\x00n\x00t\x00u\x00\n\x00"
+    )
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    status = provider.doctor(RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})))
+
+    assert status.ready is True
+    assert "managed_guest" not in status.missing_requirements
+    assert not any("--import" in command for command, _input_text, _timeout in fake.calls)
+
+
 def test_windows_wsl_provider_downloads_rumi_rootfs_when_not_configured(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
     monkeypatch.delenv(WSL_ROOTFS_ENV, raising=False)
@@ -807,7 +863,8 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
 
     assert ensured.ok is True
     assert started.state == "ready"
-    assert "BROWSER_URL=https://example.com" in start_script
+    assert "BROWSER_URL_ORIGINAL=https://example.com" in start_script
+    assert 'BROWSER_URL="$(python3 - "$BROWSER_URL_ORIGINAL" "$RUMI_HOST_LOOPBACK_ALIAS"' in start_script
     assert "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'" in start_script
     assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
     assert "run_detached()" in start_script
@@ -815,6 +872,33 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "/etc/machine-id" in start_script
     assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
     assert "starter-browser.log" in start_script
+
+
+def test_managed_ubuntu_desktop_browser_url_starter_rewrites_host_loopback(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(network_mode="host_shared", network_approval_required=False),
+            startup={"starter": "browser_url", "browser_url": "http://127.0.0.1:8766/chat?chat=qa-loop"},
+        )
+    )
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL_ORIGINAL=" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "BROWSER_URL_ORIGINAL='http://127.0.0.1:8766/chat?chat=qa-loop'" in start_script
+    assert "host.lima.internal host.docker.internal" in start_script
+    assert "/etc/resolv.conf" in start_script
+    assert "host in {'127.0.0.1', 'localhost'}" in start_script
+    assert "netloc = f'{host_alias}:{parsed.port}'" in start_script
+    assert "BROWSER_URL=http://127.0.0.1:8766/chat" not in start_script
+    assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
 
 
 def test_managed_ubuntu_desktop_browser_starter_opens_browser_without_url(monkeypatch) -> None:

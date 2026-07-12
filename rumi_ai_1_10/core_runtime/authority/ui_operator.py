@@ -13,13 +13,14 @@ from typing import Any
 UI_OPERATOR_ORIGIN = "tauri_webview_window"
 UI_OPERATOR_WINDOW_LABEL = "authority-approval"
 UI_OPERATOR_VERSION = 1
+BROWSER_UI_OPERATOR_VERSION = 2
 UI_OPERATOR_TTL_SECONDS = 180
 
 
 def _operator_message(payload: dict[str, Any]) -> bytes:
-    return "\n".join(
-        [
-            f"v{UI_OPERATOR_VERSION}",
+    version = int(payload.get("version") or UI_OPERATOR_VERSION)
+    fields = [
+            f"v{version}",
             str(payload.get("origin") or ""),
             str(payload.get("window_label") or ""),
             str(payload.get("request_id") or ""),
@@ -27,7 +28,17 @@ def _operator_message(payload: dict[str, Any]) -> bytes:
             str(int(payload.get("expires_at") or 0)),
             str(payload.get("nonce") or ""),
         ]
-    ).encode("utf-8")
+    if version == BROWSER_UI_OPERATOR_VERSION:
+        fields.extend(
+            [
+                str(payload.get("principal_id") or ""),
+                str(payload.get("device_id") or ""),
+                str(payload.get("browser_origin") or ""),
+                str(payload.get("browser_window_id") or ""),
+                str(payload.get("exchange_nonce") or ""),
+            ]
+        )
+    return "\n".join(fields).encode("utf-8")
 
 
 def _signing_secret() -> bytes:
@@ -40,12 +51,15 @@ def sign_ui_operator(
     now: int | None = None,
     nonce: str | None = None,
     ttl_seconds: int = UI_OPERATOR_TTL_SECONDS,
+    browser_audience: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build the same signed provenance payload produced by the Tauri window."""
     issued_at = int(now if now is not None else time.time())
     expires_at = issued_at + max(15, int(ttl_seconds or UI_OPERATOR_TTL_SECONDS))
     payload = {
-        "version": UI_OPERATOR_VERSION,
+        "version": (
+            BROWSER_UI_OPERATOR_VERSION if browser_audience else UI_OPERATOR_VERSION
+        ),
         "kind": "ui_operator",
         "origin": UI_OPERATOR_ORIGIN,
         "window_label": UI_OPERATOR_WINDOW_LABEL,
@@ -54,6 +68,20 @@ def sign_ui_operator(
         "expires_at": expires_at,
         "nonce": nonce or secrets.token_urlsafe(24),
     }
+    if browser_audience:
+        payload.update(
+            {
+                "principal_id": str(browser_audience.get("principal_id") or ""),
+                "device_id": str(browser_audience.get("device_id") or ""),
+                "browser_origin": str(browser_audience.get("browser_origin") or ""),
+                "browser_window_id": str(
+                    browser_audience.get("browser_window_id") or ""
+                ),
+                "exchange_nonce": str(
+                    browser_audience.get("exchange_nonce") or ""
+                ),
+            }
+        )
     secret = _signing_secret()
     if not secret:
         payload["signature"] = ""
@@ -87,7 +115,10 @@ def verify_ui_operator(
         "nonce": str(payload.get("nonce") or ""),
     }
     signature = str(payload.get("signature") or "")
-    if normalized["version"] != UI_OPERATOR_VERSION or normalized["kind"] != "ui_operator":
+    if normalized["version"] not in {
+        UI_OPERATOR_VERSION,
+        BROWSER_UI_OPERATOR_VERSION,
+    } or normalized["kind"] != "ui_operator":
         return False, "ui_operator version is invalid", {}
     if normalized["origin"] != UI_OPERATOR_ORIGIN or normalized["window_label"] != UI_OPERATOR_WINDOW_LABEL:
         return False, "ui_operator source is invalid", {}
@@ -95,6 +126,17 @@ def verify_ui_operator(
         return False, "ui_operator request mismatch", {}
     if not normalized["nonce"]:
         return False, "ui_operator nonce is missing", {}
+    if normalized["version"] == BROWSER_UI_OPERATOR_VERSION:
+        for key in (
+            "principal_id",
+            "device_id",
+            "browser_origin",
+            "browser_window_id",
+            "exchange_nonce",
+        ):
+            normalized[key] = str(payload.get(key) or "")
+            if not normalized[key]:
+                return False, f"ui_operator {key} is missing", {}
 
     try:
         normalized["issued_at"] = int(normalized["issued_at"] or 0)
@@ -124,4 +166,9 @@ def ui_operator_audit_record(payload: dict[str, Any]) -> dict[str, Any]:
         "issued_at": payload.get("issued_at"),
         "expires_at": payload.get("expires_at"),
         "nonce_hash": hashlib.sha256(nonce.encode("utf-8")).hexdigest() if nonce else "",
+        "browser_bound": payload.get("version") == BROWSER_UI_OPERATOR_VERSION,
+        "principal_id": payload.get("principal_id"),
+        "device_id": payload.get("device_id"),
+        "browser_origin": payload.get("browser_origin"),
+        "browser_window_id": payload.get("browser_window_id"),
     }

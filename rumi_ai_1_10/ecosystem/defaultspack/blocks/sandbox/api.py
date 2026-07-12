@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     from domain.tool_policy.internal_context import internal_tool_decision, internal_tool_decision_allows, tool_server_approval_context_is_internal  # type: ignore
 
 from ecosystem.defaultspack.backend.sandbox.control_lease import ControlLeaseManager
+from ecosystem.defaultspack.backend.sandbox.desktop_access_exchange import DesktopAccessExchange
 from ecosystem.defaultspack.backend.sandbox.cancellation import (
     CancellationRegistry,
     CancellationToken,
@@ -54,6 +55,7 @@ from ecosystem.defaultspack.backend.sandbox.providers import (
 )
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
+from ecosystem.defaultspack.domain.artifact.store import ArtifactStore
 
 
 RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
@@ -71,6 +73,9 @@ class _SandboxApiService:
         self.provider_registry.register(DockerProvider())
         self.provider_registry.register(CloudflareSandboxBridgeProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
+        self.desktop_exchange = DesktopAccessExchange(
+            self.manager.state_dir / "desktop_access_exchange.json"
+        )
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
         self.operation_cancellations = CancellationRegistry()
         self.operation_store.interrupt_nonterminal(
@@ -97,6 +102,12 @@ _SERVICE_LOCK = threading.RLock()
 def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None):
     payload = input_data if isinstance(input_data, dict) else {}
     context_payload = context if isinstance(context, dict) else {}
+    if _has_legacy_desktop_key(payload):
+        return _api_error(
+            "Reusable desktop access keys are no longer accepted; exchange a one-time code for a scoped session credential.",
+            "DESKTOP_ACCESS_KEY_MIGRATION_REQUIRED",
+            400,
+        )
     handler = str(payload.get("_handler") or "runtime_providers")
     service = _service()
     try:
@@ -158,6 +169,16 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
             return _desktop_access_request(service, payload, context_payload)
         if handler == "desktop_access_grant":
             return _desktop_access_grant(service, payload, context_payload)
+        if handler == "desktop_exchange_issue":
+            return _desktop_exchange_issue(service, payload, context_payload)
+        if handler == "desktop_exchange_redeem":
+            return _desktop_exchange_redeem(service, payload, context_payload)
+        if handler == "desktop_grants_list":
+            return _desktop_grants_list(service, payload, context_payload)
+        if handler == "desktop_grant_revoke":
+            return _desktop_grant_revoke(service, payload, context_payload)
+        if handler == "desktop_grants_expire":
+            return _desktop_grants_expire(service, context_payload)
         if handler == "desktop_control_acquire":
             return _desktop_control_acquire(service, payload, context_payload)
         if handler == "desktop_control_renew":
@@ -225,6 +246,7 @@ def _cleanup_lifecycle_results(service: _SandboxApiService, results: list[dict[s
         if str(result.get("lifecycle_action") or "") in {"stop", "destroy"}:
             service.frame_cache.discard(sandbox_id)
             service.lease_manager.invalidate(sandbox_id)
+            _desktop_exchange(service).revoke_seat(sandbox_id, reason="lifecycle_change")
 
 
 class _RecordingProgressSink:
@@ -717,7 +739,7 @@ def _desktop_list_sort_key(desktop: dict[str, Any]) -> tuple[int, float, str]:
 
 def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.read", payload, context)
     if access_error is not None:
         return access_error
     status = service.manager.status(seat_id)
@@ -728,7 +750,7 @@ def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: 
 
 def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.delete", payload, context)
     if access_error is not None:
         return access_error
     confirmation_error = _destructive_confirmation_error(payload, action="delete", resource="desktop")
@@ -739,12 +761,13 @@ def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any], contex
         return _api_error(str(result.get("error") or "Desktop delete failed"), str(result.get("code") or "DESKTOP_DELETE_FAILED"), int(result.get("status_code") or 400))
     service.frame_cache.discard(seat_id)
     service.lease_manager.invalidate(seat_id)
+    _desktop_exchange(service).revoke_seat(seat_id, reason="desktop_destroyed")
     return ok({"deleted": True, "seat_id": seat_id})
 
 
 def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any], *, action: str):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, f"desktop.{action}", payload, context)
     if access_error is not None:
         return access_error
     if action == "stop":
@@ -764,12 +787,13 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], con
     if action in {"stop", "restart"}:
         service.frame_cache.discard(seat_id)
         service.lease_manager.invalidate(seat_id)
+        _desktop_exchange(service).revoke_seat(seat_id, reason=f"desktop_{action}")
     return ok(_desktop_payload(service, result))
 
 
 def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.frame", payload, context)
     if access_error is not None:
         return access_error
     after_seq = _optional_int(payload.get("after"))
@@ -802,24 +826,29 @@ def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any], context
         }
     assert fetched.frame is not None
     frame = fetched.frame
+    artifact = _persist_desktop_frame_artifact(frame)
     return {
         "_binary": True,
         "status_code": 200,
         "content_type": frame.content_type,
         "body": frame.data,
+        "artifacts": [artifact],
+        "artifact_paths": [artifact["path"]],
         "headers": {
             "Cache-Control": "no-store",
             "X-Rumi-Frame-Seq": str(frame.frame_seq),
             "X-Rumi-Frame-Width": str(frame.width),
             "X-Rumi-Frame-Height": str(frame.height),
             "X-Rumi-Captured-At": str(frame.captured_at),
+            "X-Rumi-Artifact-Path": artifact["path"],
+            "X-Rumi-Artifact-Id": artifact["artifact_id"],
         },
     }
 
 
 def _desktop_input(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.input", payload, context)
     if access_error is not None:
         return access_error
     lease_token = payload.get("lease_token")
@@ -832,7 +861,7 @@ def _desktop_input(service: _SandboxApiService, payload: dict[str, Any], context
 
 def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.ai_input", payload, context)
     if access_error is not None:
         return access_error
     service.lease_manager.validate_ai_input(seat_id)
@@ -852,10 +881,25 @@ def _desktop_ai_input(service: _SandboxApiService, payload: dict[str, Any], cont
 
 def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.rules.update", payload, context)
     if access_error is not None:
         return access_error
     access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
+    changes_access_policy = bool(access) or any(
+        key in payload for key in ("access_mode", "access_request_required")
+    )
+    if changes_access_policy:
+        owner_result = service.manager.validate_desktop_access(
+            seat_id,
+            None,
+            owner_id=_desktop_principal_id(context),
+        )
+        if owner_result.get("ok") is not True:
+            return _api_error(
+                str(owner_result.get("error") or "Desktop owner access is required"),
+                str(owner_result.get("code") or "DESKTOP_OWNER_REQUIRED"),
+                int(owner_result.get("status_code") or 403),
+            )
     result = service.manager.update_desktop_rules(
         seat_id,
         role=payload.get("role"),
@@ -869,6 +913,7 @@ def _desktop_rules_update(service: _SandboxApiService, payload: dict[str, Any], 
     )
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Desktop rules update failed"), str(result.get("code") or "DESKTOP_RULES_UPDATE_FAILED"), int(result.get("status_code") or 400))
+    _desktop_exchange(service).revoke_seat(seat_id, reason="desktop_policy_changed")
     data = _desktop_payload(service, result)
     if result.get("access_key"):
         data["access_key"] = result.get("access_key")
@@ -907,9 +952,62 @@ def _desktop_access_grant(service: _SandboxApiService, payload: dict[str, Any], 
     return ok({key: value for key, value in result.items() if key != "ok"})
 
 
+def _desktop_exchange_issue(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "").strip()
+    binding = _desktop_binding_context(context)
+    if binding is None or not _owner_or_local_ui(service, seat_id, context):
+        return _api_error("Only the authenticated desktop owner or local UI can issue exchange codes.", "DESKTOP_EXCHANGE_ISSUER_FORBIDDEN", 403)
+    requested = payload.get("operations")
+    operations = requested if isinstance(requested, list) else []
+    try:
+        result = _desktop_exchange(service).issue(
+            **binding,
+            seat_id=seat_id,
+            operations=operations,
+            code_ttl_seconds=int(payload.get("code_ttl_seconds") or 60),
+            credential_ttl_seconds=int(payload.get("credential_ttl_seconds") or 300),
+        )
+    except (TypeError, ValueError) as exc:
+        return _api_error(str(exc), "DESKTOP_EXCHANGE_ISSUE_INVALID", 400)
+    return ok(result)
+
+
+def _desktop_exchange_redeem(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
+    binding = _desktop_binding_context(context)
+    if binding is None:
+        return _api_error("Trusted origin and authenticated principal/device/session context are required.", "DESKTOP_EXCHANGE_CONTEXT_REQUIRED", 403)
+    result = _desktop_exchange(service).exchange(str(payload.get("exchange_code") or ""), context=binding)
+    if result.get("ok") is not True:
+        return _api_error(str(result["error"]), str(result["code"]), int(result["status_code"]))
+    return ok({key: value for key, value in result.items() if key != "ok"})
+
+
+def _desktop_grants_list(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "").strip()
+    if not _owner_or_local_ui(service, seat_id, context):
+        return _api_error("Desktop grant metadata requires owner access.", "DESKTOP_GRANT_ADMIN_FORBIDDEN", 403)
+    return ok({"grants": _desktop_exchange(service).list_metadata(seat_id=seat_id)})
+
+
+def _desktop_grant_revoke(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
+    seat_id = str(payload.get("seat_id") or "").strip()
+    if not _owner_or_local_ui(service, seat_id, context):
+        return _api_error("Desktop grant revocation requires owner access.", "DESKTOP_GRANT_ADMIN_FORBIDDEN", 403)
+    identifier = str(payload.get("grant_id") or "")
+    if not _desktop_exchange(service).revoke(identifier, seat_id=seat_id):
+        return _api_error("Desktop grant was not found.", "DESKTOP_GRANT_NOT_FOUND", 404)
+    return ok({"grant_id": identifier, "revoked": True})
+
+
+def _desktop_grants_expire(service: _SandboxApiService, context: dict[str, Any]):
+    if context.get("owner_pack") != "defaultspack" and context.get("source") != "defaultspack_local_ui":
+        return _api_error("Grant expiry is restricted to the local service.", "DESKTOP_GRANT_ADMIN_FORBIDDEN", 403)
+    return ok({"expired": _desktop_exchange(service).expire()})
+
+
 def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.control.acquire", payload, context)
     if access_error is not None:
         return access_error
     running_error = _desktop_running_error(service, seat_id)
@@ -926,7 +1024,7 @@ def _desktop_control_acquire(service: _SandboxApiService, payload: dict[str, Any
 
 def _desktop_control_renew(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.control.renew", payload, context)
     if access_error is not None:
         return access_error
     running_error = _desktop_running_error(service, seat_id)
@@ -945,7 +1043,7 @@ def _desktop_control_renew(service: _SandboxApiService, payload: dict[str, Any],
 
 def _desktop_control_release(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
-    access_error = _desktop_access_error(service, seat_id, payload, context)
+    access_error = _desktop_access_error(service, seat_id, "desktop.control.release", payload, context)
     if access_error is not None:
         return access_error
     owner_id = _desktop_principal_id(context)
@@ -1235,6 +1333,47 @@ def _frame_bytes(screenshot: dict[str, Any]) -> tuple[bytes, str]:
         content_type = header[5:].split(";", 1)[0] or "image/png"
         return base64.b64decode(payload), content_type
     raise SandboxContractError("FRAME_NOT_FOUND", "Desktop screenshot did not include frame bytes", status_code=404)
+
+
+def _persist_desktop_frame_artifact(frame) -> dict[str, Any]:
+    extension = _frame_extension(frame.content_type)
+    captured_at = datetime.fromtimestamp(frame.captured_at, timezone.utc)
+    stamp = captured_at.strftime("%Y%m%dT%H%M%SZ")
+    path = f"desktop_frames/{frame.seat_id}/{stamp}-seq{frame.frame_seq}.{extension}"
+    artifact = ArtifactStore(_defaultspack_root()).create_binary(
+        "desktop_frame",
+        f"Desktop frame {frame.seat_id} #{frame.frame_seq}",
+        frame.data,
+        path=path,
+        mime_type=frame.content_type,
+        source_task="desktop_frame",
+        metadata={
+            "seat_id": frame.seat_id,
+            "frame_seq": frame.frame_seq,
+            "width": frame.width,
+            "height": frame.height,
+            "captured_at": frame.captured_at,
+            "source": frame.source,
+        },
+    )
+    return {
+        "artifact_id": artifact["artifact_id"],
+        "path": artifact["path"],
+        "mime_type": artifact.get("mime_type") or frame.content_type,
+        "size": artifact.get("size") or len(frame.data),
+        "type": artifact.get("type") or "desktop_frame",
+        "title": artifact.get("title") or "Desktop frame",
+        "content_ref": artifact.get("content_ref"),
+    }
+
+
+def _frame_extension(content_type: str) -> str:
+    normalized = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized == "image/jpeg":
+        return "jpg"
+    if normalized == "image/webp":
+        return "webp"
+    return "png"
 
 
 def _default_provider_id() -> str:
@@ -1547,13 +1686,36 @@ def _truthy(value: Any) -> bool:
 def _desktop_access_error(
     service: _SandboxApiService,
     seat_id: str,
+    operation: str,
     payload: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any] | None:
-    result = service.manager.validate_desktop_access(
-        seat_id,
-        _access_key(payload),
-        owner_id=_desktop_principal_id(context),
+    # Preserve the backend's owner/local authority path. Session credentials are
+    # required only when that trusted principal does not already own the seat.
+    owner_result: dict[str, Any] | None = None
+    validate_owner = getattr(service.manager, "validate_desktop_access", None)
+    if callable(validate_owner):
+        owner_result = validate_owner(
+            seat_id,
+            None,
+            owner_id=_desktop_principal_id(context),
+        )
+        if owner_result.get("ok") is True:
+            return None
+    binding = _desktop_binding_context(context)
+    if binding is None:
+        if owner_result is not None:
+            return _api_error(
+                str(owner_result.get("error") or "Desktop access denied"),
+                str(owner_result.get("code") or "DESKTOP_ACCESS_DENIED"),
+                int(owner_result.get("status_code") or 403),
+            )
+        return _api_error("Trusted desktop session context is required.", "DESKTOP_SESSION_CONTEXT_REQUIRED", 403)
+    credential = _session_credential(payload)
+    if not credential:
+        return _api_error("A scoped desktop session credential is required.", "DESKTOP_SESSION_CREDENTIAL_REQUIRED", 403)
+    result = _desktop_exchange(service).authorize(
+        credential, seat_id=seat_id, operation=operation, context=binding
     )
     if result.get("ok") is True:
         return None
@@ -1561,7 +1723,6 @@ def _desktop_access_error(
         str(result.get("error") or "Desktop access denied"),
         str(result.get("code") or "DESKTOP_ACCESS_DENIED"),
         int(result.get("status_code") or 403),
-        details={key: value for key, value in result.items() if key in {"sandbox_id", "key_hint"}},
     )
 
 
@@ -1584,20 +1745,58 @@ def _desktop_running_error(service: _SandboxApiService, seat_id: str) -> dict[st
     )
 
 
-def _access_key(payload: dict[str, Any]) -> str | None:
-    access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
+def _session_credential(payload: dict[str, Any]) -> str | None:
     headers = payload.get("_headers") if isinstance(payload.get("_headers"), dict) else {}
     for value in (
+        payload.get("desktop_session_credential"),
+        headers.get("X-Rumi-Desktop-Session-Credential"),
+        headers.get("x-rumi-desktop-session-credential"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _has_legacy_desktop_key(payload: dict[str, Any]) -> bool:
+    access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
+    headers = payload.get("_headers") if isinstance(payload.get("_headers"), dict) else {}
+    return any(value is not None for value in (
         payload.get("access_key"),
         access.get("access_key"),
         payload.get("desktop_access_key"),
         headers.get("X-Rumi-Desktop-Access-Key"),
         headers.get("x-rumi-desktop-access-key"),
-    ):
-        text = str(value or "")
-        if text:
-            return text
-    return None
+    ))
+
+
+def _desktop_exchange(service: _SandboxApiService) -> DesktopAccessExchange:
+    exchange = getattr(service, "desktop_exchange", None)
+    if not isinstance(exchange, DesktopAccessExchange):
+        exchange = DesktopAccessExchange(service.manager.state_dir / "desktop_access_exchange.json")
+        setattr(service, "desktop_exchange", exchange)
+    return exchange
+
+
+def _desktop_binding_context(context: dict[str, Any]) -> dict[str, str] | None:
+    values = {
+        "audience": context.get("trusted_audience") or context.get("audience"),
+        "origin": context.get("trusted_origin"),
+        "principal_id": context.get("authenticated_principal_id") or context.get("principal_id") or context.get("user_id"),
+        "device_id": context.get("authenticated_device_id") or context.get("device_id"),
+        "session_id": context.get("authenticated_session_id") or context.get("session_id"),
+    }
+    normalized = {key: str(value or "").strip()[:512] for key, value in values.items()}
+    return normalized if all(normalized.values()) else None
+
+
+def _owner_or_local_ui(service: _SandboxApiService, seat_id: str, context: dict[str, Any]) -> bool:
+    if context.get("source") == "defaultspack_local_ui" or context.get("owner_pack") == "defaultspack":
+        return True
+    principal = _desktop_principal_id(context)
+    if not principal:
+        return False
+    return service.manager.validate_desktop_access(seat_id, owner_id=principal).get("ok") is True
 
 
 def _desktop_principal_id(context: dict[str, Any]) -> str | None:

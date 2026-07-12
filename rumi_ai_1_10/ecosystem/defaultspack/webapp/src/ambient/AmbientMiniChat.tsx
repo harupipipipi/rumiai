@@ -18,12 +18,6 @@ type Props = {
   latestInputPreview: string | null;
   authorityApproval?: AuthorityApproval | null;
   authorityApprovalUrl?: string | null;
-  browserApprovalTokenPrompt?: {
-    required: boolean;
-    token: string;
-    onTokenChange: (value: string) => void;
-    onSave: () => void;
-  } | null;
   showPicker?: boolean;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -45,7 +39,6 @@ export function AmbientMiniChat({
   latestInputPreview,
   authorityApproval = null,
   authorityApprovalUrl = null,
-  browserApprovalTokenPrompt = null,
   showPicker = true,
   onInputChange,
   onSubmit,
@@ -124,37 +117,7 @@ export function AmbientMiniChat({
                 <p className="text-sky-100/75">承認後に回答を続行します。</p>
               </div>
             </div>
-            {browserApprovalTokenPrompt?.required ? (
-              <form
-                data-testid="ambient-mini-browser-approval-token"
-                className="mt-2 space-y-1.5 rounded-md border border-sky-200/20 bg-black/20 p-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  browserApprovalTokenPrompt.onSave();
-                }}
-              >
-                <p className="text-[10px] leading-4 text-sky-100/80">
-                  ブラウザで承認するにはテストトークンが必要です。browser_approval_token を入力して保存してください。
-                </p>
-                <div className="flex gap-1.5">
-                  <input
-                    value={browserApprovalTokenPrompt.token}
-                    onChange={(event) => browserApprovalTokenPrompt.onTokenChange(event.currentTarget.value)}
-                    className="h-7 min-w-0 flex-1 rounded-md border border-sky-200/25 bg-zinc-950 px-2 font-mono text-[11px] text-sky-50 outline-none placeholder:text-sky-100/30 focus:border-sky-100/60"
-                    placeholder="browser_approval_token"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <button
-                    type="submit"
-                    className="h-7 shrink-0 rounded-md border border-sky-200/35 bg-sky-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
-                  >
-                    保存
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   onClick={onOpenAuthorityApproval}
@@ -167,6 +130,7 @@ export function AmbientMiniChat({
                 {authorityApprovalUrl && (
                   <a
                     href={authorityApprovalUrl}
+                    rel="noreferrer"
                     className="inline-flex h-7 items-center gap-1.5 rounded-md border border-sky-200/35 px-2 text-[11px] font-semibold text-sky-50 hover:bg-sky-300/10"
                     title="同じタブで承認を開く"
                   >
@@ -174,8 +138,7 @@ export function AmbientMiniChat({
                     同じタブ
                   </a>
                 )}
-              </div>
-            )}
+            </div>
           </div>
         )}
         {error && (

@@ -659,6 +659,15 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
             "text": "http://127.0.0.1:8766/chat",
         },
     )
+    unsupported_action = manager.desktop_input(
+        "input-seat",
+        {
+            "action": "navigate",
+            "client_action_id": "unsupported-action",
+            "lease_token": "lease-token",
+            "text": "http://127.0.0.1:8766/chat",
+        },
+    )
     valid = manager.desktop_input(
         "input-seat",
         {
@@ -678,6 +687,11 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
     assert missing_action["code"] == "INVALID_DESKTOP_INPUT"
     assert "action=type_text" in missing_action["error"]
     assert "key=Enter" in missing_action["error"]
+    assert unsupported_action["ok"] is False
+    assert unsupported_action["code"] == "INVALID_DESKTOP_INPUT"
+    assert "supported actions" in unsupported_action["error"]
+    assert "action=type_text" in unsupported_action["error"]
+    assert "key=Enter" in unsupported_action["error"]
     assert valid["ok"] is True
     assert agent.provider_inputs == [
         {
@@ -1485,6 +1499,82 @@ def test_desktop_api_sees_desktop_created_by_external_tool_manager(tmp_path) -> 
     assert http_agent.desktop_inputs[0].action == "click"
 
 
+def test_desktop_api_sees_desktop_created_by_desktop_create_tool(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    if str(DEFAULTSPACK_ROOT) not in sys.path:
+        sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import (
+        seal_tool_context as domain_seal_tool_context,
+    )
+
+    capabilities = {
+        "sandbox.exec",
+        "sandbox.files",
+        "sandbox.resource_limits",
+        "sandbox.network_policy",
+        "sandbox.desktop",
+        "sandbox.desktop_input",
+        "sandbox.snapshot",
+    }
+    tool_registry = ProviderRegistry()
+    tool_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            sandbox_id_factory=lambda: "tool-created-seat",
+        )
+    )
+    tool_service = SimpleNamespace(
+        provider_registry=tool_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=tool_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+
+    http_registry = ProviderRegistry()
+    http_registry.register(
+        FakeRuntimeProvider(provider_id="fake-runtime", capabilities=capabilities)
+    )
+    http_service = SimpleNamespace(
+        provider_registry=http_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=http_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+
+    api._reset_service_for_tests(tool_service)
+    try:
+        created = desktop_tools.desktop_create(
+            {
+                "provider_id": "fake-runtime",
+                "template_id": "desktop.ubuntu",
+                "name": "Issue 416 QA desktop",
+            },
+            domain_seal_tool_context(
+                {"user_id": "local-user"},
+                {"action": "allow", "allowed": True},
+            ),
+        )
+
+        api._reset_service_for_tests(http_service)
+        listed = api.run({"_handler": "desktops_list"}, {})
+        fetched = api.run(
+            {"_handler": "desktop_get", "seat_id": "tool-created-seat"},
+            {"user_id": "local-user"},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["seat_id"] == "tool-created-seat"
+    assert listed["status"] == "ok"
+    assert [desktop["seat_id"] for desktop in listed["data"]["desktops"]] == ["tool-created-seat"]
+    assert fetched["status"] == "ok"
+    assert fetched["data"]["seat_id"] == "tool-created-seat"
+
+
 def test_sandbox_stop_and_delete_require_destructive_confirmation(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -1571,6 +1661,18 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
         lease_manager=lease_manager,
     )
     api._reset_service_for_tests(service)
+    trusted_agent_context = {
+        "source": "defaultspack_local_ui",
+        "trusted_audience": "https://fake-audience.invalid/desktop",
+        "trusted_origin": "https://fake-origin.invalid",
+        "authenticated_principal_id": "agent-1",
+        "authenticated_device_id": "fake-device-managed-contract",
+        "authenticated_session_id": "fake-session-managed-contract",
+    }
+    scoped_agent_context = {
+        key: value for key, value in trusted_agent_context.items() if key != "source"
+    }
+    scoped_agent_context["principal_id"] = "agent-1"
     try:
         missing_key = api.run(
             {
@@ -1601,13 +1703,35 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
                 "provider_id": "fake-runtime",
                 "role": "browser operator",
                 "rules": {"rule_ids": ["browser-only"]},
-                "access": {"mode": "key_required", "access_key": "correct-key"},
+                "owner_id": "local-user",
+                "access": {"mode": "owner_only", "owner_id": "local-user"},
                 "assigned_agent": "agent-1",
                 "workspace_id": "workspace-1",
                 "workspace_access": "read_only",
             },
-            {},
+            {"user_id": "local-user"},
         )
+        issued = api.run(
+            {
+                "_handler": "desktop_exchange_issue",
+                "seat_id": "seat-locked",
+                "operations": [
+                    "desktop.read",
+                    "desktop.rules.update",
+                    "desktop.input",
+                    "desktop.control.acquire",
+                ],
+            },
+            trusted_agent_context,
+        )
+        redeemed = api.run(
+            {
+                "_handler": "desktop_exchange_redeem",
+                "exchange_code": issued["data"]["exchange_code"],
+            },
+            scoped_agent_context,
+        )
+        scoped_credential = redeemed["data"]["session_credential"]
         request_required_create = api.run(
             {
                 "_handler": "desktops_create",
@@ -1619,27 +1743,52 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
         )
         denied = api.run({"_handler": "desktop_get", "seat_id": "seat-locked"}, {})
         allowed = api.run(
-            {"_handler": "desktop_get", "seat_id": "seat-locked", "access_key": "correct-key"},
-            {},
+            {
+                "_handler": "desktop_get",
+                "seat_id": "seat-locked",
+                "desktop_session_credential": scoped_credential,
+            },
+            scoped_agent_context,
         )
         updated = api.run(
             {
                 "_handler": "desktop_rules_update",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "role": "coding desktop",
                 "rules": ["playwright-ok"],
             },
-            {},
+            scoped_agent_context,
         )
+        reissued = api.run(
+            {
+                "_handler": "desktop_exchange_issue",
+                "seat_id": "seat-locked",
+                "operations": [
+                    "desktop.read",
+                    "desktop.rules.update",
+                    "desktop.ai_input",
+                    "desktop.control.acquire",
+                ],
+            },
+            trusted_agent_context,
+        )
+        re_redeemed = api.run(
+            {
+                "_handler": "desktop_exchange_redeem",
+                "exchange_code": reissued["data"]["exchange_code"],
+            },
+            scoped_agent_context,
+        )
+        scoped_credential = re_redeemed["data"]["session_credential"]
         request_required_update = api.run(
             {
                 "_handler": "desktop_rules_update",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "access": {"mode": "request_required"},
             },
-            {},
+            scoped_agent_context,
         )
         access_request = api.run(
             {"_handler": "desktop_access_request", "seat_id": "seat-locked"},
@@ -1649,71 +1798,71 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
             {
                 "_handler": "desktop_ai_input",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "action": "click",
                 "client_action_id": "ai-wrong",
                 "x": 10,
                 "y": 10,
             },
-            {"agent_id": "agent-2"},
+            {**scoped_agent_context, "agent_id": "agent-2"},
         )
         spoofed_body_wrong_context = api.run(
             {
                 "_handler": "desktop_ai_input",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "action": "click",
                 "client_action_id": "ai-spoof-wrong",
                 "x": 10,
                 "y": 10,
                 "agent_id": "agent-1",
             },
-            {"agent_id": "agent-2"},
+            {**scoped_agent_context, "agent_id": "agent-2"},
         )
         spoofed_body_no_context = api.run(
             {
                 "_handler": "desktop_ai_input",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "action": "click",
                 "client_action_id": "ai-spoof-missing",
                 "x": 10,
                 "y": 10,
                 "agent_id": "agent-1",
             },
-            {},
+            scoped_agent_context,
         )
         ai_click = api.run(
             {
                 "_handler": "desktop_ai_input",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "action": "click",
                 "client_action_id": "ai-1",
                 "x": 10,
                 "y": 10,
             },
-            {"agent_id": "agent-1"},
+            {**scoped_agent_context, "agent_id": "agent-1"},
         )
         lease = api.run(
             {
                 "_handler": "desktop_control_acquire",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
             },
-            {"user_id": "local-user"},
+            scoped_agent_context,
         )
         ai_conflict = api.run(
             {
                 "_handler": "desktop_ai_input",
                 "seat_id": "seat-locked",
-                "access_key": "correct-key",
+                "desktop_session_credential": scoped_credential,
                 "action": "click",
                 "client_action_id": "ai-2",
                 "x": 10,
                 "y": 10,
             },
-            {"agent_id": "agent-1"},
+            {**scoped_agent_context, "agent_id": "agent-1"},
         )
     finally:
         api._reset_service_for_tests(None)
@@ -1721,17 +1870,18 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert missing_key["status"] == "error"
     assert missing_key["error"]["code"] == "DESKTOP_ACCESS_KEY_MISSING"
     assert created["status"] == "error"
-    assert created["error"]["code"] == "DESKTOP_WORKSPACE_WRITE_REQUIRES_APPROVAL"
+    assert created["error"]["code"] == "DESKTOP_ACCESS_KEY_MIGRATION_REQUIRED"
     assert safe_workspace["status"] == "ok"
-    assert safe_workspace["data"]["access_policy"]["key_required"] is True
-    assert safe_workspace["data"]["access_policy"]["key_hint"] == "ends:-key"
+    assert safe_workspace["data"]["access_policy"]["key_required"] is False
     assert safe_workspace["data"]["network_policy"]["default"] == "project_policy_or_first_use_approval"
     assert safe_workspace["data"]["workspace"]["access"] == "read_only"
     assert "correct-key" not in str(safe_workspace)
+    assert issued["status"] == "ok"
+    assert redeemed["status"] == "ok"
     assert request_required_create["status"] == "error"
     assert request_required_create["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert denied["status"] == "error"
-    assert denied["error"]["code"] == "DESKTOP_ACCESS_KEY_REQUIRED"
+    assert denied["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
     assert allowed["status"] == "ok"
     assert allowed["data"]["rules"]["role"] == "browser operator"
     assert updated["status"] == "ok"
@@ -1739,8 +1889,8 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert updated["data"]["rules"]["rule_ids"] == ["playwright-ok"]
     assert request_required_update["status"] == "error"
     assert request_required_update["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
-    assert access_request["status"] == "error"
-    assert access_request["error"]["code"] == "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED"
+    assert access_request["status"] == "ok"
+    assert access_request["data"]["status"] == "owner"
     assert wrong_agent_click["status"] == "error"
     assert wrong_agent_click["error"]["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
     assert spoofed_body_wrong_context["status"] == "error"
@@ -1758,7 +1908,12 @@ def test_desktop_access_key_rules_and_ai_input_contract(tmp_path, monkeypatch) -
     assert ai_conflict["error"]["code"] == DESKTOP_CONTROL_CONFLICT
     audit_events = service.manager.read_desktop_audit_events()
     assert {event["code"] for event in audit_events if event["code"]} >= {"DESKTOP_AGENT_NOT_ASSIGNED"}
-    assert all("correct-key" not in str(event) and "lease-token" not in str(event) for event in audit_events)
+    assert all(
+        "correct-key" not in str(event)
+        and scoped_credential not in str(event)
+        and "lease-token" not in str(event)
+        for event in audit_events
+    )
 
 
 def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> None:
@@ -1788,6 +1943,14 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
         lease_manager=ControlLeaseManager(ttl_seconds=30),
     )
     api._reset_service_for_tests(service)
+    trusted_link_context = {
+        "source": "defaultspack_local_ui",
+        "trusted_audience": "https://fake-audience.invalid/desktop",
+        "trusted_origin": "https://fake-origin.invalid",
+        "authenticated_principal_id": "fake-link-principal",
+        "authenticated_device_id": "fake-link-device",
+        "authenticated_session_id": "fake-link-session",
+    }
     try:
         owner_only = api.run(
             {
@@ -1828,6 +1991,29 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
             },
             {},
         )
+        issued = api.run(
+            {
+                "_handler": "desktop_exchange_issue",
+                "seat_id": "link-seat",
+                "operations": ["desktop.read"],
+            },
+            trusted_link_context,
+        )
+        redeemed = api.run(
+            {
+                "_handler": "desktop_exchange_redeem",
+                "exchange_code": issued["data"]["exchange_code"],
+            },
+            trusted_link_context,
+        )
+        link_allowed_with_scope = api.run(
+            {
+                "_handler": "desktop_get",
+                "seat_id": "link-seat",
+                "desktop_session_credential": redeemed["data"]["session_credential"],
+            },
+            trusted_link_context,
+        )
     finally:
         api._reset_service_for_tests(None)
 
@@ -1841,9 +2027,13 @@ def test_desktop_owner_only_and_shared_link_access_are_distinct(tmp_path) -> Non
     assert owner_allowed["status"] == "ok"
     assert link_denied_without_token["status"] == "error"
     assert link_denied_without_token["error"]["code"] == "DESKTOP_SHARED_LINK_TOKEN_REQUIRED"
-    assert link_allowed_with_token["status"] == "ok"
-    assert link_allowed_with_token["data"]["access_policy"]["mode"] == "shared_link"
-    assert link_allowed_with_token["data"]["access_policy"]["link_enabled"] is True
+    assert link_allowed_with_token["status"] == "error"
+    assert link_allowed_with_token["error"]["code"] == "DESKTOP_ACCESS_KEY_MIGRATION_REQUIRED"
+    assert issued["status"] == "ok"
+    assert redeemed["status"] == "ok"
+    assert link_allowed_with_scope["status"] == "ok"
+    assert link_allowed_with_scope["data"]["access_policy"]["mode"] == "shared_link"
+    assert link_allowed_with_scope["data"]["access_policy"]["link_enabled"] is True
 
 
 def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, monkeypatch) -> None:
@@ -1873,6 +2063,14 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
         lease_manager=ControlLeaseManager(ttl_seconds=30),
     )
     api._reset_service_for_tests(service)
+    trusted_requester_context = {
+        "source": "defaultspack_local_ui",
+        "trusted_audience": "https://fake-audience.invalid/desktop",
+        "trusted_origin": "https://fake-origin.invalid",
+        "authenticated_principal_id": "requester-1",
+        "authenticated_device_id": "fake-requester-device",
+        "authenticated_session_id": "fake-requester-session",
+    }
     try:
         created = api.run(
             {
@@ -1922,6 +2120,29 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
             {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
             {},
         )
+        issued = api.run(
+            {
+                "_handler": "desktop_exchange_issue",
+                "seat_id": "seat-request",
+                "operations": ["desktop.read"],
+            },
+            trusted_requester_context,
+        )
+        redeemed = api.run(
+            {
+                "_handler": "desktop_exchange_redeem",
+                "exchange_code": issued["data"]["exchange_code"],
+            },
+            trusted_requester_context,
+        )
+        requester_allowed_with_scope = api.run(
+            {
+                "_handler": "desktop_get",
+                "seat_id": "seat-request",
+                "desktop_session_credential": redeemed["data"]["session_credential"],
+            },
+            trusted_requester_context,
+        )
         owner_reverted = api.run(
             {
                 "_handler": "desktop_rules_update",
@@ -1931,8 +2152,12 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
             {"user_id": "owner-1"},
         )
         requester_after_revert = api.run(
-            {"_handler": "desktop_get", "seat_id": "seat-request", "access_key": granted_key},
-            {},
+            {
+                "_handler": "desktop_get",
+                "seat_id": "seat-request",
+                "desktop_session_credential": redeemed["data"]["session_credential"],
+            },
+            trusted_requester_context,
         )
         request_after_revert = api.run(
             {
@@ -1962,12 +2187,16 @@ def test_desktop_request_required_access_can_be_requested_and_granted(tmp_path, 
     assert granted["status"] == "ok"
     assert granted["data"]["status"] == "approved"
     assert granted["data"]["access_key_hint"].startswith("ends:")
-    assert requester_allowed["status"] == "ok"
+    assert requester_allowed["status"] == "error"
+    assert requester_allowed["error"]["code"] == "DESKTOP_ACCESS_KEY_MIGRATION_REQUIRED"
+    assert issued["status"] == "ok"
+    assert redeemed["status"] == "ok"
+    assert requester_allowed_with_scope["status"] == "ok"
     assert owner_reverted["status"] == "ok"
     assert owner_reverted["data"]["access_policy"]["mode"] == "owner_only"
     assert owner_reverted["data"]["access_policy"]["request_required"] is False
     assert requester_after_revert["status"] == "error"
-    assert requester_after_revert["error"]["code"] == "DESKTOP_OWNER_REQUIRED"
+    assert requester_after_revert["error"]["code"] == "DESKTOP_SESSION_CREDENTIAL_REVOKED"
     assert request_after_revert["status"] == "error"
     assert request_after_revert["error"]["code"] == "DESKTOP_ACCESS_REQUEST_NOT_REQUIRED"
     assert access_request["data"]["request_id"] not in registry_after_revert
@@ -2608,16 +2837,20 @@ def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
-def test_cancellable_subprocess_replaces_non_utf8_output() -> None:
+def test_cancellable_subprocess_replaces_non_utf8_and_nul_output() -> None:
     from ecosystem.defaultspack.backend.sandbox.cancellation import run_cancellable_subprocess
 
-    script = "import sys; sys.stderr.buffer.write(b'bad-\\\\xfc-byte')"
+    script = (
+        "import sys; "
+        "sys.stdout.buffer.write(b'frame-\\x89png\\x00tail'); "
+        "sys.stderr.buffer.write(b'bad-\\xfc-byte\\x00err')"
+    )
 
     completed = run_cancellable_subprocess((sys.executable, "-c", script), timeout=5)
 
     assert completed.returncode == 0
-    assert "bad-" in completed.stderr
-    assert "-byte" in completed.stderr
+    assert completed.stdout == "frame-\ufffdpng\x00tail"
+    assert completed.stderr == "bad-\ufffd-byte\x00err"
 
 
 def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:

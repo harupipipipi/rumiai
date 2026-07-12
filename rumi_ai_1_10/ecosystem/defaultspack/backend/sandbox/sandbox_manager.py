@@ -1257,9 +1257,16 @@ class SandboxManager:
                     continue
                 inst = self._instance_from_dict(raw, legacy=schema_version < REGISTRY_SCHEMA_VERSION)
                 instances[inst.sandbox_id] = inst
+            legacy_access_invalidated = "desktop_access_key_hash" in json.dumps(data)
             self._instances = instances
             self._desktop_access_requests = _access_requests_from_registry(raw_access_requests)
-            if self._reconcile_loaded_instances():
+            for record in self._desktop_access_requests.values():
+                if record.get("access_key_hash"):
+                    record["access_key_hash"] = None
+                    record["access_key_hint"] = None
+                    record["status"] = "revoked"
+            reconciled = self._reconcile_loaded_instances()
+            if legacy_access_invalidated or reconciled:
                 self._save_registry()
             else:
                 self._registry_signature = self._registry_file_signature()
@@ -2169,7 +2176,7 @@ class SandboxManager:
             assigned_agent_id=_optional_clean_string(data.get("assigned_agent_id")),
             generation=max(1, int(_float_or_zero(data.get("generation") or 1))),
             recovery_token_hash=str(data.get("recovery_token_hash")) if data.get("recovery_token_hash") is not None else None,
-            desktop_access_key_hash=str(data.get("desktop_access_key_hash")) if data.get("desktop_access_key_hash") is not None else None,
+            desktop_access_key_hash=None,
         )
 
     def _provider_agent(self, inst: SandboxInstance):
@@ -2591,6 +2598,8 @@ def _desktop_access_from_dict(value: Any) -> DesktopAccessPolicy:
     if not isinstance(value, dict):
         return DesktopAccessPolicy()
     mode = str(value.get("mode") or "owner_only")
+    if mode in {"key_required", "shared_link"}:
+        mode = "owner_only"
     if mode not in DESKTOP_ACCESS_MODES:
         mode = "owner_only"
     return DesktopAccessPolicy(

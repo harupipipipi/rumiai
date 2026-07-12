@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -38,6 +37,17 @@ def test_artifact_workspace_priority_and_traversal(tmp_path):
 
     fallback = ArtifactWorkspace({"conversation_workspace_dir": str(conversation)})
     assert fallback.root == (conversation / "artifacts").resolve()
+    generated = fallback.resolve("sheets/report.csv")
+    generated.parent.mkdir(parents=True)
+    generated.write_text("month,revenue\nJan,10\n", encoding="utf-8")
+    assert fallback.workspace_relative(generated) == "artifacts/sheets/report.csv"
+    assert fallback.resolve("artifacts/sheets/report.csv", must_exist=True) == generated
+    try:
+        fallback.resolve("artifacts/../escape.txt")
+    except ValueError as exc:
+        assert "escapes artifact root" in str(exc)
+    else:
+        raise AssertionError("workspace-relative traversal should be rejected")
 
     try:
         ws.resolve("../escape.txt")
@@ -116,8 +126,25 @@ def test_document_sheet_slides_job_and_workflow_tools(tmp_path):
 
     sheet = executor.execute("sheet_create", {"columns": ["name", "score"], "rows": [["a", 1]], "output_path": "data/scores.xlsx"}, context)
     assert sheet["is_error"] is False
-    analyzed = executor.execute("sheet_analyze", {"path": "data/scores.xlsx"}, context)
+    canonical_path = sheet["widget"]["data"]["workspace_path"]
+    assert canonical_path == "data/scores.xlsx"
+    analyzed = executor.execute("sheet_analyze", {"path": canonical_path}, context)
     assert analyzed["widget"]["data"]["row_count"] == 2
+
+    conversation_context = {
+        "conversation_workspace_dir": str(tmp_path / "conversation"),
+        "profile_policy": {"yolo_mode": True},
+    }
+    conversation_sheet = executor.execute(
+        "sheet_create",
+        {"columns": ["name", "score"], "rows": [["a", 1]], "output_path": "data/scores.csv"},
+        conversation_context,
+    )
+    conversation_path = conversation_sheet["widget"]["data"]["workspace_path"]
+    assert conversation_path == "artifacts/data/scores.csv"
+    canonical_analysis = executor.execute("sheet_analyze", {"path": conversation_path}, conversation_context)
+    assert canonical_analysis["is_error"] is False
+    assert canonical_analysis["widget"]["data"]["row_count"] == 2
 
     slides = executor.execute(
         "slides_create",

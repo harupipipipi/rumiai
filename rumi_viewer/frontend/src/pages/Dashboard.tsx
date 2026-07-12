@@ -18,6 +18,7 @@ import {
 } from '@/src/lib/api';
 import type {
   ApiStartupProfile,
+  StartupProfileMutationResponseData,
   StartupProfileCompilePreviewResponseData,
   StartupProfilesResponseData,
 } from '@/src/lib/apiTypes';
@@ -75,6 +76,48 @@ const defaultDashboard: DashboardData = {
 const INITIAL_PROFILE_LOAD_MAX_ATTEMPTS = 3;
 const INITIAL_PROFILE_LOAD_RETRY_DELAY_MS = 900;
 
+export function canLoadDashboardProfiles(runtimeReady: boolean, runtimeStatus: string): boolean {
+  return runtimeReady || runtimeStatus === 'panel_ready';
+}
+
+export async function launchStartupProfileFromDashboard({
+  profileId,
+  preferredProfileId,
+  launchProfile,
+  refreshProfiles,
+  refreshDashboard,
+  openDesktop,
+  setSuccessFeedback,
+  setErrorFeedback,
+  translateError,
+}: {
+  profileId: string;
+  preferredProfileId?: string | null;
+  launchProfile: (profileId: string) => Promise<StartupProfileMutationResponseData>;
+  refreshProfiles: (preferredProfileId?: string | null) => Promise<void>;
+  refreshDashboard: () => Promise<void>;
+  openDesktop: () => Promise<unknown>;
+  setSuccessFeedback: (message: string) => void;
+  setErrorFeedback: (message: string) => void;
+  translateError: (error: unknown, fallbackAction: string) => string;
+}): Promise<void> {
+  const response = await launchProfile(profileId);
+  if (response.restart_requested) {
+    setSuccessFeedback('Profile launched. Defaultspack will open after the runtime restart is ready.');
+    return;
+  }
+
+  await refreshProfiles(preferredProfileId);
+  await refreshDashboard();
+  try {
+    await openDesktop();
+  } catch (desktopError) {
+    setErrorFeedback(`Profile launched, but Defaultspack desktop did not open: ${translateError(desktopError, 'open Defaultspack desktop')}`);
+    return;
+  }
+  setSuccessFeedback('Profile launched. Defaultspack window opened.');
+}
+
 function formatTimestamp(timestamp: number): string {
   if (!timestamp) return '--';
   return new Date(timestamp * 1000).toLocaleString();
@@ -90,6 +133,7 @@ export function Dashboard() {
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
+  const profilesAvailable = canLoadDashboardProfiles(runtimeReady, runtimeStatus);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -175,10 +219,14 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    if (!runtimeReady) return;
-    void refreshDashboard();
+    if (!profilesAvailable) return;
+    if (runtimeReady) {
+      void refreshDashboard();
+    } else {
+      setDashboardLoading(false);
+    }
     void refreshProfiles();
-  }, [runtimeReady]);
+  }, [profilesAvailable, runtimeReady]);
 
   const selectedProfile = useMemo(
     () => payload?.profiles.find((profile) => profile.profile_id === editProfileId) ?? null,
@@ -336,18 +384,17 @@ export function Dashboard() {
     setActionState({ type: 'launch', profileId });
     setFeedback(null);
     try {
-      const response = await launchStartupProfile(profileId);
-      if (!response.restart_requested) {
-        await refreshProfiles(editProfileId);
-        await refreshDashboard();
-      }
-      try {
-        await launchDefaultspackDesktop();
-      } catch (desktopError) {
-        setErrorFeedback(`Profile launched, but Defaultspack desktop did not open: ${translateActionError(desktopError, 'open Defaultspack desktop')}`);
-        return;
-      }
-      setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested. Defaultspack window opened.' : 'Profile launched. Defaultspack window opened.');
+      await launchStartupProfileFromDashboard({
+        profileId,
+        preferredProfileId: editProfileId,
+        launchProfile: launchStartupProfile,
+        refreshProfiles,
+        refreshDashboard,
+        openDesktop: launchDefaultspackDesktop,
+        setSuccessFeedback,
+        setErrorFeedback,
+        translateError: translateActionError,
+      });
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'launch this profile'));
     } finally { setActionState(null); }
@@ -390,7 +437,7 @@ export function Dashboard() {
 
   // --- Loading / Error states ---
 
-  if (!runtimeReady && runtimeStatus !== 'error') {
+  if (!profilesAvailable && runtimeStatus !== 'error') {
     return <DashboardSkeleton />;
   }
 
@@ -476,6 +523,13 @@ export function Dashboard() {
                 <RefreshCw className="h-3.5 w-3.5" /> Retry
               </Button>
             )}
+          </div>
+        )}
+
+        {!runtimeReady && runtimeStatus === 'panel_ready' && (
+          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span className="flex-1">Runtime is still preparing. Profiles are available now, and launch surfaces will open after readiness.</span>
           </div>
         )}
 

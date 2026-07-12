@@ -16,7 +16,6 @@
     "defaultspack.ai.get_effective_thinking_level",
     "defaults.ai.get.effective.thinking.level",
     "defaultspack.ai.get.effective.thinking.level",
-    "defaults.model_runtime.get_effective_thinking_level",
     "defaultspack.model_runtime.get_effective_thinking_level"
   ],
   "input_schema": {

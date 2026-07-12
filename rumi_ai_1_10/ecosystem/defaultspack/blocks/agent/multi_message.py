@@ -25,7 +25,7 @@ def run(input_data, context):
     session = get_multi_session(session_id) or {}
     company_id = str(input_data.get("company_id") or session.get("company_id") or DEFAULT_COMPANY_ID)
     if CompanyStore().get_company(company_id) is None:
-        return error("company workspace not found: " + company_id, "NOT_FOUND")
+        return error("team workspace not found: " + company_id, "NOT_FOUND")
     target_agent = str(input_data.get("target_agent") or "").strip()
     target_agent_ids = [_slug(target_agent)] if target_agent else None
     result = CompanySlackRuntime().post_message(
@@ -42,7 +42,7 @@ def run(input_data, context):
         context=context if isinstance(context, dict) else {},
     )
     if result is None:
-        return error("company workspace not found", "NOT_FOUND")
+        return error("team workspace not found", "NOT_FOUND")
     if not session:
         set_multi_session(
             session_id,

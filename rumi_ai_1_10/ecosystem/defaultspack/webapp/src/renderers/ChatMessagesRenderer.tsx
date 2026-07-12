@@ -8,13 +8,14 @@ import { PromptUsageDisclosure } from "../components/prompts/PromptUsageDisclosu
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
 import { buildToolActivityGroups, buildToolActivityItems, toolFolderFor, type RunActivityItem, type ToolActivityGroup, type ToolActivityItem, type ToolActivityStatus } from "../lib/toolActivity";
-import type { ChatContentBlock } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock } from "../lib/api";
 import {
   AUTHORITY_FOLLOWUP_TEXT,
   AUTHORITY_WAITING_TEXT,
   sanitizeAssistantAuthorityBoilerplate,
 } from "../lib/authorityApproval";
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
+import { classifyUntrustedImageUrl, extractImageBlockUrl, imageBlockAttachmentId } from "../lib/untrustedImagePolicy";
 import type { ChatMessagesRendererProps } from "./types";
 
 export { AUTHORITY_FOLLOWUP_TEXT, sanitizeAssistantAuthorityBoilerplate };
@@ -78,6 +79,59 @@ type MessageToolActivityState = {
   hasRunningItems: boolean;
   summary: ToolActivityTraySummary;
 };
+
+function activityEventValue(event: ChatActivityEvent, key: string): unknown {
+  const data = isRecord(event.data) ? event.data : {};
+  return event[key] ?? data[key];
+}
+
+function attemptGeneration(value: unknown): number | string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return undefined;
+}
+
+export function toolActivityPreviewKey(
+  toolCallId: string,
+  providerAttemptGeneration?: number | string,
+): string {
+  const callId = String(toolCallId ?? "").trim();
+  return providerAttemptGeneration === undefined
+    ? callId
+    : `${callId}::provider-attempt:${providerAttemptGeneration}`;
+}
+
+export function previewableToolActivityKeys(events: ChatActivityEvent[]): Set<string> {
+  const keys = new Set<string>();
+  for (const event of events) {
+    if (
+      event.type !== "browser_screenshot"
+      && event.type !== "browser_state_snapshot"
+      && event.type !== "browser_dom_snapshot"
+      && event.type !== "tool_call_completed"
+    ) continue;
+    if (activityEventValue(event, "provider_attempt_discarded") === true) continue;
+    const callId = String(activityEventValue(event, "tool_call_id") ?? "").trim();
+    if (!callId) continue;
+    const generation = attemptGeneration(
+      activityEventValue(event, "provider_attempt_generation"),
+    );
+    keys.add(toolActivityPreviewKey(callId, generation));
+  }
+  return keys;
+}
+
+export function toolActivityPreviewId(
+  item: Pick<RunActivityItem, "toolCallId" | "providerAttemptGeneration">,
+  previewableKeys: Set<string>,
+): string | undefined {
+  if (!item.toolCallId) return undefined;
+  const key = toolActivityPreviewKey(
+    item.toolCallId,
+    item.providerAttemptGeneration,
+  );
+  return previewableKeys.has(key) ? item.toolCallId : undefined;
+}
 
 function shortDetail(value: unknown, limit = 420): string {
   let text = "";
@@ -165,10 +219,58 @@ function CompactLogBlock({ text }: { text: string }) {
   );
 }
 
-function MessageMarkdown({ text }: { text: string }) {
+function MessageMarkdown({
+  text,
+  onOpenImagePreview,
+}: {
+  text: string;
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
   return isCompactLogLikeMessageText(text)
     ? <CompactLogBlock text={text} />
-    : <ReactMarkdown remarkPlugins={markdownPlugins}>{text}</ReactMarkdown>;
+    : (
+      <ReactMarkdown
+        remarkPlugins={markdownPlugins}
+        components={{
+          img: ({ src, alt }) => (
+            <UntrustedImageBlock
+              block={{ type: "image_url", url: src, alt, presentation: "chat" }}
+              blockType="markdown-image"
+              onOpenImagePreview={onOpenImagePreview}
+            />
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    );
+}
+
+function MessageMentionBadges({
+  mentions,
+}: {
+  mentions: NonNullable<NonNullable<ChatMessagesRendererProps["messages"][number]["metadata"]>["mentions"]>;
+}) {
+  if (mentions.length === 0) return null;
+  return (
+    <div
+      aria-label="このメッセージで指定されたメンション"
+      className="mb-2 flex flex-wrap gap-1.5"
+      data-testid="message-mention-badges"
+    >
+      {mentions.map((mention) => (
+        <span
+          key={`${mention.kind}:${mention.id}`}
+          data-testid="message-mention-badge"
+          data-mention-kind={mention.kind}
+          className="inline-flex min-h-6 max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-sky-400/25 bg-sky-400/10 px-2 text-[11px] font-medium text-sky-100"
+          title={`@${mention.label} · ${mention.kind}`}
+        >
+          @{mention.label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function MessageMentionBadges({
@@ -217,6 +319,133 @@ function artifactDialogItemFromImagePreview(image: ImagePreviewRequest | null): 
   };
 }
 
+function appOrigin(): string | undefined {
+  return typeof window === "undefined" ? undefined : window.location.origin;
+}
+
+function UntrustedImageBlock({
+  block,
+  blockType,
+  onOpenImagePreview,
+}: {
+  block: ChatContentBlock;
+  blockType: string;
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
+  const rawUrl = extractImageBlockUrl(block);
+  const policy = classifyUntrustedImageUrl(rawUrl, {
+    appOrigin: appOrigin(),
+    attachmentId: imageBlockAttachmentId(block),
+    // Chat/tool/import blocks are attacker-controlled. Only an out-of-band,
+    // backend-verified attachment channel may set this option in the future.
+    trustedAttachment: false,
+  });
+  const trusted = policy.disposition === "trusted-attachment";
+  const [consented, setConsented] = useState(trusted);
+  const [loadingRemote, setLoadingRemote] = useState(false);
+  const [loadedSrc, setLoadedSrc] = useState(trusted ? policy.normalizedUrl : "");
+  const [proxyUrl, setProxyUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const alt = String(block.alt ?? "image").trim() || "image";
+
+  useEffect(() => {
+    setConsented(trusted);
+    setLoadedSrc(trusted ? policy.normalizedUrl : "");
+    setProxyUrl("");
+    setFailed(false);
+    setCopied(false);
+  }, [policy.normalizedUrl, trusted]);
+
+  useEffect(() => () => {
+    if (loadedSrc.startsWith("blob:")) URL.revokeObjectURL(loadedSrc);
+  }, [loadedSrc]);
+
+  const copyUrl = () => {
+    if (!rawUrl || typeof navigator === "undefined" || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(rawUrl).then(() => setCopied(true), () => setCopied(false));
+  };
+  const openPreview = () => onOpenImagePreview?.({
+    src: loadedSrc,
+    title: alt,
+    alt,
+    details: [
+      { label: "type", value: blockType },
+      { label: "source", value: policy.sourceLabel },
+    ],
+  });
+  const loadRemote = async () => {
+    setLoadingRemote(true);
+    setFailed(false);
+    try {
+      const loaded = await chatMessageResources.loadRemoteImage(policy.normalizedUrl);
+      setLoadedSrc(loaded.blobUrl);
+      setProxyUrl(loaded.proxyUrl);
+      setConsented(true);
+    } catch {
+      setFailed(true);
+      setConsented(true);
+    } finally {
+      setLoadingRemote(false);
+    }
+  };
+  const revokeRemote = () => {
+    if (loadedSrc.startsWith("blob:")) URL.revokeObjectURL(loadedSrc);
+    if (proxyUrl) void chatMessageResources.revokeRemoteImage(proxyUrl);
+    setLoadedSrc("");
+    setProxyUrl("");
+    setFailed(false);
+    setConsented(false);
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2" aria-label={`Image: ${alt}`}>
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <ImageIcon size={12} aria-hidden="true" />
+        <span>{alt}</span>
+      </div>
+      {policy.disposition === "blocked" ? (
+        <div role="alert" className="rounded-md border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-200">
+          <p>Image blocked for safety.</p>
+          <p className="mt-1 break-all text-amber-300/80">Source: {policy.sourceLabel} ({policy.reason})</p>
+        </div>
+      ) : !consented ? (
+        <div className="rounded-md border border-zinc-700 bg-zinc-950/50 p-3 text-xs text-zinc-300">
+          <p>Remote image hidden. Loading it will contact this source.</p>
+          <p className="mt-1 break-all text-zinc-400">Source: {policy.sourceLabel}</p>
+          <button type="button" disabled={loadingRemote} className="mt-3 rounded-md bg-zinc-100 px-3 py-1.5 font-medium text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:opacity-60" onClick={() => void loadRemote()}>
+            {loadingRemote ? "Loading image…" : "Load image"}
+          </button>
+        </div>
+      ) : failed ? (
+        <div role="alert" className="rounded-md border border-red-900/70 bg-red-950/30 p-3 text-xs text-red-200">
+          Image could not be loaded from {policy.sourceLabel}.
+          {!trusted ? <button type="button" className="ml-2 underline" onClick={revokeRemote}>Revoke access</button> : null}
+        </div>
+      ) : (
+        <button type="button" className="block max-w-full cursor-zoom-in rounded-lg border border-zinc-800 bg-black/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={openPreview}>
+          <img
+            src={loadedSrc}
+            alt={alt}
+            className="max-h-72 rounded-lg"
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
+            loading="lazy"
+            decoding="async"
+            onError={() => setFailed(true)}
+          />
+        </button>
+      )}
+      {consented && !trusted && loadedSrc ? <button type="button" className="text-xs text-zinc-400 underline" onClick={revokeRemote}>Revoke remote image</button> : null}
+      {rawUrl ? (
+        <button type="button" className="text-xs text-zinc-400 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={copyUrl} aria-label="Copy image URL">
+          {copied ? "URL copied" : "Copy URL"}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function MessageBlock({
   block,
   sanitizeText,
@@ -233,7 +462,7 @@ function MessageBlock({
   if (blockType === "text" || blockType === "markdown") {
     const text = sanitizeText ? sanitizeText(String(block.text ?? "")) : String(block.text ?? "");
     if (!text.trim()) return null;
-    return <MessageMarkdown text={text} />;
+    return <MessageMarkdown text={text} onOpenImagePreview={onOpenImagePreview} />;
   }
 
   if (blockType === "code") {
@@ -246,38 +475,7 @@ function MessageBlock({
 
   if (blockType === "image" || blockType === "image_url") {
     if (!shouldRenderImageBlockInChat(block)) return null;
-    const imageUrl = block.image_url;
-    const url = String(
-      block.url
-      ?? (typeof imageUrl === "object" && imageUrl !== null && "url" in imageUrl ? imageUrl.url : "")
-      ?? "",
-    );
-    return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
-        <div className="flex items-center gap-2 text-xs text-zinc-400">
-          <ImageIcon size={12} />
-          <span>{String(block.alt ?? "image")}</span>
-        </div>
-        {url ? (
-          <button
-            type="button"
-            className="block max-w-full cursor-zoom-in rounded-lg border border-zinc-800 bg-black/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
-            onClick={() => onOpenImagePreview?.({
-              src: url,
-              href: url,
-              title: String(block.alt ?? "image"),
-              alt: String(block.alt ?? "image"),
-              details: [
-                { label: "type", value: blockType },
-                { label: "source", value: shortDetail(url, 180) },
-              ],
-            })}
-          >
-            <img src={url} alt={String(block.alt ?? "image")} className="max-h-72 rounded-lg" />
-          </button>
-        ) : null}
-      </div>
-    );
+    return <UntrustedImageBlock block={block} blockType={blockType} onOpenImagePreview={onOpenImagePreview} />;
   }
 
   if (unknownStrategy === "hidden") return null;
@@ -910,7 +1108,7 @@ function stringValue(value: unknown): string {
 }
 
 function isImageDataUrl(value: string): boolean {
-  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+  return /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(value);
 }
 
 function browserActionForEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): string | undefined {
@@ -1143,7 +1341,7 @@ function ToolActivityTimelineRow({
   previewableCallIds: Set<string>;
 }) {
   const artifactPreviewId = isToolActivityItem(item) ? item.artifacts?.find((artifact) => artifact.url)?.path : undefined;
-  const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+  const previewId = toolActivityPreviewId(item, previewableCallIds) ?? artifactPreviewId;
   const hasPreview = Boolean(previewId);
   const statusLabel = item.status === "failed" || item.status === "blocked"
     ? "エラー"
@@ -1211,17 +1409,7 @@ function ToolActivityPanel({
 }) {
   const [showAll, setShowAll] = useState(false);
   if (items.length === 0) return null;
-  const previewableCallIds = new Set(
-    (message.events ?? [])
-      .filter((event) => (
-        event.type === "browser_screenshot"
-        || event.type === "browser_state_snapshot"
-        || event.type === "browser_dom_snapshot"
-        || event.type === "tool_call_completed"
-      ))
-      .map((event) => String(event.tool_call_id ?? "").trim())
-      .filter(Boolean),
-  );
+  const previewableCallIds = previewableToolActivityKeys(message.events ?? []);
   const timeline = showAll ? { items, hiddenCount: 0 } : visibleTimelineItems(items);
   return (
     <section className="rumi-tool-activity mb-3 grid w-full max-w-[640px] gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/45 px-2 py-1.5 text-zinc-300">
@@ -1441,6 +1629,16 @@ export function ChatMessagesRenderer({
                               )
                             : <MessageMarkdown text={messageDisplayText(message, message.rawText)} />}
                       </div>
+
+                      {message.role === "agent" && message.metadata?.interrupted && (
+                        <div
+                          className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
+                          role="status"
+                        >
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                          <span>応答は途中で中断されました。表示内容は中断前までに届いたものです。</span>
+                        </div>
+                      )}
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
 

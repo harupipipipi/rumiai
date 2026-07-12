@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { SettingsSection } from "../lib/api";
+import { settingsFieldSearchText } from "../lib/settingsSearch";
 import {
   buildCodexAppServerPrelude,
   buildAccountConnectionPrelude,
   buildControlCenterSections,
   controlCenterSectionForField,
+  localizedSettingsSourceLabel,
   safeSettingsLabel,
 } from "./controlCenter";
 
@@ -25,6 +27,40 @@ test("settings control center keeps the required section order", () => {
     "Advanced",
     "Diagnostics",
   ]);
+});
+
+test("Japanese settings use task-oriented copy while preserving technical search aliases", () => {
+  const sections = buildControlCenterSections([
+    {
+      id: "general",
+      label: "General",
+      fields: [
+        { id: "composer_placeholder", label: "Composer Placeholder", type: "text", help: "composer placeholder" },
+        { id: "language", label: "Language", type: "select", options: [{ value: "auto", label: "Auto" }] },
+      ],
+    },
+    {
+      id: "tools",
+      label: "Tools",
+      fields: [{ id: "semantic_backend", label: "Semantic backend", type: "select", advanced: true, options: [{ value: "embedding", label: "Embedding" }] }],
+    },
+  ] as SettingsSection[], "ja");
+
+  assert.equal(sections.find((section) => section.id === "workspace_ui")?.label, "表示と操作");
+  const workspaceFields = sections.find((section) => section.id === "workspace_ui")?.fields ?? [];
+  assert.equal(workspaceFields.find((field) => field.id === "composer_placeholder")?.label, "入力欄の案内文");
+  assert.equal(workspaceFields.find((field) => field.id === "language")?.options?.[0]?.label, "端末に合わせる");
+  const semanticField = sections.find((section) => section.id === "tools_mcp")?.fields.find((field) => field.id === "semantic_backend");
+  assert.equal(semanticField?.label, "機能候補の探し方");
+  assert.equal(semanticField?.advanced, true);
+  assert.match(settingsFieldSearchText(semanticField!), /semantic_backend/);
+  assert.match(settingsFieldSearchText(semanticField!), /embedding/);
+});
+
+test("Japanese placement and provenance labels never expose raw registry copy", () => {
+  assert.equal(localizedSettingsSourceLabel("general", "General", "ja"), "表示と操作");
+  assert.equal(localizedSettingsSourceLabel("unknown_extension", "Internal Vector Registry", "ja"), "拡張機能の設定");
+  assert.equal(localizedSettingsSourceLabel("general", "General", "en"), "General");
 });
 
 test("settings control center separates computer control from tools", () => {
@@ -275,6 +311,52 @@ test("account connection prelude treats Codex as a redacted credential", () => {
   assert.equal(codex?.credential?.configured, true);
   assert.equal(codex?.credential?.canClear, true);
   assert.doesNotMatch(JSON.stringify(codex), new RegExp(rawToken));
+});
+
+test("Japanese account connection copy covers every provider and OAuth variant", () => {
+  const cards = buildAccountConnectionPrelude({
+    accounts_connections: {
+      providers: {
+        google: {
+          connect_enabled: true,
+          connection_status: "not_connected",
+          status_label: "Ready to connect",
+          scope_mode: "google_gmail_metadata",
+          scope_modes: [
+            {
+              id: "google_gmail_metadata",
+              label: "Gmail metadata/search",
+              description: "Restricted metadata/search scope for Gmail.",
+              warning: "Restricted Gmail scopes require explicit review.",
+              restricted: true,
+              scopes: ["https://www.googleapis.com/auth/gmail.metadata"],
+              services: ["gmail_metadata"],
+            },
+          ],
+        },
+      },
+    },
+  }, "ja");
+
+  assert.deepEqual(cards.map((card) => card.providerId), ["cloudflare", "google", "github", "codex"]);
+  for (const card of cards) {
+    const visibleCopy = [
+      card.description,
+      card.statusLabel,
+      card.primaryLabel,
+      card.disabledReason,
+      card.officialAppDescription,
+      card.selfHostDescription,
+      card.configureLabel,
+      card.credential?.saveLabel ?? "",
+      card.credential?.clearLabel ?? "",
+    ].join(" ");
+    assert.doesNotMatch(visibleCopy, /Connect|Credential|Token needed|Client config|Official app|required|Import JSON|Review credential/i);
+  }
+  const gmail = cards.find((card) => card.providerId === "google")?.scopeModes[0];
+  assert.equal(gmail?.label, "Gmailの検索とメタデータ");
+  assert.match(gmail?.description ?? "", /メールの検索/);
+  assert.doesNotMatch(`${gmail?.label} ${gmail?.description} ${gmail?.warning}`, /Restricted|metadata\/search|scope/i);
 });
 
 test("Codex App Server prelude maps safe Tools & MCP status", () => {

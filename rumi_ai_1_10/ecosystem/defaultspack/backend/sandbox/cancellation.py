@@ -111,6 +111,10 @@ def run_cancellable_subprocess(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        # Managed WSL frame capture may surface non-UTF-8 bytes through the
+        # Windows subprocess reader. Decode deterministically instead of
+        # falling back to the host locale (for example cp932) and crashing a
+        # desktop frame request with UnicodeDecodeError.
         encoding="utf-8",
         errors="replace",
         start_new_session=os.name != "nt",

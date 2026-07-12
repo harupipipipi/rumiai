@@ -1,16 +1,19 @@
 # Migration Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-10
 
 ## `defaults` -> `defaultspack`
 
 - Canonical prefix: `defaultspack.`
 - Compatibility prefix: `defaults.`
 - Compatibility aliases are tracked in `ecosystem/defaultspack/compat_aliases.yaml`.
+- Canonical replacements and the inventory/warning/enforcement/removal process are documented in `docs/compat-alias-migration.md`.
 
 Status:
-- Canonical naming exists broadly across generated function manifests.
-- Legacy aliases remain for compatibility and are explicitly allowlisted.
+- Canonical naming exists across generated function manifests.
+- Actual `defaults.*` resolution emits privacy-safe local audit telemetry, with structured warnings for non-internal callers.
+- Generation and integrity checks require the explicit allowlist and a migration note; new functions do not receive `defaults.*` aliases automatically.
+- The verified-unused `defaults.model_runtime.*` group has been removed while canonical `defaultspack.*` aliases remain.
 
 ## Handwritten API -> `api_routes`
 

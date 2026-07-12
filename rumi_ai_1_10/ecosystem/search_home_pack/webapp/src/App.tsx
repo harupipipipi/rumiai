@@ -15,17 +15,16 @@ import {
   buildBrowserCompanionRouteMessage,
   normalizeSelectedIndex,
   persistRouteSessionState,
-  routeHotkeyActionFromKeyboardEvent,
-  routeNavigationForHotkey,
+  reviewRouteDestination,
   ROUTE_SESSION_STORAGE_KEY,
   selectedCandidateUrl,
   type RouteCandidate,
   type RouteDecision,
   type RouteSessionState,
 } from "./routerTypes";
+import { NavigationReview } from "./NavigationReview";
 
 const ROUTE_DECISION_STORAGE_KEY = "rumi-search-home-route-decision";
-const AUTO_NAV_DELAY_MS = 240;
 const ANSWER_ROUTE_TYPES = new Set(["ASK_AI", "ASK_AI_WITH_SEARCH"]);
 
 type HydratedRouteState = RouteDecision | null;
@@ -155,18 +154,22 @@ function loadDecisionFromSessionStorage(storage: Storage | null): HydratedRouteS
   if (!storage) {
     return null;
   }
-  try {
-    const full = storage.getItem(ROUTE_DECISION_STORAGE_KEY);
-    if (full) {
-      return coerceRouteDecision(JSON.parse(full));
-    }
-  } catch {
-    // Ignore malformed stored decisions.
-  }
+  storage.removeItem(ROUTE_DECISION_STORAGE_KEY);
   try {
     const session = storage.getItem(ROUTE_SESSION_STORAGE_KEY);
     if (session) {
-      return decisionFromSessionState(JSON.parse(session));
+      const parsed = JSON.parse(session) as Partial<RouteSessionState>;
+      const issuedAt = Date.parse(String(parsed.issued_at || ""));
+      const expiresAt = Date.parse(String(parsed.expires_at || ""));
+      const now = Date.now();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(parsed.state_id || "")) ||
+          !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) ||
+          issuedAt > now + 30_000 || expiresAt <= now ||
+          expiresAt - issuedAt > 6 * 60 * 60 * 1000) {
+        storage.removeItem(ROUTE_SESSION_STORAGE_KEY);
+        return null;
+      }
+      return decisionFromSessionState(parsed);
     }
   } catch {
     // Ignore malformed session payloads.
@@ -179,14 +182,7 @@ function saveDecisionToSessionStorage(storage: Storage | null, decision: RouteDe
     return null;
   }
   const session = persistRouteSessionState(storage, decision, selectedIndex);
-  storage.setItem(
-    ROUTE_DECISION_STORAGE_KEY,
-    JSON.stringify({
-      ...decision,
-      target_url: selectedCandidateUrl(decision, selectedIndex),
-      selected_index: selectedIndex,
-    }),
-  );
+  storage.removeItem(ROUTE_DECISION_STORAGE_KEY);
   return session;
 }
 
@@ -285,7 +281,6 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const modelFilterRef = useRef<HTMLInputElement | null>(null);
-  const pendingNavigationRef = useRef<number | null>(null);
   const committedNavigationRef = useRef(false);
 
   const currentDecision = useMemo(() => {
@@ -335,44 +330,30 @@ export default function App() {
     });
   }, [modelFilter, models]);
 
-  const clearPendingNavigation = useCallback(() => {
-    if (pendingNavigationRef.current !== null) {
-      window.clearTimeout(pendingNavigationRef.current);
-      pendingNavigationRef.current = null;
-    }
-  }, []);
-
   const persistRouteState = useCallback((nextDecision: RouteDecision, nextIndex: number) => {
     const storage = typeof window !== "undefined" ? window.sessionStorage : null;
     const session = saveDecisionToSessionStorage(storage, nextDecision, nextIndex);
     if (session) {
       persistRouteStateRemotely(session);
+      window.postMessage(
+        buildBrowserCompanionRouteMessage(nextDecision, nextIndex),
+        window.location.origin,
+      );
     }
-    window.postMessage(buildBrowserCompanionRouteMessage(nextDecision, nextIndex), "*");
   }, []);
 
   const navigate = useCallback(
-    (nextDecision: RouteDecision, nextIndex: number, destination: string) => {
-      if (!destination || committedNavigationRef.current) {
+    (nextDecision: RouteDecision, nextIndex: number, rawDestination: string) => {
+      const destination = reviewRouteDestination(rawDestination);
+      if (!destination.ok || committedNavigationRef.current) {
         return;
       }
       committedNavigationRef.current = true;
-      clearPendingNavigation();
       setSelectedIndex(nextIndex);
       persistRouteState(nextDecision, nextIndex);
-      window.location.assign(destination);
+      window.location.assign(destination.url);
     },
-    [clearPendingNavigation, persistRouteState],
-  );
-
-  const scheduleNavigation = useCallback(
-    (nextDecision: RouteDecision, nextIndex: number, destination: string) => {
-      clearPendingNavigation();
-      pendingNavigationRef.current = window.setTimeout(() => {
-        navigate(nextDecision, nextIndex, destination);
-      }, AUTO_NAV_DELAY_MS);
-    },
-    [clearPendingNavigation, navigate],
+    [persistRouteState],
   );
 
   useEffect(() => {
@@ -439,28 +420,6 @@ export default function App() {
     };
   }, [modelPickerOpen]);
 
-  useEffect(() => () => clearPendingNavigation(), [clearPendingNavigation]);
-
-  useEffect(() => {
-    if (!currentDecision) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      const action = routeHotkeyActionFromKeyboardEvent(event);
-      if (!action) {
-        return;
-      }
-      const navigation = routeNavigationForHotkey(currentDecision, currentDecision.selected_index, action);
-      if (!navigation) {
-        return;
-      }
-      event.preventDefault();
-      navigate(currentDecision, navigation.nextIndex, navigation.url);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [currentDecision, navigate]);
-
   const runAnswer = useCallback(
     async (query: string, baseDecision: RouteDecision = syntheticAnswerDecision(query)) => {
       setDecision(baseDecision);
@@ -484,7 +443,6 @@ export default function App() {
       if (!query || loading || answerLoading) {
         return;
       }
-      clearPendingNavigation();
       committedNavigationRef.current = false;
       setLoading(true);
       try {
@@ -505,7 +463,8 @@ export default function App() {
             used_visual_judge: false,
             metadata: {},
           };
-          navigate(fallbackDecision, -1, fallbackDecision.fallback_url);
+          setDecision(fallbackDecision);
+          setSelectedIndex(-1);
           return;
         }
 
@@ -518,10 +477,6 @@ export default function App() {
           await runAnswer(query, nextDecision);
           return;
         }
-        const destination = selectedCandidateUrl(nextDecision, nextIndex);
-        if (action === "open" || action === "smart") {
-          scheduleNavigation(nextDecision, nextIndex, destination);
-        }
       } catch (submitError) {
         console.warn("Search Home route failed", submitError);
       } finally {
@@ -530,13 +485,11 @@ export default function App() {
     },
     [
       answerLoading,
-      clearPendingNavigation,
       input,
       loading,
       navigate,
       persistRouteState,
       runAnswer,
-      scheduleNavigation,
       selectedModel,
     ],
   );
@@ -752,6 +705,32 @@ export default function App() {
           </div>
         </form>
       </section>
+
+      {currentDecision && !isAnswerRoute(currentDecision) ? (
+        <NavigationReview
+          decision={currentDecision}
+          selectedIndex={selectedIndex}
+          onSelectIndex={(nextIndex) => {
+            setSelectedIndex(nextIndex);
+            persistRouteState(currentDecision, nextIndex);
+          }}
+          onOpenSelected={() =>
+            navigate(currentDecision, selectedIndex, selectedCandidateUrl(currentDecision, selectedIndex))
+          }
+          onOpenFallback={() => navigate(currentDecision, -1, currentDecision.fallback_url)}
+          onCopy={() => {
+            const destination = reviewRouteDestination(selectedCandidateUrl(currentDecision, selectedIndex));
+            const details = destination.ok
+              ? destination.url
+              : `Search Home blocked destination: ${destination.code}. ${destination.message}`;
+            void navigator.clipboard.writeText(details);
+          }}
+          onCancel={() => {
+            setDecision(null);
+            setSelectedIndex(-1);
+          }}
+        />
+      ) : null}
 
     </main>
   );

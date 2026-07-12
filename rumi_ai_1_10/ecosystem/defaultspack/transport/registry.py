@@ -71,6 +71,7 @@ _ALLOWED_FIRST_PARTY_COMPONENT_ROUTE_BLOCK_MODULES = {
     "blocks.integrations.line",
     "blocks.integrations.slack",
     "blocks.ui.catalog",
+    "blocks.ui.provider_health",
 }
 
 
@@ -695,6 +696,20 @@ def _mobile_http_route_specs() -> list[HttpRouteSpec]:
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
+        "POST", "/api/remote-images/consents",
+        block_module="blocks.media.remote_image", sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
+        "GET", "/api/remote-images/{token}",
+        block_module="blocks.media.remote_image", path_inject={"token": "token"},
+        sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
+        "DELETE", "/api/remote-images/{token}",
+        block_module="blocks.media.remote_image", path_inject={"token": "token"},
+        sensitive=True, local_only=True,
+    ),
+    HttpRouteSpec(
         "POST",
         "/v1/chat/completions",
         flow_id="defaultspack.chat_turn",
@@ -1134,6 +1149,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/company/{company_id}/threads/{thread_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "thread_id": "thread_id"}, defaults={"action": "create"}),
     HttpRouteSpec("GET", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("DELETE", "/api/company/{company_id}/tasks/{task_id}", block_module="blocks.company.tasks", path_inject={"company_id": "company_id", "task_id": "task_id"}, defaults={"action": "delete"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/tasks/{task_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id", "task_id": "task_id"}),
     HttpRouteSpec("GET", "/api/company/{company_id}/runs", block_module="blocks.company.runs", path_inject={"company_id": "company_id"}),
@@ -2125,6 +2141,23 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "GET", "/api/share/{token}", block_module="blocks.share.get", path_inject={"token": "token"}
     ),
     HttpRouteSpec(
+        "POST",
+        "/api/share/{token}/export",
+        block_module="blocks.share.export_bundle",
+        path_inject={"token": "token"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/share/{token}/import",
+        block_module="blocks.share.import_conversation",
+        path_inject={"token": "token"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/packs/defaultspack/chat/conversations/import",
+        block_module="blocks.share.import_bundle",
+    ),
+    HttpRouteSpec(
         "DELETE",
         "/api/share/{token}",
         block_module="blocks.share.revoke",
@@ -2178,6 +2211,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
     HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
     HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("GET", "/api/ui/provider-health", block_module="blocks.ui.provider_health"),
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
@@ -2338,9 +2372,13 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/desktops", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/calendar", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
+    HttpRouteSpec("POST", "/api/authority/browser-exchange", handler_name="_handle_authority_browser_exchange"),
+    HttpRouteSpec("POST", "/api/authority/browser-exchange/revoke", handler_name="_handle_authority_browser_exchange_revoke"),
+    HttpRouteSpec("GET", "/share/{token}", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient-debug", handler_name="_handle_static"),

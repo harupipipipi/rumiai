@@ -6,6 +6,10 @@ from typing import Any
 
 from .schemas import ENVELOPE_SCHEMA, OBJECT_SCHEMA
 from .security import HIGH_RISK_CALLER_REQUIREMENT
+from .compat_aliases import (
+    compatibility_alias_allowed,
+    compatibility_aliases_for_replacements,
+)
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,11 @@ def _default_aliases(function_id: str) -> tuple[str, ...]:
     if len(op_parts) > 1:
         dotted = ".".join(op_parts)
         aliases.extend(_alias_pair(namespace, dotted))
-    return tuple(dict.fromkeys(aliases))
+    return tuple(
+        alias
+        for alias in dict.fromkeys(aliases)
+        if not alias.startswith("defaults.") or compatibility_alias_allowed(alias)
+    )
 
 
 def _flag_enabled(name: str) -> bool:
@@ -77,7 +85,17 @@ def _spec(
     input_schema: dict[str, Any] | None = None,
     grant_config: dict[str, Any] | None = None,
 ) -> FunctionSpec:
-    all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
+    base_aliases = tuple(
+        alias
+        for alias in dict.fromkeys([*_default_aliases(function_id), *aliases])
+        if not alias.startswith("defaults.") or compatibility_alias_allowed(alias)
+    )
+    canonical_aliases = {alias for alias in base_aliases if alias.startswith("defaultspack.")}
+    all_aliases = tuple(
+        dict.fromkeys(
+            [*base_aliases, *compatibility_aliases_for_replacements(canonical_aliases)]
+        )
+    )
     return FunctionSpec(
         function_id=function_id,
         description=description,
@@ -144,10 +162,10 @@ AI_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("ai_tts", "Generate speech with the configured AI provider.", ("ai", "audio"), risk="medium", block="blocks.ai.tts"),
     _spec("ai_get_preferred_model", "Get the preferred model profile.", ("ai", "model_runtime")),
     _spec("ai_set_preferred_model", "Set the preferred model profile.", ("ai", "model_runtime"), risk="medium"),
-    _spec("ai_get_thinking_level", "Get the configured model thinking level.", ("ai", "model_runtime"), aliases=("defaults.model_runtime.get_thinking_level", "defaultspack.model_runtime.get_thinking_level")),
-    _spec("ai_set_thinking_level", "Set the configured model thinking level.", ("ai", "model_runtime"), risk="medium", aliases=("defaults.model_runtime.set_thinking_level", "defaultspack.model_runtime.set_thinking_level")),
-    _spec("ai_get_effective_thinking_level", "Resolve the effective thinking level.", ("ai", "model_runtime"), aliases=("defaults.model_runtime.get_effective_thinking_level", "defaultspack.model_runtime.get_effective_thinking_level")),
-    _spec("ai_normalize_thinking_level", "Normalize a thinking level for a provider.", ("ai", "model_runtime"), aliases=("defaults.model_runtime.normalize_thinking_level", "defaultspack.model_runtime.normalize_thinking_level")),
+    _spec("ai_get_thinking_level", "Get the configured model thinking level.", ("ai", "model_runtime"), aliases=("defaultspack.model_runtime.get_thinking_level",)),
+    _spec("ai_set_thinking_level", "Set the configured model thinking level.", ("ai", "model_runtime"), risk="medium", aliases=("defaultspack.model_runtime.set_thinking_level",)),
+    _spec("ai_get_effective_thinking_level", "Resolve the effective thinking level.", ("ai", "model_runtime"), aliases=("defaultspack.model_runtime.get_effective_thinking_level",)),
+    _spec("ai_normalize_thinking_level", "Normalize a thinking level for a provider.", ("ai", "model_runtime"), aliases=("defaultspack.model_runtime.normalize_thinking_level",)),
     _spec("ai_validate_model_params", "Validate model runtime parameters.", ("ai", "model_runtime")),
     _spec("ai_get_provider_key_status", "Get provider API key status.", ("ai", "provider_key")),
     _spec("ai_set_provider_key", "Set a provider API key.", ("ai", "provider_key"), risk="high"),

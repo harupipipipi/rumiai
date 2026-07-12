@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import html
+import http.client
 import json
 import os
 import re
+import socket
 import threading
 import time
 import urllib.error
@@ -19,6 +21,7 @@ from .safe_url import (
     build_google_fallback_url,
     classify_direct_url,
     query_explicitly_targets_localhost,
+    resolve_public_addresses,
     unsafe_scheme_reason,
     validate_candidate_url,
 )
@@ -76,7 +79,55 @@ class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
         validation = validate_candidate_url(newurl)
         if not validation.ok:
             raise urllib.error.HTTPError(newurl, code, validation.reason, headers, fp)
+        parsed = urllib.parse.urlparse(validation.normalized_url)
+        resolve_public_addresses(
+            str(parsed.hostname or ""),
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+        )
         return super().redirect_request(req, fp, code, msg, headers, validation.normalized_url)
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection pinned to addresses already checked by SSRF policy."""
+
+    def __init__(self, host: str, addresses: tuple[str, ...], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._verified_addresses = addresses
+
+    def connect(self) -> None:
+        last_error: OSError | None = None
+        for address in self._verified_addresses:
+            try:
+                self.sock = socket.create_connection(
+                    (address, self.port), self.timeout, self.source_address
+                )
+                return
+            except OSError as exc:
+                last_error = exc
+        raise last_error or OSError("no verified destination address")
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection pinned to checked IPs while retaining hostname TLS."""
+
+    def __init__(self, host: str, addresses: tuple[str, ...], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._verified_addresses = addresses
+
+    def connect(self) -> None:
+        last_error: OSError | None = None
+        for address in self._verified_addresses:
+            try:
+                raw_socket = socket.create_connection(
+                    (address, self.port), self.timeout, self.source_address
+                )
+                self.sock = self._context.wrap_socket(
+                    raw_socket, server_hostname=self.host
+                )
+                return
+            except OSError as exc:
+                last_error = exc
+        raise last_error or OSError("no verified destination address")
 
 
 @dataclass(slots=True)
@@ -191,6 +242,16 @@ class SearchTargetResolver:
             )
 
         probed_candidates = self._probe_candidates(candidates, user_query=cleaned)
+        if not probed_candidates:
+            return RouteDecision(
+                route_type=GOOGLE_REDIRECT,
+                query=cleaned,
+                target_url=fallback_url,
+                target_candidates=[],
+                selected_index=-1,
+                fallback_url=fallback_url,
+                resolution_reason="no_viable_target_fallback",
+            )
         self._attach_screenshots(probed_candidates)
 
         selected_model = str((context or {}).get(_SETTINGS_MODEL_KEY) or "").strip()
@@ -547,8 +608,9 @@ class SearchTargetResolver:
                 candidate["final_url"] = final_validation.normalized_url
                 candidate["domain"] = self._domain(candidate["final_url"])
             else:
-                candidate["final_url"] = str(candidate.get("url") or "")
-        return results
+                candidate["final_url"] = ""
+                candidate["destination_blocked_reason"] = final_validation.reason
+        return [candidate for candidate in results if not candidate.get("destination_blocked_reason")]
 
     def _attach_screenshots(self, candidates: list[dict[str, Any]]) -> None:
         if self._max_visual_candidates <= 0:
@@ -600,7 +662,7 @@ class SearchTargetResolver:
 
     def _capture_with_cdp(self, url: str) -> dict[str, Any]:
         try:
-            from ecosystem.rumi_default_tools_pack.domain.browser.cdp_client import BrowserCDPClient, CDPTab
+            from ecosystem.rumi_default_tools_pack.domain.browser.cdp_client import BrowserCDPClient
         except Exception as exc:
             return {"screenshot_error": f"browser_cdp_import_failed:{exc}"}
 
@@ -837,30 +899,21 @@ class SearchTargetResolver:
 
     def _probe_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
         url = str(candidate.get("url") or "")
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "RumiSearchHome/1.0 (+intent resolver)",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        )
-        opener = urllib.request.build_opener(_ValidatingRedirectHandler)
+        validation = validate_candidate_url(url)
+        if not validation.ok:
+            return {"final_url": "", "status": 0, "probe_error": validation.reason}
+        parsed = urllib.parse.urlparse(validation.normalized_url)
+        try:
+            resolve_public_addresses(
+                str(parsed.hostname or ""),
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+            )
+        except ValueError as exc:
+            return {"final_url": "", "status": 0, "probe_error": str(exc)}
+        url = validation.normalized_url
         started = time.time()
         try:
-            with opener.open(request, timeout=6.0) as response:
-                status = getattr(response, "status", 200)
-                final_url = response.geturl()
-                content_type = response.headers.get("Content-Type", "")
-                raw_body = response.read(_MAX_PROBE_BYTES)
-                redirected = final_url != url
-        except urllib.error.HTTPError as exc:
-            status = int(getattr(exc, "code", 0) or 0)
-            final_url = exc.geturl() or url
-            content_type = exc.headers.get("Content-Type", "") if exc.headers else ""
-            try:
-                raw_body = exc.read(_MAX_PROBE_BYTES)
-            except Exception:
-                raw_body = b""
+            status, final_url, content_type, raw_body = self._fetch_pinned(url)
             redirected = final_url != url
         except Exception as exc:
             return {
@@ -889,6 +942,49 @@ class SearchTargetResolver:
             "is_search_results": self._looks_like_search_results(final_url, parsed),
             "probe_ms": int((time.time() - started) * 1000),
         }
+
+    @staticmethod
+    def _fetch_pinned(url: str) -> tuple[int, str, str, bytes]:
+        """Fetch with every redirect revalidated and each connection IP-pinned."""
+        current = url
+        for _redirect in range(6):
+            validation = validate_candidate_url(current, allow_localhost=False)
+            if not validation.ok:
+                raise ValueError(validation.reason)
+            current = validation.normalized_url
+            parsed = urllib.parse.urlparse(current)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            addresses = resolve_public_addresses(str(parsed.hostname or ""), port)
+            connection_type = (
+                _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+            )
+            connection = connection_type(
+                str(parsed.hostname), addresses, port=port, timeout=6.0
+            )
+            path = urllib.parse.urlunparse(
+                ("", "", parsed.path or "/", parsed.params, parsed.query, "")
+            )
+            try:
+                connection.request(
+                    "GET",
+                    path,
+                    headers={
+                        "User-Agent": "RumiSearchHome/1.0 (+intent resolver)",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    },
+                )
+                response = connection.getresponse()
+                status = int(response.status or 0)
+                location = response.getheader("Location", "")
+                content_type = response.getheader("Content-Type", "")
+                body = response.read(_MAX_PROBE_BYTES)
+            finally:
+                connection.close()
+            if status in {301, 302, 303, 307, 308} and location:
+                current = urllib.parse.urljoin(current, location)
+                continue
+            return status, current, content_type, body
+        raise ValueError("redirect_limit_exceeded")
 
     @staticmethod
     def _decode_body(raw_body: bytes, content_type: str) -> str:

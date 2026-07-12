@@ -241,7 +241,7 @@ def test_route_metadata_sensitive_reads_server_route_table():
     assert request_handler._route_metadata_sensitive("GET", "/api/template/sensitive") is False
 
 
-def test_ambient_browser_qa_token_can_submit_pre_auth_event(monkeypatch):
+def test_legacy_browser_qa_token_cannot_submit_pre_auth_event(monkeypatch):
     from transport.http import _RequestHandler
 
     def handler(request_data, path_params):
@@ -271,7 +271,11 @@ def test_ambient_browser_qa_token_can_submit_pre_auth_event(monkeypatch):
         "X-Rumi-CSRF": "1",
         "X-Rumi-Approval-Browser-Token": "browser-secret",
     }
-    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") is None
+    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+        401,
+        "local auth token required",
+        "AUTH_REQUIRED",
+    )
 
     request_handler.headers = {
         "Origin": "http://localhost:8766",
@@ -289,13 +293,13 @@ def test_ambient_browser_qa_token_can_submit_pre_auth_event(monkeypatch):
         "X-Rumi-Approval-Browser-Token": "browser-secret",
     }
     assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
-        403,
-        "CSRF header required for sensitive integration mutation",
-        "CSRF_REQUIRED",
+        401,
+        "local auth token required",
+        "AUTH_REQUIRED",
     )
 
 
-def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
+def test_legacy_browser_qa_token_cannot_mint_authority_ui_operator(monkeypatch):
     from transport.http import _RequestHandler, _browser_qa_token_authorized
 
     def handler(request_data, path_params):
@@ -330,8 +334,10 @@ def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
         "POST",
         "/api/authority/browser-ui-operator",
         request_handler.headers,
-    ) is True
-    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") is None
+    ) is False
+    assert request_handler._sensitive_request_error(
+        "POST", "/api/authority/browser-ui-operator"
+    ) == (401, "local auth token required", "AUTH_REQUIRED")
 
     request_handler.headers = {
         "Origin": "http://127.0.0.1:8766",
@@ -343,7 +349,9 @@ def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
         "/api/authority/browser-ui-operator",
         request_handler.headers,
     ) is False
-    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") is None
+    assert request_handler._sensitive_request_error(
+        "POST", "/api/authority/browser-ui-operator"
+    ) == (401, "local auth token required", "AUTH_REQUIRED")
 
     request_handler.headers = {
         "Origin": "http://127.0.0.1:8766",
@@ -355,12 +363,12 @@ def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
         "/api/authority/browser-ui-operator",
         request_handler.headers,
         query_data,
-    ) is True
+    ) is False
     assert request_handler._sensitive_request_error(
         "POST",
         "/api/authority/browser-ui-operator",
         query_data,
-    ) is None
+    ) == (401, "local auth token required", "AUTH_REQUIRED")
 
     invalid_query_data = {"browser_approval_token": "wrong"}
     assert _browser_qa_token_authorized(
@@ -373,16 +381,16 @@ def test_browser_qa_token_can_mint_authority_ui_operator(monkeypatch):
         "POST",
         "/api/authority/browser-ui-operator",
         invalid_query_data,
-    ) is None
+    ) == (401, "local auth token required", "AUTH_REQUIRED")
 
     request_handler.headers = {
         "Origin": "http://127.0.0.1:8766",
         "X-Rumi-Approval-Browser-Token": "browser-secret",
     }
     assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") == (
-        403,
-        "CSRF header required for sensitive local mutation",
-        "CSRF_REQUIRED",
+        401,
+        "local auth token required",
+        "AUTH_REQUIRED",
     )
 
 
@@ -464,8 +472,10 @@ def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(mo
         "POST",
         "/api/ambient/monitor/start",
         request_handler.headers,
-    ) is True
-    assert request_handler._sensitive_request_error("POST", "/api/ambient/monitor/start") is None
+    ) is False
+    assert request_handler._sensitive_request_error(
+        "POST", "/api/ambient/monitor/start"
+    ) == (401, "local auth token required", "AUTH_REQUIRED")
 
     request_handler.headers = {
         "Origin": "http://localhost:8766",
@@ -521,11 +531,18 @@ def test_runtime_and_desktop_mutations_can_use_local_ui_approval_context(monkeyp
     for method, path in (
         ("POST", "/api/runtime/ensure"),
         ("POST", "/api/runtime/update"),
+        ("POST", "/api/runtime/uninstall"),
         ("POST", "/api/runtime/operations/op-1/cancel"),
         ("POST", "/api/desktops"),
         ("POST", "/api/desktops/seat-1/start"),
+        ("POST", "/api/desktops/seat-1/stop"),
+        ("POST", "/api/desktops/seat-1/restart"),
         ("POST", "/api/desktops/seat-1/input"),
+        ("POST", "/api/desktops/seat-1/ai-input"),
+        ("POST", "/api/desktops/seat-1/rules"),
         ("POST", "/api/desktops/seat-1/control/acquire"),
+        ("POST", "/api/desktops/seat-1/control/renew"),
+        ("POST", "/api/desktops/seat-1/control/release"),
         ("POST", "/api/desktops/seat-1/access-requests/request-1/grant"),
         ("DELETE", "/api/desktops/seat-1"),
     ):

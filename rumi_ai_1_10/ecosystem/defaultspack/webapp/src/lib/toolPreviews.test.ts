@@ -108,6 +108,33 @@ test("tool previews open html artifacts as real file previews without placeholde
   }
 });
 
+test("tool previews prefer conversation workspace artifact paths", () => {
+  const message = assistantMessage({
+    tool_logs: [
+      {
+        tool_name: "chart_create",
+        arguments: { output_path: "charts/revenue.png" },
+        result: {
+          status: "ok",
+          data: {
+            path: "charts/revenue.png",
+            workspace_path: "artifacts/charts/revenue.png",
+          },
+        },
+      },
+    ],
+  });
+
+  const previews = toolPreviewsFromMessages([message]);
+
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0]?.data.type, "image");
+  if (previews[0]?.data.type === "image") {
+    assert.equal(previews[0].data.path, "artifacts/charts/revenue.png");
+    assert.match(previews[0].data.url, /path=artifacts%2Fcharts%2Frevenue\.png/);
+  }
+});
+
 test("tool previews ignore approval-required artifacts until the tool really executes", () => {
   const message = assistantMessage({
     tool_logs: [

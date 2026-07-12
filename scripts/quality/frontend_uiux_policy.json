@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "source_roots": [
+    "rumi_viewer/frontend",
+    "rumi_ai_1_10/ecosystem/defaultspack/webapp",
+    "rumi_ai_1_10/ecosystem/search_home_pack/webapp",
+    "rumi_ai_1_10/ecosystem/rumi_mobile",
+    "rumi_ai_1_10/ecosystem/defaultspack/browser_extensions",
+    "rumi_ai_1_10/core_runtime"
+  ],
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".html",
+    ".css",
+    ".dart"
+  ],
+  "exclude_path_parts": [
+    ".git",
+    ".dart_tool",
+    ".next",
+    ".turbo",
+    "build",
+    "coverage",
+    "dist",
+    "generated",
+    "node_modules",
+    "vendor"
+  ],
+  "notes": [
+    "Pull requests are checked against added/modified lines, not every legacy line in a touched file.",
+    "A full repository scan is available for scheduled/manual reporting.",
+    "Heuristics are guardrails, not proof of runtime accessibility, visual quality, or security."
+  ]
+}

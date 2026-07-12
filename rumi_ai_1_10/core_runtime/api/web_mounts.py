@@ -154,6 +154,16 @@ class WebMountMixin:
                     return wm
                 continue
         fallback_mounts = {
+            "/desktops": {
+                "web_root": Path(__file__).resolve().parent.parent.parent
+                / "ecosystem"
+                / "defaultspack"
+                / "ui",
+                "spa_fallback": True,
+                "index_file": "shell.html",
+                "auth_required": True,
+                "pack_id": "defaultspack",
+            },
             "/panel": {
                 "web_root": Path(__file__).resolve().parent.parent / "core_pack" / "core_control_panel" / "web",
                 "spa_fallback": True,

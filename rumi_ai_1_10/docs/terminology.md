@@ -18,6 +18,8 @@ compatibility matters.
 | `team` | A cooperating set of agents | Use when describing the group, not the storage or routing layer. |
 | `agent` | A tool-capable runtime actor | This remains the general execution unit. |
 | `specialist` | A narrowly scoped agent definition or role | Prefer this over `subagent` when naming reusable worker roles. |
+| `worker runtime` | The execution environment for an agent or specialist | Use this for Docker, process, or host-worker concerns; it is model-independent. |
+| `scheduled agent runtime` | The scheduler and execution path for recurring agent work | Use this for timing, timeout, approval, and execution behavior; it is model-independent. |
 | `delegation` | The act of sending bounded work to another agent | Maps to the canonical `agent.delegate` runtime behavior. |
 | `tool` | An external action or integration an agent can call | Keep this meaning narrow and concrete. |
 | `pack` | A shipped runtime/package unit that provides code, assets, routes, prompts, tools, or skills | Keep this separate from instruction-layer terms such as `rule`. |
@@ -49,4 +51,7 @@ being discussed whenever ambiguity is possible.
 - Prefer `skill = triggered or on demand`.
 - Prefer `team workspace` for the long-running multi-agent surface.
 - Prefer `delegation` for the runtime action and `specialist` for the worker role.
+- Treat team workspace, worker runtime, and scheduled agent runtime as
+  model-independent defaultspack infrastructure. Name a model or provider only
+  when the behavior depends on that concrete integration.
 - Reserve `prompt` and `system prompt` for implementation, runtime, or API details.

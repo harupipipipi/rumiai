@@ -1,5 +1,26 @@
 legacy_routes:
 - method: POST
+  pattern: /api/remote-images/consents
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: GET
+  pattern: /api/remote-images/{token}
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/remote-images/{token}
+  legacy_block_module: blocks.media.remote_image
+  replacement_function_id: ''
+  owner: media
+  reason: consent-gated process-local image proxy requires binary HTTP response
+  remove_after: v2.4
+- method: POST
   pattern: /api/chat/conversations/{id}/stream
   legacy_block_module: blocks.chat.stream
   replacement_function_id: ''
@@ -946,6 +967,13 @@ legacy_routes:
   remove_after: v2.4
 - method: POST
   pattern: /api/company/{company_id}/tasks
+  legacy_block_module: blocks.company.tasks
+  replacement_function_id: ''
+  owner: company
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: DELETE
+  pattern: /api/company/{company_id}/tasks/{task_id}
   legacy_block_module: blocks.company.tasks
   replacement_function_id: ''
   owner: company
@@ -2988,6 +3016,27 @@ legacy_routes:
   owner: share
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/share/{token}/export
+  legacy_block_module: blocks.share.export_bundle
+  replacement_function_id: ''
+  owner: share
+  reason: privacy-safe redacted share export compatibility route
+  remove_after: v2.4
+- method: POST
+  pattern: /api/share/{token}/import
+  legacy_block_module: blocks.share.import_conversation
+  replacement_function_id: ''
+  owner: share
+  reason: importable conversation share compatibility route
+  remove_after: v2.4
+- method: POST
+  pattern: /api/packs/defaultspack/chat/conversations/import
+  legacy_block_module: blocks.share.import_bundle
+  replacement_function_id: ''
+  owner: share
+  reason: manual conversation bundle import compatibility route
+  remove_after: v2.4
 - method: DELETE
   pattern: /api/share/{token}
   legacy_block_module: blocks.share.revoke
@@ -3155,6 +3204,13 @@ legacy_routes:
   replacement_function_id: ui_settings_get
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/ui/provider-health
+  legacy_block_module: blocks.ui.provider_health
+  replacement_function_id: ''
+  owner: ui
+  reason: sanitized provider key-source diagnostics for settings/model health
   remove_after: v2.4
 - method: PUT
   pattern: /api/ui/settings

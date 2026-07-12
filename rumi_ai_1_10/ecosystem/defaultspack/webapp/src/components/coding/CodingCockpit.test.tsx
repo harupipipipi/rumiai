@@ -1,12 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ApprovalQueue } from "./ApprovalQueue";
+import { CheckpointPanel } from "./CheckpointPanel";
 import { CodingCockpit } from "./CodingCockpit";
 import { DiffPanel } from "./DiffPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { codingApprovalRequestId } from "./CheckpointPanel";
+import {
+  codingActionRequiresApproval,
+  nextApprovalQueueRefreshSignal,
+} from "./approvalQueueSync";
+
+test("approval-required coding results advance the queue refresh signal", () => {
+  assert.equal(codingActionRequiresApproval({ approval_required: true }), true);
+  assert.equal(codingActionRequiresApproval({ approval_request: { request_id: "apr_restore" } }), true);
+  assert.equal(codingActionRequiresApproval({ approval_required: false }), false);
+  assert.equal(nextApprovalQueueRefreshSignal(3, { approval_required: true }), 4);
+  assert.equal(nextApprovalQueueRefreshSignal(3, { ok: true }), 3);
+});
+
+test("checkpoint restore resolves approval request ids from both response shapes", () => {
+  assert.equal(codingApprovalRequestId({ approval_request_id: "apr_direct" }), "apr_direct");
+  assert.equal(
+    codingApprovalRequestId({ approval_request: { request_id: "apr_nested" } }),
+    "apr_nested",
+  );
+  assert.equal(codingApprovalRequestId({ restored: true }), "");
+});
 
 test("approval queue renders cockpit approval decisions", () => {
   const html = renderToStaticMarkup(
@@ -24,8 +49,8 @@ test("approval queue renders cockpit approval decisions", () => {
   );
 
   assert.match(html, /terminal\.exec/);
-  assert.match(html, /Approve/);
-  assert.match(html, /Deny/);
+  assert.match(html, /許可/);
+  assert.match(html, /拒否/);
 });
 
 test("approval queue separates expired pending approvals from active approvals", () => {
@@ -49,11 +74,11 @@ test("approval queue separates expired pending approvals from active approvals",
   assert.match(html, /No active approvals/);
   assert.match(html, /Recent approval history/);
   assert.match(html, /expired/);
-  assert.doesNotMatch(html, /Approve/);
-  assert.doesNotMatch(html, /Deny/);
+  assert.doesNotMatch(html, />許可</);
+  assert.doesNotMatch(html, />拒否</);
 });
 
-test("diff panel renders status and diff content", () => {
+test("diff panel renders status, content, and an operable refresh control", () => {
   const html = renderToStaticMarkup(
     createElement(DiffPanel, {
       initialStatus: { branch: "main", clean: false, modified: ["src/App.tsx"] },
@@ -65,6 +90,28 @@ test("diff panel renders status and diff content", () => {
   assert.match(html, /src\/App\.tsx/);
   assert.match(html, /-old/);
   assert.match(html, /\+new/);
+  assert.match(html, /aria-label="Refresh diff"/);
+});
+
+test("checkpoint panel renders refresh and restore-review controls for supplied snapshots", () => {
+  const html = renderToStaticMarkup(
+    createElement(CheckpointPanel, {
+      workspaceId: "ws-main",
+      initialCheckpoints: [
+        {
+          snapshot_id: "snapshot-1",
+          path: "/repo/.rumi/checkpoints/snapshot-1",
+        },
+      ],
+      initialDiff: { diff: "-before\n+after", files_changed: 1, files: ["src/App.tsx"] },
+    }),
+  );
+
+  assert.match(html, /snapshot-1/);
+  assert.match(html, /Refresh checkpoints/);
+  assert.match(html, /Review restore snapshot-1/);
+  assert.match(html, /Restore diff/);
+  assert.match(html, /-before/);
 });
 
 test("terminal panel renders classification and risk reasons", () => {
@@ -106,4 +153,11 @@ test("coding cockpit renders workspace and sidecar sections", () => {
   assert.match(html, /Browser/);
   assert.match(html, /MCP/);
   assert.match(html, /Agents/);
+});
+
+test("MCP requester never approves its own request", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "CodingCockpit.tsx"), "utf8");
+  assert.doesNotMatch(source, /codingResources\.approveCodingApproval/);
+  assert.match(source, /separate Approvals queue/);
+  assert.match(source, /requesting form cannot approve its own request/);
 });

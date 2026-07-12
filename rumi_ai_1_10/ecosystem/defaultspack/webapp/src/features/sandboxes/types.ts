@@ -412,7 +412,7 @@ export type DesktopInputAction =
 
 export type DesktopInputRequest = DesktopInputAction & {
   lease_token: string;
-  access_key?: string;
+  desktop_session_credential?: string;
   client_action_id?: string;
   request_id?: string;
 };

@@ -26,6 +26,7 @@ export const companyResources = {
   sendP2PMessage: api.sendP2PMessage,
   createCompanyTask: api.createCompanyTask,
   updateCompanyTask: api.updateCompanyTask,
+  deleteCompanyTask: api.deleteCompanyTask,
   bootstrapCompanyWorkspace: api.bootstrapCompanyWorkspace,
 };
 

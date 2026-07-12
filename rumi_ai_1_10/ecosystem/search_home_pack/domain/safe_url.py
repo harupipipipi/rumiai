@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote_plus, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote_plus, urlparse, urlunparse
 
 
 UNSAFE_SCHEMES = {
@@ -21,6 +22,12 @@ PRIVATE_IPV4_RE = re.compile(
     r"\b(?:127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})\b"
 )
 _SCHEME_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ENCODED_CONTROL_RE = re.compile(r"%(?:0[0-9a-f]|1[0-9a-f]|7f)", re.IGNORECASE)
+_SECRET_QUERY_KEY_RE = re.compile(
+    r"(?:^|[_-])(token|secret|password|passwd|key|signature|credential|auth|code)(?:$|[_-])",
+    re.IGNORECASE,
+)
 _LOCAL_TARGET_RE = re.compile(
     r"^(?P<host>localhost|127\.0\.0\.1|\[::1\]|::1|0\.0\.0\.0)"
     r"(?::(?P<port>\d{1,5}))?"
@@ -144,10 +151,17 @@ def classify_direct_url(raw: str) -> dict[str, Any] | None:
 
 
 def validate_candidate_url(url: str, *, user_query: str = "", allow_localhost: bool | None = None) -> SafeUrlResult:
-    raw = str(url or "").strip()
+    raw = str(url or "")
     if not raw:
         return SafeUrlResult(False, reason="empty_url")
-    parsed = urlparse(raw)
+    if raw != raw.strip() or _CONTROL_RE.search(raw) or _ENCODED_CONTROL_RE.search(raw):
+        return SafeUrlResult(False, reason="control_characters")
+    if "\\" in raw:
+        return SafeUrlResult(False, reason="ambiguous_url_syntax")
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return SafeUrlResult(False, reason="malformed_url")
     scheme = parsed.scheme.casefold()
     if scheme in UNSAFE_SCHEMES:
         return SafeUrlResult(False, reason="unsafe_scheme")
@@ -155,13 +169,25 @@ def validate_candidate_url(url: str, *, user_query: str = "", allow_localhost: b
         return SafeUrlResult(False, reason="unsupported_scheme")
     if not parsed.hostname:
         return SafeUrlResult(False, reason="missing_hostname")
+    if parsed.username or parsed.password:
+        return SafeUrlResult(False, reason="embedded_credentials")
+    try:
+        port = parsed.port
+    except ValueError:
+        return SafeUrlResult(False, reason="invalid_port")
     allow_local = query_explicitly_targets_localhost(user_query) if allow_localhost is None else bool(allow_localhost)
     if not allow_local and host_is_private_or_local(parsed.hostname):
         return SafeUrlResult(False, reason="private_or_local_host")
+    try:
+        ascii_host = parsed.hostname.encode("idna").decode("ascii").casefold()
+    except UnicodeError:
+        return SafeUrlResult(False, reason="invalid_hostname")
+    authority_host = f"[{ascii_host}]" if ":" in ascii_host else ascii_host
+    authority = authority_host if port is None else f"{authority_host}:{port}"
     normalized = urlunparse(
         (
-            parsed.scheme,
-            parsed.netloc,
+            scheme,
+            authority,
             parsed.path or "/",
             "",
             parsed.query,
@@ -171,16 +197,45 @@ def validate_candidate_url(url: str, *, user_query: str = "", allow_localhost: b
     return SafeUrlResult(True, normalized_url=normalized)
 
 
+def url_safe_for_persistence(url: str) -> str:
+    """Return a normalized URL only when it has no credential-like component."""
+    validation = validate_candidate_url(url, allow_localhost=True)
+    if not validation.ok:
+        return ""
+    parsed = urlparse(validation.normalized_url)
+    if parsed.fragment:
+        return ""
+    if any(_SECRET_QUERY_KEY_RE.search(key) for key, _value in parse_qsl(parsed.query)):
+        return ""
+    return validation.normalized_url
+
+
 def host_is_private_or_local(host: str) -> bool:
     normalized = str(host or "").strip().strip("[]").casefold()
     if not normalized:
         return True
-    if normalized in LOCAL_HOSTS or normalized.endswith(".local"):
+    if (
+        normalized in LOCAL_HOSTS
+        or normalized.endswith(".localhost")
+        or normalized.endswith(".local")
+        or normalized.endswith(".internal")
+        or normalized == "home.arpa"
+        or normalized.endswith(".home.arpa")
+    ):
         return True
     try:
         ip = ipaddress.ip_address(normalized)
     except ValueError:
-        return False
+        # WHATWG URL parsers accept legacy one-to-four component IPv4 forms,
+        # including decimal, octal, and hexadecimal components. Reject their
+        # private/local interpretations at the backend boundary as well.
+        if not re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}", normalized):
+            return False
+        try:
+            packed = socket.inet_aton(normalized)
+            ip = ipaddress.ip_address(packed)
+        except OSError:
+            return True
     return (
         ip.is_private
         or ip.is_loopback
@@ -189,6 +244,30 @@ def host_is_private_or_local(host: str) -> bool:
         or ip.is_reserved
         or ip.is_unspecified
     )
+
+
+def resolve_public_addresses(host: str, port: int) -> tuple[str, ...]:
+    """Resolve a host and reject it unless every DNS answer is public."""
+    normalized = str(host or "").strip().strip("[]")
+    if host_is_private_or_local(normalized):
+        raise ValueError("private_or_local_host")
+    try:
+        answers = socket.getaddrinfo(
+            normalized,
+            port,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("dns_resolution_failed") from exc
+    addresses = tuple(
+        dict.fromkeys(str(sockaddr[0]) for _, _, _, _, sockaddr in answers)
+    )
+    if not addresses:
+        raise ValueError("dns_resolution_failed")
+    if any(host_is_private_or_local(address) for address in addresses):
+        raise ValueError("dns_resolved_private_or_local_host")
+    return addresses
 
 
 def _validated_port(raw_port: str | None) -> int | None:

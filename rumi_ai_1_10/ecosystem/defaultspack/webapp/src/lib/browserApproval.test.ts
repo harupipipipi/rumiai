@@ -29,13 +29,15 @@ test("chat browser approval card exposes deny and settles stale request-backed c
   const browserCardSource = source.slice(cardStart, cardEnd);
 
   assert.match(source, /const denyBrowserAction = async \(\) => \{/);
-  assert.match(source, /await api\.denyCodingApproval\(currentApproval\.requestId, "Denied from chat approval card"\)/);
+  assert.match(source, /await api\.denyCodingApproval\(currentApproval\.requestId, "User denied the request from the shared approval surface"\)/);
   assert.match(source, /function browserApprovalSettlementKey\(approval: BrowserApproval\): string/);
   assert.match(source, /const staleMessage = currentApproval\.requestId \? approvalStaleUiMessage\(approvalError\) : null/);
   assert.match(source, /settleBrowserApproval\(currentApproval\)/);
-  assert.match(browserCardSource, /onClick=\{denyBrowserAction\}/);
-  assert.match(browserCardSource, /aria-label="browser\/computer の承認を拒否"/);
-  assert.match(browserCardSource, /拒否 \(2\)[\s\S]*許可 \(3\)/);
+  assert.match(browserCardSource, /<ApprovalDecisionSurface/);
+  assert.match(browserCardSource, /approval=\{browserApprovalViewModel\(visibleBrowserApproval\)\}/);
+  assert.match(browserCardSource, /onDeny=\{\(\) => void denyBrowserAction\(\)\}/);
+  assert.match(browserCardSource, /onApprove=\{\(\) => void approveBrowserAction\(\)\}/);
+  assert.match(browserCardSource, /keyboardShortcuts=\{\{ deny: "2", approve: "3" \}\}/);
 });
 
 test("returns a fresh browser computer approval request", () => {

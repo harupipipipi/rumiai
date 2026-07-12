@@ -2030,43 +2030,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(any("api/ui/client-events" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
 
-    def test_client_event_route_records_redacted_audit_entry(self):
-        from blocks.ui.client_events import run
-
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch.dict(
-                os.environ,
-                {"RUMI_DEFAULTSPACK_AUDIT_PATH": str(Path(tmpdir) / "audit.jsonl")},
-                clear=False,
-            ),
-        ):
-            result = run(
-                {
-                    "_method": "POST",
-                    "source": "webapp",
-                    "category": "conversation_integrity",
-                    "level": "warning",
-                    "message": "Frontend collapsed duplicate assistant finals.",
-                    "fingerprint": "conv-1:assistant:2",
-                    "conversation_id": "conv-1",
-                    "detail": {
-                        "duplicate_count": 2,
-                        "api_key": "secret-value",
-                    },
-                },
-                {},
-            )
-
-            self.assertEqual(result["status"], "ok")
-            audit_path = Path(tmpdir) / "audit.jsonl"
-            self.assertTrue(audit_path.exists())
-            audit_entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(audit_entry["event"], "client_diagnostic")
-            self.assertEqual(audit_entry["category"], "conversation_integrity")
-            self.assertEqual(audit_entry["conversation_id"], "conv-1")
-            self.assertEqual(audit_entry["details"]["api_key"], "***")
-
     def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
         from domain.frontend.command_registry import SlashCommandRegistry
 

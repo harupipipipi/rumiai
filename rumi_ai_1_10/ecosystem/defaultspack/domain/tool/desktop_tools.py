@@ -46,6 +46,12 @@ def desktop_frame(arguments: dict[str, Any], context: dict[str, Any] | None = No
     if not isinstance(body, (bytes, bytearray)):
         return err("desktop frame returned an invalid binary payload", "DESKTOP_FRAME_INVALID")
     headers = result.get("headers") if isinstance(result.get("headers"), dict) else {}
+    artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
+    artifact_paths = [
+        artifact.get("path")
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("path")
+    ]
     return {
         "status": "ok",
         "data": {
@@ -56,7 +62,10 @@ def desktop_frame(arguments: dict[str, Any], context: dict[str, Any] | None = No
             "width": _header_int(headers.get("X-Rumi-Frame-Width")),
             "height": _header_int(headers.get("X-Rumi-Frame-Height")),
             "captured_at": headers.get("X-Rumi-Captured-At"),
+            "artifact_paths": artifact_paths,
         },
+        "artifacts": artifacts,
+        "artifact_paths": artifact_paths,
     }
 
 

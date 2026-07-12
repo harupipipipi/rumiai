@@ -40,6 +40,23 @@ const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
 export const MIMO_CODING_COMPANY_ID = "mimo-coding-company";
 export const OPERATIONS_COMPANY_ID = "operations-company";
 
+type P2PDetailResources = Pick<typeof companyResources, "getP2PIdentity" | "listP2PPeers">;
+
+export async function loadEnabledP2PDetails(
+  status: P2PStatusResponse | null,
+  resources: P2PDetailResources = companyResources,
+): Promise<{ identity: P2PIdentity | null; peers: P2PPeer[] }> {
+  if (!status?.p2p?.enabled) return { identity: null, peers: [] };
+  const [identityResult, peersResult] = await Promise.allSettled([
+    resources.getP2PIdentity(),
+    resources.listP2PPeers(),
+  ]);
+  return {
+    identity: identityResult.status === "fulfilled" ? identityResult.value.identity : null,
+    peers: peersResult.status === "fulfilled" ? peersResult.value.peers : [],
+  };
+}
+
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -372,12 +389,10 @@ export function CompanyWorkspacePanel({
       const statusRequest = statusTarget
         ? companyResources.getCompanyStatus(statusTarget)
         : Promise.resolve({ bootstrapped: false, company_id: "", company: null });
-      const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
+      const [companyListResult, statusResult, p2pStatusResult] = await Promise.allSettled([
         companyResources.listCompanies(),
         statusRequest,
         companyResources.getP2PStatus(),
-        companyResources.getP2PIdentity(),
-        companyResources.listP2PPeers(),
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
@@ -425,9 +440,11 @@ export function CompanyWorkspacePanel({
       setActiveCompanyId(selectedId);
       setCompany(selectedCompany);
 
-      if (p2pStatusResult.status === "fulfilled") setP2PStatus(p2pStatusResult.value);
-      if (p2pIdentityResult.status === "fulfilled") setP2PIdentity(p2pIdentityResult.value.identity);
-      if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
+      const nextP2PStatus = p2pStatusResult.status === "fulfilled" ? p2pStatusResult.value : null;
+      setP2PStatus(nextP2PStatus);
+      const p2pDetails = await loadEnabledP2PDetails(nextP2PStatus);
+      setP2PIdentity(p2pDetails.identity);
+      setPeers(p2pDetails.peers);
 
       const loadErrors = [
         settledErrorMessage("Company list", companyListResult),
@@ -664,6 +681,7 @@ export function CompanyWorkspacePanel({
               });
             })}
             onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
+            onDeleteTask={(taskId) => activeCompanyId && void run(() => companyResources.deleteCompanyTask(activeCompanyId, taskId))}
             onDispatchTask={(taskId) => activeCompanyId && void run(() => companyResources.dispatchCompanyTask(activeCompanyId, taskId))}
           />
         );
