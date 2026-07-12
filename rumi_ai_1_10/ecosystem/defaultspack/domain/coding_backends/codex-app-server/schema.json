@@ -38,11 +38,58 @@
       "type": "string",
       "description": "Trusted workspace root. All file and terminal operations must remain inside this root."
     },
+    "executable": {
+      "type": "string",
+      "default": "codex",
+      "description": "Codex executable path. It is launched as an argv element without a shell."
+    },
+    "model": {
+      "type": "string",
+      "description": "Account-visible model id returned by model/list."
+    },
+    "reasoning_effort": {
+      "type": "string",
+      "description": "A model-supported reasoning effort returned by model/list."
+    },
+    "personality": {
+      "type": "string",
+      "description": "Personality selected only when the model reports supportsPersonality."
+    },
+    "include_hidden_models": {
+      "type": "boolean",
+      "default": false
+    },
+    "permission_profile": {
+      "type": "string",
+      "description": "Permission profile id returned by permissionProfile/list. Mutually exclusive with legacy_sandbox."
+    },
+    "legacy_sandbox": {
+      "type": "string",
+      "enum": ["readOnly", "workspaceWrite"],
+      "default": "readOnly"
+    },
+    "required_mcp_servers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "default": []
+    },
+    "experimental_api": {
+      "type": "boolean",
+      "default": false
+    },
     "approval_mode": {
       "type": "string",
       "enum": ["server_side_required"],
       "default": "server_side_required"
     }
   },
-  "required": ["workspace_root"]
+  "required": ["workspace_root"],
+  "allOf": [
+    {
+      "not": {
+        "required": ["permission_profile", "legacy_sandbox"]
+      }
+    }
+  ]
 }
