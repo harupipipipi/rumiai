@@ -6,6 +6,7 @@ import { cn } from "../lib/cn";
 import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
+import { MobilePairingApproval } from "../components/MobilePairingApproval";
 import { normalizeLocale, t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -40,6 +41,13 @@ import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsF
 const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
   ...builtinSettingsFieldRendererEntries,
   {
+    id: "builtin-settings-mobile-pairing-review",
+    types: ["mobile_pairing_review"],
+    renderers: ["mobile_pairing_review", "MobilePairingApproval"],
+    component: "MobilePairingApproval",
+    render: MobilePairingReviewField,
+  },
+  {
     id: "builtin-settings-model-routing",
     types: ["model_api_routes"],
     renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
@@ -59,6 +67,32 @@ type PendingOAuthReview = OAuthDestinationReview & {
   popup: Window | null;
   scopes: string[];
 };
+
+function MobilePairingReviewField({ sectionId, field, value, onChange }: SettingsFieldRendererProps) {
+  const pairingId = String(value ?? "").trim();
+  const originRef = useRef<HTMLInputElement>(null);
+  const [dismissedId, setDismissedId] = useState("");
+  const visible = pairingId.length > 0 && dismissedId !== pairingId;
+  return (
+    <div className="space-y-3" data-settings-renderer="mobile_pairing_review">
+      <label className="block text-sm text-zinc-300">
+        {field.label}
+        <input
+          ref={originRef}
+          value={String(value ?? "")}
+          onChange={(event) => { setDismissedId(""); onChange(sectionId, field.id, event.target.value); }}
+          placeholder="pair-…"
+          autoComplete="off"
+          spellCheck={false}
+          className="mt-2 h-10 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 font-mono text-sm outline-none focus:border-zinc-500"
+        />
+      </label>
+      <p className="text-xs leading-5 text-zinc-500">PCで作成したpairing IDを入力すると、authoritative requestを再取得して安全に確認します。</p>
+      {visible ? <MobilePairingApproval pairingId={pairingId} originRef={originRef} onClose={() => setDismissedId(pairingId)} /> : null}
+      {!visible && pairingId ? <button type="button" onClick={() => setDismissedId("")} className="text-xs underline">接続要求をもう一度開く</button> : null}
+    </div>
+  );
+}
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -108,6 +142,7 @@ function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): 
     || type === "model_api_routes"
     || type === "continuity"
     || type === "device_lock"
+    || type === "mobile_pairing_review"
     || type === "slash_commands"
     || field.id.endsWith("_setup_guide")
   );
