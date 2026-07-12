@@ -1,13 +1,34 @@
-# Rumi AI Repository Guidance
+# Tobkiri Repository Guidance
 
 These notes are for coding agents working in this repository.
 
 ## Orientation
 
-- The canonical runtime implementation is `rumi_ai_1_10/`.
-- The canonical defaultspack implementation is `rumi_ai_1_10/ecosystem/defaultspack/`.
-- The canonical control-panel frontend is `rumi_ai_1_10/ecosystem/defaultspack/webapp/`.
-- The desktop shell lives in `rumi_viewer/`; the mobile client lives in `rumi_mobile/`.
+- The canonical runtime implementation is `tobkiri_runtime/`.
+- The canonical defaultspack implementation is `tobkiri_runtime/ecosystem/defaultspack/`.
+- The canonical control-panel frontend is `tobkiri_runtime/ecosystem/defaultspack/webapp/`.
+- The desktop shell lives in `tobkiri_launcher/`; the mobile client lives in `tobkiri_mobile/`.
+
+## Product Naming Migration
+
+- The user-facing product name is **Tobkiri**.
+- The desktop shell is displayed as **Tobkiri Launcher**.
+- `Tobkiri` is intentional and must not be autocorrected to `Tobikiri`,
+  `Tokbiri`, or another spelling.
+- The repository is migrating incrementally from the legacy names **Rumi AI**
+  and **Rumi Viewer**.
+- Use `Tobkiri` or `Tobkiri Launcher` for new or modified user-facing copy,
+  including window titles, menus, tooltips, accessibility labels, alt text,
+  setup screens, errors, help text, screenshots, and docs.
+- Keep existing internal identifiers stable unless a dedicated migration
+  explicitly changes them. This includes paths, package/module/API names,
+  storage keys, environment variables, update targets, and application
+  identifiers such as `tobkiri_runtime`, `tobkiri_launcher`, `rumi_*`, `RUMI_*`,
+  `viewer_*`, `rumiai`, and `dev.rumiai.app`.
+- Legacy filenames may remain during the compatibility phase.
+- Do not perform a repository-wide search-and-replace. Preserve legacy names
+  in compatibility contracts, migrations, historical notes, and changelogs
+  where the old name is intentional.
 
 ## Coding Workflow
 
@@ -82,7 +103,7 @@ def process_file(file_path: Path, encoding: str = "utf-8") -> Optional[str]:
 
 ### Python Tests
 
-- For defaultspack backend changes, run focused tests from `rumi_ai_1_10/`:
+- For defaultspack backend changes, run focused tests from `tobkiri_runtime/`:
   ```bash
   python -m pytest tests/test_defaultspack_tool_protocol_v2.py -q
   ```
@@ -122,7 +143,7 @@ def test_api_call_handles_timeout():
 
 ### Frontend Tests
 
-- For frontend changes, run from `rumi_ai_1_10/ecosystem/defaultspack/webapp/`:
+- For frontend changes, run from `tobkiri_runtime/ecosystem/defaultspack/webapp/`:
   ```bash
   npm test
   npm run lint
