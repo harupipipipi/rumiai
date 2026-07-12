@@ -293,7 +293,13 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         model_ref = str(model or "").strip()
         provider_model_id = self._provider_model_id(model_ref)
         supported: set[str] = set()
-        for item in self.list_models():
+        invocation_models = [dict(item) for item in self.KNOWN_MODELS]
+        cache = self._load_remote_model_cache()
+        if cache:
+            invocation_models.extend(
+                self._normalize_remote_models(cache.get("models"))
+            )
+        for item in invocation_models:
             if not isinstance(item, dict):
                 continue
             for key in ("id", "model_id", "qualified_model_id"):

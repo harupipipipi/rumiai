@@ -55,6 +55,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         credential_required: bool = True,
         extra_headers: Optional[Dict[str, str]] = None,
         remote_model_discovery: bool | None = None,
+        remote_model_discovery_requires_auth: bool = True,
         remote_model_list_path: str | None = None,
         remote_model_cache_ttl_seconds: int | None = None,
     ):
@@ -76,6 +77,9 @@ class OpenAICompatibleProvider(OpenAIProvider):
         if remote_model_cache_ttl_seconds is None:
             remote_model_cache_ttl_seconds = getattr(self.__class__, "remote_model_cache_ttl_seconds", 21600)
         self._remote_model_discovery = bool(remote_model_discovery)
+        self._remote_model_discovery_requires_auth = bool(
+            remote_model_discovery_requires_auth
+        )
         self._remote_model_list_path = str(remote_model_list_path or "/models").strip() or "/models"
         try:
             self._remote_model_cache_ttl_seconds = max(60, int(remote_model_cache_ttl_seconds))
@@ -180,6 +184,12 @@ class OpenAICompatibleProvider(OpenAIProvider):
             known_models=known_models,
             extra_headers=dict(manifest.get("headers", {})),
             remote_model_discovery=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_sync") or "").strip().lower() in {"remote_merge", "remote_discovery"},
+            remote_model_discovery_requires_auth=bool(
+                ((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get(
+                    "model_list_requires_auth",
+                    True,
+                )
+            ),
             remote_model_list_path=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_path") or "/models"),
             remote_model_cache_ttl_seconds=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_cache_ttl_seconds", 21600),
         )
@@ -422,7 +432,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return merged
 
     def _remote_discovered_models(self) -> List[Dict[str, Any]]:
-        if not self._remote_model_discovery or not self._api_key or not self._base_url:
+        if (
+            not self._remote_model_discovery
+            or not self._base_url
+            or (self._remote_model_discovery_requires_auth and not self._api_key)
+        ):
             return []
         cache = self._load_remote_model_cache()
         now = int(time.time())

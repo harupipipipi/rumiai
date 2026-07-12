@@ -95,9 +95,14 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
     def test_ai_client_lists_auto_registered_generic_provider_models(self):
         from domain.ai_client.client import AIClient
+        from domain.ai_client.providers.provider_catalog import MistralProvider
 
         AIClient._instance = None
-        with patch.dict(
+        with patch.object(
+            MistralProvider,
+            "_remote_discovered_models",
+            return_value=[],
+        ), patch.dict(
             os.environ,
             {"MISTRAL_API_KEY": "m-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
             clear=True,
@@ -113,24 +118,41 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertIn("mistral/mistral-large-latest", model_ids)
         self.assertIn("mistral/mistral-embed", model_ids)
 
-    def test_openrouter_provider_lists_curated_allowlist_and_rejects_unknown_models(self):
+    def test_openrouter_provider_merges_live_overlay_and_rejects_unknown_models(self):
         from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
         with patch.object(
             OpenRouterProvider,
             "_catalog_models",
             classmethod(lambda cls: _openrouter_catalog_models()),
+        ), patch.object(
+            OpenRouterProvider,
+            "_remote_discovered_models",
+            return_value=[{
+                "id": "openrouter/openai/live-model",
+                "model_id": "openai/live-model",
+                "provider_id": "openrouter",
+                "provider": "openrouter",
+                "name": "Live model",
+                "display_name": "Live model",
+                "type": "chat",
+            }],
+        ), patch.object(
+            OpenRouterProvider,
+            "_load_remote_model_cache",
+            return_value={"models": [{"id": "openai/live-model", "name": "Live model", "type": "chat"}]},
         ):
             provider = OpenRouterProvider()
             models = provider.list_models()
 
-            self.assertGreaterEqual(len(models), 2)
-            self.assertEqual({item["id"] for item in models}, {item["id"] for item in OPENROUTER_CURATED_ALLOWLIST})
+            model_ids = {item["id"] for item in models}
+            self.assertTrue({item["id"] for item in OPENROUTER_CURATED_ALLOWLIST}.issubset(model_ids))
+            self.assertIn("openrouter/openai/live-model", model_ids)
             for model in models:
                 provider._assert_supported_model(model["model_id"])
                 provider._assert_supported_model(model["id"])
 
-            with self.assertRaisesRegex(RuntimeError, "unsupported model"):
+            with self.assertRaisesRegex(RuntimeError, "live or last-known-good catalog"):
                 provider._assert_supported_model("openai/gpt-4o-mini")
 
     def test_ai_client_lists_openrouter_curated_allowlist(self):
@@ -143,6 +165,11 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
                 OpenRouterProvider,
                 "_catalog_models",
                 classmethod(lambda cls: _openrouter_catalog_models()),
+            ),
+            patch.object(
+                OpenRouterProvider,
+                "_remote_discovered_models",
+                return_value=[],
             ),
             patch.dict(
                 os.environ,
