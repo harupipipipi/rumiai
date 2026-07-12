@@ -3,12 +3,12 @@ name: Frontend UI/UX regression guard
 on:
   pull_request:
     paths:
-      - "rumi_viewer/frontend/**"
-      - "rumi_ai_1_10/ecosystem/defaultspack/webapp/**"
-      - "rumi_ai_1_10/ecosystem/search_home_pack/webapp/**"
-      - "rumi_ai_1_10/ecosystem/rumi_mobile/**"
-      - "rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/**"
-      - "rumi_ai_1_10/core_runtime/**"
+      - "tobkiri_launcher/frontend/**"
+      - "tobkiri_runtime/ecosystem/defaultspack/webapp/**"
+      - "tobkiri_runtime/ecosystem/search_home_pack/webapp/**"
+      - "tobkiri_runtime/ecosystem/tobkiri_mobile/**"
+      - "tobkiri_runtime/ecosystem/defaultspack/browser_extensions/**"
+      - "tobkiri_runtime/core_runtime/**"
       - "scripts/quality/audit_frontend_uiux.py"
       - "scripts/quality/test_audit_frontend_uiux.py"
       - "scripts/quality/frontend_uiux_*.json"
