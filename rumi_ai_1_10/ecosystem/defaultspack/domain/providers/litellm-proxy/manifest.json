@@ -1,0 +1,62 @@
+{
+  "id": "litellm-proxy",
+  "provider_id": "litellm-proxy",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "LiteLLM Proxy",
+  "description": "LiteLLM Proxy with explicit upstream routing policy.",
+  "provider_metadata": {
+    "display_name": "LiteLLM Proxy",
+    "kind": "gateway",
+    "env_vars": [
+      "LITELLM_API_KEY"
+    ],
+    "base_url_envs": [
+      "LITELLM_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "http://127.0.0.1:4000/v1",
+    "default_model_for": {},
+    "catalog_features": [
+      "gateway",
+      "explicit_upstream_routes"
+    ]
+  },
+  "provider_manifest": {
+    "id": "litellm-proxy",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "LiteLLM Proxy",
+    "enabled": true,
+    "priority": 450,
+    "adapter": "openai_compatible",
+    "api_key_env": "LITELLM_API_KEY",
+    "base_url_env": "LITELLM_BASE_URL",
+    "default_base_url": "http://127.0.0.1:4000/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "proxy_models_api",
+      "observability_is_not_inventory": true,
+      "upstream_selection_separate": true,
+      "source_docs": "https://docs.litellm.ai/docs/proxy/model_management",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "litellm-proxy"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "gateway",
+    "explicit_upstream_routes"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "id": "helicone-gateway",
+  "provider_id": "helicone-gateway",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Helicone Gateway",
+  "description": "Helicone Gateway with explicit upstream routing policy.",
+  "provider_metadata": {
+    "display_name": "Helicone Gateway",
+    "kind": "gateway",
+    "env_vars": [
+      "HELICONE_API_KEY"
+    ],
+    "base_url_envs": [
+      "HELICONE_BASE_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "gateway-config://helicone-gateway",
+    "default_model_for": {},
+    "catalog_features": [
+      "gateway",
+      "explicit_upstream_routes"
+    ]
+  },
+  "provider_manifest": {
+    "id": "helicone-gateway",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Helicone Gateway",
+    "enabled": true,
+    "priority": 450,
+    "adapter": "helicone_gateway",
+    "api_key_env": "HELICONE_API_KEY",
+    "base_url_env": "HELICONE_BASE_URL",
+    "default_base_url": "gateway-config://helicone-gateway",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "configured_routes_only",
+      "observability_is_not_inventory": true,
+      "upstream_selection_separate": true,
+      "source_docs": "https://docs.helicone.ai/gateway/overview"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "helicone-gateway"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "gateway",
+    "explicit_upstream_routes"
+  ]
+}
