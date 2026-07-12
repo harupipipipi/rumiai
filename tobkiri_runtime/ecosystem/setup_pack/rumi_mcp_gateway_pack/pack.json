@@ -30,7 +30,7 @@
   "recommended": false,
   "risk_level": "critical",
   "supports_all_ok": false,
-  "required_permissions": ["mcp.tool.call"],
+  "required_permissions": ["mcp.tool.call", "mcp.invoke"],
   "conflicts_with": [],
   "overlap_policy": {
     "defaultspack_tool_mcp": "do_not_override",
