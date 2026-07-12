@@ -26,6 +26,32 @@ _SECRET_KEYS = {
     "headers",
 }
 _SECRET_VALUE = re.compile(r"(?:Bearer\s+[A-Za-z0-9._~+/-]{8,}|\bsk-[A-Za-z0-9_-]{8,})", re.IGNORECASE)
+_OPAQUE_SCOPE = re.compile(r"^[a-f0-9]{64}$")
+_MODEL_TYPES = {
+    "chat",
+    "embedding",
+    "rerank",
+    "moderation",
+    "image",
+    "video",
+    "audio",
+    "music",
+    "transcription",
+    "tts",
+    "unknown",
+}
+_RAW_SCOPE_KEYS = {
+    "account",
+    "project",
+    "region",
+    "workspace",
+    "deployment",
+    "server",
+    "connection",
+    "tenant",
+    "tenancy",
+    "compartment",
+}
 
 
 def build_report(
@@ -49,12 +75,16 @@ def build_report(
     manifests = _load_manifests(root)
     owners: dict[str, list[str]] = defaultdict(list)
     visible_ids: dict[str, set[str]] = defaultdict(set)
+    visible_models: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     invalid_defaults: list[dict[str, str]] = []
     for manifest in manifests:
         provider_id = manifest["provider_id"]
         owners[provider_id].append(manifest["path"])
-        declared = _declared_model_ids(root / manifest["path"], manifest["payload"])
+        declared_models = _declared_models(root / manifest["path"], manifest["payload"])
+        declared = set(declared_models)
         visible_ids[provider_id].update(declared)
+        for model_id, model in declared_models.items():
+            visible_models[provider_id].setdefault(model_id, model)
         default_model = str(manifest["manifest"].get("default_model") or "").strip()
         if default_model and provider_id not in internal_ids and default_model not in declared:
             invalid_defaults.append(
@@ -64,28 +94,64 @@ def build_report(
     registered = set(owners)
     authoritative = _load_authoritative_fixtures(root / "provider_coverage" / "fixtures")
     missing_visible: list[dict[str, str]] = []
-    stale_visible: list[dict[str, str]] = []
+    stale_without_lifecycle: list[dict[str, str]] = []
     for provider_id, fixture_ids in authoritative.items():
         unified = visible_ids.get(provider_id, set())
         for model_id in sorted(fixture_ids - unified):
             missing_visible.append({"provider_id": provider_id, "model_id": model_id})
         for model_id in sorted(unified - fixture_ids):
-            stale_visible.append({"provider_id": provider_id, "model_id": model_id})
+            model = visible_models.get(provider_id, {}).get(model_id, {})
+            metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
+            lifecycle = str(
+                model.get("lifecycle_reason")
+                or metadata.get("lifecycle_reason")
+                or metadata.get("lifecycle")
+                or ""
+            ).strip()
+            if not lifecycle:
+                stale_without_lifecycle.append(
+                    {"provider_id": provider_id, "model_id": model_id}
+                )
 
     duplicates = [
         {"provider_id": provider_id, "owners": sorted(paths)}
         for provider_id, paths in sorted(owners.items())
         if len(paths) > 1 and provider_id not in internal_ids
     ]
-    secret_findings = _scan_cache_roots(cache_roots)
+    wrong_task_typing: list[dict[str, str]] = []
+    unverified_capabilities: list[dict[str, str]] = []
+    for provider_id, models_by_id in sorted(visible_models.items()):
+        for model_id, model in sorted(models_by_id.items()):
+            typing_reason = _task_typing_failure(model)
+            if typing_reason:
+                wrong_task_typing.append(
+                    {
+                        "provider_id": provider_id,
+                        "model_id": model_id,
+                        "reason": typing_reason,
+                    }
+                )
+            if _has_unverified_capability_claims(model):
+                unverified_capabilities.append(
+                    {
+                        "provider_id": provider_id,
+                        "model_id": model_id,
+                        "reason": "true capability claims require dated provenance",
+                    }
+                )
+
+    secret_findings, cache_leakage = _scan_cache_roots(cache_roots)
     failures = {
         "missing_providers": sorted(required_ids - registered),
         "unmapped_registered_providers": sorted((registered - set(matrix_by_id)) - internal_ids),
         "duplicate_canonical_owners": duplicates,
         "invalid_defaults": sorted(invalid_defaults, key=lambda item: (item["provider_id"], item["owner"])),
         "missing_authoritative_model_ids": missing_visible,
-        "stale_invokable_model_ids": stale_visible,
+        "stale_models_without_lifecycle_reason": stale_without_lifecycle,
+        "wrong_task_typing": wrong_task_typing,
+        "unverified_capability_claims": unverified_capabilities,
         "secret_bearing_caches": secret_findings,
+        "cross_account_cache_leakage": cache_leakage,
     }
     failure_count = sum(len(value) for value in failures.values())
     return {
@@ -156,8 +222,11 @@ def _load_manifests(root: Path) -> list[dict[str, Any]]:
     return output
 
 
-def _declared_model_ids(manifest_path: Path, payload: dict[str, Any]) -> set[str]:
-    model_ids: set[str] = set()
+def _declared_models(
+    manifest_path: Path, payload: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    models: dict[str, dict[str, Any]] = {}
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
 
     def add_models(raw_models: Any) -> None:
         if not isinstance(raw_models, list):
@@ -170,7 +239,11 @@ def _declared_model_ids(manifest_path: Path, payload: dict[str, Any]) -> set[str
                 raw_model_id = ""
                 value = str(raw or "").strip()
             if value:
-                model_ids.add(value if raw_model_id else value.split("/", 1)[-1])
+                model_id = value if raw_model_id else value.split("/", 1)[-1]
+                item = dict(raw) if isinstance(raw, dict) else {"model_id": model_id}
+                if snapshot:
+                    item["_snapshot"] = dict(snapshot)
+                models.setdefault(model_id, item)
 
     add_models(payload.get("models"))
     entrypoints = payload.get("entrypoints") if isinstance(payload.get("entrypoints"), dict) else {}
@@ -181,7 +254,17 @@ def _declared_model_ids(manifest_path: Path, payload: dict[str, Any]) -> set[str
             referenced = _read_json(referenced_path)
         except (OSError, ValueError, json.JSONDecodeError):
             referenced = {}
+        referenced_snapshot = (
+            referenced.get("snapshot")
+            if isinstance(referenced.get("snapshot"), dict)
+            else {}
+        )
+        original_snapshot = dict(snapshot)
+        snapshot.clear()
+        snapshot.update(referenced_snapshot)
         add_models(referenced.get("models"))
+        snapshot.clear()
+        snapshot.update(original_snapshot)
     model_dir = manifest_path.parent / "models"
     if model_dir.is_dir():
         for path in sorted(model_dir.glob("*.json")):
@@ -192,8 +275,9 @@ def _declared_model_ids(manifest_path: Path, payload: dict[str, Any]) -> set[str
             raw_model_id = str(model.get("model_id") or "").strip()
             value = raw_model_id or str(model.get("id") or "").strip()
             if value:
-                model_ids.add(value if raw_model_id else value.split("/", 1)[-1])
-    return model_ids
+                model_id = value if raw_model_id else value.split("/", 1)[-1]
+                models.setdefault(model_id, dict(model))
+    return models
 
 
 def _load_authoritative_fixtures(path: Path) -> dict[str, set[str]]:
@@ -209,8 +293,11 @@ def _load_authoritative_fixtures(path: Path) -> dict[str, set[str]]:
     return output
 
 
-def _scan_cache_roots(cache_roots: Iterable[Path]) -> list[dict[str, str]]:
+def _scan_cache_roots(
+    cache_roots: Iterable[Path],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     findings: list[dict[str, str]] = []
+    leakage: list[dict[str, str]] = []
     for root in sorted({Path(item).resolve() for item in cache_roots}, key=lambda item: str(item)):
         if not root.is_dir():
             continue
@@ -221,7 +308,76 @@ def _scan_cache_roots(cache_roots: Iterable[Path]) -> list[dict[str, str]]:
                 continue
             for location, reason in _secret_locations(payload):
                 findings.append({"path": path.as_posix(), "location": location, "reason": reason})
-    return sorted(findings, key=lambda item: (item["path"], item["location"], item["reason"]))
+            leakage.extend(_cache_scope_findings(path, payload))
+    return (
+        sorted(findings, key=lambda item: (item["path"], item["location"], item["reason"])),
+        sorted(leakage, key=lambda item: (item["path"], item["reason"])),
+    )
+
+
+def _cache_scope_findings(path: Path, payload: dict[str, Any]) -> list[dict[str, str]]:
+    if not isinstance(payload.get("models"), list):
+        return []
+    scope = str(payload.get("account_scope") or payload.get("scope") or "").strip()
+    findings: list[dict[str, str]] = []
+    if not scope:
+        findings.append({"path": path.as_posix(), "reason": "missing_opaque_account_scope"})
+    elif not _OPAQUE_SCOPE.fullmatch(scope):
+        findings.append({"path": path.as_posix(), "reason": "non_opaque_account_scope"})
+    raw_keys = sorted(_RAW_SCOPE_KEYS.intersection({str(key).lower() for key in payload}))
+    if raw_keys:
+        findings.append(
+            {
+                "path": path.as_posix(),
+                "reason": "raw_scope_identity:" + ",".join(raw_keys),
+            }
+        )
+    return findings
+
+
+def _task_typing_failure(model: dict[str, Any]) -> str:
+    model_type = str(model.get("type") or "chat").strip().lower()
+    if model_type not in _MODEL_TYPES:
+        return f"unsupported_type:{model_type}"
+    metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
+    task = str(metadata.get("task") or "").strip().lower()
+    canonical_task = "transcription" if task == "stt" else task
+    if canonical_task and canonical_task != model_type:
+        return f"task_metadata_mismatch:{canonical_task}!={model_type}"
+    capabilities = (
+        model.get("capabilities") if isinstance(model.get("capabilities"), dict) else {}
+    )
+    required = {
+        "chat": ("text_input", "text_output"),
+        "embedding": ("text_input",),
+        "rerank": ("text_input",),
+        "transcription": ("audio_input", "text_output"),
+        "tts": ("text_input", "audio_output"),
+        "image": ("image_output",),
+        "video": ("video_output",),
+        "audio": ("audio_output",),
+        "music": ("audio_output",),
+    }.get(model_type, ())
+    contradicted = [key for key in required if capabilities.get(key) is False]
+    return "contradicted_capability:" + ",".join(contradicted) if contradicted else ""
+
+
+def _has_unverified_capability_claims(model: dict[str, Any]) -> bool:
+    capabilities = (
+        model.get("capabilities") if isinstance(model.get("capabilities"), dict) else {}
+    )
+    if not any(value is True for value in capabilities.values()):
+        return False
+    metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
+    snapshot = model.get("_snapshot") if isinstance(model.get("_snapshot"), dict) else {}
+    provenance = str(
+        metadata.get("capability_provenance")
+        or metadata.get("capability_source")
+        or snapshot.get("source")
+        or ""
+    ).strip()
+    verified_at = str(metadata.get("verified_at") or snapshot.get("verified_at") or "").strip()
+    return not provenance or not verified_at
 
 
 def _secret_locations(value: Any, location: str = "$") -> list[tuple[str, str]]:

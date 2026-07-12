@@ -80,8 +80,112 @@ def test_gate_finds_duplicates_defaults_equality_and_secret_caches(tmp_path):
     assert failures["duplicate_canonical_owners"][0]["provider_id"] == "provider-a"
     assert failures["invalid_defaults"][0]["default_model"] == "retired"
     assert failures["missing_authoritative_model_ids"] == [{"provider_id": "provider-a", "model_id": "current"}]
-    assert failures["stale_invokable_model_ids"] == [{"provider_id": "provider-a", "model_id": "stale"}]
+    assert failures["stale_models_without_lifecycle_reason"] == [
+        {"provider_id": "provider-a", "model_id": "stale"}
+    ]
     assert failures["secret_bearing_caches"]
+
+
+def test_gate_checks_task_typing_capability_provenance_and_cache_scope(tmp_path):
+    root = tmp_path / "repo"
+    matrix = root / "matrix.json"
+    _write(matrix, _matrix("provider-a"))
+    _write(
+        root
+        / "ecosystem"
+        / "defaultspack"
+        / "domain"
+        / "providers"
+        / "provider-a"
+        / "manifest.json",
+        {
+            "provider_manifest": {"id": "provider-a", "enabled": True},
+            "models": [
+                {
+                    "model_id": "wrong-image",
+                    "type": "image",
+                    "capabilities": {"image_output": False, "text_input": True},
+                }
+            ],
+        },
+    )
+    cache = root / "cache"
+    _write(
+        cache / "models.json",
+        {
+            "provider_id": "provider-a",
+            "account": "raw-account-name",
+            "models": [{"id": "one"}],
+        },
+    )
+    report = build_report(root=root, matrix_path=matrix, cache_roots=[cache])
+    failures = report["failures"]
+    assert failures["wrong_task_typing"] == [
+        {
+            "provider_id": "provider-a",
+            "model_id": "wrong-image",
+            "reason": "contradicted_capability:image_output",
+        }
+    ]
+    assert failures["unverified_capability_claims"][0]["model_id"] == "wrong-image"
+    assert {item["reason"] for item in failures["cross_account_cache_leakage"]} == {
+        "missing_opaque_account_scope",
+        "raw_scope_identity:account",
+    }
+
+
+def test_dated_provenance_lifecycle_and_opaque_cache_scope_pass(tmp_path):
+    root = tmp_path / "repo"
+    matrix = root / "matrix.json"
+    _write(matrix, _matrix("provider-a"))
+    provider = (
+        root
+        / "ecosystem"
+        / "defaultspack"
+        / "domain"
+        / "providers"
+        / "provider-a"
+    )
+    _write(
+        provider / "manifest.json",
+        {
+            "provider_manifest": {"id": "provider-a", "enabled": True},
+            "entrypoints": {"models": "models.json"},
+        },
+    )
+    _write(
+        provider / "models.json",
+        {
+            "snapshot": {
+                "source": "https://official.example/models",
+                "verified_at": "2026-07-13",
+            },
+            "models": [
+                {
+                    "model_id": "legacy-model",
+                    "type": "chat",
+                    "capabilities": {"text_input": True, "text_output": True},
+                    "metadata": {"lifecycle": "legacy until 2026-12-31"},
+                }
+            ],
+        },
+    )
+    _write(
+        root / "provider_coverage" / "fixtures" / "provider-a.json",
+        {"provider_id": "provider-a", "visible_ids": []},
+    )
+    cache = root / "cache"
+    _write(
+        cache / "models.json",
+        {
+            "provider_id": "provider-a",
+            "account_scope": "a" * 64,
+            "models": [{"id": "legacy-model"}],
+        },
+    )
+    report = build_report(root=root, matrix_path=matrix, cache_roots=[cache])
+    assert report["passed"] is True
+    assert report["failure_count"] == 0
 
 
 def test_required_mode_fails_and_markdown_is_stable(tmp_path):
