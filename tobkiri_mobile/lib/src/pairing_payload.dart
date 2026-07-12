@@ -1,24 +1,49 @@
 import 'dart:convert';
 
 class MobilePairingPayload {
-  const MobilePairingPayload({required this.pairingId, required this.baseUrl});
+  const MobilePairingPayload({
+    required this.pairingId,
+    required this.baseUrl,
+    required this.code,
+    required this.pickupSecret,
+    required this.expiresAt,
+  });
   final String pairingId;
   final String baseUrl;
+  final String code;
+  final String pickupSecret;
+  final int expiresAt;
+
+  bool get isExpired => DateTime.now().millisecondsSinceEpoch >= expiresAt;
 
   static MobilePairingPayload parse(String raw) {
     final trimmed = raw.trim();
     if (trimmed.startsWith('rumi_api:') || trimmed.startsWith('rumi_api://')) {
       throw const FormatException(
-          'legacy credential-bearing QR is not supported');
+        'legacy credential-bearing QR is not supported',
+      );
     }
     final decoded = jsonDecode(trimmed);
-    if (decoded is! Map || decoded['version'] != 2) {
+    if (decoded is! Map ||
+        !const {'rumi_pair_v2', 'rumi_mobile_pair_v1'}
+            .contains(decoded['kind'])) {
       throw const FormatException('unsupported pairing payload');
     }
     final pairingId = decoded['pairing_id'] as String? ?? '';
-    final baseUrl = decoded['base_url'] as String? ?? '';
+    final urls = (decoded['base_urls'] as List? ?? const [])
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+    final baseUrl =
+        urls.isNotEmpty ? urls.first : decoded['base_url'] as String? ?? '';
+    final code = decoded['code'] as String? ?? '';
+    final pickupSecret = decoded['pickup_secret'] as String? ?? '';
+    final expiresAt = (decoded['expires_at'] as num?)?.toInt() ?? 0;
     final uri = Uri.tryParse(baseUrl);
     if (pairingId.isEmpty ||
+        code.isEmpty ||
+        pickupSecret.isEmpty ||
+        expiresAt <= 0 ||
         uri == null ||
         !uri.hasScheme ||
         uri.host.isEmpty) {
@@ -28,11 +53,16 @@ class MobilePairingPayload {
           'token',
           'credential',
           'api_key',
-          'secret',
-          'private_key'
+          'private_key',
         }.contains(key))) {
       throw const FormatException('pairing QR must not contain credentials');
     }
-    return MobilePairingPayload(pairingId: pairingId, baseUrl: baseUrl);
+    return MobilePairingPayload(
+      pairingId: pairingId,
+      baseUrl: baseUrl,
+      code: code,
+      pickupSecret: pickupSecret,
+      expiresAt: expiresAt,
+    );
   }
 }

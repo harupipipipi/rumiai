@@ -210,6 +210,71 @@ class MobileCredentialIdentityStore {
     }
     return Map<String, dynamic>.from(decoded);
   }
+
+  Future<Map<String, dynamic>> decryptPairingTokenEnvelope(
+    Map<String, dynamic> envelope, {
+    required String pairingId,
+    required String deviceId,
+  }) async {
+    if (envelope['version'] != 1 ||
+        envelope['alg'] != credentialTransferAlgorithm) {
+      throw const FormatException('unsupported token delivery envelope');
+    }
+    final identity = await loadOrCreate();
+    if (identity.deviceId != deviceId) {
+      throw const FormatException('token delivery recipient mismatch');
+    }
+    final deliveryId = envelope['delivery_id'] as String? ?? '';
+    if (deliveryId.isEmpty) {
+      throw const FormatException('token delivery id is missing');
+    }
+    final localPublic = SimplePublicKey(
+      _decodePrefixed(identity.encryptionPublicKey, 'x25519:'),
+      type: KeyPairType.x25519,
+    );
+    final localPair = SimpleKeyPairData(
+      _decode(identity.encryptionPrivateKey),
+      publicKey: localPublic,
+      type: KeyPairType.x25519,
+    );
+    final remotePublic = SimplePublicKey(
+      _decodePrefixed(
+        envelope['ephemeral_public_key'] as String? ?? '',
+        'x25519:',
+      ),
+      type: KeyPairType.x25519,
+    );
+    final shared = await X25519().sharedSecretKey(
+      keyPair: localPair,
+      remotePublicKey: remotePublic,
+    );
+    final key = await Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+      secretKey: shared,
+      nonce: utf8.encode('rumi-mobile-token-delivery-v1'),
+      info: utf8.encode('$pairingId:$deviceId:$deliveryId'),
+    );
+    final aad = _decode(envelope['aad'] as String? ?? '');
+    final expectedAad = utf8.encode(
+      'rumi-mobile-token-delivery:v1:$pairingId:$deviceId:$deliveryId',
+    );
+    if (!_constantTimeEquals(aad, expectedAad)) {
+      throw const FormatException('token delivery binding mismatch');
+    }
+    final clear = await AesGcm.with256bits().decrypt(
+      SecretBox(
+        _decode(envelope['ciphertext'] as String? ?? ''),
+        nonce: _decode(envelope['nonce'] as String? ?? ''),
+        mac: Mac(_decode(envelope['tag'] as String? ?? '')),
+      ),
+      secretKey: key,
+      aad: aad,
+    );
+    final decoded = jsonDecode(utf8.decode(clear));
+    if (decoded is! Map) {
+      throw const FormatException('invalid token delivery payload');
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
 }
 
 class PendingCredentialTransfer {

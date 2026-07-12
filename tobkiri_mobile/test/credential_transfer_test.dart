@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rumi_remote_app/src/credential_pairing_client.dart';
 import 'package:rumi_remote_app/src/credential_transfer.dart';
 import 'package:rumi_remote_app/src/pairing_payload.dart';
 
@@ -68,6 +69,50 @@ Future<Map<String, dynamic>> makeEnvelope({
   return {
     'version': 1,
     'alg': credentialTransferAlgorithm,
+    'ephemeral_public_key': 'x25519:${encodeBytes(ephemeralPublic.bytes)}',
+    'nonce': encodeBytes(box.nonce),
+    'ciphertext': encodeBytes(box.cipherText),
+    'tag': encodeBytes(box.mac.bytes),
+    'aad': encodeBytes(aad),
+  };
+}
+
+Future<Map<String, dynamic>> makeTokenEnvelope({
+  required MobileCredentialIdentity identity,
+  required String pairingId,
+  String deliveryId = 'delivery-1',
+}) async {
+  final ephemeral = await X25519().newKeyPair();
+  final ephemeralPublic = await ephemeral.extractPublicKey();
+  final recipient = SimplePublicKey(
+    decodeBytes(identity.encryptionPublicKey.substring('x25519:'.length)),
+    type: KeyPairType.x25519,
+  );
+  final shared = await X25519().sharedSecretKey(
+    keyPair: ephemeral,
+    remotePublicKey: recipient,
+  );
+  final key = await Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+    secretKey: shared,
+    nonce: utf8.encode('rumi-mobile-token-delivery-v1'),
+    info: utf8.encode('$pairingId:${identity.deviceId}:$deliveryId'),
+  );
+  final aad = utf8.encode(
+    'rumi-mobile-token-delivery:v1:$pairingId:${identity.deviceId}:$deliveryId',
+  );
+  final box = await AesGcm.with256bits().encrypt(
+    utf8.encode(jsonEncode({
+      'device_token': 'device-token',
+      'approval_token': '',
+      'scopes': [credentialTransferScope],
+    })),
+    secretKey: key,
+    aad: aad,
+  );
+  return {
+    'version': 1,
+    'alg': credentialTransferAlgorithm,
+    'delivery_id': deliveryId,
     'ephemeral_public_key': 'x25519:${encodeBytes(ephemeralPublic.bytes)}',
     'nonce': encodeBytes(box.nonce),
     'ciphertext': encodeBytes(box.cipherText),
@@ -233,18 +278,73 @@ void main() {
     );
     expect(
       () => MobilePairingPayload.parse(jsonEncode({
-        'version': 2,
+        'kind': 'rumi_pair_v2',
         'pairing_id': 'pair-1',
         'base_url': 'https://pc.example',
+        'code': 'ABCD-EFGH',
+        'pickup_secret': 'pickup-value',
+        'expires_at': 1893456000000,
         'token': 'secret',
       })),
       throwsFormatException,
     );
     final parsed = MobilePairingPayload.parse(jsonEncode({
-      'version': 2,
+      'kind': 'rumi_pair_v2',
       'pairing_id': 'pair-1',
       'base_url': 'https://pc.example',
+      'code': 'ABCD-EFGH',
+      'pickup_secret': 'pickup-value',
+      'expires_at': 1893456000000,
     }));
     expect(parsed.pairingId, 'pair-1');
+  });
+
+  test('pairing requests only credential scope and ACKs verified token storage',
+      () async {
+    final identityStore = MobileCredentialIdentityStore(
+      storage: MemorySecretStorage(),
+    );
+    final identity = await identityStore.loadOrCreate();
+    final deviceStorage = MemorySecretStorage();
+    final deviceStore = PairedCredentialDeviceStore(storage: deviceStorage);
+    final envelope = await makeTokenEnvelope(
+      identity: identity,
+      pairingId: 'pair-1',
+    );
+    final paths = <String>[];
+    final bodies = <Map<String, dynamic>>[];
+    final client = CredentialPairingClient(
+      identityStore: identityStore,
+      deviceStore: deviceStore,
+      client: MockClient((request) async {
+        paths.add(request.url.path);
+        bodies.add(Map<String, dynamic>.from(jsonDecode(request.body) as Map));
+        if (request.url.path.endsWith('/token/pickup')) {
+          return http.Response(
+              jsonEncode({
+                'status': 'ok',
+                'data': {'token_delivery_envelope': envelope},
+              }),
+              200);
+        }
+        return http.Response('{"status":"ok","data":{}}', 200);
+      }),
+    );
+    const pairing = MobilePairingPayload(
+      pairingId: 'pair-1',
+      baseUrl: 'https://pc.example',
+      code: 'ABCD-EFGH',
+      pickupSecret: 'pickup-value',
+      expiresAt: 1893456000000,
+    );
+
+    await client.claim(pairing);
+    expect(bodies.first['requested_capabilities'], [credentialTransferScope]);
+    expect(bodies.first.containsKey('private_key'), isFalse);
+    expect(await client.pickupApproved(pairing), isTrue);
+    final paired = await deviceStore.load();
+    expect(paired?.deviceToken, 'device-token');
+    expect(paths.last, endsWith('/token/ack'));
+    client.close();
   });
 }
