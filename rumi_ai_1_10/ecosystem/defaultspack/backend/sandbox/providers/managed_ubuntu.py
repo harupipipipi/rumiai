@@ -123,7 +123,9 @@ ChecksumFetcher = Callable[[str], str]
 def _wsl_distribution_names(output: str) -> tuple[str, ...]:
     # Some Windows WSL builds can return UTF-16-like text through subprocess
     # decoding, leaving NUL separators in distro names such as R\0u\0m\0i...
-    normalized = str(output or "").replace("\x00", "").replace("\ufeff", "")
+    normalized = str(output or "")
+    for marker in ("\x00", "\ufeff", "\ufffe", "\xff\xfe", "\xfe\xff"):
+        normalized = normalized.replace(marker, "")
     return tuple(line.strip() for line in normalized.splitlines() if line.strip())
 
 

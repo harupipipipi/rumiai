@@ -446,6 +446,11 @@ def test_openrouter_provider_lists_curated_allowlist_from_catalog(monkeypatch):
         "_catalog_models",
         classmethod(lambda cls: _openrouter_catalog_models()),
     )
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_merge_remote_models",
+        lambda self, models: [dict(model) for model in models],
+    )
 
     provider = OpenRouterProvider()
     models = provider.list_models()
@@ -454,8 +459,7 @@ def test_openrouter_provider_lists_curated_allowlist_from_catalog(monkeypatch):
 
 
 def test_openrouter_provider_loads_bundled_curated_catalog():
-    provider = OpenRouterProvider()
-    model_ids = {model["model_id"] for model in provider.list_models()}
+    model_ids = {model["model_id"] for model in OpenRouterProvider._catalog_models()}
 
     assert {
         "cohere/north-mini-code:free",
@@ -476,9 +480,14 @@ def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
         "_catalog_models",
         classmethod(lambda cls: _openrouter_catalog_models()),
     )
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_merge_remote_models",
+        lambda self, models: [dict(model) for model in models],
+    )
 
     provider = OpenRouterProvider()
-    with pytest.raises(RuntimeError, match="unsupported model"):
+    with pytest.raises(RuntimeError, match="not present in the live or last-known-good catalog"):
         provider.complete("openai/gpt-4o-mini", [{"role": "user", "content": "hi"}], [], {})
 
 
