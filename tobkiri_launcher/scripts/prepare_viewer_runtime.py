@@ -84,7 +84,7 @@ def repo_venv_uv_path(repo_root: Path, target: str) -> Path:
 
 
 def bundled_uv_path(repo_root: Path, target: str) -> Path:
-    return repo_root / "rumi_ai_1_10" / "bundled" / uv_binary_name(target)
+    return repo_root / "tobkiri_runtime" / "bundled" / uv_binary_name(target)
 
 
 def resolve_dev_uv_source(

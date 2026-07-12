@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = ROOT / "rumi_viewer" / "scripts" / "prepare_viewer_runtime.py"
+SCRIPT_PATH = ROOT / "tobkiri_launcher" / "scripts" / "prepare_viewer_runtime.py"
 
 
 def _load_module():
@@ -48,7 +48,7 @@ def test_prepare_dev_stages_repo_venv_uv_into_trusted_bundle(tmp_path, monkeypat
 
     destination = module.prepare_dev(tmp_path, target)
 
-    assert destination == tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
+    assert destination == tmp_path / "tobkiri_runtime" / "bundled" / "uv"
     assert destination.read_bytes() == b"uv"
     assert os.access(destination, os.X_OK)
     assert verified == [source.resolve(), destination]
@@ -91,7 +91,7 @@ def test_relative_explicit_uv_path_is_resolved_from_repo_root(tmp_path):
 
 def test_prepare_dev_reuses_valid_existing_trusted_bundle(tmp_path, monkeypatch):
     module = _load_module()
-    destination = tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
+    destination = tmp_path / "tobkiri_runtime" / "bundled" / "uv"
     destination.parent.mkdir(parents=True)
     destination.write_bytes(b"existing")
     verified: list[Path] = []
@@ -124,7 +124,7 @@ def test_prepare_dev_removes_staged_uv_when_post_copy_verification_changes(
     with pytest.raises(RuntimeError, match="reported a different version"):
         module.prepare_dev(tmp_path, "x86_64-unknown-linux-gnu")
 
-    destination = tmp_path / "rumi_ai_1_10" / "bundled" / "uv"
+    destination = tmp_path / "tobkiri_runtime" / "bundled" / "uv"
     assert not destination.exists()
 
 

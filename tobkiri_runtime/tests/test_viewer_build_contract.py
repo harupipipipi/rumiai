@@ -10,11 +10,11 @@ import pytest
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[2]
-TAURI_ROOT = ROOT / "rumi_viewer" / "src-tauri"
+TAURI_ROOT = ROOT / "tobkiri_launcher" / "src-tauri"
 TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
-DEV_REQUIREMENTS = ROOT / "rumi_ai_1_10" / "requirements-dev.txt"
-DEV_PYPROJECT = ROOT / "rumi_ai_1_10" / "pyproject.toml"
+DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
+DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
 VIEWER_BUILD_WORKFLOWS = (
     ROOT / ".github" / "workflows" / "desktop-installers.yml",
     ROOT / ".github" / "workflows" / "release.yml",
@@ -43,11 +43,11 @@ def test_tauri_hooks_prepare_runtime_for_dev_and_release():
     config = _read_json(TAURI_CONFIG)
 
     assert (
-        "rumi_viewer/scripts/prepare_viewer_runtime.py --mode dev"
+        "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev"
         in config["build"]["beforeDevCommand"]
     )
     assert (
-        "rumi_viewer/scripts/prepare_viewer_runtime.py --mode release"
+        "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release"
         in config["build"]["beforeBuildCommand"]
     )
 
