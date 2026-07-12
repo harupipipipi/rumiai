@@ -293,7 +293,8 @@ def run(input_data, context):
             "server": {
                 "name": server_name,
                 "transport": transport,
-                "config": registry.list_mcp_servers().get(server_name, {}),
+                "config": dict(snapshot["review"]["config"]),
+                "config_digest": snapshot["config_digest"],
             },
         }
     )

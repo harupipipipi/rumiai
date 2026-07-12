@@ -163,6 +163,15 @@ def test_mcp_token_rejects_mutation_cross_server_workspace_and_replay(
         {},
     )
     assert connected["status"] == "ok"
+    assert "first-value" not in json.dumps(connected)
+    assert connected["data"]["server"]["config"]["env"] == {
+        "MCP_TOKEN": "<redacted>"
+    }
+    from domain.tool.mcp_registry import McpRegistry
+
+    public_server = McpRegistry().get_server("scoped-server")
+    assert public_server["config"]["env"] == {"MCP_TOKEN": "<redacted>"}
+    assert "first-value" not in json.dumps(public_server)
     replay = mcp_connect.run(
         {**request_args, "approval_token": token},
         {},

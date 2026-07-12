@@ -4,6 +4,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import urlsplit, urlunsplit
 from pathlib import Path
 from typing import Any
 
@@ -234,7 +235,7 @@ class McpRegistry:
             "name": server.get("name"),
             "server_name": server.get("name"),
             "transport": server.get("transport"),
-            "config": server.get("config", {}),
+            "config": _public_config(server.get("config")),
             "permissions": server.get("permissions", {}),
             "status": server.get("status", "registered"),
             "connected": bool(server.get("connected")),
@@ -244,3 +245,50 @@ class McpRegistry:
             "metadata": server.get("metadata", {}),
             "last_error": server.get("last_error"),
         }
+
+
+def _public_config(value: Any) -> dict[str, Any]:
+    config = dict(value) if isinstance(value, dict) else {}
+    public = {
+        key: config.get(key)
+        for key in ("server_id", "name", "transport", "tool_prefix")
+        if key in config
+    }
+    if "command" in config:
+        public["command"] = str(config.get("command") or "")
+    if isinstance(config.get("args"), list):
+        public["args"] = [
+            "<redacted>" if _looks_sensitive_argument(str(item)) else str(item)
+            for item in config["args"]
+        ]
+    if "cwd" in config:
+        public["cwd"] = str(config.get("cwd") or "")
+    if isinstance(config.get("env"), dict):
+        public["env"] = {str(key): "<redacted>" for key in config["env"]}
+    if isinstance(config.get("headers"), dict):
+        public["headers"] = {
+            str(key): "<redacted>" for key in config["headers"]
+        }
+    if "url" in config:
+        public["url"] = _public_url(config.get("url"))
+    return public
+
+
+def _looks_sensitive_argument(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in ("api-key", "api_key", "token", "secret", "password", "authorization")
+    )
+
+
+def _public_url(value: Any) -> str:
+    try:
+        parsed = urlsplit(str(value or ""))
+        hostname = parsed.hostname or ""
+        netloc = hostname
+        if parsed.port is not None:
+            netloc = f"{hostname}:{parsed.port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+    except ValueError:
+        return "<invalid-url>"
