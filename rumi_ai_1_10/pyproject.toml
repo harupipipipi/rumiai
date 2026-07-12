@@ -25,6 +25,9 @@ computer-windows = [
 browser-cdp = [
   "websocket-client>=1.8.0",
 ]
+coding-backends = [
+  "claude-agent-sdk>=0.1.60",
+]
 
 [tool.setuptools]
 include-package-data = true

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Claude Agent SDK Coding Backend",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "workspace_root": {"type": "string"},
+    "model": {
+      "type": "string",
+      "description": "Runtime-reported or explicitly configured model; not a static universal catalog."
+    },
+    "setting_sources": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["user", "project", "local"]},
+      "uniqueItems": true,
+      "default": []
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "default": ["Glob", "Grep", "Read"]
+    },
+    "mcp_servers": {
+      "type": "object",
+      "default": {},
+      "description": "Explicit SDK MCP server configuration."
+    },
+    "resume_session_id": {"type": "string"},
+    "fork_on_resume": {"type": "boolean", "default": false},
+    "permission_mode": {
+      "type": "string",
+      "enum": ["default"],
+      "default": "default"
+    }
+  },
+  "required": ["workspace_root"]
+}
