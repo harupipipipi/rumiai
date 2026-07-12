@@ -1,0 +1,83 @@
+{
+  "id": "replicate",
+  "provider_id": "replicate",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Replicate",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/hosted_native_providers.py",
+    "models": "models.json"
+  },
+  "description": "Replicate typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "Replicate",
+    "kind": "cloud",
+    "env_vars": [
+      "REPLICATE_API_TOKEN"
+    ],
+    "base_url_envs": [
+      "REPLICATE_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://api.replicate.com/v1",
+    "default_model_for": {},
+    "task_types": [
+      "image",
+      "video",
+      "audio",
+      "chat"
+    ],
+    "catalog_features": [
+      "image",
+      "video",
+      "audio",
+      "chat",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "replicate",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Replicate",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "replicate_predictions",
+    "api_key_env": "REPLICATE_API_TOKEN",
+    "base_url_env": "REPLICATE_BASE_URL",
+    "default_base_url": "https://api.replicate.com/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.hosted_native_providers:ReplicateProvider",
+    "config": {
+      "inventory_strategy": "native_catalog",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "image",
+        "video",
+        "audio",
+        "chat"
+      ],
+      "source_docs": "https://replicate.com/docs/reference/http"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "replicate"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "image",
+    "video",
+    "audio",
+    "chat",
+    "typed_inventory"
+  ]
+}

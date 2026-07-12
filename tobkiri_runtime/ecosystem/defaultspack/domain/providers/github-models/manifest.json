@@ -1,0 +1,70 @@
+{
+  "id": "github-models",
+  "provider_id": "github-models",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "GitHub Models",
+  "description": "GitHub Models typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "GitHub Models",
+    "kind": "cloud",
+    "env_vars": [
+      "GITHUB_TOKEN"
+    ],
+    "base_url_envs": [
+      "GITHUB_MODELS_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://models.github.ai/inference",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "github-models",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "GitHub Models",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "GITHUB_TOKEN",
+    "base_url_env": "GITHUB_MODELS_BASE_URL",
+    "default_base_url": "https://models.github.ai/inference",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding"
+      ],
+      "source_docs": "https://docs.github.com/en/rest/models/catalog"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "github-models"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "typed_inventory"
+  ]
+}
