@@ -1149,6 +1149,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/company/{company_id}/threads/{thread_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "thread_id": "thread_id"}, defaults={"action": "create"}),
     HttpRouteSpec("GET", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("DELETE", "/api/company/{company_id}/tasks/{task_id}", block_module="blocks.company.tasks", path_inject={"company_id": "company_id", "task_id": "task_id"}, defaults={"action": "delete"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id"}),
     HttpRouteSpec("POST", "/api/company/{company_id}/tasks/{task_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id", "task_id": "task_id"}),
     HttpRouteSpec("GET", "/api/company/{company_id}/runs", block_module="blocks.company.runs", path_inject={"company_id": "company_id"}),

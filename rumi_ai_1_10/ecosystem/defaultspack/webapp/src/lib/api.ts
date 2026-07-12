@@ -3661,6 +3661,13 @@ export const api = {
     });
   },
 
+  deleteCompanyTask(companyId: string, taskId: string) {
+    return request<{ deleted: boolean; task_id: string }>(
+      `/api/company/${encodeURIComponent(companyId)}/tasks/${encodeURIComponent(taskId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   dispatchCompanyTask(companyId: string, taskId: string, policy?: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/api/company/${encodeURIComponent(companyId)}/dispatch`, {
       method: "POST",

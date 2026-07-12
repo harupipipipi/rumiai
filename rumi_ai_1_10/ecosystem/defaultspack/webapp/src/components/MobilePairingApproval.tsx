@@ -29,6 +29,7 @@ export function MobilePairingApproval({ pairingId, api = mobileApiResources, onC
   const [closeReview, setCloseReview] = useState(false);
   const mounted = useRef(true);
   const gate = useRef(new PairingRequestGate());
+  const refreshGeneration = useRef(0);
   const closeButton = useRef<HTMLButtonElement>(null);
 
   const announceSettlement = useCallback((next: PairingSettlement) => {
@@ -37,11 +38,13 @@ export function MobilePairingApproval({ pairingId, api = mobileApiResources, onC
   }, []);
 
   const refresh = useCallback(async () => {
+    const generation = ++refreshGeneration.current;
     setLoading(true);
     setPollError("");
     try {
       const authoritative = await api.getPairingStatus(pairingId);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== refreshGeneration.current) return;
+      if (authoritative.pairing_id !== pairingId) throw new Error("pairing status mismatch");
       setStatus(authoritative);
       const settled = pairingSettlement(authoritative.status);
       if (settled) {
@@ -49,20 +52,21 @@ export function MobilePairingApproval({ pairingId, api = mobileApiResources, onC
         return;
       }
       const details = await api.getPairingReview(pairingId);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== refreshGeneration.current) return;
       if (details.pairing.pairing_id !== pairingId) throw new Error("pairing review mismatch");
       setReview(details);
     } catch (error) {
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== refreshGeneration.current) return;
       setPollError(error instanceof Error ? error.message : "接続要求を確認できませんでした");
     } finally {
-      if (mounted.current) setLoading(false);
+      if (mounted.current && generation === refreshGeneration.current) setLoading(false);
     }
   }, [announceSettlement, api, pairingId]);
 
   useEffect(() => {
     mounted.current = true;
     gate.current.invalidate();
+    refreshGeneration.current += 1;
     setStatus(null);
     setReview(null);
     setSettlement(null);
@@ -72,6 +76,7 @@ export function MobilePairingApproval({ pairingId, api = mobileApiResources, onC
     return () => {
       mounted.current = false;
       gate.current.invalidate();
+      refreshGeneration.current += 1;
       window.clearInterval(timer);
     };
   }, [pairingId, refresh]);
@@ -91,14 +96,24 @@ export function MobilePairingApproval({ pairingId, api = mobileApiResources, onC
       if (!mounted.current) return;
       const authoritative = await api.getPairingStatus(pairingId);
       if (!mounted.current || !gate.current.finish(generation)) return;
+      if (authoritative.pairing_id !== pairingId) {
+        setDecisionError("接続要求の状態が一致しません。状態を再確認してください");
+        return;
+      }
       setStatus(authoritative);
-      announceSettlement(pairingSettlement(authoritative.status) ?? (nextDecision === "approve" ? "approved" : "rejected"));
+      const settled = pairingSettlement(authoritative.status);
+      if (settled) {
+        announceSettlement(settled);
+      } else {
+        setDecisionError("処理結果を確認中です。サーバーの状態が確定するまで完了とは表示しません。");
+        void refresh();
+      }
     } catch (error) {
       if (!mounted.current || !gate.current.finish(generation)) return;
       const code = pairingErrorCode(error);
       if (code !== "failed") {
         await refresh();
-        if (mounted.current && !pairingSettlement(status?.status)) announceSettlement(code as PairingSettlement);
+        if (mounted.current) setDecisionError("処理結果を確認中です。サーバーの状態を再確認してください。");
       } else {
         setDecisionError(error instanceof Error ? error.message : "操作に失敗しました");
       }

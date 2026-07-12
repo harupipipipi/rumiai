@@ -657,6 +657,26 @@ class CompanyRuntimeStore:
             self.mark_summary_dirty(str(updated["company_id"]), "task", str(task_id))
         return updated
 
+    def delete_task(self, task_id: str, *, company_id: str | None = None) -> bool:
+        task = self.get_task(task_id, company_id)
+        if task is None:
+            return False
+        resolved_company_id = str(task["company_id"])
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM company_task_assignments WHERE company_id = ? AND task_id = ?",
+                (resolved_company_id, str(task_id)),
+            )
+            self.conn.execute(
+                "DELETE FROM company_summaries WHERE company_id = ? AND scope_type = 'task' AND scope_id = ?",
+                (resolved_company_id, str(task_id)),
+            )
+            cursor = self.conn.execute(
+                "DELETE FROM company_tasks WHERE company_id = ? AND task_id = ?",
+                (resolved_company_id, str(task_id)),
+            )
+        return cursor.rowcount > 0
+
     def list_tasks(
         self,
         company_id: str,

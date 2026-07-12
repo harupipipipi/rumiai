@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { deleteCalendarScheduleBeforeLocalChange } from "./calendarScheduleDeletion";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import {
@@ -2646,5 +2647,66 @@ test("directory and group storage helpers target native selection routes", async
     input: "/api/chat/group-storage",
     method: "POST",
     body: { root_path: "/repo" },
+  });
+});
+
+test("deleting a calendar Agent Task keeps its local item when schedule deletion fails", async () => {
+  const calls: string[] = [];
+  const backendError = new Error("backend unavailable");
+
+  await assert.rejects(
+    deleteCalendarScheduleBeforeLocalChange("schedule-1", async (scheduleId) => {
+      calls.push(scheduleId);
+      throw backendError;
+    }),
+    backendError,
+  );
+  assert.deepEqual(calls, ["schedule-1"]);
+});
+
+test("disabling a calendar Agent Task can retry deletion after a failed save", async () => {
+  let attempts = 0;
+  const deleteSchedule = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("offline");
+  };
+
+  await assert.rejects(
+    deleteCalendarScheduleBeforeLocalChange("schedule-2", deleteSchedule),
+    /offline/,
+  );
+  await deleteCalendarScheduleBeforeLocalChange("schedule-2", deleteSchedule);
+  assert.equal(attempts, 2);
+});
+
+test("calendar items without an Agent Task skip schedule deletion", async () => {
+  let called = false;
+  await deleteCalendarScheduleBeforeLocalChange(undefined, async () => {
+    called = true;
+  });
+  assert.equal(called, false);
+});
+
+test("company task deletion uses the scoped DELETE route", async () => {
+  const originalFetch = globalThis.fetch;
+  let seen: { input: string; method: string } | null = null;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    seen = { input: String(input), method: init?.method ?? "GET" };
+    return new Response(
+      JSON.stringify({ status: "ok", data: { deleted: true, task_id: "task/one" } }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await api.deleteCompanyTask("operations/company", "task/one");
+    assert.equal(result.deleted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen, {
+    input: "/api/company/operations%2Fcompany/tasks/task%2Fone",
+    method: "DELETE",
   });
 });
