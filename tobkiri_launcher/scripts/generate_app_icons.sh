@@ -26,6 +26,7 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 
 cropped_icon="${tmp_dir}/icon-cropped.png"
 square_icon="${tmp_dir}/icon-square.png"
+rounded_mask="${tmp_dir}/rounded-mask.png"
 iconset_dir="${tmp_dir}/icon.iconset"
 
 mkdir -p "${ICONS_DIR}" "${iconset_dir}"
@@ -51,8 +52,17 @@ canvas_size=$(( (width > height ? width : height) * 115 / 100 ))
 
 magick "${SOURCE_ICON}" -crop "${bbox}" +repage "${cropped_icon}"
 
+# The source art is an opaque square. Preserve the white rounded launcher
+# panel and its black illustration, while making only the outside corners
+# transparent for macOS, Windows, and Linux icon surfaces.
+corner_radius=$(( width * 20 / 100 ))
+magick -size "${width}x${height}" xc:none -fill white \
+  -draw "roundrectangle 0,0 $((width - 1)),$((height - 1)) ${corner_radius},${corner_radius}" \
+  "${rounded_mask}"
+
 # Tauri app icons should be square, so keep the visible art centered with a small transparent margin.
-magick "${cropped_icon}" -background none -gravity center -extent "${canvas_size}x${canvas_size}" "${square_icon}"
+magick "${cropped_icon}" "${rounded_mask}" -alpha off -compose CopyOpacity -composite \
+  -compose Over -background none -gravity center -extent "${canvas_size}x${canvas_size}" "${square_icon}"
 
 magick "${square_icon}" -resize 32x32 "${ICONS_DIR}/32x32.png"
 magick "${square_icon}" -resize 128x128 "${ICONS_DIR}/128x128.png"
