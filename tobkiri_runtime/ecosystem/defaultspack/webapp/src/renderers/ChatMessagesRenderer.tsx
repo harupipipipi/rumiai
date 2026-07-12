@@ -1,5 +1,6 @@
 import { AlertTriangle, Box, Calculator, Check, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, Terminal, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -15,6 +16,7 @@ import {
   sanitizeAssistantAuthorityBoilerplate,
 } from "../lib/authorityApproval";
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
+import { classifyChatLink, openChatLink } from "../lib/chatLinkPolicy";
 import { classifyUntrustedImageUrl, extractImageBlockUrl, imageBlockAttachmentId } from "../lib/untrustedImagePolicy";
 import type { ChatMessagesRendererProps } from "./types";
 
@@ -232,6 +234,7 @@ function MessageMarkdown({
       <ReactMarkdown
         remarkPlugins={markdownPlugins}
         components={{
+          a: ({ href, children }) => <SafeChatLink href={href}>{children}</SafeChatLink>,
           img: ({ src, alt }) => (
             <UntrustedImageBlock
               block={{ type: "image_url", url: src, alt, presentation: "chat" }}
@@ -244,6 +247,59 @@ function MessageMarkdown({
         {text}
       </ReactMarkdown>
     );
+}
+
+function linkText(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(linkText).join("");
+  return "";
+}
+
+function SafeChatLink({ href, children }: { href?: string; children: ReactNode }) {
+  const [reviewing, setReviewing] = useState(false);
+  const [status, setStatus] = useState("");
+  const decision = useMemo(() => classifyChatLink(
+    href,
+    linkText(children),
+    typeof window === "undefined" ? undefined : window.location.origin,
+  ), [children, href]);
+  const destination = decision.host || decision.normalizedUrl || "invalid destination";
+
+  const open = () => {
+    if (!decision.allowed) {
+      setStatus(decision.reason || "This destination is blocked.");
+    } else if (!openChatLink(decision)) {
+      setStatus("The destination could not be opened. Your chat and draft are unchanged; copy the link to continue manually.");
+    } else {
+      setReviewing(false);
+      setStatus(decision.kind === "internal" ? "Opened inside Rumi." : "Opened in a new context without referrer or opener access.");
+    }
+  };
+  const activate = () => {
+    if (decision.kind === "internal" && decision.allowed && !decision.textMismatch) open();
+    else setReviewing(true);
+  };
+
+  return (
+    <span className="inline-flex max-w-full flex-col align-baseline">
+      <button type="button" className="inline break-all text-left text-sky-300 underline decoration-sky-500/50 underline-offset-2 hover:text-sky-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400" aria-label={`${linkText(children) || "Link"}; destination ${destination}; ${decision.kind}`} title={decision.normalizedUrl || decision.reason} onClick={activate}>
+        {children}
+      </button>
+      {reviewing && (
+        <span role="dialog" aria-modal="false" aria-label={`Review link to ${destination}`} className="my-2 flex max-w-xl flex-col gap-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 text-xs text-zinc-300 shadow-xl">
+          <strong className="text-sm text-zinc-100">Review destination</strong>
+          <span className="break-all font-mono text-[11px] text-zinc-400">{decision.normalizedUrl || href || "Malformed target"}</span>
+          <span>{decision.reason || (decision.kind === "web" ? "External web page" : decision.kind)}</span>
+          <span className="flex flex-wrap gap-2">
+            <button type="button" disabled={!decision.allowed} onClick={open} className="rounded-md bg-sky-500/20 px-3 py-1.5 font-semibold text-sky-100 disabled:cursor-not-allowed disabled:opacity-40">{decision.requiresStrongConfirmation ? "Open after review" : "Open"}</button>
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(decision.normalizedUrl || href || "").then(() => setStatus("Link copied.")).catch(() => setStatus("Copy failed. Select the destination text instead."))} className="rounded-md border border-zinc-700 px-3 py-1.5">Copy link</button>
+            <button autoFocus type="button" onClick={() => { setReviewing(false); setStatus("Cancelled. Your chat and draft are unchanged."); }} className="rounded-md border border-zinc-700 px-3 py-1.5">Cancel</button>
+          </span>
+        </span>
+      )}
+      {status && <span role={/could not|blocked|failed/i.test(status) ? "alert" : "status"} className="mt-1 text-[11px] text-zinc-400">{status}</span>}
+    </span>
+  );
 }
 
 function MessageMentionBadges({
