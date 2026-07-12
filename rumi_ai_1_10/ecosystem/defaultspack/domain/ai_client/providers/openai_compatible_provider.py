@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
 import urllib.error
@@ -422,7 +423,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return merged
 
     def _remote_discovered_models(self) -> List[Dict[str, Any]]:
-        if not self._remote_model_discovery or not self._api_key or not self._base_url:
+        if (
+            not self._remote_model_discovery
+            or not self._base_url
+            or (self._credential_required and not self._api_key)
+        ):
             return []
         cache = self._load_remote_model_cache()
         now = int(time.time())
@@ -440,7 +445,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
     def _remote_model_cache_path(self) -> Path:
         cache_root = Path(__file__).resolve().parents[3] / "user_data" / "shared" / "provider_model_cache"
         cache_root.mkdir(parents=True, exist_ok=True)
-        return cache_root / f"{self.provider_id}.models.json"
+        auth_scope = hashlib.sha256(self._api_key.encode("utf-8")).hexdigest() if self._api_key else "anonymous"
+        endpoint_scope = hashlib.sha256(
+            f"{self._base_url}|{auth_scope}".encode("utf-8")
+        ).hexdigest()[:24]
+        return cache_root / f"{self.provider_id}.{endpoint_scope}.models.json"
 
     def _load_remote_model_cache(self) -> Dict[str, Any] | None:
         path = self._remote_model_cache_path()
@@ -504,6 +513,24 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "capability_source": "remote_models_endpoint",
             "capability_confidence": "unknown",
         }
+        if self.provider_id in {
+            "sglang",
+            "huggingface-tgi",
+            "localai",
+            "jan",
+            "text-generation-webui",
+            "llamafile",
+            "mlx-lm-server",
+            "mlc-llm-server",
+        }:
+            metadata.update(
+                {
+                    "installed_state": "unknown",
+                    "served_state": "served",
+                    "loaded_state": "unknown",
+                    "healthy_state": "unknown",
+                }
+            )
         for key in ("owned_by", "object", "created"):
             value = raw.get(key)
             if value not in (None, ""):

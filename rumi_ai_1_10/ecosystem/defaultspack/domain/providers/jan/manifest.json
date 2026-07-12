@@ -1,0 +1,78 @@
+{
+  "id": "jan",
+  "provider_id": "jan",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Jan",
+  "description": "Jan served-model endpoint with side-effect-free discovery.",
+  "provider_metadata": {
+    "display_name": "Jan",
+    "kind": "local",
+    "env_vars": [
+      "JAN_API_KEY"
+    ],
+    "base_url_envs": [
+      "JAN_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "http://127.0.0.1:1337/v1",
+    "default_model_for": {},
+    "state_dimensions": [
+      "installed",
+      "served",
+      "loaded",
+      "healthy"
+    ],
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "openai_compatible",
+      "runtime_model_discovery"
+    ]
+  },
+  "provider_manifest": {
+    "id": "jan",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Jan",
+    "enabled": true,
+    "priority": 400,
+    "adapter": "openai_compatible",
+    "api_key_env": "JAN_API_KEY",
+    "base_url_env": "JAN_BASE_URL",
+    "default_base_url": "http://127.0.0.1:1337/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "api_compatibility": "openai",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "health_path": "/health",
+      "discovery_side_effects": "none",
+      "state_dimensions": [
+        "installed",
+        "served",
+        "loaded",
+        "healthy"
+      ],
+      "source_docs": "https://jan.ai/docs/desktop/api-preference"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "jan"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "openai_compatible",
+    "runtime_model_discovery"
+  ]
+}
