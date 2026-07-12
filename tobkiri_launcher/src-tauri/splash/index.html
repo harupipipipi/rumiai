@@ -6,15 +6,17 @@
   <title>Tobkiri Launcher</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { background: #0a0a0a; color: #f5f5f5; }
+    /* The illustrated startup blade has a white field; match the native window
+       so there is no black frame around the animation during launch. */
+    html, body { background: #ffffff; color: #171717; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; user-select: none; }
     .loader { width: min(72vw, 760px); aspect-ratio: 2 / 1; margin-bottom: 1.25rem; opacity: 0; transform: translateY(8px); transition: opacity .3s ease, transform .3s ease; }
     .loader.visible { opacity: 1; transform: translateY(0); }
-    .loader img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 36px rgba(0, 0, 0, .36)); }
-    .progress { font-size: 1rem; color: #b0b0b0; text-align: center; min-height: 1.5em; padding: 0 2rem; transition: color .3s, opacity .3s ease; opacity: 0; }
+    .loader img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 36px rgba(0, 0, 0, .16)); }
+    .progress { font-size: 1rem; color: #666666; text-align: center; min-height: 1.5em; padding: 0 2rem; transition: color .3s, opacity .3s ease; opacity: 0; }
     .progress.visible { opacity: 1; }
-    .progress.error { color: #ff6b6b; }
-    .progress.ready { color: #69db7c; }
+    .progress.error { color: #c52626; }
+    .progress.ready { color: #167a3d; }
     @media (prefers-reduced-motion: reduce) { .loader, .progress { transition: none; } }
   </style>
 </head>

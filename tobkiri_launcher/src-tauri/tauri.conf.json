@@ -26,7 +26,7 @@
         "minHeight": 600,
         "center": true,
         "visible": true,
-        "backgroundColor": "#0a0a0a"
+        "backgroundColor": "#ffffff"
       }
     ],
     "withGlobalTauri": true
