@@ -1,4 +1,4 @@
-# Rumi AI Repository Guidance
+# Tobkiri Repository Guidance
 
 These notes are for coding agents working in this repository.
 
@@ -8,6 +8,27 @@ These notes are for coding agents working in this repository.
 - The canonical defaultspack implementation is `rumi_ai_1_10/ecosystem/defaultspack/`.
 - The canonical control-panel frontend is `rumi_ai_1_10/ecosystem/defaultspack/webapp/`.
 - The desktop shell lives in `rumi_viewer/`; the mobile client lives in `rumi_mobile/`.
+
+## Product Naming Migration
+
+- The user-facing product name is **Tobkiri**.
+- The desktop shell is displayed as **Tobkiri Launcher**.
+- `Tobkiri` is intentional and must not be autocorrected to `Tobikiri`,
+  `Tokbiri`, or another spelling.
+- The repository is migrating incrementally from the legacy names **Rumi AI**
+  and **Rumi Viewer**.
+- Use `Tobkiri` or `Tobkiri Launcher` for new or modified user-facing copy,
+  including window titles, menus, tooltips, accessibility labels, alt text,
+  setup screens, errors, help text, screenshots, and docs.
+- Keep existing internal identifiers stable unless a dedicated migration
+  explicitly changes them. This includes paths, package/module/API names,
+  storage keys, environment variables, update targets, and application
+  identifiers such as `rumi_ai_1_10`, `rumi_viewer`, `rumi_*`, `RUMI_*`,
+  `viewer_*`, `rumiai`, and `dev.rumiai.app`.
+- Legacy filenames may remain during the compatibility phase.
+- Do not perform a repository-wide search-and-replace. Preserve legacy names
+  in compatibility contracts, migrations, historical notes, and changelogs
+  where the old name is intentional.
 
 ## Coding Workflow
 

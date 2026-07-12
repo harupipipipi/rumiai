@@ -36,8 +36,12 @@ bbox="$(
 )"
 
 if [[ -z "${bbox}" ]]; then
-  echo "Failed to detect a visible icon shape in ${SOURCE_ICON}" >&2
-  exit 1
+  # The Tobkiri source icon has an opaque background. It is intentionally a
+  # complete square composition, so retain the whole canvas rather than
+  # treating the absent alpha channel as an empty image.
+  source_width="$(magick identify -format '%w' "${SOURCE_ICON}")"
+  source_height="$(magick identify -format '%h' "${SOURCE_ICON}")"
+  bbox="${source_width}x${source_height}+0+0"
 fi
 
 dimensions="${bbox%%+*}"

@@ -12,7 +12,7 @@ const viewerRoot = resolve(frontendRoot, '..');
 test('Home version label renders the package version as non-interactive text', () => {
   const markup = renderToStaticMarkup(<ViewerVersionLabel />);
 
-  assert.match(markup, new RegExp(`Rumi Viewer v${RUMI_VIEWER_VERSION.replaceAll('.', '\\.')}`));
+  assert.match(markup, new RegExp(`Tobkiri Launcher v${RUMI_VIEWER_VERSION.replaceAll('.', '\\.')}`));
   assert.match(markup, /pointer-events-none/);
   assert.match(markup, /select-none/);
   assert.match(markup, /text-\[10px\]/);

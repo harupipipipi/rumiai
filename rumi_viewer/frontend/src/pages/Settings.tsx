@@ -11,6 +11,7 @@ import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff, ShieldCheck } from 'lucide-react';
+import { LAUNCHER_DISPLAY_NAME, LAUNCHER_VERSION_LABEL, PRODUCT_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 
 function permissionBadgeVariant(permission: DesktopPermissionStatus): 'success' | 'warning' | 'destructive' | 'secondary' {
   if (permission.granted === true || permission.status === 'granted') return 'success';
@@ -66,7 +67,7 @@ export function Settings() {
   const loadDesktopInfo = async () => {
     if (!desktopShellAvailable) {
       setDesktopInfo(null);
-      setDesktopInfoError('macOS permission status is only available inside Rumi Viewer.');
+      setDesktopInfoError(`macOS permission status is only available inside ${LAUNCHER_DISPLAY_NAME}.`);
       return;
     }
     setDesktopInfoBusy(true);
@@ -75,7 +76,7 @@ export function Settings() {
       const info = await fetchDesktopSystemInfo();
       if (!info) {
         setDesktopInfo(null);
-        setDesktopInfoError('Rumi Viewer permission bridge is unavailable. Reopen this page from Rumi Viewer and try again.');
+        setDesktopInfoError(`${LAUNCHER_DISPLAY_NAME} permission bridge is unavailable. Reopen this page from ${LAUNCHER_DISPLAY_NAME} and try again.`);
         return;
       }
       setDesktopInfo(info);
@@ -165,7 +166,7 @@ export function Settings() {
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-  const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
+  const updateName = (target: UpdateTarget) => target === 'rumiai' ? PRODUCT_DISPLAY_NAME : 'defaultspack';
   const permissionRows = desktopInfo?.permissions ?? [];
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
@@ -473,10 +474,10 @@ export function Settings() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {[
                     ['App Version', desktopInfo?.display_version ?? version.app],
-                    ['Viewer Version', desktopInfo?.viewer_version ?? 'unknown'],
+                    [LAUNCHER_VERSION_LABEL, desktopInfo?.viewer_version ?? 'unknown'],
                     ['Kernel Version', version.kernel],
                     ['Python Version', version.python],
-                    ['Launcher Version', version.launcher],
+                    ['Platform', version.launcher],
                   ].map(([label, val]) => (
                     <div key={label} className="flex items-center justify-between rounded-lg border border-border p-3">
                       <span className="text-sm text-text-main">{label}</span>
@@ -547,7 +548,7 @@ export function Settings() {
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
                     <CardTitle>macOS Permissions</CardTitle>
-                    <CardDescription>Rumi Viewer is the macOS permission host for Computer Use and screen capture.</CardDescription>
+                    <CardDescription>{LAUNCHER_DISPLAY_NAME} is the macOS permission host for Computer Use and screen capture.</CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -556,9 +557,9 @@ export function Settings() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="rounded-lg border border-border bg-bg-main/50 p-4">
-                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? 'Rumi Viewer'}</p>
+                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? LAUNCHER_DISPLAY_NAME}</p>
                     <p className="mt-2 text-xs leading-5 text-text-muted">
-                      Rumiの画面確認・クリック・キーボード操作は、Rumi Viewerに許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをViewer経由で要求します。
+                      Tobkiriの画面確認・クリック・キーボード操作は、{LAUNCHER_DISPLAY_NAME}に許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをLauncher経由で要求します。
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
                       <span className="rounded-full border border-border px-2.5 py-1">画面を見る</span>

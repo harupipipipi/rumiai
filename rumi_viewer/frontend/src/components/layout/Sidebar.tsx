@@ -4,6 +4,7 @@ import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRouteMeta, panelRoutes, viewerNavGroups, type PanelRouteKey } from '@/src/lib/routes';
 import { Avatar } from '@/src/components/ui/Avatar';
+import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route, Rocket } from 'lucide-react';
 
 type NavGroup = {
@@ -73,7 +74,7 @@ export function Sidebar() {
           )}
           aria-hidden={!isSidebarOpen}
         >
-          Rumi AI
+          {LAUNCHER_DISPLAY_NAME}
         </span>
         <button
           onClick={() => setSidebarOpen(!isSidebarOpen)}

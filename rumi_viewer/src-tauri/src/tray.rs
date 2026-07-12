@@ -1,4 +1,4 @@
-//! System tray icon and menu for Rumi Viewer.
+//! System tray icon and menu for Tobkiri Launcher.
 
 use std::sync::{Arc, Mutex};
 
@@ -28,13 +28,13 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
 
     let mut tray_builder = TrayIconBuilder::with_id("main-tray")
-        .tooltip("Rumi AI")
+        .tooltip("Tobkiri Launcher")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => {
                 if let Err(error) = show_primary_window(app) {
-                    error!("Failed to show Rumi window: {error}");
+                    error!("Failed to show Tobkiri Launcher window: {error}");
                 }
             }
             "restart_kernel" => {
@@ -62,7 +62,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Ok(None) => {
-                        info!("Rumi AI is up to date.");
+                        info!("Tobkiri is up to date.");
                     }
                     Err(e) => {
                         error!("Update check failed: {e}");
@@ -83,7 +83,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             {
                 let app = tray.app_handle();
                 if let Err(error) = show_primary_window(&app) {
-                    error!("Failed to show Rumi window: {error}");
+                    error!("Failed to show Tobkiri Launcher window: {error}");
                 }
             }
         });

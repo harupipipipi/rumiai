@@ -1,12 +1,16 @@
-# Rumi AI
+# Tobkiri
 
-Rumi AI is a modular AI runtime and tooling workspace.
+Tobkiri is a modular AI runtime and tooling workspace.
+
+The project is being renamed from Rumi AI. Existing package names, commands,
+paths, environment variables, and application identifiers remain unchanged
+during the compatibility transition.
 
 The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
 
 ## Quick Start (5 minutes)
 
-Get Rumi AI running in 5 minutes:
+Get Tobkiri running in 5 minutes:
 
 ```bash
 # 1. Clone the repository

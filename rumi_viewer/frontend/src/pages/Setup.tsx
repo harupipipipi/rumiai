@@ -10,6 +10,7 @@ import {
   setupPackSelectionUrl,
 } from '@/src/lib/setupPacks';
 import { Loader2, CheckCircle2 } from 'lucide-react';
+import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 
 export function Setup() {
   const navigate = useNavigate();
@@ -206,10 +207,10 @@ export function Setup() {
         {/* Logo + Title */}
         <div className="flex flex-col items-center gap-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
-            <span className="text-2xl font-bold text-accent">R</span>
+            <span className="text-2xl font-bold text-accent">T</span>
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-text-main">Welcome to Rumi AI</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-main">Welcome to {LAUNCHER_DISPLAY_NAME}</h1>
             <p className="mt-2 text-sm text-text-muted">{t('setup.subtitle')}</p>
           </div>
         </div>
