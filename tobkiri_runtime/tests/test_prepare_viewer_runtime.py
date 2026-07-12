@@ -189,3 +189,29 @@ def test_prepare_release_rejects_target_without_pinned_checksum(tmp_path, monkey
 
     with pytest.raises(RuntimeError, match="No pinned uv checksum"):
         module.prepare_release(tmp_path, "aarch64-pc-windows-msvc")
+
+
+def test_prepare_release_removes_read_only_dev_uv_before_verified_stage(tmp_path, monkeypatch):
+    module = _load_module()
+    target = "aarch64-apple-darwin"
+    destination = tmp_path / "tobkiri_runtime" / "bundled" / "uv"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("dev uv", encoding="utf-8")
+    destination.chmod(0o555)
+    manifest = tmp_path / "pack-shell" / "Cargo.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[package]\nname='fixture'\nversion='0.1.0'\n", encoding="utf-8")
+
+    fake_preparer = SimpleNamespace(
+        UV_PINNED_VERSION="0.0.0",
+        UV_SHA256_BY_TARGET={target: "fixture"},
+    )
+    calls = []
+    monkeypatch.setattr(module, "load_resource_preparer", lambda _root: fake_preparer)
+    monkeypatch.setattr(module, "run_command", lambda command, **kwargs: calls.append(list(command)))
+
+    module.prepare_release(tmp_path, target)
+
+    assert not destination.exists()
+    assert len(calls) == 2
+    assert "prepare_tauri_resources.py" in str(calls[1][1])

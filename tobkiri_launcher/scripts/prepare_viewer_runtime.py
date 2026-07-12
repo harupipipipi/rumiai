@@ -203,6 +203,18 @@ def load_resource_preparer(repo_root: Path) -> ModuleType:
     return module
 
 
+def remove_existing_staged_uv(repo_root: Path, target: str) -> None:
+    """Remove a prior dev-stage binary before the verified release stage."""
+    destination = bundled_uv_path(repo_root, target)
+    if not destination.exists():
+        return
+    if destination.is_symlink() or not destination.is_file():
+        raise RuntimeError(f"Refusing to replace unsafe staged uv path: {destination}")
+    if os.name != "nt":
+        destination.chmod(destination.stat().st_mode | stat.S_IWUSR)
+    destination.unlink()
+
+
 def prepare_release(repo_root: Path, target: str) -> None:
     preparer = load_resource_preparer(repo_root)
     if target not in preparer.UV_SHA256_BY_TARGET:
@@ -228,6 +240,8 @@ def prepare_release(repo_root: Path, target: str) -> None:
         ],
         cwd=repo_root,
     )
+
+    remove_existing_staged_uv(repo_root, target)
 
     run_command(
         [
