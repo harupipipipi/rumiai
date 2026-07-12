@@ -602,8 +602,20 @@ def _read_manifests(
             continue
         manifest = dict(payload)
         manifest["_manifest_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
-        manifest["_content_hash"] = _pack_content_hash(
-            location.pack_subdir, manifest["_manifest_hash"]
+        provenance = manifest.get("provenance")
+        declared_content_hash = (
+            str(provenance.get("content_hash") or "").strip()
+            if isinstance(provenance, Mapping)
+            else ""
+        )
+        manifest["_content_hash"] = (
+            declared_content_hash
+            if declared_content_hash.startswith("sha256:")
+            and len(declared_content_hash) == 71
+            else _pack_content_hash(
+                location.pack_subdir,
+                manifest["_manifest_hash"],
+            )
         )
         manifests[location.pack_id] = manifest
     return manifests, diagnostics

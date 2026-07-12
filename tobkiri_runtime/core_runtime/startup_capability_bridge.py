@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from .capability_graph_compiler import CapabilityGraphCompiler
 from .capability_graph_loader import CapabilityGraphLoader
 from .ecosystem_nodes import EcosystemNodeRegistry
+from .frontend_host import build_frontend_catalog
 from .interface_registry import InterfaceRegistry
 from .profile_models import CapabilityProfileDefinition
 from .profile_loader import CapabilityProfileLoader
@@ -33,6 +34,7 @@ class StartupCapabilityCompileResult:
     runtime_profile: Optional[Dict[str, Any]] = None
     surface_launch_target: Optional[Dict[str, Any]] = None
     resolved_profile: Optional[ResolvedProfile] = None
+    frontend_catalog: Optional[Dict[str, Any]] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     skipped: bool = False
     reason: Optional[str] = None
@@ -50,6 +52,7 @@ class StartupCapabilityCompileResult:
             "resolved_profile": (
                 self.resolved_profile.to_dict() if self.resolved_profile else None
             ),
+            "frontend_catalog": self.frontend_catalog,
             "diagnostics": list(self.diagnostics),
         }
 
@@ -67,6 +70,7 @@ def compile_startup_capabilities(
     capability_profile_id = _string_or_none(startup_profile.get("capability_profile_id"))
     diagnostics: List[Dict[str, Any]] = []
     resolved_profile: Optional[ResolvedProfile] = None
+    frontend_catalog: Optional[Dict[str, Any]] = None
     activation_token = None
 
     if not graph_id:
@@ -145,6 +149,21 @@ def compile_startup_capabilities(
                 resolved_profile=resolved_profile,
                 diagnostics=diagnostics,
             )
+        frontend_catalog_result = build_frontend_catalog(
+            resolved_profile,
+            ecosystem_dir=ecosystem_dir,
+        )
+        frontend_catalog = frontend_catalog_result.to_dict()
+        diagnostics.extend(
+            {
+                "level": item.severity,
+                "code": item.code,
+                "message": item.message,
+                "pack_id": item.owner_pack_id,
+                "contribution_id": item.contribution_id,
+            }
+            for item in frontend_catalog_result.diagnostics
+        )
         profile_loader = CapabilityProfileLoader(
             interface_registry=interface_registry,
             approval_manager=approval_manager,
@@ -166,6 +185,8 @@ def compile_startup_capabilities(
                 ok=False,
                 graph_id=graph_id,
                 capability_profile_id=capability_profile_id,
+                resolved_profile=resolved_profile,
+                frontend_catalog=frontend_catalog,
                 diagnostics=diagnostics,
             )
 
@@ -190,6 +211,8 @@ def compile_startup_capabilities(
                 ok=False,
                 graph_id=graph_id,
                 capability_profile_id=capability_profile_id,
+                resolved_profile=resolved_profile,
+                frontend_catalog=frontend_catalog,
                 diagnostics=diagnostics,
             )
 
@@ -213,6 +236,8 @@ def compile_startup_capabilities(
                 ok=False,
                 graph_id=graph_id,
                 capability_profile_id=capability_profile_id,
+                resolved_profile=resolved_profile,
+                frontend_catalog=frontend_catalog,
                 diagnostics=diagnostics,
             )
 
@@ -260,6 +285,7 @@ def compile_startup_capabilities(
             runtime_profile=runtime_profile,
             surface_launch_target=surface_launch_target,
             resolved_profile=resolved_profile,
+            frontend_catalog=frontend_catalog,
             diagnostics=diagnostics,
         )
     except Exception as exc:
@@ -279,6 +305,7 @@ def compile_startup_capabilities(
             graph_id=graph_id,
             capability_profile_id=capability_profile_id,
             resolved_profile=resolved_profile,
+            frontend_catalog=frontend_catalog,
             diagnostics=diagnostics,
         )
 
