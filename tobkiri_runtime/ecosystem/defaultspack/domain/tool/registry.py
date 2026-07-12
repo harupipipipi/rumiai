@@ -14,6 +14,7 @@ from .security import (
     unsupported_execution_reason,
 )
 from .loading import normalize_tool_loading_mode
+from core_runtime.resolved_profile_scope import effective_pack_ids
 
 _TOOL_SEARCH_METADATA_KEYS = {
     "aliases",
@@ -119,8 +120,13 @@ class ToolRegistry:
         if not ecosystem_dir.is_dir():
             return [self._pack_root()]
         roots: list[Path] = []
-        for path in sorted(ecosystem_dir.iterdir()):
-            if path.is_dir() and (path / "ecosystem.json").is_file():
+        effective = effective_pack_ids()
+        for pack_id in sorted(effective):
+            path = ecosystem_dir / pack_id
+            if (
+                path.is_dir()
+                and (path / "ecosystem.json").is_file()
+            ):
                 roots.append(path)
         return roots
 

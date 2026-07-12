@@ -6,8 +6,8 @@ import threading
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .activation import selected_extension_pack_ids
 from .registry import ExtensionRegistry
+from core_runtime.resolved_profile_scope import effective_pack_ids
 
 _LOCK = threading.Lock()
 _REGISTRY: Optional[ExtensionRegistry] = None
@@ -63,11 +63,14 @@ def _append_ecosystem_extension_roots(
         return
     active_pack_name = pack_root.name
     active_pack_id = _pack_id_for_root(pack_root)
-    for path in sorted(ecosystem_dir.iterdir()):
+    candidates = (
+        (ecosystem_dir / pack_id for pack_id in sorted(selected_pack_ids))
+        if selected_pack_ids is not None
+        else ()
+    )
+    for path in candidates:
         extensions = path / "extensions"
         if path == pack_root or path.name in {active_pack_name, active_pack_id}:
-            continue
-        if selected_pack_ids is not None and path.name not in selected_pack_ids:
             continue
         if path.is_dir() and (path / "ecosystem.json").is_file() and extensions.is_dir():
             _append_unique_root(roots, extensions)
@@ -109,7 +112,7 @@ def build_extensions_roots(
     ecosystem_dir = pack_root.parent
     roots: list[Path] = []
     default_root = pack_root / "extensions"
-    selected_pack_ids = selected_extension_pack_ids(pack_root)
+    selected_pack_ids = set(effective_pack_ids())
 
     # Core defaults must load first so sibling packs and user/env roots can
     # extend or override them by id.

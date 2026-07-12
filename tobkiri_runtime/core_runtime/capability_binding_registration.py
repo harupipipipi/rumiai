@@ -8,7 +8,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
 from .paths import (
@@ -17,6 +17,7 @@ from .paths import (
     ECOSYSTEM_DIR,
     PackLocation,
     discover_pack_locations,
+    resolve_pack_locations,
 )
 
 
@@ -45,10 +46,22 @@ def register_pack_binding_handlers(
     approval_manager: Any = None,
     ecosystem_dir: Optional[str] = None,
     registry: Any = None,
+    effective_pack_ids: Optional[Iterable[str]] = None,
 ) -> CapabilityBindingRegistrationResult:
     """Register explicit pack-owned binding handlers from approved packs."""
     result = CapabilityBindingRegistrationResult()
-    for pack_id, pack_location in _iter_pack_locations(registry, ecosystem_dir):
+    effective = (
+        frozenset(str(item) for item in effective_pack_ids)
+        if effective_pack_ids is not None
+        else None
+    )
+    for pack_id, pack_location in _iter_pack_locations(
+        registry,
+        ecosystem_dir,
+        effective,
+    ):
+        if effective is not None and pack_id not in effective:
+            continue
         ok, reason = _is_pack_approved(approval_manager, pack_id)
         if not ok:
             result.skipped.append(pack_id)
@@ -130,7 +143,11 @@ def register_pack_binding_handlers(
     return result
 
 
-def _iter_pack_locations(registry: Any, ecosystem_dir: Optional[str]) -> List[Tuple[str, PackLocation]]:
+def _iter_pack_locations(
+    registry: Any,
+    ecosystem_dir: Optional[str],
+    effective_pack_ids: frozenset[str] | None = None,
+) -> List[Tuple[str, PackLocation]]:
     if registry is not None and isinstance(getattr(registry, "packs", None), dict):
         pairs = []
         for pack_id, pack_info in registry.packs.items():
@@ -151,7 +168,12 @@ def _iter_pack_locations(registry: Any, ecosystem_dir: Optional[str]) -> List[Tu
                 )
         if pairs:
             return pairs
-    return [(loc.pack_id, loc) for loc in discover_pack_locations(ecosystem_dir)]
+    locations = (
+        resolve_pack_locations(effective_pack_ids, ecosystem_dir)
+        if effective_pack_ids is not None
+        else discover_pack_locations(ecosystem_dir)
+    )
+    return [(loc.pack_id, loc) for loc in locations]
 
 
 def _is_pack_approved(approval_manager: Any, pack_id: str) -> Tuple[bool, Optional[str]]:

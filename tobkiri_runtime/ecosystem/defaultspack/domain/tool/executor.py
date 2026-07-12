@@ -717,8 +717,12 @@ class ToolExecutor:
 
     @staticmethod
     def _load_pack_functions_into_registry(registry):
+        from core_runtime.resolved_profile_scope import effective_pack_ids
+
         ecosystem_dir = Path(__file__).resolve().parents[3]
-        for pack_root in sorted(ecosystem_dir.iterdir()):
+        effective = effective_pack_ids()
+        for pack_id in sorted(effective):
+            pack_root = ecosystem_dir / pack_id
             if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
                 continue
             try:
