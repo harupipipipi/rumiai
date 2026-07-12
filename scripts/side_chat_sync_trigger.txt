@@ -1,0 +1,1 @@
+Trigger the pull_request workflow after the PR leaves draft state.
