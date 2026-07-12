@@ -1,12 +1,16 @@
-# Rumi AI
+# Tobkiri
 
-Rumi AI is a modular AI runtime and tooling workspace.
+Tobkiri is a modular AI runtime and tooling workspace.
 
-The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
+The project is being renamed from Rumi AI. Existing package names, commands,
+paths, environment variables, and application identifiers remain unchanged
+during the compatibility transition.
+
+The repository keeps the runtime implementation under `tobkiri_runtime/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `tobkiri_launcher/frontend`; the kernel serves its built artifact at `/panel/`.
 
 ## Quick Start (5 minutes)
 
-Get Rumi AI running in 5 minutes:
+Get Tobkiri running in 5 minutes:
 
 ```bash
 # 1. Clone the repository
@@ -19,9 +23,9 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
 
 # 3. Install dependencies
-pip install -r rumi_ai_1_10/requirements.txt
-pip install -r rumi_ai_1_10/requirements-dev.txt
-pip install -e ./rumi_ai_1_10
+pip install -r tobkiri_runtime/requirements.txt
+pip install -r tobkiri_runtime/requirements-dev.txt
+pip install -e ./tobkiri_runtime
 
 # 4. Run health check
 python -m rumi_ai --health
@@ -36,28 +40,28 @@ After starting, open http://localhost:8765/panel/ in your browser to access the 
 
 | やりたいこと | まず読む場所 | 補足 |
 |---|---|---|
-| 目的別にドキュメントを辿りたい | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | 「何をしたいか」から読む順番を案内します |
-| 用語の意味を揃えたい | [`rumi_ai_1_10/docs/terminology.md`](./rumi_ai_1_10/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` 互換名の整理です |
+| 目的別にドキュメントを辿りたい | [`tobkiri_runtime/docs/README.md`](./tobkiri_runtime/docs/README.md) | 「何をしたいか」から読む順番を案内します |
+| 用語の意味を揃えたい | [`tobkiri_runtime/docs/terminology.md`](./tobkiri_runtime/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` 互換名の整理です |
 | とにかく起動したい | [`README.md`](./README.md) の `Start` | 最短の起動コマンドだけを載せています |
-| runtime / kernel の全体像を知りたい | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | アーキテクチャと主要ディレクトリの説明があります |
-| コードを読まずに仕組みを理解したい | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
-| まず動作確認したい（チュートリアル） | [`rumi_ai_1_10/docs/tutorials/runtime-quickstart.md`](./rumi_ai_1_10/docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` まで最短手順です |
-| `rumi_viewer` を起動したい / viewer の詰まり方を見たい | [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) | 起動手順、`401`, 黒画面, `defaultspack` との関係をまとめています |
-| viewer 側を直したい | [`rumi_viewer/src-tauri/src/config.rs`](./rumi_viewer/src-tauri/src/config.rs) と [`rumi_viewer/src-tauri/src/kernel_manager.rs`](./rumi_viewer/src-tauri/src/kernel_manager.rs) | viewer は Tauri shell、kernel 起動は Rust 側が担当です |
-| pack / defaultspack を触りたい | [`rumi_ai_1_10/ecosystem/defaultspack/README.md`](./rumi_ai_1_10/ecosystem/defaultspack/README.md) | chat, ai_client, tool などの pack 側実装です |
-| defaultspack の frontend 拡張方法を知りたい | [`rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md`](./rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md) | 右バー追加、設定追加、chat renderer 拡張、preview feed 追加の入り口です |
-| API キーや secrets の扱いを知りたい | [`rumi_ai_1_10/docs/operations.md`](./rumi_ai_1_10/docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路の説明があります |
-| Pack の作り方を知りたい | [`rumi_ai_1_10/docs/pack-development.md`](./rumi_ai_1_10/docs/pack-development.md) | ecosystem.json, routes, permissions の作法をまとめています |
-| 運用・監査の考え方を知りたい | [`rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`](./rumi_ai_1_10/docs/quality_pack/philosophy_memo.md) | 継続開発と回帰確認の前提を整理しています |
+| runtime / kernel の全体像を知りたい | [`tobkiri_runtime/README.md`](./tobkiri_runtime/README.md) | アーキテクチャと主要ディレクトリの説明があります |
+| コードを読まずに仕組みを理解したい | [`tobkiri_runtime/docs/concepts/system-mechanism.md`](./tobkiri_runtime/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
+| まず動作確認したい（チュートリアル） | [`tobkiri_runtime/docs/tutorials/runtime-quickstart.md`](./tobkiri_runtime/docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` まで最短手順です |
+| `tobkiri_launcher` を起動したい / viewer の詰まり方を見たい | [`tobkiri_runtime/docs/tobkiri_launcher_start.md`](./tobkiri_runtime/docs/tobkiri_launcher_start.md) | 起動手順、`401`, 黒画面, `defaultspack` との関係をまとめています |
+| viewer 側を直したい | [`tobkiri_launcher/src-tauri/src/config.rs`](./tobkiri_launcher/src-tauri/src/config.rs) と [`tobkiri_launcher/src-tauri/src/kernel_manager.rs`](./tobkiri_launcher/src-tauri/src/kernel_manager.rs) | viewer は Tauri shell、kernel 起動は Rust 側が担当です |
+| pack / defaultspack を触りたい | [`tobkiri_runtime/ecosystem/defaultspack/README.md`](./tobkiri_runtime/ecosystem/defaultspack/README.md) | chat, ai_client, tool などの pack 側実装です |
+| defaultspack の frontend 拡張方法を知りたい | [`tobkiri_runtime/ecosystem/defaultspack/docs/frontend_extensions.md`](./tobkiri_runtime/ecosystem/defaultspack/docs/frontend_extensions.md) | 右バー追加、設定追加、chat renderer 拡張、preview feed 追加の入り口です |
+| API キーや secrets の扱いを知りたい | [`tobkiri_runtime/docs/operations.md`](./tobkiri_runtime/docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路の説明があります |
+| Pack の作り方を知りたい | [`tobkiri_runtime/docs/pack-development.md`](./tobkiri_runtime/docs/pack-development.md) | ecosystem.json, routes, permissions の作法をまとめています |
+| 運用・監査の考え方を知りたい | [`tobkiri_runtime/docs/quality_pack/philosophy_memo.md`](./tobkiri_runtime/docs/quality_pack/philosophy_memo.md) | 継続開発と回帰確認の前提を整理しています |
 
 ## Repository Layout
 
-- `rumi_ai_1_10/`: kernel/runtime/API/backend source tree
+- `tobkiri_runtime/`: kernel/runtime/API/backend source tree
 - `rumi_ai/`: version-stable Python entrypoint package
 - `pack-shell/`: desktop pack launcher
-- `rumi_viewer/`: desktop shell and control panel frontend source
-- `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
-- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/`: browser companion assets bundled with defaultspack
+- `tobkiri_launcher/`: desktop shell and control panel frontend source
+- `tobkiri_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
+- `tobkiri_runtime/ecosystem/defaultspack/browser_extensions/`: browser companion assets bundled with defaultspack
 
 ## Setup
 
@@ -66,10 +70,10 @@ After starting, open http://localhost:8765/panel/ in your browser to access the 
 - Python 3.10+
 - Node.js 18+
 - npm
-- uv (`rumi_viewer` を触る場合)
-- Rust / Cargo (`rumi_viewer` を触る場合)
-- MSVC Build Tools (`rumi_viewer` を Windows で触る場合)
-- Flutter SDK (`rumi_mobile` を触る場合)
+- uv (`tobkiri_launcher` を触る場合)
+- Rust / Cargo (`tobkiri_launcher` を触る場合)
+- MSVC Build Tools (`tobkiri_launcher` を Windows で触る場合)
+- Flutter SDK (`tobkiri_mobile` を触る場合)
 
 ### Clone and install
 
@@ -82,11 +86,11 @@ cd rumiai
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r rumi_ai_1_10\requirements.txt
-python -m pip install -r rumi_ai_1_10\requirements-dev.txt
-python -m pip install -e .\rumi_ai_1_10
+python -m pip install -r tobkiri_runtime\requirements.txt
+python -m pip install -r tobkiri_runtime\requirements-dev.txt
+python -m pip install -e .\tobkiri_runtime
 
-cd rumi_viewer\frontend
+cd tobkiri_launcher\frontend
 npm install
 npm run tauri -- info
 cd ..\..
@@ -103,11 +107,11 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r rumi_ai_1_10/requirements.txt
-python -m pip install -r rumi_ai_1_10/requirements-dev.txt
-python -m pip install -e ./rumi_ai_1_10
+python -m pip install -r tobkiri_runtime/requirements.txt
+python -m pip install -r tobkiri_runtime/requirements-dev.txt
+python -m pip install -e ./tobkiri_runtime
 
-cd rumi_viewer/frontend
+cd tobkiri_launcher/frontend
 npm install
 npm run tauri -- info
 cd ../..
@@ -120,7 +124,7 @@ Windows PowerShell:
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m rumi_ai --health
-cd rumi_viewer\frontend
+cd tobkiri_launcher\frontend
 npm run tauri -- dev
 ```
 
@@ -131,7 +135,7 @@ macOS / Linux:
 ```bash
 source .venv/bin/activate
 python -m rumi_ai --health
-cd rumi_viewer/frontend
+cd tobkiri_launcher/frontend
 npm run tauri -- dev
 ```
 
@@ -164,29 +168,29 @@ python -m rumi_ai
 ### Viewer development
 
 ```bash
-cd rumi_viewer/frontend
+cd tobkiri_launcher/frontend
 npm install
 npm run tauri -- info
 npm run tauri -- dev
 ```
 
-2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
+2 回目以降、`tobkiri_launcher/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
-cd rumi_viewer/frontend
+cd tobkiri_launcher/frontend
 npm run tauri -- dev
 ```
 
-開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
+開発用 viewer は repo 内の `tobkiri_runtime/` を自動検出して kernel を起動します。
 Viewer build は起動前に空き容量を確認します。`Rumi Viewer build preflight failed: not enough free disk space.` が出た場合はディスク容量を空けてから再実行してください。検証済みの環境で閾値だけを調整したい場合は `RUMI_VIEWER_MIN_FREE_MB=<MB>` を指定できます。
 `Open Defaultspack` は開発起動では repo 同梱の `defaultspack` を優先して開きます。
-起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
+起動時の詰まり方を含めたガイドは [`tobkiri_runtime/docs/tobkiri_launcher_start.md`](./tobkiri_runtime/docs/tobkiri_launcher_start.md) を参照してください。
 
 ## Development
 
 ```bash
 source .venv/bin/activate
-cd rumi_ai_1_10
+cd tobkiri_runtime
 python -m pytest tests/test_capability_trust_store.py
 ```
 
@@ -194,9 +198,9 @@ python -m pytest tests/test_capability_trust_store.py
 
 継続開発・監査・回帰確認の運用パックは以下を参照:
 
-- `rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`
-- `rumi_ai_1_10/docs/quality_pack/claude_desktop_quality_pack.md`
-- `rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh`
+- `tobkiri_runtime/docs/quality_pack/philosophy_memo.md`
+- `tobkiri_runtime/docs/quality_pack/claude_desktop_quality_pack.md`
+- `tobkiri_runtime/scripts/quality_pack/run_claude_quality_pack.sh`
 
 ## HMAC Migration
 
@@ -207,11 +211,11 @@ python -m rumi_ai migrate-hmac
 ## Components
 
 - `rumi_ai`: stable CLI and module entrypoint
-- `rumi_ai_1_10`: kernel, runtime, API, backend, and docs
+- `tobkiri_runtime`: kernel, runtime, API, backend, and docs
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
-- `rumi_viewer`: viewer-side application shell and canonical panel frontend source
-- `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
-- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
+- `tobkiri_launcher`: viewer-side application shell and canonical panel frontend source
+- `tobkiri_mobile`: mobile remote client for the bearer-auth Kernel Pack API
+- `tobkiri_runtime/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
 
 ## Troubleshooting
 
@@ -230,7 +234,7 @@ df -h
 rm -rf .venv
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r rumi_ai_1_10/requirements.txt
+pip install -r tobkiri_runtime/requirements.txt
 ```
 
 #### 2. Port 8765 already in use
@@ -261,11 +265,11 @@ export RUMI_API_TOKEN="your-token-here"
 
 #### 4. Frontend build fails
 
-**Problem**: `npm run build` fails in rumi_viewer/frontend.
+**Problem**: `npm run build` fails in tobkiri_launcher/frontend.
 
 **Solution**: Clear node_modules and reinstall.
 ```bash
-cd rumi_viewer/frontend
+cd tobkiri_launcher/frontend
 rm -rf node_modules package-lock.json
 npm install
 npm run build
@@ -278,14 +282,14 @@ npm run build
 **Solution**: Ensure you're in the virtual environment and package is installed.
 ```bash
 source .venv/bin/activate
-pip install -e ./rumi_ai_1_10
+pip install -e ./tobkiri_runtime
 ```
 
 ### Getting Help
 
 If you encounter issues not covered here:
 
-1. Check the [documentation](./rumi_ai_1_10/docs/README.md)
+1. Check the [documentation](./tobkiri_runtime/docs/README.md)
 2. Search existing [GitHub Issues](https://github.com/harupipipipi/rumiai/issues)
 3. Create a new issue with:
    - Steps to reproduce
@@ -337,7 +341,7 @@ We welcome contributions! Please follow these guidelines:
 
 This project is licensed under the terms specified in [LICENSE](./LICENSE).
 
-For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
+For architecture and runtime details, see [tobkiri_runtime/README.md](./tobkiri_runtime/README.md).
 
 For Codex OSS-inspired coding-tool conventions, see [AGENTS.md](./AGENTS.md) and
-[rumi_ai_1_10/docs/codex_oss_reference.md](./rumi_ai_1_10/docs/codex_oss_reference.md).
+[tobkiri_runtime/docs/codex_oss_reference.md](./tobkiri_runtime/docs/codex_oss_reference.md).
