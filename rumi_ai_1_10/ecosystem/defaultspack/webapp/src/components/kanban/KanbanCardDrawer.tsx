@@ -111,7 +111,7 @@ export function KanbanCardDrawer({
   return createPortal(
     <ModalFoundation
       variant="drawer"
-      title={isCreate ? "New card" : `Card detail: ${card.title}`}
+      title={isCreate ? "New card" : `Card detail: ${card?.title ?? ""}`}
       description="Edit this Kanban card. Escape closes the topmost drawer."
       onClose={onClose}
       dismissible={!busy}
