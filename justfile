@@ -1,4 +1,4 @@
-set positional-arguments
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 # Display available commands.
 help:
@@ -10,15 +10,15 @@ health:
 
 # Run root-level contract tests.
 root-test *args:
-    pytest tests/ "$@"
+    pytest tests/ {{args}}
 
-# Run rumi_ai_1_10 tests. Pass pytest selectors after the recipe name.
+# Run tobkiri_runtime tests. Pass pytest selectors after the recipe name.
 test *args:
-    cd rumi_ai_1_10 && python -m pytest "$@"
+    cd tobkiri_runtime && python -m pytest "$@"
 
 # Run the focused defaultspack coding/tooling regression cluster.
 tooling-test:
-    cd rumi_ai_1_10 && python -m pytest \
+    cd tobkiri_runtime && python -m pytest \
         tests/test_defaultspack_provider_tool_schema.py \
         tests/test_defaultspack_tool_protocol_v2.py \
         tests/test_defaultspack_terminal_policy.py \
@@ -26,20 +26,19 @@ tooling-test:
 
 # Run Python static checks over the backend surfaces guarded in CI.
 lint:
-    cd rumi_ai_1_10 && python -m ruff check core_runtime backend_core ecosystem/defaultspack/domain/coding ecosystem/defaultspack/domain/tool ecosystem/defaultspack/blocks/coding app.py
-    cd rumi_ai_1_10 && python -m mypy --check-untyped-defs core_runtime backend_core ecosystem/defaultspack/domain/coding ecosystem/defaultspack/domain/tool ecosystem/defaultspack/blocks/coding app.py
+    cd tobkiri_runtime && python -m ruff check core_runtime backend_core ecosystem/defaultspack/domain/coding ecosystem/defaultspack/domain/tool ecosystem/defaultspack/blocks/coding app.py
+    cd tobkiri_runtime && python -m mypy --check-untyped-defs core_runtime backend_core ecosystem/defaultspack/domain/coding ecosystem/defaultspack/domain/tool ecosystem/defaultspack/blocks/coding app.py
 
 # Run defaultspack frontend checks.
 frontend-check:
-    cd rumi_ai_1_10/ecosystem/defaultspack/webapp && npm test
-    cd rumi_ai_1_10/ecosystem/defaultspack/webapp && npm run lint
-    cd rumi_ai_1_10/ecosystem/defaultspack/webapp && npm run build
+    cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm test
+    cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run lint
+    cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run build
 
 # Run the defaultspack integrity scan used by CI.
 integrity:
-    cd rumi_ai_1_10 && python scripts/quality/scan_defaultspack_integrity.py
+    cd tobkiri_runtime && python scripts/quality/scan_defaultspack_integrity.py
 
-# Generate the matrix-driven provider report. It becomes blocking only when
-# provider_coverage/gate.json is switched on after all migration PRs land.
+# Generate the blocking matrix-driven provider report.
 provider-coverage *args:
-    cd rumi_ai_1_10 && python scripts/quality/check_provider_coverage.py --json-output provider_coverage/provider_coverage.json --markdown-output provider_coverage/provider_coverage.md "$@"
+    cd tobkiri_runtime && python scripts/quality/check_provider_coverage.py --json-output provider_coverage/provider_coverage.json --markdown-output provider_coverage/provider_coverage.md "$@"

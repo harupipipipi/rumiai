@@ -1,0 +1,75 @@
+{
+  "snapshot": {
+    "source": "https://www.assemblyai.com/docs/getting-started/models",
+    "verified_at": "2026-07-12",
+    "lifecycle_policy": "refresh from official model inventory or documentation before retirement"
+  },
+  "models": [
+    {
+      "id": "assemblyai/stt/universal-3-pro",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "assemblyai",
+      "model_id": "universal-3-pro",
+      "display_name": "Universal-3 Pro",
+      "type": "transcription",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": false,
+        "image_input": false,
+        "audio_input": true,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://www.assemblyai.com/docs/getting-started/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "stt",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "assemblyai/stt/universal-2",
+      "category": "task_model",
+      "version": "1",
+      "provider_id": "assemblyai",
+      "model_id": "universal-2",
+      "display_name": "Universal-2",
+      "type": "transcription",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": false,
+        "image_input": false,
+        "audio_input": true,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://www.assemblyai.com/docs/getting-started/models",
+        "verified_at": "2026-07-12",
+        "lifecycle": "active",
+        "task": "stt",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

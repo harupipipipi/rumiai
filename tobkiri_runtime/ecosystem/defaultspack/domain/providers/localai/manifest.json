@@ -1,0 +1,78 @@
+{
+  "id": "localai",
+  "provider_id": "localai",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "LocalAI",
+  "description": "LocalAI served-model endpoint with side-effect-free discovery.",
+  "provider_metadata": {
+    "display_name": "LocalAI",
+    "kind": "local",
+    "env_vars": [
+      "LOCALAI_API_KEY"
+    ],
+    "base_url_envs": [
+      "LOCALAI_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "http://127.0.0.1:8080/v1",
+    "default_model_for": {},
+    "state_dimensions": [
+      "installed",
+      "served",
+      "loaded",
+      "healthy"
+    ],
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "openai_compatible",
+      "runtime_model_discovery"
+    ]
+  },
+  "provider_manifest": {
+    "id": "localai",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "LocalAI",
+    "enabled": true,
+    "priority": 400,
+    "adapter": "openai_compatible",
+    "api_key_env": "LOCALAI_API_KEY",
+    "base_url_env": "LOCALAI_BASE_URL",
+    "default_base_url": "http://127.0.0.1:8080/v1",
+    "credential_required": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "api_compatibility": "openai",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "health_path": "/readyz",
+      "discovery_side_effects": "none",
+      "state_dimensions": [
+        "installed",
+        "served",
+        "loaded",
+        "healthy"
+      ],
+      "source_docs": "https://localai.io/features/openai-functions/"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "localai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "openai_compatible",
+    "runtime_model_discovery"
+  ]
+}

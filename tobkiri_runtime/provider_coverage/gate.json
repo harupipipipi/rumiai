@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "required": true,
+  "activation": "All provider migration branches are present in the ordered provider stack."
+}

@@ -1,0 +1,23 @@
+{
+  "authoritative_fixture_count": 0,
+  "failure_count": 0,
+  "failures": {
+    "cross_account_cache_leakage": [],
+    "duplicate_canonical_owners": [],
+    "invalid_defaults": [],
+    "missing_authoritative_model_ids": [],
+    "missing_providers": [],
+    "secret_bearing_caches": [],
+    "stale_models_without_lifecycle_reason": [],
+    "unmapped_registered_providers": [],
+    "unverified_capability_claims": [],
+    "wrong_task_typing": []
+  },
+  "matrix_generated_at": "2026-07-11",
+  "matrix_schema_version": 2,
+  "passed": true,
+  "provider_count_expected": 82,
+  "provider_count_registered": 82,
+  "provider_count_required": 79,
+  "schema_version": 1
+}

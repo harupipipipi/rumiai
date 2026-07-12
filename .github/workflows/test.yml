@@ -50,7 +50,7 @@ jobs:
           path: ${{ runner.temp }}/root-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
 
-  rumi-ai-contract-checks:
+  tobkiri-contract-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,18 +62,18 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
 
       - name: Guard contract marker coverage
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -91,7 +91,7 @@ jobs:
           PY
 
       - name: Generate provider coverage report
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           python scripts/quality/check_provider_coverage.py \
             --json-output provider_coverage/provider_coverage.json \
@@ -102,14 +102,14 @@ jobs:
         with:
           name: provider-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            rumi_ai_1_10/provider_coverage/provider_coverage.json
-            rumi_ai_1_10/provider_coverage/provider_coverage.md
+            tobkiri_runtime/provider_coverage/provider_coverage.json
+            tobkiri_runtime/provider_coverage/provider_coverage.md
 
       # Contract tests are marker-discovered. Add pytest.mark.contract to any
       # new test that belongs in this CI cluster instead of editing this workflow.
       - name: Run contract cluster pytest
         id: contract_pytest
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
@@ -139,22 +139,22 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
 
       - name: Run Task D smoke tests
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py -v
 
-  rumi-ai-security-audit:
+  tobkiri-security-audit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -166,29 +166,29 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
 
       - name: Audit Python dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install pip-audit
           pip-audit -r requirements.txt
 
       - name: Run security/audit regression tests
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_defaultspack_boundary_scan.py tests/test_defaultspack_shipped_bundle_hardening.py tests/test_capability_trust_store.py tests/test_defaultspack_coding_hardening.py tests/test_defaultspack_terminal_policy.py -v
 
       - name: Run defaultspack boundary scan
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: python scripts/quality/scan_defaultspack_boundaries.py
 
   frontend-security-audit:
@@ -196,8 +196,8 @@ jobs:
       fail-fast: false
       matrix:
         app:
-          - rumi_viewer/frontend
-          - rumi_ai_1_10/ecosystem/defaultspack/webapp
+          - tobkiri_launcher/frontend
+          - tobkiri_runtime/ecosystem/defaultspack/webapp
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -219,35 +219,35 @@ jobs:
         run: npm run audit
 
       - name: Run defaultspack frontend tests
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm test
 
       - name: Verify defaultspack host permission registry sync
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm run check:host-permissions
 
       - name: Typecheck defaultspack frontend
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm run lint
 
       - name: Build defaultspack frontend
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm run build
 
       - name: Verify defaultspack vendored assets
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         working-directory: ${{ matrix.app }}
         run: npm run check:vendored-assets -- --require-ui
 
       - name: Verify defaultspack frontend bundle is synchronized
-        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
-        run: git diff --exit-code -- rumi_ai_1_10/ecosystem/defaultspack/ui
+        if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
+        run: git diff --exit-code -- tobkiri_runtime/ecosystem/defaultspack/ui
 
-  rumi-ai-static-checks:
+  tobkiri-static-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -261,11 +261,11 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
@@ -277,7 +277,7 @@ jobs:
           git fetch origin "$BASE_REF" --depth=1
           python .github/scripts/quality_gate_nonregression.py \
             --base-ref "origin/${BASE_REF}" \
-            --package-dir rumi_ai_1_10 \
+            --package-dir tobkiri_runtime \
             --ruff-target core_runtime \
             --ruff-target backend_core \
             --ruff-target ecosystem/defaultspack/domain/coding \
@@ -289,7 +289,7 @@ jobs:
             --mypy-target ecosystem/defaultspack/blocks/coding \
             --mypy-target app.py
 
-  rumi-ai-package-pytest:
+  tobkiri-package-pytest:
     strategy:
       fail-fast: false
       matrix:
@@ -306,11 +306,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
@@ -318,7 +318,7 @@ jobs:
 
       - name: Run package pytest
         id: package_pytest
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
@@ -364,7 +364,7 @@ jobs:
             sleep $((attempt * 10))
           done
 
-  rumi-viewer-macos:
+  tobkiri-launcher-macos:
     if: >
       github.event_name != 'pull_request' ||
       (
@@ -381,18 +381,18 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+          cache-dependency-path: tobkiri_launcher/frontend/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm ci
 
       - name: Run frontend panel auth tests
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm test
 
       - name: Build panel frontend
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm run build
 
       - name: Install Rust toolchain
@@ -401,8 +401,8 @@ jobs:
       - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rumi-viewer-macos
-          workspaces: rumi_viewer/src-tauri -> target
+          shared-key: tobkiri-launcher-macos
+          workspaces: tobkiri_launcher/src-tauri -> target
 
       - name: Bundle uv binary for offline startup
         run: |
@@ -428,7 +428,7 @@ jobs:
           UV_ARCHIVE="$(mktemp -t uv-bundle.XXXXXX.tar.gz)"
           trap 'rm -f "$UV_ARCHIVE"' EXIT
 
-          mkdir -p rumi_ai_1_10/bundled
+          mkdir -p tobkiri_runtime/bundled
           echo "Downloading uv ${UV_VERSION} for ${UV_TRIPLE}: ${UV_URL}"
           if ! curl -fL --retry 5 --retry-delay 2 --connect-timeout 15 "$UV_URL" -o "$UV_ARCHIVE"; then
             echo "Failed to download uv archive. Check UV_VERSION/asset URL: ${UV_URL}" >&2
@@ -441,17 +441,17 @@ jobs:
             exit 1
           fi
 
-          tar -xzf "$UV_ARCHIVE" -C rumi_ai_1_10/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
-          chmod +x rumi_ai_1_10/bundled/uv
+          tar -xzf "$UV_ARCHIVE" -C tobkiri_runtime/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
+          chmod +x tobkiri_runtime/bundled/uv
           echo "Bundled uv at:"
-          ls -la rumi_ai_1_10/bundled/
+          ls -la tobkiri_runtime/bundled/
 
       - name: Build rumi viewer
-        working-directory: rumi_viewer/src-tauri
+        working-directory: tobkiri_launcher/src-tauri
         run: cargo build --locked
 
       - name: Run rumi viewer tests
-        working-directory: rumi_viewer/src-tauri
+        working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
 
   mac-computer-driver-smoke:
@@ -472,18 +472,18 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
 
       - name: Run mac computer driver smoke tests
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pytest tests/test_mac_cgevent_pid_driver.py tests/test_browser_cdp_driver.py tests/test_computer_fallback_order.py tests/test_computer_seat_service.py tests/test_computer_seat_default_factory.py -v
 
@@ -499,11 +499,11 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
@@ -511,11 +511,11 @@ jobs:
 
       - name: Compile and self-test EdgeHaze helper
         run: |
-          swiftc rumi_ai_1_10/ecosystem/rumi_default_tools_pack/domain/computer/mac/EdgeHaze.swift -o "${RUNNER_TEMP}/edge_haze"
+          swiftc tobkiri_runtime/ecosystem/rumi_default_tools_pack/domain/computer/mac/EdgeHaze.swift -o "${RUNNER_TEMP}/edge_haze"
           "${RUNNER_TEMP}/edge_haze" --self-test
 
       - name: Run mac computer-use visual/control tests
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pytest tests/test_computer_use_haze.py tests/test_computer_desktop_action_delegation.py tests/test_computer_seat_service.py tests/test_browser_computer_seat_delegation.py -v
 
@@ -531,22 +531,22 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            rumi_ai_1_10/requirements.txt
-            rumi_ai_1_10/requirements-dev.txt
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Install dependencies
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
 
       - name: Run Windows portability smoke tests
-        working-directory: rumi_ai_1_10
+        working-directory: tobkiri_runtime
         run: |
           pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_coding_hardening.py -v
 
-  rumi-viewer-windows:
+  tobkiri-launcher-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -557,20 +557,20 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+          cache-dependency-path: tobkiri_launcher/frontend/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm ci
 
       - name: Run frontend tests
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm test
 
       - name: Typecheck frontend
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm run lint
 
       - name: Build panel frontend
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm run build

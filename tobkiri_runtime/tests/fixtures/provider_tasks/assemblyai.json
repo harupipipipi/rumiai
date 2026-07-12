@@ -1,0 +1,18 @@
+{
+  "source": "https://www.assemblyai.com/docs/getting-started/models",
+  "verified_at": "2026-07-12",
+  "models": [
+    {
+      "model_id": "universal-3-pro",
+      "task": "stt",
+      "display_name": "Universal-3 Pro",
+      "streaming": false
+    },
+    {
+      "model_id": "universal-2",
+      "task": "stt",
+      "display_name": "Universal-2",
+      "streaming": false
+    }
+  ]
+}

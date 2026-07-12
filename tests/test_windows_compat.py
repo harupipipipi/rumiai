@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 # テスト対象のモジュールをインポートできるようにパスを追加
 _this_dir = Path(__file__).resolve().parent
-_repo_dir = _this_dir.parent / "rumi_ai_1_10"
+_repo_dir = _this_dir.parent / "tobkiri_runtime"
 if str(_repo_dir) not in sys.path:
     sys.path.insert(0, str(_repo_dir))
 

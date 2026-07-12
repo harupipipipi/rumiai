@@ -1,0 +1,66 @@
+{
+  "id": "cloudflare-ai-gateway",
+  "provider_id": "cloudflare-ai-gateway",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Cloudflare AI Gateway",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/gateway_providers.py",
+    "models": "models.json"
+  },
+  "description": "Cloudflare AI Gateway with explicit upstream routing policy.",
+  "provider_metadata": {
+    "display_name": "Cloudflare AI Gateway",
+    "kind": "gateway",
+    "env_vars": [
+      "CLOUDFLARE_API_TOKEN"
+    ],
+    "base_url_envs": [
+      "CLOUDFLARE_AI_GATEWAY_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "",
+    "default_model_for": {},
+    "catalog_features": [
+      "gateway",
+      "explicit_upstream_routes"
+    ]
+  },
+  "provider_manifest": {
+    "id": "cloudflare-ai-gateway",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Cloudflare AI Gateway",
+    "enabled": true,
+    "priority": 450,
+    "adapter": "cloudflare_gateway",
+    "api_key_env": "CLOUDFLARE_API_TOKEN",
+    "base_url_env": "CLOUDFLARE_AI_GATEWAY_URL",
+    "default_base_url": "",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.gateway_providers:CloudflareAIGatewayProvider",
+    "config": {
+      "configured_routes_env": "RUMI_GATEWAY_ROUTES_JSON",
+      "inventory_strategy": "configured_routes_only",
+      "observability_is_not_inventory": true,
+      "upstream_selection_separate": true,
+      "source_docs": "https://developers.cloudflare.com/ai-gateway/usage/providers/universal/"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "cloudflare-ai-gateway"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "gateway",
+    "explicit_upstream_routes"
+  ]
+}

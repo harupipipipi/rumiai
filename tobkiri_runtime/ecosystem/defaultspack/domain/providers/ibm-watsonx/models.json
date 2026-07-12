@@ -1,0 +1,10 @@
+{
+  "snapshot": {
+    "source": "https://cloud.ibm.com/apidocs/watsonx-ai",
+    "verified_at": "2026-07-13",
+    "strategy": "dynamic_account_inventory",
+    "connected_empty_is_not_disconnected": true,
+    "lifecycle_policy": "native control plane is authoritative; no invented global defaults"
+  },
+  "models": []
+}

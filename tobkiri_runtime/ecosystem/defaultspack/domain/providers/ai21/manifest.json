@@ -1,0 +1,66 @@
+{
+  "id": "ai21",
+  "provider_id": "ai21",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "AI21 Labs",
+  "description": "AI21 Labs typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "AI21 Labs",
+    "kind": "cloud",
+    "env_vars": [
+      "AI21_API_KEY"
+    ],
+    "base_url_envs": [
+      "AI21_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://api.ai21.com/studio/v1",
+    "default_model_for": {},
+    "task_types": [
+      "chat"
+    ],
+    "catalog_features": [
+      "chat",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "ai21",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "AI21 Labs",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "AI21_API_KEY",
+    "base_url_env": "AI21_BASE_URL",
+    "default_base_url": "https://api.ai21.com/studio/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat"
+      ],
+      "source_docs": "https://docs.ai21.com/reference"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "ai21"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "typed_inventory"
+  ]
+}
