@@ -22,10 +22,15 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 class ToolDefinitionRegistry:
     """Own tool definitions and finite aliases, but never execute tools."""
 
-    def __init__(self, profile_id: str) -> None:
+    def __init__(
+        self,
+        profile_id: str,
+        *,
+        user_data_root: Path | None = None,
+    ) -> None:
         self.profile_id = validate_profile_id(profile_id)
         self.root = (
-            Path(USER_DATA_DIR)
+            Path(user_data_root or USER_DATA_DIR)
             / "packs"
             / "rumi_tool_registry_pack"
             / "profiles"
