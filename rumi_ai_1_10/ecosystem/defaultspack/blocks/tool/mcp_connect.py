@@ -33,9 +33,9 @@ def _mcp_config_path():
 
 
 def _load_saved_mcp_config(server_identifier):
-    registry_server = McpRegistry().get_server(server_identifier)
-    if registry_server:
-        return dict(registry_server.get("config") or {})
+    registry_config = McpRegistry().get_server_config(server_identifier)
+    if registry_config:
+        return registry_config
     config_path = _mcp_config_path()
     if not config_path.is_file():
         return None
@@ -142,10 +142,13 @@ def run(input_data, context):
     try:
         tools_added = mcp_client.connect(server_name, config)
     except Exception as exc:
+        ToolRegistry().unregister_mcp_server(server_name)
+        mcp_registry.mark_connected(server_name, status="error", tools=[], approved=None)
         record_tool_failure(OPERATION, RISK, approval_input, str(exc), server_name=server_name)
         return error("MCP connect failed: {}".format(exc), "MCP_CONNECT_ERROR")
 
     registry = ToolRegistry()
+    registry.unregister_mcp_server(server_name)
     registry.register_mcp_server(server_name, config)
 
     server_tools = mcp_client.get_server_tools(server_name)
@@ -195,6 +198,7 @@ def run(input_data, context):
 
     record_tool_execution(OPERATION, RISK, approval_input, server_name=server_name, tools_added=tools_added)
     mcp_registry.mark_connected(server_name, tools=registered_tools, approved=True)
+    inspect = mcp_registry.inspect_server(server_name)
     return ok(
         {
             "server_id": str(config.get("server_id", "") or server_name),
@@ -206,7 +210,7 @@ def run(input_data, context):
             "server": {
                 "name": server_name,
                 "transport": transport,
-                "config": registry.list_mcp_servers().get(server_name, {}),
+                "inspect": inspect,
             },
         }
     )

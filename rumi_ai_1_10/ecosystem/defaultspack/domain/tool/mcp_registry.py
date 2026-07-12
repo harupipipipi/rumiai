@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
 import time
+from urllib.parse import urlsplit, urlunsplit
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,19 @@ def default_registry_path() -> Path:
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+_MCP_LIFECYCLE_STATES = {
+    "registered",
+    "connecting",
+    "connected",
+    "degraded",
+    "disconnecting",
+    "disconnected",
+    "removal_pending",
+    "removed",
+    "error",
+}
 
 
 class McpRegistry:
@@ -42,11 +57,56 @@ class McpRegistry:
         return [self._public_server(server) for server in values if isinstance(server, dict)]
 
     def get_server(self, server_id: str) -> dict[str, Any] | None:
+        server = self._find_server(server_id)
+        return self._public_server(server) if server is not None else None
+
+    def get_server_config(self, server_id: str) -> dict[str, Any] | None:
+        """Return the saved connection configuration for server-side use only."""
+        server = self._find_server(server_id)
+        if server is None:
+            return None
+        config = server.get("config")
+        return dict(config) if isinstance(config, dict) else None
+
+    def inspect_server(self, server_id: str) -> dict[str, Any] | None:
+        """Return a display-safe server description without credential material."""
+        server = self._find_server(server_id)
+        if server is None:
+            return None
+        config = server.get("config") if isinstance(server.get("config"), dict) else {}
+        return {
+            "server_id": server.get("server_id"),
+            "name": server.get("name"),
+            "transport": server.get("transport"),
+            "status": server.get("status", "registered"),
+            "connected": bool(server.get("connected")),
+            "command": _redacted_command(config.get("command")),
+            "args": _redacted_args(config.get("args")),
+            "endpoint": _redacted_endpoint(config.get("url")),
+            "tools": list(server.get("tools", [])) if isinstance(server.get("tools"), list) else [],
+            "updated_at": server.get("updated_at"),
+        }
+
+    def config_digest(self, server_id: str) -> str | None:
+        """Return a server-side digest used to bind lifecycle approvals to a revision."""
+        config = self.get_server_config(server_id)
+        if config is None:
+            return None
+        encoded = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _find_server(self, server_id: str) -> dict[str, Any] | None:
         server_id = str(server_id or "").strip()
         if not server_id:
             return None
-        for server in self.list_servers():
-            if server_id in {server.get("server_id"), server.get("name")}:
+        data = self._read()
+        servers = data.get("servers", {})
+        if not isinstance(servers, dict):
+            return None
+        for candidate, server in servers.items():
+            if not isinstance(server, dict):
+                continue
+            if server_id in {str(candidate), str(server.get("server_id") or ""), str(server.get("name") or "")}:
                 return server
         return None
 
@@ -86,7 +146,13 @@ class McpRegistry:
         self._write(data)
         return True
 
-    def mark_connected(self, server_id: str, *, status: str = "connected", tools: list[Any] | None = None, approved: bool = True) -> dict[str, Any] | None:
+    def mark_disconnected(self, server_id: str) -> dict[str, Any] | None:
+        """Persist a transport-only disconnect without revoking stored grants."""
+        return self.mark_connected(server_id, status="disconnected", tools=None, approved=None)
+
+    def mark_connected(self, server_id: str, *, status: str = "connected", tools: list[Any] | None = None, approved: bool | None = True) -> dict[str, Any] | None:
+        if status not in _MCP_LIFECYCLE_STATES:
+            raise ValueError("unsupported MCP lifecycle status: {}".format(status))
         data = self._read()
         servers = data.get("servers", {})
         if not isinstance(servers, dict):
@@ -100,8 +166,10 @@ class McpRegistry:
                 if tools is not None:
                     server["tools"] = tools
                 permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
-                permissions["approved"] = bool(approved)
-                permissions.setdefault("approved_at", _now_iso())
+                if approved is not None:
+                    permissions["approved"] = bool(approved)
+                    if approved:
+                        permissions.setdefault("approved_at", _now_iso())
                 server["permissions"] = permissions
                 self._write(data)
                 return self._public_server(server)
@@ -177,3 +245,60 @@ class McpRegistry:
             "updated_at": server.get("updated_at"),
             "metadata": server.get("metadata", {}),
         }
+
+
+_SENSITIVE_ARG_MARKERS = ("token", "secret", "password", "apikey", "api-key", "authorization", "cookie")
+
+
+def _redacted_args(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    redact_next = False
+    for raw_item in value:
+        item = str(raw_item)
+        marker = item.lower()
+        if redact_next:
+            result.append("[redacted]")
+            redact_next = False
+            continue
+        if any(sensitive in marker for sensitive in _SENSITIVE_ARG_MARKERS):
+            if "=" in item:
+                key, _value = item.split("=", 1)
+                result.append(f"{key}=[redacted]")
+            else:
+                result.append(item)
+                redact_next = True
+            continue
+        result.append(item)
+    return result
+
+
+def _redacted_command(value: Any) -> str | None:
+    command = str(value or "").strip()
+    if not command:
+        return None
+    if any(marker in command.lower() for marker in _SENSITIVE_ARG_MARKERS):
+        return "[redacted command]"
+    return command
+
+
+def _redacted_endpoint(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return "[redacted endpoint]"
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "[redacted endpoint]"
+    netloc = hostname
+    try:
+        port = parsed.port
+    except ValueError:
+        return "[redacted endpoint]"
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "[redacted]" if parsed.query else "", ""))
