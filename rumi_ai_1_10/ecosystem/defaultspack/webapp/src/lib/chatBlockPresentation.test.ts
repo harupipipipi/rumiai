@@ -34,3 +34,9 @@ test("malformed and huge unknown values produce bounded diagnostics", () => {
   assert.ok(details.length < 1000);
   assert.doesNotMatch(details, /xxxx/);
 });
+
+test("unknown type values are not reflected in developer diagnostics", () => {
+  const details = safeUnknownBlockDetails({ type: "secret-do-not-leak", value: "ignored" });
+  assert.match(details, /"blockType": "unknown"/);
+  assert.doesNotMatch(details, /secret-do-not-leak/);
+});

@@ -681,6 +681,7 @@ export function CompanyWorkspacePanel({
               });
             })}
             onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
+            onDeleteTask={(taskId) => activeCompanyId && void run(() => companyResources.deleteCompanyTask(activeCompanyId, taskId))}
             onDispatchTask={(taskId) => activeCompanyId && void run(() => companyResources.dispatchCompanyTask(activeCompanyId, taskId))}
           />
         );

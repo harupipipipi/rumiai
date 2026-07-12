@@ -60,6 +60,7 @@ import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
+import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
 import {
   canExecuteComposerEndpointAction,
   composerMentionMetadataFromWidgets,
@@ -876,7 +877,7 @@ function CalendarComposerPanel({
         scheduleId = schedule.scheduleId;
         scheduleStatus = schedule.scheduleStatus;
       } else if (existing?.scheduleId) {
-        await api.deleteSchedule(existing.scheduleId).catch(() => undefined);
+        await deleteCalendarScheduleBeforeLocalChange(existing.scheduleId, api.deleteSchedule);
         scheduleId = undefined;
         scheduleStatus = undefined;
       }
@@ -910,7 +911,7 @@ function CalendarComposerPanel({
     setIsSavingDraft(true);
     setDraftError(null);
     try {
-      if (activeItem.scheduleId) await api.deleteSchedule(activeItem.scheduleId).catch(() => undefined);
+      await deleteCalendarScheduleBeforeLocalChange(activeItem.scheduleId, api.deleteSchedule);
       setItems((current) => current.filter((item) => item.id !== activeItem.id));
       setActiveEditor(null);
     } catch (error) {

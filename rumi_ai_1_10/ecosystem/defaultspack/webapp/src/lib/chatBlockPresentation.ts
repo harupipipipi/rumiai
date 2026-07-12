@@ -26,7 +26,14 @@ export function unknownBlockDiagnostic(block: unknown): UnknownBlockDiagnostic {
   const record = block && typeof block === "object" && !Array.isArray(block)
     ? block as Record<string, unknown>
     : {};
-  const type = typeof record.type === "string" ? record.type.slice(0, 80) : "malformed";
+  const rawType = typeof record.type === "string" ? record.type : "";
+  // `type` comes from an untrusted block too. It is useful only as a bounded,
+  // identifier-like diagnostic label; never reflect arbitrary value text.
+  const type = rawType.length <= 80
+    && SAFE_FIELD_NAME_PATTERN.test(rawType)
+    && !PRIVATE_FIELD_PATTERN.test(rawType)
+    ? rawType
+    : rawType ? "unknown" : "malformed";
   const sourceVersionValue = record.schema_version ?? record.version;
   const sourceVersion = typeof sourceVersionValue === "string" && /^[a-z0-9_.-]{1,32}$/i.test(sourceVersionValue)
     ? sourceVersionValue
