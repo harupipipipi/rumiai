@@ -28,8 +28,8 @@ test("credentials, custom and active schemes fail closed", () => {
   }
 });
 
-test("localhost, private IPv4 and private IPv6 fail closed", () => {
-  for (const target of ["http://localhost/a", "http://127.1.2.3/a", "http://10.2.3.4", "http://172.20.1.1", "http://192.168.1.2", "http://[::1]/", "http://[fd00::1]/"]) {
+test("localhost, private IPv4, private IPv6, and IPv4-mapped IPv6 fail closed", () => {
+  for (const target of ["http://localhost/a", "http://127.1.2.3/a", "http://10.2.3.4", "http://172.20.1.1", "http://192.168.1.2", "http://[::1]/", "http://[fd00::1]/", "http://[::ffff:127.0.0.1]/"]) {
     const decision = classifyChatLink(target, target, ORIGIN);
     assert.equal(decision.kind, "local", target);
     assert.equal(decision.allowed, false, target);

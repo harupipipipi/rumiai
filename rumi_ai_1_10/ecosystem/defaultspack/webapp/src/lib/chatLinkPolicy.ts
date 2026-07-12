@@ -29,6 +29,10 @@ function isLocalHost(host: string): boolean {
   return lowered === "localhost"
     || lowered.endsWith(".localhost")
     || lowered === "::1"
+    // IPv4-mapped IPv6 literals can resolve to a loopback/private IPv4
+    // address after URL parsing canonicalizes their final 32 bits. Block the
+    // entire representation instead of attempting a lossy reverse conversion.
+    || lowered.startsWith("::ffff:")
     || lowered.startsWith("fe80:")
     || lowered.startsWith("fc")
     || lowered.startsWith("fd")
