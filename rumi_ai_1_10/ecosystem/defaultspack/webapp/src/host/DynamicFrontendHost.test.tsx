@@ -101,4 +101,8 @@ test("isolated executable UI uses an opaque-origin iframe", () => {
   const frame = screen.getByTitle("Dynamic feature");
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
   expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
+  expect(frame.getAttribute("src")).toContain("profile_id=fixture");
+  expect(frame.getAttribute("src")).toContain("rumi_rpc_nonce=");
+  expect(frame.getAttribute("src")).not.toContain("authorization");
+  expect(frame.getAttribute("src")).not.toContain("token");
 });

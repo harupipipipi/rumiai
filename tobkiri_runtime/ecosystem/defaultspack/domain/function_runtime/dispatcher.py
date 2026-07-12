@@ -183,8 +183,6 @@ def _apply_function_defaults(function_id: str, payload: dict[str, Any]) -> dict[
         payload.setdefault("_method", "PUT")
     elif function_id == "prompt_system_get":
         payload.setdefault("_method", "GET")
-    elif function_id == "prompt_system_set":
-        payload.setdefault("_method", "PUT")
     elif function_id == "coding_git_branch_get":
         payload.setdefault("_method", "GET")
     elif function_id == "coding_git_branch_create":

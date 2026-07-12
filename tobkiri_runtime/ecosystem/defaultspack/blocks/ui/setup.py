@@ -6,13 +6,21 @@ import os
 import sys
 
 
-def _lazy(module_path: str, func_name: str = "run"):
+def _lazy(
+    module_path: str,
+    func_name: str = "run",
+    *,
+    sensitive: bool = False,
+    local_only: bool = False,
+):
     def handler(request_data, context):
         import importlib
 
         mod = importlib.import_module(module_path)
         return getattr(mod, func_name)(request_data, context)
 
+    handler.__rumi_route_sensitive__ = sensitive
+    handler.__rumi_route_local_only__ = local_only
     return handler
 
 
@@ -52,6 +60,16 @@ def run(context):
     source_component = context.get("_source_component", "defaultspack:frontend:ui")
     routes = [
         ("GET", "/api/ui/catalog", _lazy("blocks.ui.catalog"), {}),
+        (
+            "POST",
+            "/api/ui/capability/invoke",
+            _lazy(
+                "blocks.ui.frontend_capability",
+                sensitive=True,
+                local_only=True,
+            ),
+            {},
+        ),
         ("GET", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("PUT", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("GET", "/api/ui/provider-health", _lazy("blocks.ui.provider_health"), {}),
@@ -62,6 +80,12 @@ def run(context):
         ("POST", "/api/ui/clipboard", _lazy("blocks.ui.clipboard"), {}),
         ("POST", "/api/ui/client-events", _lazy("blocks.ui.client_events"), {}),
         ("POST", "/api/ui/compile-plan", _lazy("blocks.ui.compile_plan"), {}),
+        (
+            "GET",
+            "/isolated/packs/{pack_id}/{path}",
+            _lazy("blocks.ui.isolated_pack_asset", local_only=True),
+            {"pack_id": "pack_id", "path": "asset_path"},
+        ),
         (
             "GET",
             "/api/ui/conversations/{id}/preview",
@@ -81,6 +105,18 @@ def run(context):
         ("GET", "/console", _static_shell, {}),
         ("GET", "/host-permissions", _static_shell, {}),
     ]
+    try:
+        from core_runtime.frontend_host import build_frontend_catalog
+        from core_runtime.resolved_profile_scope import active_resolved_profile
+
+        plan = active_resolved_profile()
+        if plan is not None and any(
+            item.kind == "route" and item.route == "/prompts"
+            for item in build_frontend_catalog(plan).contributions
+        ):
+            routes.append(("GET", "/prompts", _static_shell, {}))
+    except Exception:
+        pass
 
     for method, pattern, handler, path_inject in routes:
         interface_registry.register(

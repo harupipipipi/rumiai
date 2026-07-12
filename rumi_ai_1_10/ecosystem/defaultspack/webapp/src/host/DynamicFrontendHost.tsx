@@ -67,7 +67,11 @@ export function DynamicFrontendHost({
           fallback={<HostFallback title={`${item.label} is unavailable`} />}
           onError={() => quarantined.add(quarantineKey(item))}
         >
-          <ContributionView item={item} capabilities={capabilities} />
+          <ContributionView
+            item={item}
+            profileId={catalog.profile_id}
+            capabilities={capabilities}
+          />
         </ContributionBoundary>
       ))}
     </div>
@@ -76,16 +80,24 @@ export function DynamicFrontendHost({
 
 function ContributionView({
   item,
+  profileId,
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
+  profileId: string;
   capabilities: FrontendCapabilityClient;
 }) {
   if (item.mode === "declarative") {
     return <DeclarativeView item={item} capabilities={capabilities} />;
   }
   if (item.mode === "isolated") {
-    return <IsolatedView item={item} capabilities={capabilities} />;
+    return (
+      <IsolatedView
+        item={item}
+        profileId={profileId}
+        capabilities={capabilities}
+      />
+    );
   }
   return <BuiltinModuleView item={item} />;
 }
@@ -108,7 +120,10 @@ function DeclarativeView({
     try {
       setResult(await capabilities.invokeAction({
         contractId: item.action_contract,
-        payload: {},
+        payload: {
+          operation: String(view.operation ?? "invoke"),
+          input: {},
+        },
         contributionId: item.contribution_id,
         ownerPackId: item.owner_pack_id,
         planHash: item.resolved_plan_hash,
@@ -137,14 +152,23 @@ function DeclarativeView({
 
 function IsolatedView({
   item,
+  profileId,
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
+  profileId: string;
   capabilities: FrontendCapabilityClient;
 }) {
   const source = item.isolated?.path;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const nonce = useMemo(() => rpcNonce(), []);
+  const frameSource = useMemo(() => {
+    if (!source) return "";
+    const url = new URL(source, window.location.origin);
+    url.searchParams.set("profile_id", profileId);
+    url.hash = `rumi_rpc_nonce=${encodeURIComponent(nonce)}`;
+    return `${url.pathname}${url.search}${url.hash}`;
+  }, [nonce, profileId, source]);
   useEffect(() => {
     const allowed = new Set(item.isolated?.rpc_contracts ?? []);
     const receive = async (event: MessageEvent) => {
@@ -187,10 +211,11 @@ function IsolatedView({
     <iframe
       ref={frameRef}
       title={item.accessibility.name}
-      src={`${source}#rumi_rpc_nonce=${encodeURIComponent(nonce)}`}
+      src={frameSource}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       loading="lazy"
+      style={{ width: "100%", minHeight: "100vh", border: 0 }}
       data-contribution-id={item.contribution_id}
     />
   );

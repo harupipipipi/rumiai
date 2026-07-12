@@ -37,7 +37,6 @@ import {
   workspaceKindForPathname,
   workspaceUrlForKind,
 } from "./lib/workspaceRouting";
-import { PromptStudio } from "./pages/PromptStudio";
 import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
 import { ConversationShareLanding, ImportedConversationNotice } from "./pages/ConversationShareLanding";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
@@ -6079,17 +6078,6 @@ function ChatApp() {
     openKanbanScope({ type: "group", id: group.id }, group.title);
   };
 
-  const openPromptStudio = (promptId?: string) => {
-    const url = new URL(window.location.href);
-    url.pathname = "/prompts";
-    url.search = "";
-    if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
-    if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
-    if (promptId) url.searchParams.set("prompt_id", promptId);
-    const modelProfileId = profileIdentity(activeProfile) || activeModelId;
-    if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
-    window.location.href = `${url.pathname}${url.search}${url.hash}`;
-  };
   const renderComposer = (isCentered = false) => {
     if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
       return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
@@ -6536,7 +6524,6 @@ function ChatApp() {
             onLoadPromptActive={promptResources.getActiveSummary}
             onTogglePromptEdge={promptResources.toggleEdge}
             onToggleChatPromptUsage={setShowPromptUsageInMessages}
-            onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}
@@ -6691,9 +6678,6 @@ export default function App() {
 
   if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
-  }
-  if (pathname === "/prompts") {
-    return <PromptStudio />;
   }
   if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
     return <UiPrecisionComparator />;

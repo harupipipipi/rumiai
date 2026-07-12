@@ -356,7 +356,6 @@ test("prompt sidebar widget lists prompt name and token count before details", (
       },
       loadPromptActive: async () => ({ segments: [] }),
       togglePromptEdge: async () => ({ segments: [] }),
-      onOpenStudio: noop,
     }),
   );
 
@@ -380,7 +379,6 @@ test("prompt sidebar widget exposes chat prompt disclosure toggle", () => {
       togglePromptEdge: async () => ({ segments: [] }),
       showChatPromptUsage: false,
       onToggleChatPromptUsage: noop,
-      onOpenStudio: noop,
     }),
   );
 

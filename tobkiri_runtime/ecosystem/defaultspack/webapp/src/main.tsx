@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { HostBootstrap } from "./host/HostBootstrap";
 import {
   cleanupLegacyApprovalCredentialsEarly,
 } from "./lib/authorityApprovalBrowserToken";
@@ -15,12 +16,13 @@ installGlobalClientDiagnostics();
 // the root host bundle imports no feature screen. Wave 10 removes this alias
 // after every builtin screen is represented by a profile-scoped contribution.
 const CompatibilitySurface = lazy(() => import("./App"));
+const route = window.location.pathname;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppErrorBoundary>
       <Suspense fallback={<main role="status">Loading selected interface…</main>}>
-        <CompatibilitySurface />
+        <HostBootstrap route={route} fallback={<CompatibilitySurface />} />
       </Suspense>
     </AppErrorBoundary>
   </React.StrictMode>,

@@ -966,7 +966,6 @@ export function RightSidebar({
   onLoadPromptActive,
   onTogglePromptEdge,
   onToggleChatPromptUsage,
-  onOpenPromptStudio,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -1001,7 +1000,6 @@ export function RightSidebar({
   onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
   onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
   onToggleChatPromptUsage?: (visible: boolean) => void;
-  onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -1897,7 +1895,6 @@ export function RightSidebar({
                 togglePromptEdge={onTogglePromptEdge}
                 showChatPromptUsage={showChatPromptUsage}
                 onToggleChatPromptUsage={onToggleChatPromptUsage}
-                onOpenStudio={onOpenPromptStudio}
               />
             ) : isToolFilterLogActive ? (
               <ToolFilterLogWidget entries={toolFilterEntries} />
