@@ -12,8 +12,6 @@ type TerminalLog = CodingTerminalResponse & {
   replay_status?: "retrying" | "replayed";
 };
 
-const EMPTY_LOGS: TerminalLog[] = [];
-
 export type ApprovedTerminalDecision = {
   request_id: string;
   approved?: boolean;
@@ -35,25 +33,23 @@ export const TERMINAL_HISTORY_POLICY = {
 
 export function TerminalPanel({
   workspaceId,
-  initialLogs = EMPTY_LOGS,
   approvedDecision,
   onActionResult,
 }: {
   workspaceId?: string | null;
-  initialLogs?: TerminalLog[];
   approvedDecision?: ApprovedTerminalDecision | null;
   onActionResult?: (result: unknown) => void;
 }) {
   const [command, setCommand] = useState("git status");
-  const [logs, setLogs] = useState<TerminalLog[]>(() => initialLogs.slice(0, 8));
+  const [logs, setLogs] = useState<TerminalLog[]>([]);
   const [busy, setBusy] = useState(false);
   const handledApprovalKeys = useRef<Set<string>>(new Set());
   const sessionPendingApprovals = useRef<Map<string, TerminalLog>>(new Map());
 
   useEffect(() => {
-    setLogs(initialLogs.slice(0, 8));
+    setLogs([]);
     sessionPendingApprovals.current.clear();
-  }, [initialLogs, workspaceId]);
+  }, [workspaceId]);
 
   const pushLog = (log: TerminalLog) => {
     if (log.approval_required && log.approval_request_id) {

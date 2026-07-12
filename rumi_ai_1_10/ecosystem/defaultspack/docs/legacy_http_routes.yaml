@@ -972,6 +972,13 @@ legacy_routes:
   owner: company
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: DELETE
+  pattern: /api/company/{company_id}/tasks/{task_id}
+  legacy_block_module: blocks.company.tasks
+  replacement_function_id: ''
+  owner: company
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/company/{company_id}/dispatch
   legacy_block_module: blocks.company.dispatch

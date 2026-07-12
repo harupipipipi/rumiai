@@ -114,27 +114,12 @@ test("checkpoint panel renders refresh and restore-review controls for supplied 
   assert.match(html, /-before/);
 });
 
-test("terminal panel renders classification and risk reasons", () => {
+test("terminal panel starts empty and accepts no initial history", () => {
   const html = renderToStaticMarkup(
-    createElement(TerminalPanel, {
-      initialLogs: [
-        {
-          id: "log-1",
-          command: "git push origin main",
-          approval_required: true,
-          classification: "high",
-          risk_reasons: ["network"],
-          exit_code: null,
-          stdout: "",
-          stderr: "",
-        },
-      ],
-    }),
+    createElement(TerminalPanel, {}),
   );
 
-  assert.match(html, /git push origin main/);
-  assert.match(html, /approval/);
-  assert.match(html, /network/);
+  assert.match(html, /No terminal runs/);
   assert.match(html, /Memory only/);
   assert.match(html, /not saved to browser storage/);
   assert.match(html, /aria-label="Clear terminal history from this private session"/);
