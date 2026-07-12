@@ -142,6 +142,30 @@ def test_task_assignment_index_tracks_create_and_update(tmp_path):
     assert new_tasks[0]["target_agent_ids"] == ["scribe"]
 
 
+def test_company_runtime_store_deletes_only_the_scoped_task_and_assignments(tmp_path):
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    store = CompanyRuntimeStore(tmp_path / "company_runtime.db")
+    task = store.create_task("acme", title="Remove me", target_agent_ids=["reviewer"])
+    other = store.create_task("other", title="Keep me", target_agent_ids=["reviewer"])
+
+    assert store.delete_task(task["task_id"], company_id="other") is False
+    assert store.get_task(task["task_id"], company_id="acme") is not None
+    assert store.delete_task(task["task_id"], company_id="acme") is True
+    assert store.get_task(task["task_id"], company_id="acme") is None
+    assignment_count = store.conn.execute(
+        "SELECT COUNT(*) AS count FROM company_task_assignments WHERE task_id = ?",
+        (task["task_id"],),
+    ).fetchone()["count"]
+    assert assignment_count == 0
+    summary_count = store.conn.execute(
+        "SELECT COUNT(*) AS count FROM company_summaries WHERE company_id = ? AND scope_type = 'task' AND scope_id = ?",
+        ("acme", task["task_id"]),
+    ).fetchone()["count"]
+    assert summary_count == 0
+    assert store.get_task(other["task_id"], company_id="other") is not None
+
+
 def test_find_active_run_marks_missing_and_terminal_links_inactive(tmp_path, monkeypatch):
     from domain.agent_runtime.models import AgentRun
     from domain.agent_runtime.run_store import AgentRunStore

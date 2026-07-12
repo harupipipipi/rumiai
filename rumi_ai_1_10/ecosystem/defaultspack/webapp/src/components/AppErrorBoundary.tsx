@@ -57,7 +57,8 @@ export class AppErrorBoundary extends Component<Props, State> {
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = href; anchor.download = "rumi-recoverable-drafts.json"; anchor.click();
-    URL.revokeObjectURL(href);
+    // Safari may defer consuming the object URL until after the click handler returns.
+    window.setTimeout(() => URL.revokeObjectURL(href), 0);
   };
 
   private diagnosticCopy(): string {

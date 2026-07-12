@@ -1,4 +1,4 @@
-import { Check, ClipboardList, Plus, Search, Send } from "lucide-react";
+import { ClipboardList, Plus, Search, Send, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { CompanyAgent, CompanyRunLink, CompanyTask } from "../../lib/api";
@@ -15,6 +15,7 @@ export function CompanyTaskBoard({
   onCreateTask,
   onCreateResearchTask,
   onUpdateTask,
+  onDeleteTask,
   onDispatchTask,
 }: {
   tasks: CompanyTask[];
@@ -25,10 +26,12 @@ export function CompanyTaskBoard({
   onCreateTask?: (title: string, targetAgentIds: string[]) => void;
   onCreateResearchTask?: (query: string, targetAgentIds: string[]) => void;
   onUpdateTask?: (taskId: string, updates: Partial<CompanyTask>) => void;
+  onDeleteTask?: (taskId: string) => void;
   onDispatchTask?: (taskId: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [targetAgentId, setTargetAgentId] = useState("");
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
   const grouped = useMemo(() => {
     const map = new Map<string, CompanyTask[]>();
     for (const task of tasks) {
@@ -146,16 +149,56 @@ export function CompanyTaskBoard({
                             <Send size={11} />
                           </button>
                         )}
-                        {onUpdateTask && status !== "done" && status !== "completed" && (
+                        {onUpdateTask && (
+                          <select
+                            value={status}
+                            onChange={(event) => onUpdateTask(task.id, { status: event.target.value })}
+                            disabled={busy}
+                            aria-label={`Move ${task.title} to status`}
+                            className="h-6 max-w-28 rounded border border-zinc-800 bg-zinc-950 px-1 text-[10px] text-zinc-400 disabled:opacity-40"
+                          >
+                            {visibleStatuses.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        )}
+                        {onDeleteTask && deleteCandidateId !== task.id && (
                           <button
                             type="button"
-                            onClick={() => onUpdateTask(task.id, { status: "completed" })}
+                            onClick={() => setDeleteCandidateId(task.id)}
                             disabled={busy}
-                            className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-                            title="Mark complete"
+                            className="flex h-6 w-6 items-center justify-center rounded border border-red-500/20 text-red-300/70 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"
+                            title={`Delete ${task.title}`}
+                            aria-label={`Delete ${task.title}`}
                           >
-                            <Check size={11} />
+                            <Trash2 size={11} />
                           </button>
+                        )}
+                        {onDeleteTask && deleteCandidateId === task.id && (
+                          <div className="flex items-center gap-1" role="group" aria-label={`Confirm deletion of ${task.title}`}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onDeleteTask(task.id);
+                                setDeleteCandidateId(null);
+                              }}
+                              disabled={busy}
+                              className="h-6 rounded border border-red-500/30 px-1.5 text-[10px] text-red-200 hover:bg-red-500/10 disabled:opacity-40"
+                              title={`Confirm delete ${task.title}`}
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteCandidateId(null)}
+                              disabled={busy}
+                              className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 hover:bg-zinc-800 disabled:opacity-40"
+                              title="Cancel delete"
+                              aria-label="Cancel delete"
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
