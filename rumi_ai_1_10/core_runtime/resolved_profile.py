@@ -1,0 +1,948 @@
+"""Authoritative immutable runtime-plan resolution for one profile revision."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform as host_platform
+import shutil
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+from .dependency_resolver import extract_dependency_specs, version_satisfies
+from .global_contracts.canonical import canonical_json, content_identity
+from .global_contracts.models import (
+    ContractRequirement,
+    ContractStatus,
+    ProviderDescriptor,
+)
+from .global_contracts.registry import ContractRegistry
+from .paths import PackLocation, resolve_pack_locations
+
+RESOLVED_PROFILE_VERSION = "rumi.resolved-profile.v1"
+LOCKFILE_VERSION = "rumi.profile-lock.v1"
+
+PROJECTION_TYPES = (
+    "routes",
+    "ui",
+    "tools",
+    "prompts",
+    "models",
+    "providers",
+    "services",
+    "resources",
+    "graphs",
+    "policies",
+    "scheduler",
+)
+
+_COMPONENT_TYPE_TO_PROJECTION = {
+    "frontend": "ui",
+    "route": "routes",
+    "tool": "tools",
+    "prompt": "prompts",
+    "model": "models",
+    "provider": "providers",
+    "ai_client": "providers",
+    "service": "services",
+    "resource": "resources",
+    "graph": "graphs",
+    "policy": "policies",
+    "scheduler": "scheduler",
+}
+
+
+@dataclass(frozen=True)
+class ResolutionDiagnostic:
+    """One stable explanation emitted while creating a runtime plan."""
+
+    code: str
+    severity: str
+    message: str
+    subject: str | None = None
+    details: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedPack:
+    """A selected data-only pack identity pinned by manifest content."""
+
+    pack_id: str
+    version: str
+    manifest_hash: str
+    content_hash: str
+    requested: bool
+    available: bool
+    selected: bool
+    healthy: bool
+    authorized: bool
+
+
+@dataclass(frozen=True)
+class ResolvedProvider:
+    """A selected global-contract provider without executable/source paths."""
+
+    contract_id: str
+    provider_instance_id: str
+    source_pack_id: str
+    version: str
+    content_hash: str
+    credential_handle: str | None = None
+    credential_scopes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Reject credential values masquerading as opaque handles."""
+        if self.credential_handle is not None and not self.credential_handle.startswith(
+            ("credential:", "opaque:")
+        ):
+            raise ValueError("credential_handle must be an opaque handle")
+
+
+@dataclass(frozen=True)
+class ResourceProjection:
+    """A complete projection contributed by one effective pack."""
+
+    kind: str
+    resource_id: str
+    source_pack_id: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class ResolutionInput:
+    """All inputs that participate in deterministic plan identity."""
+
+    profile_id: str
+    profile_revision: str
+    platform: str
+    policy_revision: str
+    lockfile_revision: str | None
+    requested_pack_ids: tuple[str, ...]
+    requested_contracts: tuple[ContractRequirement, ...] = ()
+    authorized_pack_ids: tuple[str, ...] = ()
+    healthy_pack_ids: tuple[str, ...] = ()
+    policy_capabilities: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedProfile:
+    """Immutable, complete, revision-bound runtime plan."""
+
+    version: str
+    profile_id: str
+    profile_revision: str
+    platform: str
+    policy_revision: str
+    requested_pack_ids: tuple[str, ...]
+    available_pack_ids: tuple[str, ...]
+    selected_pack_ids: tuple[str, ...]
+    healthy_pack_ids: tuple[str, ...]
+    authorized_pack_ids: tuple[str, ...]
+    effective_pack_set: tuple[str, ...]
+    packs: tuple[ResolvedPack, ...]
+    providers: tuple[ResolvedProvider, ...]
+    projections: tuple[ResourceProjection, ...]
+    effective_permissions: tuple[str, ...]
+    diagnostics: tuple[ResolutionDiagnostic, ...]
+    input_hash: str
+    plan_hash: str
+
+    def projections_for(self, kind: str) -> tuple[ResourceProjection, ...]:
+        """Return one precomputed projection without rediscovering packs."""
+        return tuple(item for item in self.projections if item.kind == kind)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe snapshot of this immutable plan."""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ProfileLockfile:
+    """Secret-free lockfile for every selected pack/provider/resource."""
+
+    version: str
+    profile_id: str
+    profile_revision: str
+    plan_hash: str
+    input_hash: str
+    packs: tuple[ResolvedPack, ...]
+    providers: tuple[ResolvedProvider, ...]
+    resources: tuple[ResourceProjection, ...]
+    lock_hash: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return canonical lockfile data suitable for persistence."""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LockfileValidation:
+    """Result of comparing a lockfile with a newly resolved plan."""
+
+    status: ContractStatus
+    diagnostics: tuple[ResolutionDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class LegacyMigrationPlan:
+    """Dry-run description for one-way legacy selection migration."""
+
+    profile_id: str
+    before_pack_ids: tuple[str, ...]
+    imported_pack_ids: tuple[str, ...]
+    after_pack_ids: tuple[str, ...]
+    changed: bool
+    backup_path: str | None = None
+
+
+def resolve_profile(
+    resolution_input: ResolutionInput,
+    *,
+    ecosystem_dir: Path | str | None = None,
+    providers: Sequence[ProviderDescriptor] = (),
+    expected_lockfile: ProfileLockfile | None = None,
+) -> ResolvedProfile:
+    """Resolve the single authoritative runtime plan from explicit inputs."""
+    requested = _unique(resolution_input.requested_pack_ids)
+    manifests, diagnostics = _read_manifest_closure(
+        requested,
+        ecosystem_dir=(str(ecosystem_dir) if ecosystem_dir is not None else None),
+    )
+    available = tuple(sorted(manifests))
+    selected, dependency_diagnostics = _dependency_closure(requested, manifests)
+    diagnostics.extend(dependency_diagnostics)
+
+    authorized = set(resolution_input.authorized_pack_ids)
+    healthy = set(resolution_input.healthy_pack_ids)
+    if not resolution_input.healthy_pack_ids:
+        healthy = set(available)
+
+    effective = tuple(
+        pack_id
+        for pack_id in selected
+        if pack_id in manifests and pack_id in authorized and pack_id in healthy
+    )
+    for pack_id in selected:
+        if pack_id not in manifests:
+            diagnostics.append(
+                _diagnostic(
+                    "missing_pack",
+                    "error",
+                    f"Selected pack is not available: {pack_id}",
+                    pack_id,
+                )
+            )
+        elif pack_id not in authorized:
+            diagnostics.append(
+                _diagnostic(
+                    "pack_not_authorized",
+                    "error",
+                    f"Selected pack is not authorized: {pack_id}",
+                    pack_id,
+                )
+            )
+        elif pack_id not in healthy:
+            diagnostics.append(
+                _diagnostic(
+                    "pack_unhealthy",
+                    "warning",
+                    f"Selected pack is unhealthy: {pack_id}",
+                    pack_id,
+                )
+            )
+
+    resolved_packs = tuple(
+        _resolved_pack(
+            pack_id,
+            manifests.get(pack_id),
+            requested=pack_id in requested,
+            selected=pack_id in selected,
+            healthy=pack_id in healthy,
+            authorized=pack_id in authorized,
+        )
+        for pack_id in selected
+    )
+    projections = _project_resources(effective, manifests)
+    resolved_providers, provider_diagnostics = _resolve_contracts(
+        resolution_input.requested_contracts,
+        providers,
+        effective,
+    )
+    diagnostics.extend(provider_diagnostics)
+    effective_permissions = _effective_permissions(
+        effective,
+        manifests,
+        resolution_input.policy_capabilities,
+    )
+
+    input_payload = _input_payload(resolution_input, manifests)
+    input_hash = content_identity(input_payload)
+    plan_payload = {
+        "version": RESOLVED_PROFILE_VERSION,
+        "profile_id": resolution_input.profile_id,
+        "profile_revision": resolution_input.profile_revision,
+        "platform": resolution_input.platform,
+        "policy_revision": resolution_input.policy_revision,
+        "requested_pack_ids": requested,
+        "available_pack_ids": available,
+        "selected_pack_ids": selected,
+        "healthy_pack_ids": tuple(sorted(healthy)),
+        "authorized_pack_ids": tuple(sorted(authorized)),
+        "effective_pack_set": effective,
+        "packs": tuple(asdict(item) for item in resolved_packs),
+        "providers": tuple(asdict(item) for item in resolved_providers),
+        "projections": tuple(asdict(item) for item in projections),
+        "effective_permissions": effective_permissions,
+        "diagnostics": tuple(asdict(item) for item in diagnostics),
+        "input_hash": input_hash,
+    }
+    plan_hash = content_identity(plan_payload)
+    plan = ResolvedProfile(
+        version=RESOLVED_PROFILE_VERSION,
+        profile_id=resolution_input.profile_id,
+        profile_revision=resolution_input.profile_revision,
+        platform=resolution_input.platform,
+        policy_revision=resolution_input.policy_revision,
+        requested_pack_ids=requested,
+        available_pack_ids=available,
+        selected_pack_ids=selected,
+        healthy_pack_ids=tuple(sorted(healthy)),
+        authorized_pack_ids=tuple(sorted(authorized)),
+        effective_pack_set=effective,
+        packs=resolved_packs,
+        providers=resolved_providers,
+        projections=projections,
+        effective_permissions=effective_permissions,
+        diagnostics=tuple(diagnostics),
+        input_hash=input_hash,
+        plan_hash=plan_hash,
+    )
+    if expected_lockfile is not None:
+        validation = validate_lockfile(expected_lockfile, plan)
+        if validation.status is not ContractStatus.OK:
+            return _with_diagnostics(plan, validation.diagnostics)
+    return plan
+
+
+def resolution_input_from_startup_profile(
+    profile: Mapping[str, Any],
+    *,
+    profile_revision: str | None = None,
+    policy_revision: str | None = None,
+    lockfile_revision: str | None = None,
+    legacy_selection: Mapping[str, Any] | None = None,
+) -> ResolutionInput:
+    """Normalize startup and legacy setup selection into one explicit input."""
+    profile_id = str(profile.get("profile_id") or profile.get("id") or "").strip()
+    if not profile_id:
+        raise ValueError("profile_id is required")
+    requested = _string_items(profile.get("packs"))
+    base_pack = str(profile.get("base_pack") or "").strip()
+    if base_pack:
+        requested = (base_pack, *requested)
+    if legacy_selection:
+        requested = (*requested, *_legacy_selected_pack_ids(legacy_selection))
+    permissions = profile.get("permissions")
+    policy = profile.get("policy")
+    authorized = _string_items(
+        permissions.get("authorized_pack_ids")
+        if isinstance(permissions, Mapping)
+        else None
+    )
+    capabilities = _string_items(
+        policy.get("capabilities") if isinstance(policy, Mapping) else None
+    )
+    return ResolutionInput(
+        profile_id=profile_id,
+        profile_revision=profile_revision or _revision_of(profile),
+        platform=host_platform.system().lower(),
+        policy_revision=policy_revision or _revision_of(policy or {}),
+        lockfile_revision=lockfile_revision,
+        requested_pack_ids=_unique(requested),
+        requested_contracts=(),
+        authorized_pack_ids=_unique(authorized),
+        healthy_pack_ids=(),
+        policy_capabilities=_unique(capabilities),
+    )
+
+
+def create_lockfile(plan: ResolvedProfile) -> ProfileLockfile:
+    """Create a complete secret-free lockfile from a resolved plan."""
+    payload = {
+        "version": LOCKFILE_VERSION,
+        "profile_id": plan.profile_id,
+        "profile_revision": plan.profile_revision,
+        "plan_hash": plan.plan_hash,
+        "input_hash": plan.input_hash,
+        "packs": tuple(asdict(item) for item in plan.packs),
+        "providers": tuple(asdict(item) for item in plan.providers),
+        "resources": tuple(asdict(item) for item in plan.projections),
+    }
+    return ProfileLockfile(
+        version=LOCKFILE_VERSION,
+        profile_id=plan.profile_id,
+        profile_revision=plan.profile_revision,
+        plan_hash=plan.plan_hash,
+        input_hash=plan.input_hash,
+        packs=plan.packs,
+        providers=plan.providers,
+        resources=plan.projections,
+        lock_hash=content_identity(payload),
+    )
+
+
+def write_lockfile(path: Path, lockfile: ProfileLockfile) -> None:
+    """Atomically persist a canonical lockfile with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(canonical_json(lockfile.to_dict()) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+
+
+def read_lockfile(path: Path) -> ProfileLockfile:
+    """Read and verify a lockfile without accepting unknown secret fields."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("version") != LOCKFILE_VERSION:
+        raise ValueError("unsupported profile lockfile")
+    allowed = {
+        "version",
+        "profile_id",
+        "profile_revision",
+        "plan_hash",
+        "input_hash",
+        "packs",
+        "providers",
+        "resources",
+        "lock_hash",
+    }
+    unknown = set(payload) - allowed
+    if unknown:
+        raise ValueError("unknown lockfile fields: " + ", ".join(sorted(unknown)))
+    packs = tuple(ResolvedPack(**item) for item in payload.get("packs", ()))
+    providers = tuple(
+        ResolvedProvider(
+            **{
+                **item,
+                "credential_scopes": tuple(item.get("credential_scopes", ())),
+            }
+        )
+        for item in payload.get("providers", ())
+    )
+    resources = tuple(
+        ResourceProjection(**item) for item in payload.get("resources", ())
+    )
+    lockfile = ProfileLockfile(
+        version=payload["version"],
+        profile_id=str(payload["profile_id"]),
+        profile_revision=str(payload["profile_revision"]),
+        plan_hash=str(payload["plan_hash"]),
+        input_hash=str(payload["input_hash"]),
+        packs=packs,
+        providers=providers,
+        resources=resources,
+        lock_hash=str(payload["lock_hash"]),
+    )
+    expected = _lock_identity(lockfile)
+    if lockfile.lock_hash != expected:
+        raise ValueError("profile lockfile hash mismatch")
+    return lockfile
+
+
+def refresh_lockfile(path: Path, plan: ResolvedProfile) -> ProfileLockfile:
+    """Replace a stale lockfile atomically from an explicit new plan revision."""
+    lockfile = create_lockfile(plan)
+    write_lockfile(path, lockfile)
+    return lockfile
+
+
+def validate_lockfile(
+    lockfile: ProfileLockfile, plan: ResolvedProfile
+) -> LockfileValidation:
+    """Fail closed when any selected pack/provider/resource revision is stale."""
+    diagnostics: list[ResolutionDiagnostic] = []
+    if lockfile.lock_hash != _lock_identity(lockfile):
+        diagnostics.append(
+            _diagnostic(
+                "invalid_lockfile_hash",
+                "error",
+                "Lockfile content does not match its identity",
+                lockfile.profile_id,
+            )
+        )
+    if lockfile.profile_id != plan.profile_id:
+        diagnostics.append(
+            _diagnostic(
+                "lockfile_profile_mismatch",
+                "error",
+                "Lockfile belongs to a different profile",
+                lockfile.profile_id,
+            )
+        )
+    if lockfile.profile_revision != plan.profile_revision:
+        diagnostics.append(
+            _diagnostic(
+                "stale_profile_revision",
+                "error",
+                "Profile revision changed since lockfile creation",
+                plan.profile_id,
+            )
+        )
+    if lockfile.input_hash != plan.input_hash or lockfile.plan_hash != plan.plan_hash:
+        diagnostics.append(
+            _diagnostic(
+                "stale_resolution",
+                "error",
+                "Resolved inputs or selected resource hashes changed",
+                plan.profile_id,
+            )
+        )
+    return LockfileValidation(
+        status=(
+            ContractStatus.STALE_RESOLUTION
+            if diagnostics
+            else ContractStatus.OK
+        ),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def plan_legacy_selection_migration(
+    profile: Mapping[str, Any], selection: Mapping[str, Any]
+) -> LegacyMigrationPlan:
+    """Return a dry-run diff; legacy selection remains compatibility input."""
+    profile_id = str(profile.get("profile_id") or profile.get("id") or "").strip()
+    before = _unique(_string_items(profile.get("packs")))
+    imported = _legacy_selected_pack_ids(selection)
+    after = _unique((*before, *imported))
+    return LegacyMigrationPlan(
+        profile_id=profile_id,
+        before_pack_ids=before,
+        imported_pack_ids=imported,
+        after_pack_ids=after,
+        changed=before != after,
+    )
+
+
+def apply_legacy_selection_migration(
+    profile_path: Path,
+    selection_path: Path,
+    *,
+    backup_dir: Path,
+) -> LegacyMigrationPlan:
+    """Apply one-way migration with backup; never dual-write legacy state."""
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    plan = plan_legacy_selection_migration(profile, selection)
+    if not plan.changed:
+        return plan
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_dir / f"{profile_path.name}.{_sha256(profile_path)}.bak"
+    shutil.copy2(profile_path, backup_path)
+    migrated = dict(profile)
+    migrated["packs"] = list(plan.after_pack_ids)
+    migrated["legacy_setup_pack_selection_imported"] = True
+    temporary = profile_path.with_suffix(profile_path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(migrated, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(profile_path)
+    return LegacyMigrationPlan(
+        profile_id=plan.profile_id,
+        before_pack_ids=plan.before_pack_ids,
+        imported_pack_ids=plan.imported_pack_ids,
+        after_pack_ids=plan.after_pack_ids,
+        changed=True,
+        backup_path=str(backup_path),
+    )
+
+
+def rollback_legacy_selection_migration(
+    profile_path: Path, backup_path: Path
+) -> None:
+    """Restore the exact pre-migration profile without touching legacy input."""
+    if not backup_path.is_file():
+        raise FileNotFoundError(f"migration backup is missing: {backup_path}")
+    temporary = profile_path.with_suffix(profile_path.suffix + ".rollback.tmp")
+    shutil.copy2(backup_path, temporary)
+    temporary.replace(profile_path)
+
+
+def _read_manifests(
+    locations: Iterable[PackLocation],
+) -> tuple[dict[str, dict[str, Any]], list[ResolutionDiagnostic]]:
+    manifests: dict[str, dict[str, Any]] = {}
+    diagnostics: list[ResolutionDiagnostic] = []
+    for location in locations:
+        try:
+            raw = location.ecosystem_json_path.read_bytes()
+            payload = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as exc:
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    f"Manifest cannot be read: {type(exc).__name__}",
+                    location.pack_id,
+                )
+            )
+            continue
+        if not isinstance(payload, dict):
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    "Manifest root must be an object",
+                    location.pack_id,
+                )
+            )
+            continue
+        manifest = dict(payload)
+        manifest["_manifest_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+        manifest["_content_hash"] = _pack_content_hash(
+            location.pack_subdir, manifest["_manifest_hash"]
+        )
+        manifests[location.pack_id] = manifest
+    return manifests, diagnostics
+
+
+def _read_manifest_closure(
+    requested: tuple[str, ...],
+    *,
+    ecosystem_dir: str | None,
+) -> tuple[dict[str, dict[str, Any]], list[ResolutionDiagnostic]]:
+    """Read only requested manifests and their explicit dependency closure."""
+    manifests: dict[str, dict[str, Any]] = {}
+    diagnostics: list[ResolutionDiagnostic] = []
+    pending = set(requested)
+    visited: set[str] = set()
+    while pending:
+        batch = tuple(sorted(pending - visited))
+        if not batch:
+            break
+        visited.update(batch)
+        discovered, batch_diagnostics = _read_manifests(
+            resolve_pack_locations(batch, ecosystem_dir)
+        )
+        manifests.update(discovered)
+        diagnostics.extend(batch_diagnostics)
+        for manifest in discovered.values():
+            pending.update(
+                spec["pack_id"]
+                for spec in extract_dependency_specs(manifest)
+            )
+    return manifests, diagnostics
+
+
+def _dependency_closure(
+    requested: tuple[str, ...], manifests: Mapping[str, Mapping[str, Any]]
+) -> tuple[tuple[str, ...], list[ResolutionDiagnostic]]:
+    selected: set[str] = set()
+    visiting: list[str] = []
+    diagnostics: list[ResolutionDiagnostic] = []
+
+    def visit(pack_id: str) -> None:
+        if pack_id in selected:
+            return
+        if pack_id in visiting:
+            cycle = " -> ".join((*visiting, pack_id))
+            diagnostics.append(
+                _diagnostic(
+                    "dependency_cycle",
+                    "error",
+                    f"Pack dependency cycle: {cycle}",
+                    pack_id,
+                )
+            )
+            return
+        visiting.append(pack_id)
+        manifest = manifests.get(pack_id)
+        if manifest is not None:
+            for spec in sorted(
+                extract_dependency_specs(dict(manifest)),
+                key=lambda item: item["pack_id"],
+            ):
+                target = spec["pack_id"]
+                target_manifest = manifests.get(target)
+                constraint = spec.get("version")
+                if target_manifest is None:
+                    diagnostics.append(
+                        _diagnostic(
+                            "missing_dependency",
+                            "error",
+                            f"Required pack is unavailable: {target}",
+                            pack_id,
+                            target=target,
+                        )
+                    )
+                elif constraint and not version_satisfies(
+                    target_manifest.get("version"), constraint
+                ):
+                    diagnostics.append(
+                        _diagnostic(
+                            "incompatible_dependency",
+                            "error",
+                            f"Pack {target} does not satisfy {constraint}",
+                            pack_id,
+                            target=target,
+                        )
+                    )
+                visit(target)
+        visiting.pop()
+        selected.add(pack_id)
+
+    for pack_id in requested:
+        visit(pack_id)
+    return tuple(sorted(selected)), diagnostics
+
+
+def _resolved_pack(
+    pack_id: str,
+    manifest: Mapping[str, Any] | None,
+    *,
+    requested: bool,
+    selected: bool,
+    healthy: bool,
+    authorized: bool,
+) -> ResolvedPack:
+    return ResolvedPack(
+        pack_id=pack_id,
+        version=str((manifest or {}).get("version") or "unknown"),
+        manifest_hash=str((manifest or {}).get("_manifest_hash") or "missing"),
+        content_hash=str((manifest or {}).get("_content_hash") or "missing"),
+        requested=requested,
+        available=manifest is not None,
+        selected=selected,
+        healthy=healthy,
+        authorized=authorized,
+    )
+
+
+def _project_resources(
+    effective: tuple[str, ...], manifests: Mapping[str, Mapping[str, Any]]
+) -> tuple[ResourceProjection, ...]:
+    projections: list[ResourceProjection] = []
+    for pack_id in effective:
+        manifest = manifests[pack_id]
+        content_hash = str(manifest["_content_hash"])
+        components = manifest.get("components")
+        if isinstance(components, Mapping):
+            entries = components.items()
+        elif isinstance(components, list):
+            entries = (
+                (str(item.get("id") or index), item)
+                for index, item in enumerate(components)
+                if isinstance(item, Mapping)
+            )
+        else:
+            entries = ()
+        for component_id, component in entries:
+            if not isinstance(component, Mapping):
+                continue
+            component_type = str(component.get("type") or "").lower()
+            kind = _COMPONENT_TYPE_TO_PROJECTION.get(component_type)
+            if kind is None:
+                continue
+            resource_id = str(component.get("id") or component_id).strip()
+            if resource_id:
+                projections.append(
+                    ResourceProjection(kind, resource_id, pack_id, content_hash)
+                )
+        for kind in PROJECTION_TYPES:
+            values = manifest.get(kind)
+            if isinstance(values, Mapping):
+                resource_ids = values.keys()
+            elif isinstance(values, list):
+                resource_ids = (
+                    item.get("id") if isinstance(item, Mapping) else item
+                    for item in values
+                )
+            else:
+                continue
+            for resource_id in resource_ids:
+                value = str(resource_id or "").strip()
+                if value:
+                    projections.append(
+                        ResourceProjection(kind, value, pack_id, content_hash)
+                    )
+    return tuple(
+        sorted(
+            set(projections),
+            key=lambda item: (item.kind, item.resource_id, item.source_pack_id),
+        )
+    )
+
+
+def _resolve_contracts(
+    requirements: Sequence[ContractRequirement],
+    providers: Sequence[ProviderDescriptor],
+    effective: tuple[str, ...],
+) -> tuple[tuple[ResolvedProvider, ...], list[ResolutionDiagnostic]]:
+    registry = ContractRegistry()
+    effective_set = set(effective)
+    for provider in providers:
+        if provider.source_pack_id in effective_set:
+            registry.register(provider)
+    selected: list[ResolvedProvider] = []
+    diagnostics: list[ResolutionDiagnostic] = []
+    for requirement in requirements:
+        result = registry.resolve(requirement)
+        if result.status is not ContractStatus.OK:
+            diagnostics.append(
+                _diagnostic(
+                    result.status.value,
+                    "warning" if requirement.optional else "error",
+                    "; ".join(result.diagnostics),
+                    requirement.contract_id,
+                )
+            )
+            continue
+        for provider in result.value or ():
+            selected.append(
+                ResolvedProvider(
+                    contract_id=requirement.contract_id,
+                    provider_instance_id=provider.provider_instance_id,
+                    source_pack_id=provider.source_pack_id,
+                    version=provider.contract.version,
+                    content_hash=provider.content_hash,
+                )
+            )
+    return (
+        tuple(
+            sorted(
+                selected,
+                key=lambda item: (item.contract_id, item.provider_instance_id),
+            )
+        ),
+        diagnostics,
+    )
+
+
+def _effective_permissions(
+    effective: tuple[str, ...],
+    manifests: Mapping[str, Mapping[str, Any]],
+    policy_capabilities: tuple[str, ...],
+) -> tuple[str, ...]:
+    requested: set[str] = set()
+    for pack_id in effective:
+        manifest = manifests[pack_id]
+        capabilities = manifest.get("required_capabilities")
+        if isinstance(capabilities, list):
+            requested.update(str(item) for item in capabilities if str(item))
+    return tuple(sorted(requested & set(policy_capabilities)))
+
+
+def _input_payload(
+    value: ResolutionInput, manifests: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "profile_id": value.profile_id,
+        "profile_revision": value.profile_revision,
+        "platform": value.platform,
+        "policy_revision": value.policy_revision,
+        "lockfile_revision": value.lockfile_revision,
+        "requested_pack_ids": value.requested_pack_ids,
+        "requested_contracts": tuple(asdict(item) for item in value.requested_contracts),
+        "authorized_pack_ids": value.authorized_pack_ids,
+        "healthy_pack_ids": value.healthy_pack_ids,
+        "policy_capabilities": value.policy_capabilities,
+        "manifest_hashes": tuple(
+            sorted(
+                (pack_id, str(manifest.get("_manifest_hash") or ""))
+                for pack_id, manifest in manifests.items()
+            )
+        ),
+    }
+
+
+def _lock_identity(lockfile: ProfileLockfile) -> str:
+    payload = lockfile.to_dict()
+    payload.pop("lock_hash", None)
+    return content_identity(payload)
+
+
+def _pack_content_hash(pack_root: Path, manifest_hash: str) -> str:
+    resources: list[tuple[str, str]] = [("ecosystem.json", manifest_hash)]
+    declared_directories = set(PROJECTION_TYPES)
+    try:
+        manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    components = manifest.get("components") if isinstance(manifest, dict) else None
+    if isinstance(components, Mapping):
+        for component in components.values():
+            if not isinstance(component, Mapping):
+                continue
+            declared = str(component.get("path") or "").strip()
+            if declared and ".." not in Path(declared).parts:
+                declared_directories.add(declared)
+    for directory in sorted(declared_directories):
+        root = pack_root / directory
+        if not root.is_dir():
+            continue
+        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+            resources.append((path.relative_to(pack_root).as_posix(), _sha256(path)))
+    return content_identity(resources)
+
+
+def _with_diagnostics(
+    plan: ResolvedProfile, diagnostics: tuple[ResolutionDiagnostic, ...]
+) -> ResolvedProfile:
+    combined = (*plan.diagnostics, *diagnostics)
+    payload = plan.to_dict()
+    payload["diagnostics"] = tuple(asdict(item) for item in combined)
+    payload.pop("plan_hash")
+    return replace(
+        plan,
+        diagnostics=combined,
+        plan_hash=content_identity(payload),
+    )
+
+
+def _legacy_selected_pack_ids(selection: Mapping[str, Any]) -> tuple[str, ...]:
+    values = _string_items(selection.get("setup_pack_ids"))
+    singular = str(selection.get("setup_pack_id") or "").strip()
+    if singular:
+        values = (*values, singular)
+    return _unique(values)
+
+
+def _string_items(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _unique(values: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted({str(item).strip() for item in values if str(item).strip()}))
+
+
+def _revision_of(value: Mapping[str, Any]) -> str:
+    return content_identity(dict(value))
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _diagnostic(
+    code: str,
+    severity: str,
+    message: str,
+    subject: str | None = None,
+    **details: str,
+) -> ResolutionDiagnostic:
+    return ResolutionDiagnostic(
+        code=code,
+        severity=severity,
+        message=message,
+        subject=subject,
+        details=tuple(sorted((str(key), str(value)) for key, value in details.items())),
+    )
