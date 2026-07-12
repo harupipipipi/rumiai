@@ -86,7 +86,7 @@ import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/de
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
-import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, type PendingChatRequest } from "./lib/pendingChat";
 import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
@@ -1846,6 +1846,15 @@ function isCancelledStreamError(errorValue: unknown): boolean {
   return message.trim().toLowerCase() === "cancelled";
 }
 
+function isLikelyTransportFailure(errorValue: unknown): boolean {
+  if (errorValue instanceof ChatStreamInterruptedError) return true;
+  const name = errorValue && typeof errorValue === "object" && "name" in errorValue
+    ? String((errorValue as { name?: unknown }).name ?? "")
+    : "";
+  const message = errorValue instanceof Error ? errorValue.message : String(errorValue ?? "");
+  return name === "TypeError" || /network|fetch|connection|timeout|timed out|load failed/i.test(message);
+}
+
 function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamEvent {
   return (
     event.type === "status"
@@ -3414,11 +3423,18 @@ function ChatApp() {
       setIsLoading(true);
       const pendingConversationId = chatIdFromLocation();
       if (pendingConversationId && isPendingInLocation()) {
+        // A reload can arrive through the pending URL after the transport has
+        // already committed the request. Keep the operation id persisted in
+        // local storage so a retry replays that logical send instead of
+        // creating a second user turn. The URL only carries the conversation
+        // id and therefore cannot reconstruct this identity by itself.
+        const storedPending = pendingRequests[pendingConversationId];
         rememberPendingRequest({
+          ...storedPending,
           conversationId: pendingConversationId,
-          startedAt: Date.now(),
-          status: "Processing...",
-          toolNames: [],
+          startedAt: storedPending?.startedAt ?? Date.now(),
+          status: storedPending?.status ?? "Processing...",
+          toolNames: storedPending?.toolNames ?? [],
           recoveredFromLocation: true,
         });
       }
@@ -3578,10 +3594,25 @@ function ChatApp() {
         }
       }).catch((pollError) => {
         console.error(pollError);
-        forgetPendingRequest(activeConversationId);
-        replaceChatIdInUrl(activeConversationId, false);
-        setIsGenerating(false);
-        setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+        if (shouldForgetPendingAfterPollError(pollError)) {
+          forgetPendingRequest(activeConversationId);
+          replaceChatIdInUrl(activeConversationId, false);
+          setIsGenerating(false);
+          setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+          return;
+        }
+        updatePendingRequests((current) => {
+          const existing = current[activeConversationId];
+          return existing ? {
+            ...current,
+            [activeConversationId]: {
+              ...existing,
+              status: "接続を待っています。同じ送信として再試行できます",
+            },
+          } : current;
+        });
+        setBackendConnectionState("degraded");
+        setBackendConnectionNote("送信結果を確認できません。operation IDを保持して接続回復を待っています。");
       });
     };
     pollPendingConversation();
@@ -5829,8 +5860,21 @@ function ChatApp() {
         const interruptedConversationId = submittedConversationId ?? submittedConversationRuntimeId;
         markInterruptedAssistant?.(submitError);
         if (interruptedConversationId) {
-          forgetPendingRequest(interruptedConversationId);
-          replaceChatIdInUrl(interruptedConversationId, false);
+          // A stream close is transport-ambiguous: the backend may already
+          // have committed the turn. Keep the persisted operation id and
+          // pending URL so a retry replays this logical send.
+          updatePendingRequests((current) => {
+            const existing = current[interruptedConversationId];
+            return existing
+              ? {
+                  ...current,
+                  [interruptedConversationId]: {
+                    ...existing,
+                    status: "応答ストリームが切れました。再試行すると結果を確認します",
+                  },
+                }
+              : current;
+          });
         }
         setBackendConnectionState("degraded");
         setBackendConnectionNote("応答 stream が途中で閉じました。ここまで届いた内容を保持しつつ、backend の回復を待っています。");
@@ -5857,7 +5901,8 @@ function ChatApp() {
         setIsNewChatLaunching(false);
         return;
       }
-      if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
+      const preserveOperationForRetry = isLikelyTransportFailure(submitError);
+      if (submittedConversationId && !preserveOperationForRetry && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
         replaceChatIdInUrl(submittedConversationId, false);
         await refreshConversations(submittedConversationId).catch(console.error);
