@@ -86,7 +86,7 @@ import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/de
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
-import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, type PendingChatRequest } from "./lib/pendingChat";
 import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
@@ -3594,10 +3594,25 @@ function ChatApp() {
         }
       }).catch((pollError) => {
         console.error(pollError);
-        forgetPendingRequest(activeConversationId);
-        replaceChatIdInUrl(activeConversationId, false);
-        setIsGenerating(false);
-        setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+        if (shouldForgetPendingAfterPollError(pollError)) {
+          forgetPendingRequest(activeConversationId);
+          replaceChatIdInUrl(activeConversationId, false);
+          setIsGenerating(false);
+          setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+          return;
+        }
+        updatePendingRequests((current) => {
+          const existing = current[activeConversationId];
+          return existing ? {
+            ...current,
+            [activeConversationId]: {
+              ...existing,
+              status: "接続を待っています。同じ送信として再試行できます",
+            },
+          } : current;
+        });
+        setBackendConnectionState("degraded");
+        setBackendConnectionNote("送信結果を確認できません。operation IDを保持して接続回復を待っています。");
       });
     };
     pollPendingConversation();
