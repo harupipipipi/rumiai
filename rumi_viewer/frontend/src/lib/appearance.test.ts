@@ -8,13 +8,19 @@ import {
   readStoredAppearance,
 } from './appearance';
 
-function fakeStorage(values: Record<string, string> = {}, options: { throwGet?: boolean; throwSet?: boolean } = {}) {
+type FakeStorageOptions = {
+  throwGet?: boolean;
+  throwGetKey?: string;
+  throwSet?: boolean;
+};
+
+function fakeStorage(values: Record<string, string> = {}, options: FakeStorageOptions = {}) {
   const data = new Map(Object.entries(values));
   return {
     data,
     storage: {
       getItem: (key: string) => {
-        if (options.throwGet) throw new Error('get blocked');
+        if (options.throwGet || options.throwGetKey === key) throw new Error('get blocked');
         return data.get(key) ?? null;
       },
       setItem: (key: string, value: string) => {
@@ -52,6 +58,35 @@ function fakeRoot() {
       dataset: {},
       style: {},
     } as unknown as HTMLElement,
+  };
+}
+
+function runPrebootAppearance(storage: Pick<Storage, 'getItem' | 'setItem'>) {
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, 'preboot appearance script not found');
+
+  const classes = new Set<string>();
+  const style: Record<string, string> = {};
+  const execute = new Function('document', 'localStorage', script);
+  execute({
+    documentElement: {
+      classList: { add: (...names: string[]) => names.forEach((name) => classes.add(name)) },
+      style,
+    },
+  }, storage);
+
+  const themeByClass = {
+    'theme-rumi': 'Rumi',
+    'theme-minimal': 'Minimal',
+    'theme-standard': 'Standard',
+    'theme-rounded': 'Rounded',
+  } as const;
+  const themeClass = [...classes].find((name) => name in themeByClass);
+  assert.ok(themeClass, 'preboot theme class not applied');
+  return {
+    theme: themeByClass[themeClass as keyof typeof themeByClass],
+    colorMode: style.colorScheme === 'light' ? 'light' : 'dark',
   };
 }
 
@@ -93,12 +128,15 @@ test('appearance migration falls back safely when storage access throws', () => 
   assert.equal(throwingSet.data.has('tobkiri-theme'), false);
 });
 
-test('preboot appearance migration uses the same canonical-first contract', () => {
-  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
-  assert.ok(html.indexOf("getItem('tobkiri-theme')") < html.indexOf("getItem('rumi-theme')"));
-  assert.ok(html.indexOf("getItem('tobkiri-color-mode')") < html.indexOf("getItem('rumi-color-mode')"));
-  assert.match(html, /themes\[legacyTheme\][\s\S]*setItem\('tobkiri-theme'/);
-  assert.match(html, /legacyMode === 'light' \|\| legacyMode === 'dark'[\s\S]*setItem\('tobkiri-color-mode'/);
+test('preboot and React preserve independent values when one canonical read fails', () => {
+  const { storage } = fakeStorage({
+    'tobkiri-theme': 'Rounded',
+    'rumi-theme': 'Minimal',
+    'rumi-color-mode': 'light',
+  }, { throwGetKey: 'tobkiri-color-mode' });
+  const expected = { theme: 'Rounded', colorMode: 'light' };
+  assert.deepEqual(readStoredAppearance(storage), expected);
+  assert.deepEqual(runPrebootAppearance(storage), expected);
 });
 
 test('appearance application keeps one theme class and toggles dark before paint', () => {
