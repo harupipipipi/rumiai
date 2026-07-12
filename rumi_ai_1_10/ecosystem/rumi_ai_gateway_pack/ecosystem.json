@@ -11,7 +11,8 @@
       "rumi.service.ai.provider.generate.v1",
       "rumi.service.ai.provider.stream.v1",
       "rumi.resource.ai.provider.health.v1",
-      "rumi.service.ai.usage.cost.v1"
+      "rumi.service.ai.usage.cost.v1",
+      "rumi.service.ai.route.v1"
     ],
     "provides": [
       "rumi.service.ai.generate.v1",

@@ -31,7 +31,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_model_catalog_pack.runtime.catalog",
       "symbol": "create_model_catalog_operation",
-      "artifact_hash": "sha256:1b2daa2dc96cbaf8e8241833c3a81279c42a3dd0e1144bfa8deedb03a7c7a0d1"
+      "artifact_hash": "sha256:40465946864c9a4d5cf7fd1810832d5c53b3a2d1cd32402d5a73d2f0ea451326"
     }
   ],
   "resources": [

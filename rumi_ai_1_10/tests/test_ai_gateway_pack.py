@@ -10,10 +10,14 @@ from ecosystem.rumi_ai_gateway_pack.runtime.gateway import (
     CATALOG_CONTRACT,
     GENERATE_PROVIDER_CONTRACT,
     HEALTH_CONTRACT,
+    ROUTING_CONTRACT,
     STREAM_PROVIDER_CONTRACT,
+    USAGE_CONTRACT,
     create_generate_operation,
     create_stream_operation,
 )
+from ecosystem.rumi_ai_routing_pack.runtime.router import create_route_operation
+from ecosystem.rumi_ai_usage_pack.runtime.usage import create_cost_operation
 
 
 class FakeContractClient:
@@ -67,6 +71,10 @@ class FakeContractClient:
                     },
                 ]
             }
+        if contract_id == ROUTING_CONTRACT:
+            return create_route_operation(None)(operation, payload)
+        if contract_id == USAGE_CONTRACT:
+            return create_cost_operation(None)(operation, payload)
         if contract_id == GENERATE_PROVIDER_CONTRACT:
             if self.fail_first and provider_instance_id == "adapter-a":
                 raise GlobalContractInvocationError(
@@ -155,7 +163,10 @@ def test_failover_requires_explicit_replay_safe_request() -> None:
             "messages": [],
             "idempotency_key": "fixture-idempotency",
             "allow_failover": True,
-            "requirements": {"modalities": ["text"]},
+            "requirements": {
+                "modalities": ["text"],
+                "preferred_model_id": "model-a",
+            },
         },
     )
 
@@ -176,7 +187,10 @@ def test_failover_is_blocked_for_tool_payload() -> None:
                 "tools": [{"name": "write"}],
                 "idempotency_key": "fixture-idempotency",
                 "allow_failover": True,
-                "requirements": {"modalities": ["text"]},
+                "requirements": {
+                    "modalities": ["text"],
+                    "preferred_model_id": "model-a",
+                },
             },
         )
 

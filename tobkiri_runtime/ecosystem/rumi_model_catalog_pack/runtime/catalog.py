@@ -148,6 +148,7 @@ def _model(
         "provider_model_id": raw_model_id,
         "provider_id": provider_id,
         "execution_provider_instance_id": "provider.compatibility",
+        "health_provider_instance_id": f"provider.{provider_id}",
         "display_name": str(value.get("display_name") or raw_model_id),
         "capabilities": capabilities,
         "modalities": modalities,

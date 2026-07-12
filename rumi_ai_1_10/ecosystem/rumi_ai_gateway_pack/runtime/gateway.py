@@ -19,6 +19,7 @@ GENERATE_PROVIDER_CONTRACT = "rumi.service.ai.provider.generate.v1"
 STREAM_PROVIDER_CONTRACT = "rumi.service.ai.provider.stream.v1"
 HEALTH_CONTRACT = "rumi.resource.ai.provider.health.v1"
 USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
+ROUTING_CONTRACT = "rumi.service.ai.route.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -143,10 +144,7 @@ def _invoke(
             "capability_mismatch",
             "no selected model satisfies the request requirements",
         )
-    ordered = sorted(
-        candidates,
-        key=lambda item: _candidate_sort_key(item, requirement),
-    )
+    ordered = candidates
     selected = ordered[0]
     _record_diagnostic(
         request_id,
@@ -325,8 +323,7 @@ def _catalog_candidates(
     requirement: RouteRequirement,
     health: Mapping[str, Mapping[str, Any]],
 ) -> tuple[list[Candidate], list[dict[str, str]]]:
-    candidates: list[Candidate] = []
-    excluded: list[dict[str, str]] = []
+    catalog_models: list[dict[str, Any]] = []
     for catalog_provider in client.providers(CATALOG_CONTRACT):
         catalog_provider_id = str(
             catalog_provider.get("provider_instance_id") or ""
@@ -337,120 +334,82 @@ def _catalog_candidates(
             {},
             provider_instance_id=catalog_provider_id,
         )
-        models = result.get("models") if isinstance(result, Mapping) else None
-        for raw in models if isinstance(models, list) else []:
+        raw_models = result.get("models") if isinstance(result, Mapping) else None
+        for raw in raw_models if isinstance(raw_models, list) else []:
             if not isinstance(raw, Mapping):
                 continue
-            candidate, reason = _candidate(
-                raw,
-                catalog_provider_id,
-                providers,
-                requirement,
-                health,
-            )
-            if candidate is None:
-                excluded.append(
-                    {
-                        "model_id": str(raw.get("model_id") or "unknown"),
-                        "reason": reason,
-                    }
-                )
-            else:
-                candidates.append(candidate)
-    return candidates, excluded
-
-
-def _candidate(
-    raw: Mapping[str, Any],
-    catalog_provider_id: str,
-    providers: Mapping[str, Mapping[str, Any]],
-    requirement: RouteRequirement,
-    health: Mapping[str, Mapping[str, Any]],
-) -> tuple[Candidate | None, str]:
-    model_id = str(raw.get("model_id") or "").strip()
-    provider_id = str(raw.get("execution_provider_instance_id") or "").strip()
-    if not model_id or provider_id not in providers:
-        return None, "execution_provider_unresolved"
-    if raw.get("available", True) is False:
-        return None, "model_unavailable"
-    modalities = _strings(raw.get("modalities"))
-    capabilities = _strings(raw.get("capabilities"))
-    if not requirement.modalities.issubset(modalities):
-        return None, "modality_mismatch"
-    if requirement.tool_calling and "tool_calling" not in capabilities:
-        return None, "tool_calling_mismatch"
-    if requirement.thinking and "thinking" not in capabilities:
-        return None, "thinking_mismatch"
-    if not requirement.capabilities.issubset(capabilities):
-        return None, "capability_mismatch"
-    if int(raw.get("context_length") or 0) < requirement.minimum_context:
-        return None, "context_length_mismatch"
-    surfaces = _strings(raw.get("request_surfaces"))
-    if surfaces and requirement.request_surface not in surfaces:
-        return None, "request_surface_mismatch"
-    residencies = _strings(raw.get("data_residency"))
-    if requirement.data_residency and requirement.data_residency not in residencies:
-        return None, "data_residency_mismatch"
-    model_health = health.get(provider_id, {})
-    health_status = str(model_health.get("status") or "unknown")
-    observed_at = _optional_float(model_health.get("observed_at"))
-    if (
-        observed_at is not None
-        and time.time() - observed_at > requirement.health_max_age
-    ):
-        health_status = "unknown"
-    if health_status in {"unavailable", "denied", "invalid"}:
-        return None, f"health_{health_status}"
-    input_cost = _optional_float(raw.get("input_cost"))
-    output_cost = _optional_float(raw.get("output_cost"))
-    if requirement.maximum_cost is not None:
-        if input_cost is None or output_cost is None:
-            return None, "cost_unknown"
-        cost = input_cost + output_cost
-        if cost > requirement.maximum_cost:
-            return None, "cost_policy_mismatch"
-    return Candidate(
-        model_id=model_id,
-        provider_instance_id=provider_id,
-        catalog_provider_instance_id=catalog_provider_id,
-        catalog_revision=str(raw.get("catalog_revision") or "unknown"),
-        capabilities=capabilities,
-        modalities=modalities,
-        context_length=int(raw.get("context_length") or 0),
-        input_cost=input_cost,
-        output_cost=output_cost,
-        priority=int(raw.get("priority") or 0),
-        available=bool(raw.get("available", True)),
-        health=health_status,
-        health_observed_at=observed_at,
-        raw=dict(raw),
-    ), ""
-
-
-def _candidate_sort_key(
-    candidate: Candidate,
-    requirement: RouteRequirement,
-) -> tuple[Any, ...]:
-    preferred_provider = (
-        0
-        if requirement.preferred_provider_instance_id
-        == candidate.provider_instance_id
-        else 1
+            descriptor = dict(raw)
+            descriptor["catalog_provider_instance_id"] = catalog_provider_id
+            catalog_models.append(descriptor)
+    routed = client.invoke(
+        ROUTING_CONTRACT,
+        "route",
+        {
+            "models": catalog_models,
+            "execution_providers": list(providers.values()),
+            "health": dict(health),
+            "requirements": _requirement_payload(requirement),
+            "decision_time": time.time(),
+        },
     )
-    preferred_model = (
-        0 if requirement.preferred_model_id == candidate.model_id else 1
-    )
-    health_order = {"healthy": 0, "degraded": 1, "unknown": 2}
+    values = routed.get("candidates") if isinstance(routed, Mapping) else None
+    excluded = routed.get("excluded") if isinstance(routed, Mapping) else None
+    values = values if isinstance(values, list) else []
+    excluded = excluded if isinstance(excluded, list) else []
     return (
-        preferred_provider,
-        preferred_model,
-        health_order.get(candidate.health, 3),
-        candidate.priority,
-        candidate.input_cost if candidate.input_cost is not None else float("inf"),
-        candidate.output_cost if candidate.output_cost is not None else float("inf"),
-        candidate.model_id,
-        candidate.provider_instance_id,
-        candidate.catalog_revision,
+        [
+            _candidate_from_route(item)
+            for item in values
+            if isinstance(item, Mapping)
+        ],
+        [
+            dict(item)
+            for item in excluded
+            if isinstance(item, Mapping)
+        ],
+    )
+
+
+def _requirement_payload(requirement: RouteRequirement) -> dict[str, Any]:
+    return {
+        "modalities": sorted(requirement.modalities),
+        "capabilities": sorted(requirement.capabilities),
+        "tool_calling": requirement.tool_calling,
+        "thinking": requirement.thinking,
+        "minimum_context": requirement.minimum_context,
+        "request_surface": requirement.request_surface,
+        "data_residency": requirement.data_residency,
+        "maximum_cost": requirement.maximum_cost,
+        "preferred_model_id": requirement.preferred_model_id,
+        "preferred_provider_instance_id": (
+            requirement.preferred_provider_instance_id
+        ),
+        "health_max_age": requirement.health_max_age,
+    }
+
+
+def _candidate_from_route(value: Mapping[str, Any]) -> Candidate:
+    descriptor = value.get("descriptor")
+    descriptor = descriptor if isinstance(descriptor, Mapping) else {}
+    return Candidate(
+        model_id=str(value.get("model_id") or ""),
+        provider_instance_id=str(
+            value.get("execution_provider_instance_id") or ""
+        ),
+        catalog_provider_instance_id=str(
+            value.get("catalog_provider_instance_id") or ""
+        ),
+        catalog_revision=str(value.get("catalog_revision") or "unknown"),
+        capabilities=frozenset(_strings(value.get("capabilities"))),
+        modalities=frozenset(_strings(value.get("modalities"))),
+        context_length=int(value.get("context_length") or 0),
+        input_cost=_optional_float(value.get("input_cost")),
+        output_cost=_optional_float(value.get("output_cost")),
+        priority=int(value.get("priority") or 0),
+        available=True,
+        health=str(value.get("health") or "unknown"),
+        health_observed_at=_optional_float(value.get("health_observed_at")),
+        raw=dict(descriptor),
     )
 
 
