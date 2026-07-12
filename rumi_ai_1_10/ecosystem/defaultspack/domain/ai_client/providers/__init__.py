@@ -556,11 +556,19 @@ def _list_provider_manifests() -> List[Dict[str, Any]]:
 
 
 def _load_model_manifests(provider_id: str = "") -> List[Dict[str, Any]]:
+    models: List[Dict[str, Any]] = []
     try:
         registry = get_extension_registry(force_reload=False)
-        return registry.llm().models(provider_id=provider_id, enabled_only=True)
+        models.extend(registry.llm().models(provider_id=provider_id, enabled_only=True))
     except Exception:
-        return []
+        pass
+    models.extend(model_manifests_from_provider_components(provider_id))
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for model in models:
+        model_id = str(model.get("id") or model.get("model_id") or "").strip()
+        if model_id:
+            deduped.setdefault(model_id, model)
+    return list(deduped.values())
 
 
 def _model_ref_matches(provider_id: str, model_ref: str, model: Dict[str, Any]) -> bool:
@@ -1355,6 +1363,11 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
         )
     if entrypoint:
         provider_cls = _import_provider_entrypoint(entrypoint)
+        if bool(getattr(provider_cls, "manifest_factory", False)):
+            return provider_cls.from_manifest(
+                manifest,
+                model_manifests=_load_model_manifests(provider_id),
+            )
         return provider_cls()
     return None
 

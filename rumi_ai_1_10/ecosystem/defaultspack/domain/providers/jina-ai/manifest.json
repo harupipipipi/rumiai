@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Jina AI",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/hosted_native_providers.py",
+    "models": "models.json"
+  },
   "description": "Jina AI typed hosted model surfaces.",
   "provider_metadata": {
     "display_name": "Jina AI",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "JINA_AI_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.jina.ai/v1",
     "default_model_for": {},
@@ -43,8 +47,9 @@
     "base_url_env": "JINA_AI_BASE_URL",
     "default_base_url": "https://api.jina.ai/v1",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.hosted_native_providers:JinaProvider",
     "config": {
       "inventory_strategy": "native_catalog",
       "model_list_path": "/models",

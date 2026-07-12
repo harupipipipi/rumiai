@@ -1,0 +1,141 @@
+{
+  "snapshot": {
+    "source": "https://replicate.com/docs/topics/models/official-models/",
+    "verified_at": "2026-07-13",
+    "lifecycle_policy": "refresh from the native inventory when available; otherwise verify official docs before retirement"
+  },
+  "models": [
+    {
+      "id": "replicate/black-forest-labs/flux-1.1-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "replicate",
+      "model_id": "black-forest-labs/flux-1.1-pro",
+      "display_name": "FLUX 1.1 Pro",
+      "type": "image",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://replicate.com/docs/topics/models/official-models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "replicate/google/veo-3.1",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "replicate",
+      "model_id": "google/veo-3.1",
+      "display_name": "Veo 3.1",
+      "type": "video",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://replicate.com/docs/topics/models/official-models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "video",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "replicate/meta/musicgen",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "replicate",
+      "model_id": "meta/musicgen",
+      "display_name": "MusicGen",
+      "type": "audio",
+      "enabled": true,
+      "priority": 3,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": true,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://replicate.com/docs/topics/models/official-models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "audio",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "replicate/meta/meta-llama-3-70b-instruct",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "replicate",
+      "model_id": "meta/meta-llama-3-70b-instruct",
+      "display_name": "Llama 3 70B Instruct",
+      "type": "chat",
+      "enabled": true,
+      "priority": 4,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": true
+      },
+      "metadata": {
+        "source": "https://replicate.com/docs/topics/models/official-models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "chat",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

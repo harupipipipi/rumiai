@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Cohere",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/hosted_native_providers.py",
+    "models": "models.json"
+  },
   "description": "Cohere typed hosted model surfaces.",
   "provider_metadata": {
     "display_name": "Cohere",
@@ -16,10 +20,10 @@
     "base_url_envs": [
       "COHERE_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
-    "default_base_url": "https://api.cohere.com/v2",
+    "default_base_url": "https://api.cohere.com",
     "default_model_for": {},
     "task_types": [
       "chat",
@@ -43,10 +47,11 @@
     "adapter": "cohere_v2",
     "api_key_env": "COHERE_API_KEY",
     "base_url_env": "COHERE_BASE_URL",
-    "default_base_url": "https://api.cohere.com/v2",
+    "default_base_url": "https://api.cohere.com",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.hosted_native_providers:CohereProvider",
     "config": {
       "inventory_strategy": "native_catalog",
       "model_list_path": "/models",

@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Cloudflare Workers AI",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/hosted_native_providers.py",
+    "models": "models.json"
+  },
   "description": "Cloudflare Workers AI typed hosted model surfaces.",
   "provider_metadata": {
     "display_name": "Cloudflare Workers AI",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "CLOUDFLARE_WORKERS_AI_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "account://cloudflare-workers-ai",
     "default_model_for": {},
@@ -51,8 +55,9 @@
     "base_url_env": "CLOUDFLARE_WORKERS_AI_BASE_URL",
     "default_base_url": "account://cloudflare-workers-ai",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.hosted_native_providers:CloudflareWorkersAIProvider",
     "config": {
       "inventory_strategy": "native_catalog",
       "model_list_path": "/models",

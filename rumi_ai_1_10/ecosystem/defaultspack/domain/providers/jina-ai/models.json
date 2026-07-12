@@ -1,0 +1,75 @@
+{
+  "snapshot": {
+    "source": "https://jina.ai/embeddings/",
+    "verified_at": "2026-07-13",
+    "lifecycle_policy": "refresh from the native inventory when available; otherwise verify official docs before retirement"
+  },
+  "models": [
+    {
+      "id": "jina-ai/jina-embeddings-v4",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "jina-ai",
+      "model_id": "jina-embeddings-v4",
+      "display_name": "Jina Embeddings v4",
+      "type": "embedding",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://jina.ai/embeddings/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "embedding",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "jina-ai/jina-reranker-v3",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "jina-ai",
+      "model_id": "jina-reranker-v3",
+      "display_name": "Jina Reranker v3",
+      "type": "rerank",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://jina.ai/embeddings/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "rerank",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

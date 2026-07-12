@@ -6,6 +6,10 @@
   "version": "1",
   "status": "experimental",
   "display_name": "Replicate",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/hosted_native_providers.py",
+    "models": "models.json"
+  },
   "description": "Replicate typed hosted model surfaces.",
   "provider_metadata": {
     "display_name": "Replicate",
@@ -16,8 +20,8 @@
     "base_url_envs": [
       "REPLICATE_BASE_URL"
     ],
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
     "default_model": "",
     "default_base_url": "https://api.replicate.com/v1",
     "default_model_for": {},
@@ -47,8 +51,9 @@
     "base_url_env": "REPLICATE_BASE_URL",
     "default_base_url": "https://api.replicate.com/v1",
     "credential_required": true,
-    "catalog_only": true,
-    "supports_invoke": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.hosted_native_providers:ReplicateProvider",
     "config": {
       "inventory_strategy": "native_catalog",
       "model_list_path": "/models",
