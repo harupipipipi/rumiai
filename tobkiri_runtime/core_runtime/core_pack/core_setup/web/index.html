@@ -278,38 +278,9 @@
     const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
     const selectedPackIds = new Set();
     let installInProgress = false;
-    const PROFILE_CARDS = [
-      {
-        id: "recommended",
-        title: "Recommended setup",
-        description: "Balanced local-first defaults for the first run.",
-        match: (pack) => pack.recommended || /default/i.test(pack.pack_id || pack.display_name || ""),
-      },
-      {
-        id: "minimal",
-        title: "Minimal base",
-        description: "Only the smallest base setup needed to proceed.",
-        match: (pack) => /minimal|base|default/i.test(pack.pack_id || pack.display_name || ""),
-      },
-      {
-        id: "agent-continuity",
-        title: "Agent continuity",
-        description: "Continuity, memory, workroom, and restart guidance.",
-        match: (pack) => /agent|continuity|memory|workroom/i.test(pack.pack_id || pack.display_name || ""),
-      },
-      {
-        id: "services",
-        title: "Services and workflows",
-        description: "Workflow, office, data, browser, computer, MCP, and scheduler packs.",
-        match: (pack) => /service|workflow|office|data|browser|computer|mcp|scheduler|tool/i.test(pack.pack_id || pack.display_name || ""),
-      },
-      {
-        id: "advanced",
-        title: "Specialized packs",
-        description: "Other focused capabilities that do not fit the groups above.",
-        match: () => true,
-      },
-    ];
+    const confirmedPrivilegedPackIds = new Set();
+    let reviewedSelectionFingerprint = "";
+    let currentReviewRevision = "";
 
     function setStatus(label, payload, rows, tone = "neutral") {
       const items = rows && rows.length ? rows : ["Waiting for setup pack selection."];
@@ -453,6 +424,21 @@
         setStatus("No setup packs checked", {}, ["Choose at least one setup profile or advanced pack before installing."]);
         return;
       }
+      const selectedPacks = currentPacks.filter((pack) => selected.includes(pack.pack_id));
+      const privileged = selectedPacks.filter((pack) => pack.supports_all_ok || pack.risk_level === "high");
+      const missingConfirmations = privileged.filter((pack) => !confirmedPrivilegedPackIds.has(pack.pack_id));
+      const fingerprint = JSON.stringify(selectedPacks.map((pack) => [pack.pack_id, pack.version, pack.depends_on, pack.required_permissions]));
+      if (missingConfirmations.length || reviewedSelectionFingerprint !== fingerprint) {
+        reviewedSelectionFingerprint = fingerprint;
+        renderReview(selectedPacks);
+        setStatus("Review required before install", { setup_pack_ids: selected }, [
+          "Review every selected pack and its exact source, permissions, dependencies, conflicts, and all-OK scope below.",
+          missingConfirmations.length
+            ? "Explicitly confirm privileged packs: " + missingConfirmations.map((pack) => pack.display_name || pack.pack_id).join(", ")
+            : "Review complete. Activate Install selected again to confirm this unchanged plan.",
+        ], "pending");
+        return;
+      }
       setInstallProgress("pending");
       setStatus("Installing setup packs…", { setup_pack_ids: selected }, [
         "Sending " + selected.length + " setup pack id(s): " + selected.join(", "),
@@ -463,7 +449,12 @@
         data = await getJson("/api/setup/packs/install", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ setup_pack_ids: selected })
+          body: JSON.stringify({
+            setup_pack_ids: selected,
+            reviewed_pack_ids: selected,
+            review_revision: currentReviewRevision,
+            confirmed_privileged_pack_ids: Array.from(confirmedPrivilegedPackIds),
+          })
         });
       } catch (error) {
         setInstallProgress("error");
@@ -542,72 +533,19 @@
       updateSelectionSummary();
     }
 
-    function matchingPacks(profile, packs, assigned) {
-      const matches = [];
-      for (const pack of packs) {
-        const packId = pack.pack_id || "";
-        if (assigned.has(packId)) continue;
-        if (profile.match(pack)) matches.push(pack);
-      }
-      if (!matches.length && profile.id === "recommended" && packs.length) {
-        matches.push(packs[0]);
-      }
-      for (const pack of matches) assigned.add(pack.pack_id || "");
-      return matches;
-    }
-
+    let currentPacks = [];
     function renderPacks(payload) {
       listEl.innerHTML = "";
-      const hasSelection = Boolean((payload.selected_setup_pack_ids || []).length);
       const packs = payload.packs || [];
+      currentPacks = packs;
+      currentReviewRevision = payload.review_revision || "";
       selectedPackIds.clear();
       for (const pack of packs) {
-        if (pack.selected || (!hasSelection && pack.recommended)) {
+        if (pack.selected) {
           selectedPackIds.add(pack.pack_id || "");
         }
       }
       selectedPackIds.delete("");
-      const assigned = new Set();
-      const visibleProfiles = PROFILE_CARDS.slice(0, 5);
-      for (const profile of visibleProfiles) {
-        const profilePacks = matchingPacks(profile, packs, assigned);
-        const packIds = uniquePackIds(profilePacks.map((pack) => pack.pack_id));
-        if (!packIds.length) continue;
-        const checked = packIds.every((packId) => selectedPackIds.has(packId));
-        const card = document.createElement("label");
-        card.className = "pack" + (checked ? " selected" : "");
-        const header = document.createElement("header");
-        const details = document.createElement("div");
-        const name = document.createElement("strong");
-        name.textContent = profile.title;
-        const description = document.createElement("div");
-        description.textContent = profile.description;
-        const allOk = document.createElement("div");
-        allOk.textContent = packIds.length + " setup pack(s): " + packIds.join(", ");
-        details.appendChild(name);
-        details.appendChild(description);
-        details.appendChild(allOk);
-
-        const pill = document.createElement("div");
-        pill.className = "pill" + (profile.id === "recommended" ? " recommended" : "");
-        pill.textContent = profile.id === "recommended" ? "Recommended" : "Profile";
-        header.appendChild(details);
-        header.appendChild(pill);
-
-        const miniActions = document.createElement("div");
-        miniActions.className = "mini-actions";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.dataset.profilePackIds = JSON.stringify(packIds);
-        input.checked = Boolean(checked);
-        input.setAttribute("aria-label", "Include " + profile.title);
-        miniActions.appendChild(input);
-        miniActions.appendChild(document.createTextNode(" Include this setup profile"));
-
-        card.appendChild(header);
-        card.appendChild(miniActions);
-        listEl.appendChild(card);
-      }
       renderAdvancedSelection(packs);
       updateSelectionSummary();
     }
@@ -616,7 +554,7 @@
       const details = document.createElement("details");
       details.className = "advanced-selection";
       const summary = document.createElement("summary");
-      summary.textContent = "Advanced custom selection";
+      summary.textContent = "Choose setup packs individually (no automatic recommendation)";
       details.appendChild(summary);
       for (const pack of packs) {
         const label = document.createElement("label");
@@ -642,8 +580,8 @@
         packDetails.appendChild(name);
         packDetails.appendChild(description);
         packDetails.appendChild(allOk);
-        pill.className = "pill" + (pack.recommended ? " recommended" : (riskClass ? " " + riskClass : ""));
-        pill.textContent = pack.recommended ? "Recommended" : "Risk: " + pack.risk_level;
+        pill.className = "pill" + (riskClass ? " " + riskClass : "");
+        pill.textContent = "Risk: " + (pack.risk_level || "unknown");
         header.appendChild(packDetails);
         header.appendChild(pill);
         const miniActions = document.createElement("div");
@@ -655,6 +593,47 @@
         details.appendChild(label);
       }
       listEl.appendChild(details);
+    }
+
+    function renderReview(packs) {
+      for (const existing of listEl.querySelectorAll("[data-install-review]")) existing.remove();
+      const review = document.createElement("section");
+      review.dataset.installReview = "true";
+      review.className = "advanced-selection";
+      const title = document.createElement("h3");
+      title.textContent = "Exact install plan";
+      review.appendChild(title);
+      for (const pack of packs) {
+        const item = document.createElement("article");
+        item.className = "pack";
+        const privileged = pack.supports_all_ok || pack.risk_level === "high";
+        item.textContent = [
+          pack.display_name || pack.pack_id,
+          "Source: " + (pack.source_path || "unknown"),
+          "Purpose: " + (pack.description || "not documented"),
+          "Risk: " + (pack.risk_level || "unknown"),
+          "Permissions: " + ((pack.required_permissions || []).join(", ") || "none declared"),
+          "All OK: " + (pack.supports_all_ok ? "eligible; bounded grants require separate approval" : "not eligible"),
+          "Dependencies: " + ((pack.depends_on || []).join(", ") || "none"),
+          "Conflicts: " + ((pack.conflicts_with || []).join(", ") || "none"),
+          "Version: " + (pack.version || "unknown"),
+        ].join(" · ");
+        if (privileged) {
+          const label = document.createElement("label");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = confirmedPrivilegedPackIds.has(pack.pack_id);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) confirmedPrivilegedPackIds.add(pack.pack_id);
+            else confirmedPrivilegedPackIds.delete(pack.pack_id);
+          });
+          label.appendChild(checkbox);
+          label.appendChild(document.createTextNode(" I explicitly confirm this privileged pack"));
+          item.appendChild(label);
+        }
+        review.appendChild(item);
+      }
+      listEl.appendChild(review);
     }
 
     async function load(options = {}) {
