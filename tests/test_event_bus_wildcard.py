@@ -6,14 +6,14 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_RUMI_PKG = str(_ROOT / "rumi_ai_1_10")
+_RUMI_PKG = str(_ROOT / "tobkiri_runtime")
 if _RUMI_PKG not in sys.path:
     sys.path.insert(0, _RUMI_PKG)
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import pytest
-from rumi_ai_1_10.core_runtime.event_bus import EventBus, _topic_matches
+from tobkiri_runtime.core_runtime.event_bus import EventBus, _topic_matches
 
 
 # ---------------------------------------------------------------------------
