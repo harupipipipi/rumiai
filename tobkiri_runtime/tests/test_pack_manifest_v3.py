@@ -30,6 +30,7 @@ from core_runtime.interface_registry import InterfaceRegistry
 ROOT = Path(__file__).parents[1]
 SCHEMA = ROOT / "schemas" / "pack_manifest_v3.schema.json"
 EXAMPLE = ROOT / "examples" / "pack_v3" / "minimal_service.json"
+FIXTURES = ROOT / "tests" / "fixtures" / "pack_v3"
 
 
 def _provider(
@@ -98,6 +99,25 @@ def test_invalid_manifest_fails_closed(mutation: object, expected: str) -> None:
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     messages = [error.message for error in Draft202012Validator(schema).iter_errors(manifest)]
     assert any(expected in message for message in messages)
+
+
+def test_invalid_fixed_fixture_returns_invalid_manifest_status() -> None:
+    """The checked-in invalid fixture must return the shared result status."""
+    result = load_manifest(FIXTURES / "invalid_unknown_field.json")
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert result.value is None
+    assert result.diagnostics
+
+
+def test_migration_fixture_declares_one_way_projection_and_rollback() -> None:
+    """Migration evidence must name ownership, sunset, and rollback."""
+    migration = json.loads(
+        (FIXTURES / "legacy_migration.json").read_text(encoding="utf-8")
+    )
+    assert migration["projection"] == "legacy_to_v3_read_only"
+    assert migration["owner"] == "core_runtime.interface_registry"
+    assert migration["removal_wave"] == 10
+    assert migration["rollback"]
 
 
 def test_canonical_identity_fixed_vector() -> None:

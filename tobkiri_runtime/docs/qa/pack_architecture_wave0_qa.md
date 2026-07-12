@@ -47,6 +47,10 @@
 - manifest validation / semantic-version compatibility
 - discovery中にentrypointがimport・実行されないこと
 - invalid manifest / duplicate provider / stale resolution diagnostics
+- canonical identity fixed vector
+- Python / TypeScript / Dart generated binding parity
+- one / many / keyed / chain / fanout / optional semantics
+- legacy public ID compatibility
 
 ## Security／integrity
 

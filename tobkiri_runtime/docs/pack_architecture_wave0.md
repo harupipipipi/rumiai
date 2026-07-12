@@ -56,8 +56,18 @@ The complete metadata-only service example is in
 | profiles | existing profile owner | existing | unchanged | unchanged | Wave 2 | Wave 2 plan | unchanged | unchanged |
 | settings | existing settings owner | existing | unchanged | unchanged | later Wave | later Wave | unchanged | unchanged |
 | secrets | core authority boundary | existing | unchanged | unchanged | none | unchanged | unchanged | unchanged |
-| conversations/messages/prompts/tools/provider connections/artifacts/schedules/memory/knowledge/Company data | existing owner | existing | unchanged | unchanged | Waves 4-9 | per-Wave | unchanged | unchanged |
-| approvals/audit records | core authority boundary | existing | unchanged | unchanged | none | unchanged | unchanged | unchanged |
+| conversations | existing conversation owner | existing | unchanged | unchanged | Wave 7 | Wave 7 plan | unchanged | unchanged |
+| messages | existing conversation owner | existing | unchanged | unchanged | Wave 7 | Wave 7 plan | unchanged | unchanged |
+| prompts | defaultspack | existing | unchanged | unchanged | Wave 4 | Wave 4 plan | unchanged | unchanged |
+| tools | defaultspack | existing | unchanged | unchanged | Wave 6 | Wave 6 plan | unchanged | unchanged |
+| provider connections | defaultspack | existing | unchanged | unchanged | Wave 5 | Wave 5 plan | unchanged | unchanged |
+| artifacts | existing artifact owner | existing | unchanged | unchanged | later Wave | per-Wave | unchanged | unchanged |
+| schedules | defaultspack | existing | unchanged | unchanged | Wave 9 | Wave 9 plan | unchanged | unchanged |
+| memory | defaultspack | existing | unchanged | unchanged | Wave 7 | Wave 7 plan | unchanged | unchanged |
+| knowledge | defaultspack | existing | unchanged | unchanged | Wave 7 | Wave 7 plan | unchanged | unchanged |
+| Company data | defaultspack | existing | unchanged | unchanged | Wave 9 | Wave 9 plan | unchanged | unchanged |
+| approvals | core authority boundary | existing | unchanged | unchanged | none | unchanged | unchanged | unchanged |
+| audit records | core authority boundary | existing | unchanged | unchanged | none | unchanged | unchanged | unchanged |
 | v3 contract projection | `core_runtime.global_contracts` | 3.0.0 | in-memory snapshot | regenerated | legacy-to-v3 read-only | remove projection | process lifetime | canonical JSON |
 
 ## Migration and rollback
