@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
+from .global_contracts.manifest import load_manifest
+from .global_contract_dispatch import GlobalContractInvocationError
+from .pack_artifact_integrity import verify_declared_artifacts
 from .paths import (
     CORE_PACK_DIR,
     CORE_PACK_ID_PREFIX,
@@ -21,7 +27,11 @@ from .paths import (
 )
 
 
-TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack", "rumi_host_capabilities_pack"}
+TRUSTED_BUILTIN_PACK_IDS = {
+    "defaultspack",
+    "rumi_default_tools_pack",
+    "rumi_host_capabilities_pack",
+}
 
 
 @dataclass
@@ -74,6 +84,19 @@ def register_pack_binding_handlers(
                     reason=reason,
                 )
             )
+            continue
+
+        process_handled, process_registered = _register_v3_process_bindings(
+            pack_id,
+            pack_location,
+            interface_registry,
+            result,
+        )
+        if process_handled:
+            if process_registered:
+                result.registered.append(pack_id)
+            else:
+                result.skipped.append(pack_id)
             continue
 
         manifest = _read_manifest(pack_location.ecosystem_json_path, result, pack_id)
@@ -141,6 +164,234 @@ def register_pack_binding_handlers(
             )
         )
     return result
+
+
+def _register_v3_process_bindings(
+    pack_id: str,
+    pack_location: PackLocation,
+    interface_registry: InterfaceRegistry,
+    result: CapabilityBindingRegistrationResult,
+) -> tuple[bool, bool]:
+    """Register approved v3 process providers without importing pack code."""
+    manifest_path = pack_location.pack_subdir / "rumi.pack.v3.json"
+    if not manifest_path.is_file():
+        return False, False
+    loaded = load_manifest(manifest_path)
+    if not loaded.ok or not isinstance(loaded.value, dict):
+        result.ok = False
+        result.diagnostics.append(
+            _diagnostic(
+                "error",
+                "v3_process_manifest_invalid",
+                "; ".join(loaded.diagnostics),
+                pack_id=pack_id,
+            )
+        )
+        return True, False
+    manifest = loaded.value
+    ecosystem_manifest = _read_manifest(
+        pack_location.ecosystem_json_path,
+        result,
+        pack_id,
+    )
+    host_allowed, host_reason = _host_registration_allowed(
+        pack_id,
+        pack_location,
+        ecosystem_manifest,
+    )
+    if not host_allowed:
+        result.diagnostics.append(
+            _diagnostic(
+                "warning",
+                "v3_process_host_execution_required",
+                f"Pack process activation skipped: {host_reason}",
+                pack_id=pack_id,
+            )
+        )
+        return True, False
+    integrity_ok, integrity_diagnostics = verify_declared_artifacts(
+        pack_location.pack_subdir,
+        ecosystem_manifest,
+    )
+    if not integrity_ok:
+        result.ok = False
+        result.diagnostics.append(
+            _diagnostic(
+                "error",
+                "v3_pack_artifact_integrity_failed",
+                "; ".join(integrity_diagnostics),
+                pack_id=pack_id,
+            )
+        )
+        return True, False
+    entrypoints = {
+        str(item.get("contract_id") or ""): item
+        for item in manifest.get("entrypoints", [])
+        if isinstance(item, dict) and item.get("loader") == "process"
+    }
+    providers = manifest.get("contracts", {}).get("provides", [])
+    registered = 0
+    expected = 0
+    for provider in providers if isinstance(providers, list) else []:
+        if not isinstance(provider, dict):
+            continue
+        contract_id = str(provider.get("id") or "")
+        entrypoint = entrypoints.get(contract_id)
+        if entrypoint is None:
+            continue
+        expected += 1
+        module = str(entrypoint.get("module") or "").strip()
+        if not module or not _module_owned_by_pack(module, pack_id):
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_process_module_not_owned",
+                    "Process entrypoint module is outside its owner namespace",
+                    pack_id=pack_id,
+                    contract_id=contract_id,
+                )
+            )
+            continue
+        module_path = _process_module_path(module, pack_location)
+        expected_artifact_hash = str(entrypoint.get("artifact_hash") or "")
+        if (
+            module_path is None
+            or not module_path.is_file()
+            or _sha256(module_path) != expected_artifact_hash
+        ):
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_process_artifact_hash_mismatch",
+                    "Process entrypoint artifact hash does not match",
+                    pack_id=pack_id,
+                    contract_id=contract_id,
+                )
+            )
+            continue
+        operation = _ProcessContractOperation(
+            module=module,
+            pack_location=pack_location,
+        )
+        descriptor = {
+            "contract_id": contract_id,
+            "version": str(provider.get("version") or ""),
+            "provider_instance_id": str(
+                provider.get("provider_instance_id") or ""
+            ),
+            "source_pack_id": pack_id,
+            "source_pack_version": str(manifest.get("pack", {}).get("version") or ""),
+            "content_hash": str(manifest.get("provenance", {}).get("content_hash") or ""),
+            "build_identity": str(manifest.get("provenance", {}).get("build_identity") or ""),
+            "trust_class": str(manifest.get("provenance", {}).get("trust_class") or "untrusted"),
+            "isolation": "process",
+            "required_capabilities": list(provider.get("required_capabilities") or []),
+            "operation": operation,
+        }
+        interface_registry.register(
+            f"global_contract.provider.{contract_id}",
+            descriptor,
+            meta={
+                "_source_pack_id": pack_id,
+                "_source_pack_version": descriptor["source_pack_version"],
+                "authority_grant": False,
+                "isolation": "process",
+            },
+        )
+        registered += 1
+    result.diagnostics.append(
+        _diagnostic(
+            "info" if registered else "warning",
+            "v3_process_bindings_registered",
+            f"Registered {registered} process contract providers",
+            pack_id=pack_id,
+            registered=registered,
+        )
+    )
+    complete = registered > 0 and registered == expected
+    if not complete and registered:
+        for contract_id in entrypoints:
+            interface_registry.unregister(
+                f"global_contract.provider.{contract_id}",
+                predicate=lambda entry, owner=pack_id: (
+                    entry.get("meta", {}).get("_source_pack_id") == owner
+                ),
+            )
+    return True, complete
+
+
+class _ProcessContractOperation:
+    """Invoke a declared pack process with a minimal non-secret environment."""
+
+    def __init__(self, *, module: str, pack_location: PackLocation) -> None:
+        self.module = module
+        self.pack_location = pack_location
+
+    def __call__(self, operation: str, payload: Dict[str, Any]) -> Any:
+        runtime_root = self.pack_location.pack_dir.parent.parent
+        environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        user_data_root = str(os.environ.get("RUMI_USER_DATA") or "").strip()
+        if user_data_root:
+            environment["RUMI_USER_DATA"] = user_data_root
+        completed = subprocess.run(
+            [sys.executable, "-s", "-E", "-m", self.module],
+            input=json.dumps(
+                {"operation": operation, "payload": dict(payload)},
+                ensure_ascii=False,
+            ),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            cwd=str(runtime_root),
+            env=environment,
+        )
+        try:
+            response = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("pack process returned invalid JSON") from exc
+        if not isinstance(response, dict) or response.get("status") != "ok":
+            diagnostics = response.get("diagnostics") if isinstance(response, dict) else []
+            code = str(response.get("error_code") or "provider_unavailable")
+            raise GlobalContractInvocationError(
+                code,
+                "; ".join(str(item) for item in diagnostics),
+            )
+        return response.get("value")
+
+
+def _module_owned_by_pack(module: str, pack_id: str) -> bool:
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", module) is None:
+        return False
+    prefixes = (f"{pack_id}.", f"ecosystem.{pack_id}.")
+    return module.startswith(prefixes)
+
+
+def _process_module_path(
+    module: str,
+    pack_location: PackLocation,
+) -> Path | None:
+    runtime_root = pack_location.pack_dir.parent.parent.resolve()
+    candidate = runtime_root.joinpath(*module.split(".")).with_suffix(".py").resolve()
+    try:
+        candidate.relative_to(pack_location.pack_subdir.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
 
 
 def _iter_pack_locations(

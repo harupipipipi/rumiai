@@ -14,12 +14,19 @@ from typing import Any, Iterable, Mapping, Sequence
 from .dependency_resolver import extract_dependency_specs, version_satisfies
 from .global_contracts.canonical import canonical_json, content_identity
 from .global_contracts.models import (
+    Cardinality,
+    ContractDescriptor,
     ContractRequirement,
     ContractStatus,
+    FailureSemantics,
+    LifecycleMetadata,
     ProviderDescriptor,
+    SecurityClassification,
 )
+from .global_contracts.manifest import load_manifest
 from .global_contracts.registry import ContractRegistry
 from .paths import PackLocation, resolve_pack_locations
+from .pack_artifact_integrity import verify_declared_artifacts
 
 RESOLVED_PROFILE_VERSION = "rumi.resolved-profile.v1"
 LOCKFILE_VERSION = "rumi.profile-lock.v1"
@@ -265,9 +272,25 @@ def resolve_profile(
         for pack_id in selected
     )
     projections = _project_resources(effective, manifests)
+    manifest_providers, manifest_requirements, manifest_diagnostics = (
+        _manifest_contract_metadata(effective, manifests)
+    )
+    diagnostics.extend(manifest_diagnostics)
+    requirement_map = {
+        item.contract_id: item for item in manifest_requirements
+    }
+    requirement_map.update(
+        {
+            item.contract_id: item
+            for item in resolution_input.requested_contracts
+        }
+    )
+    requirements = tuple(
+        requirement_map[key] for key in sorted(requirement_map)
+    )
     resolved_providers, provider_diagnostics = _resolve_contracts(
-        resolution_input.requested_contracts,
-        providers,
+        requirements,
+        (*providers, *manifest_providers),
         effective,
     )
     diagnostics.extend(provider_diagnostics)
@@ -617,6 +640,34 @@ def _read_manifests(
                 manifest["_manifest_hash"],
             )
         )
+        integrity_ok, integrity_diagnostics = verify_declared_artifacts(
+            location.pack_subdir,
+            manifest,
+        )
+        if not integrity_ok:
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    "; ".join(integrity_diagnostics),
+                    location.pack_id,
+                )
+            )
+            continue
+        v3_path = location.pack_subdir / "rumi.pack.v3.json"
+        if v3_path.is_file():
+            loaded = load_manifest(v3_path)
+            if loaded.ok and isinstance(loaded.value, dict):
+                manifest["_v3_manifest"] = loaded.value
+            else:
+                diagnostics.append(
+                    _diagnostic(
+                        "invalid_manifest",
+                        "error",
+                        "; ".join(loaded.diagnostics),
+                        location.pack_id,
+                    )
+                )
         manifests[location.pack_id] = manifest
     return manifests, diagnostics
 
@@ -788,6 +839,128 @@ def _project_resources(
     )
 
 
+def _manifest_contract_metadata(
+    effective: tuple[str, ...],
+    manifests: Mapping[str, Mapping[str, Any]],
+) -> tuple[
+    tuple[ProviderDescriptor, ...],
+    tuple[ContractRequirement, ...],
+    list[ResolutionDiagnostic],
+]:
+    """Project validated v3 descriptors without importing pack code."""
+    providers: list[ProviderDescriptor] = []
+    requirements: dict[str, ContractRequirement] = {}
+    diagnostics: list[ResolutionDiagnostic] = []
+    for pack_id in effective:
+        ecosystem_manifest = manifests[pack_id]
+        manifest = ecosystem_manifest.get("_v3_manifest")
+        if not isinstance(manifest, Mapping):
+            continue
+        provenance = manifest.get("provenance")
+        provenance = provenance if isinstance(provenance, Mapping) else {}
+        contracts = manifest.get("contracts")
+        contracts = contracts if isinstance(contracts, Mapping) else {}
+        for item in contracts.get("provides", []):
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                cardinality = Cardinality(str(item.get("cardinality")))
+                lifecycle_data = item.get("lifecycle")
+                lifecycle_data = (
+                    lifecycle_data if isinstance(lifecycle_data, Mapping) else {}
+                )
+                schemas = item.get("schemas")
+                schemas = schemas if isinstance(schemas, Mapping) else {}
+                contract = ContractDescriptor(
+                    contract_id=str(item.get("id") or ""),
+                    version=str(item.get("version") or ""),
+                    cardinality=cardinality,
+                    security=SecurityClassification(str(item.get("security"))),
+                    failure=FailureSemantics(str(item.get("failure"))),
+                    lifecycle=LifecycleMetadata(**dict(lifecycle_data)),
+                    input_schema=schemas.get("input"),
+                    output_schema=schemas.get("output"),
+                    event_schema=schemas.get("event"),
+                )
+                provider = ProviderDescriptor(
+                    contract=contract,
+                    provider_instance_id=str(
+                        item.get("provider_instance_id") or ""
+                    ),
+                    source_pack_id=pack_id,
+                    source_pack_version=str(
+                        ecosystem_manifest.get("version") or "0.0.0"
+                    ),
+                    content_hash=str(provenance.get("content_hash") or ""),
+                    build_identity=str(provenance.get("build_identity") or ""),
+                    trust_class=str(provenance.get("trust_class") or "untrusted"),
+                    isolation=str(item.get("isolation") or "process"),
+                    required_capabilities=tuple(
+                        str(value)
+                        for value in item.get("required_capabilities", [])
+                    ),
+                    instance_key=(
+                        str(item.get("instance_key"))
+                        if item.get("instance_key") is not None
+                        else None
+                    ),
+                    priority=int(item.get("priority") or 0),
+                    before=tuple(str(value) for value in item.get("before", [])),
+                    after=tuple(str(value) for value in item.get("after", [])),
+                )
+            except (TypeError, ValueError) as exc:
+                diagnostics.append(
+                    _diagnostic(
+                        "invalid_manifest",
+                        "error",
+                        f"Invalid global provider descriptor: {exc}",
+                        pack_id,
+                    )
+                )
+                continue
+            providers.append(provider)
+            requirements.setdefault(
+                contract.contract_id,
+                ContractRequirement(
+                    contract_id=contract.contract_id,
+                    version_range=f">={contract.version} <{int(contract.version.split('.')[0]) + 1}.0.0",
+                    cardinality=contract.cardinality,
+                    optional=contract.cardinality is Cardinality.OPTIONAL,
+                    instance_key=provider.instance_key,
+                ),
+            )
+        for item in contracts.get("requires", []):
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                requirement = ContractRequirement(
+                    contract_id=str(item.get("id") or ""),
+                    version_range=str(item.get("version_range") or ""),
+                    cardinality=Cardinality(str(item.get("cardinality"))),
+                    optional=bool(item.get("optional", False)),
+                    instance_key=(
+                        str(item.get("instance_key"))
+                        if item.get("instance_key") is not None
+                        else None
+                    ),
+                )
+                requirements.setdefault(requirement.contract_id, requirement)
+            except (TypeError, ValueError) as exc:
+                diagnostics.append(
+                    _diagnostic(
+                        "invalid_manifest",
+                        "error",
+                        f"Invalid global consumer requirement: {exc}",
+                        pack_id,
+                    )
+                )
+    return (
+        tuple(providers),
+        tuple(requirements[key] for key in sorted(requirements)),
+        diagnostics,
+    )
+
+
 def _resolve_contracts(
     requirements: Sequence[ContractRequirement],
     providers: Sequence[ProviderDescriptor],
@@ -844,6 +1017,18 @@ def _effective_permissions(
         capabilities = manifest.get("required_capabilities")
         if isinstance(capabilities, list):
             requested.update(str(item) for item in capabilities if str(item))
+        v3_manifest = manifest.get("_v3_manifest")
+        permissions = (
+            v3_manifest.get("permissions")
+            if isinstance(v3_manifest, Mapping)
+            else None
+        )
+        if isinstance(permissions, list):
+            requested.update(
+                str(item.get("capability"))
+                for item in permissions
+                if isinstance(item, Mapping) and item.get("capability")
+            )
     return tuple(sorted(requested & set(policy_capabilities)))
 
 
