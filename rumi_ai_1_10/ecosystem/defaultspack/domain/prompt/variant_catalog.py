@@ -3,6 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, Mapping
 
+from domain.prompt.variant_profile_config import (
+    candidate_declarations as _candidate_declarations,
+    int_value as _int_value,
+    merge_selection_metadata as _merge_selection_metadata,
+    profile_selection_config as _profile_selection_config,
+    prompt_ids_match as _prompt_ids_match,
+    prompt_usage_states as _prompt_usage_states,
+)
 from domain.prompt.variant_selector import (
     PromptVariantCandidate,
     merge_model_prompt_preferences,
@@ -11,25 +19,6 @@ from domain.prompt.variant_selector import (
 
 
 _MAX_CANDIDATES = 64
-_NAMESPACED_SELECTION_KEYS = (
-    "prompt_tags",
-    "prompt_slot",
-    "prompt_priority",
-    "prompt_fallback",
-    "prompt_explicit",
-    "prompt_selection_mode",
-    "prompt_slot_priority",
-)
-_SELECTION_ALIASES = (
-    "tags",
-    "slot",
-    "priority",
-    "fallback",
-    "explicit",
-    "selection_mode",
-    "mode",
-    "slot_priority",
-)
 
 
 def resolve_model_prompt_preferences(model: str) -> dict[str, Any]:
@@ -69,7 +58,7 @@ def resolve_profile_prompt_candidates(
     """Resolve trusted prompt-variant candidates declared by a profile."""
 
     selection_config = _profile_selection_config(profile)
-    active_prompt_ids = _active_prompt_ids(context)
+    active_prompt_ids, blocked_prompt_states = _prompt_usage_states(context)
     if not selection_config and not active_prompt_ids:
         return [], []
 
@@ -104,6 +93,17 @@ def resolve_profile_prompt_candidates(
         prompt_id = str(declaration.get("prompt_id") or "").strip()
         if not prompt_id:
             continue
+        blocked_states = blocked_prompt_states.get(prompt_id, ())
+        if blocked_states and not declaration.get("already_active"):
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": "prompt_variant_blocked_by_existing_prompt_state",
+                    "prompt_id": prompt_id,
+                    "states": list(blocked_states),
+                }
+            )
+            continue
         source_pack_id = str(
             declaration.get("source_pack_id")
             or declaration.get("pack_id")
@@ -111,14 +111,31 @@ def resolve_profile_prompt_candidates(
         ).strip()
         cache_key = (prompt_id, source_pack_id)
         if cache_key not in resolved_cache:
-            resolved_cache[cache_key] = _resolve_effective_candidate(
+            resolved = _resolve_candidate_safely(
+                diagnostics,
                 profile_id=profile_id,
                 base_pack=base_pack,
                 source_pack_id=source_pack_id,
                 prompt_id=prompt_id,
                 workspace=workspace,
             )
+            if resolved is None:
+                continue
+            resolved_cache[cache_key] = resolved
         effective = resolved_cache[cache_key]
+        resolved_prompt_id = str(
+            effective.get("prompt_id") or prompt_id
+        ).strip()
+        if not _prompt_ids_match(prompt_id, resolved_prompt_id):
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": "prompt_variant_resolved_unexpected_prompt",
+                    "prompt_id": prompt_id,
+                    "resolved_prompt_id": resolved_prompt_id,
+                }
+            )
+            continue
         text = str(
             effective.get("final_content") or effective.get("content") or ""
         )
@@ -134,36 +151,14 @@ def resolve_profile_prompt_candidates(
                 )
             continue
 
-        effective_metadata = (
-            effective.get("metadata")
-            if isinstance(effective.get("metadata"), Mapping)
-            else {}
-        )
-        profile_metadata = (
-            prompt_overrides.get(prompt_id)
-            if isinstance(prompt_overrides.get(prompt_id), Mapping)
-            else {}
-        )
-        merged_metadata = _merge_selection_metadata(
-            (effective_metadata, False),
-            (profile_metadata, True),
-            (declaration, True),
-        )
-        normalized = normalize_prompt_variant_metadata(
-            merged_metadata,
+        candidate = _candidate_from_resolution(
+            declaration,
+            effective,
             prompt_id=prompt_id,
-            slot_hint=str(declaration.get("slot") or ""),
-            fallback_hint=bool(declaration.get("fallback")),
-            explicit_hint=bool(declaration.get("explicit")),
-            selection_mode_hint=str(
-                declaration.get("selection_mode") or "best_match"
-            ),
-            slot_priority_hint=_int_value(
-                declaration.get("slot_priority"),
-                default=100,
-            ),
+            profile_metadata=prompt_overrides.get(prompt_id),
+            text=text,
         )
-        if not normalized["slot"]:
+        if candidate is None:
             if not declaration.get("already_active"):
                 diagnostics.append(
                     {
@@ -173,32 +168,6 @@ def resolve_profile_prompt_candidates(
                     }
                 )
             continue
-
-        candidate = PromptVariantCandidate(
-            prompt_id=prompt_id,
-            slot=normalized["slot"],
-            tags=tuple(normalized["tags"]),
-            priority=int(normalized["priority"]),
-            fallback=bool(normalized["fallback"]),
-            explicit=bool(normalized["explicit"]),
-            selection_mode=str(normalized["selection_mode"]),
-            text=text,
-            source=str(effective.get("source") or ""),
-            source_type=str(effective.get("source_type") or ""),
-            metadata={
-                "already_active": bool(declaration.get("already_active")),
-                "source_chain": (
-                    effective.get("source_chain")
-                    if isinstance(effective.get("source_chain"), list)
-                    else []
-                ),
-                "source_pack_id": effective.get("source_pack_id"),
-                "source_pack_trusted": effective.get(
-                    "source_pack_trusted"
-                ),
-            },
-            slot_priority=int(normalized["slot_priority"]),
-        )
         key = (candidate.slot, candidate.prompt_id)
         candidates[key] = _merge_duplicate_candidate(
             candidates.get(key),
@@ -227,6 +196,95 @@ def resolve_profile_prompt_candidates(
     )
 
 
+def _resolve_candidate_safely(
+    diagnostics: list[dict[str, Any]],
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    prompt_id = str(kwargs.get("prompt_id") or "")
+    try:
+        resolved = _resolve_effective_candidate(**kwargs)
+    except Exception as exc:
+        diagnostics.append(
+            {
+                "severity": "warning",
+                "code": "prompt_variant_resolution_error",
+                "prompt_id": prompt_id,
+                "error_type": exc.__class__.__name__,
+            }
+        )
+        return None
+    if not isinstance(resolved, Mapping):
+        diagnostics.append(
+            {
+                "severity": "warning",
+                "code": "prompt_variant_invalid_resolution",
+                "prompt_id": prompt_id,
+            }
+        )
+        return None
+    return dict(resolved)
+
+
+def _candidate_from_resolution(
+    declaration: Mapping[str, Any],
+    effective: Mapping[str, Any],
+    *,
+    prompt_id: str,
+    profile_metadata: Any,
+    text: str,
+) -> PromptVariantCandidate | None:
+    effective_metadata = (
+        effective.get("metadata")
+        if isinstance(effective.get("metadata"), Mapping)
+        else {}
+    )
+    profile_layer = profile_metadata if isinstance(profile_metadata, Mapping) else {}
+    merged_metadata = _merge_selection_metadata(
+        (effective_metadata, False),
+        (profile_layer, True),
+        (declaration, True),
+    )
+    normalized = normalize_prompt_variant_metadata(
+        merged_metadata,
+        prompt_id=prompt_id,
+        slot_hint=str(declaration.get("slot") or ""),
+        fallback_hint=bool(declaration.get("fallback")),
+        explicit_hint=bool(declaration.get("explicit")),
+        selection_mode_hint=str(
+            declaration.get("selection_mode") or "best_match"
+        ),
+        slot_priority_hint=_int_value(
+            declaration.get("slot_priority"),
+            default=100,
+        ),
+    )
+    if not normalized["slot"]:
+        return None
+    return PromptVariantCandidate(
+        prompt_id=prompt_id,
+        slot=normalized["slot"],
+        tags=tuple(normalized["tags"]),
+        priority=int(normalized["priority"]),
+        fallback=bool(normalized["fallback"]),
+        explicit=bool(normalized["explicit"]),
+        selection_mode=str(normalized["selection_mode"]),
+        text=text,
+        source=str(effective.get("source") or ""),
+        source_type=str(effective.get("source_type") or ""),
+        metadata={
+            "already_active": bool(declaration.get("already_active")),
+            "source_chain": (
+                effective.get("source_chain")
+                if isinstance(effective.get("source_chain"), list)
+                else []
+            ),
+            "source_pack_id": effective.get("source_pack_id"),
+            "source_pack_trusted": effective.get("source_pack_trusted"),
+        },
+        slot_priority=int(normalized["slot_priority"]),
+    )
+
+
 def _merge_duplicate_candidate(
     current: PromptVariantCandidate | None,
     incoming: PromptVariantCandidate,
@@ -243,126 +301,6 @@ def _merge_duplicate_candidate(
         explicit=current.explicit or incoming.explicit,
         metadata=metadata,
     )
-
-
-def _profile_selection_config(profile: Mapping[str, Any]) -> dict[str, Any]:
-    metadata = (
-        profile.get("metadata")
-        if isinstance(profile.get("metadata"), Mapping)
-        else {}
-    )
-    for key in ("prompt_selection", "model_prompt_selection"):
-        value = metadata.get(key)
-        if isinstance(value, Mapping):
-            return dict(value)
-    return {}
-
-
-def _candidate_declarations(config: Mapping[str, Any]) -> list[dict[str, Any]]:
-    declarations: list[dict[str, Any]] = []
-    for item in _list_value(config.get("candidates")):
-        declaration = _candidate_declaration(item)
-        if declaration:
-            declarations.append(declaration)
-    for item in _list_value(config.get("selected_prompt_ids")):
-        declaration = _candidate_declaration(item)
-        if declaration:
-            declaration["explicit"] = True
-            declarations.append(declaration)
-
-    slots = config.get("slots") if isinstance(config.get("slots"), Mapping) else {}
-    for slot_id in sorted(slots):
-        raw_slot = slots.get(slot_id)
-        if not isinstance(raw_slot, Mapping):
-            continue
-        declarations.extend(
-            _slot_candidate_declarations(str(slot_id), raw_slot)
-        )
-
-    deduped: dict[tuple[str, str], dict[str, Any]] = {}
-    for declaration in declarations:
-        key = (
-            str(declaration.get("slot") or ""),
-            str(declaration.get("prompt_id") or ""),
-        )
-        current = deduped.get(key, {})
-        deduped[key] = {
-            **current,
-            **declaration,
-            "explicit": bool(
-                current.get("explicit") or declaration.get("explicit")
-            ),
-            "already_active": bool(
-                current.get("already_active")
-                or declaration.get("already_active")
-            ),
-        }
-    return [deduped[key] for key in sorted(deduped)]
-
-
-def _slot_candidate_declarations(
-    slot_id: str,
-    raw_slot: Mapping[str, Any],
-) -> list[dict[str, Any]]:
-    fallback_id = str(raw_slot.get("fallback_prompt_id") or "").strip()
-    pinned_id = str(
-        raw_slot.get("selected_prompt_id")
-        or raw_slot.get("pinned_prompt_id")
-        or ""
-    ).strip()
-    mode = str(
-        raw_slot.get("selection_mode")
-        or raw_slot.get("mode")
-        or "best_match"
-    )
-    slot_priority = _int_value(
-        raw_slot.get("slot_priority", raw_slot.get("priority")),
-        default=100,
-    )
-    slot_items = list(_list_value(raw_slot.get("candidates")))
-    listed_ids = {
-        str(_candidate_declaration(item).get("prompt_id") or "")
-        for item in slot_items
-    }
-    for prompt_id in (fallback_id, pinned_id):
-        if prompt_id and prompt_id not in listed_ids:
-            slot_items.append(prompt_id)
-            listed_ids.add(prompt_id)
-
-    declarations: list[dict[str, Any]] = []
-    for item in slot_items:
-        declaration = _candidate_declaration(item)
-        if not declaration:
-            continue
-        declaration["slot"] = str(declaration.get("slot") or slot_id)
-        declaration["selection_mode"] = str(
-            declaration.get("selection_mode") or mode
-        )
-        declaration["slot_priority"] = _int_value(
-            declaration.get("slot_priority"),
-            default=slot_priority,
-        )
-        if declaration["prompt_id"] == fallback_id:
-            declaration["fallback"] = True
-        if declaration["prompt_id"] == pinned_id:
-            declaration["explicit"] = True
-        declarations.append(declaration)
-    return declarations
-
-
-def _candidate_declaration(value: Any) -> dict[str, Any]:
-    if isinstance(value, str):
-        prompt_id = value.strip()
-        return {"prompt_id": prompt_id} if prompt_id else {}
-    if not isinstance(value, Mapping):
-        return {}
-    prompt_id = str(
-        value.get("prompt_id")
-        or value.get("id")
-        or value.get("prompt")
-        or ""
-    ).strip()
-    return {**dict(value), "prompt_id": prompt_id} if prompt_id else {}
 
 
 def _resolve_effective_candidate(
@@ -384,48 +322,6 @@ def _resolve_effective_candidate(
             "workspace": dict(workspace),
         }
     )
-
-
-def _merge_selection_metadata(
-    *layers: tuple[Any, bool],
-) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
-    nested: dict[str, Any] = {}
-    for layer, allow_aliases in layers:
-        if not isinstance(layer, Mapping):
-            continue
-        for key in _NAMESPACED_SELECTION_KEYS:
-            if key in layer:
-                merged[key] = layer[key]
-        selection = layer.get("prompt_selection")
-        if isinstance(selection, Mapping):
-            nested.update(selection)
-        if allow_aliases:
-            for key in _SELECTION_ALIASES:
-                if key in layer:
-                    nested[key] = layer[key]
-    if nested:
-        merged["prompt_selection"] = nested
-    return merged
-
-
-def _active_prompt_ids(context: Mapping[str, Any]) -> set[str]:
-    usage = context.get("prompt_usage")
-    segments = usage.get("segments") if isinstance(usage, Mapping) else None
-    if not isinstance(segments, list):
-        return set()
-    output: set[str] = set()
-    for segment in segments:
-        if not isinstance(segment, Mapping):
-            continue
-        if str(segment.get("status") or "") != "active":
-            continue
-        if str(segment.get("kind") or "") == "model_prompt_variant":
-            continue
-        prompt_id = str(segment.get("prompt_id") or "").strip()
-        if prompt_id:
-            output.add(prompt_id)
-    return output
 
 
 def _profile_workspace(profile_id: str) -> dict[str, Any]:
@@ -487,23 +383,6 @@ def _preference_declaration(value: Any) -> dict[str, Any]:
             if isinstance(direct, Mapping):
                 return dict(direct)
     return {}
-
-
-def _list_value(value: Any) -> list[Any]:
-    if isinstance(value, str):
-        return [
-            item.strip()
-            for item in value.replace("\n", ",").split(",")
-            if item.strip()
-        ]
-    return list(value) if isinstance(value, (list, tuple, set)) else []
-
-
-def _int_value(value: Any, *, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _provider_from_model(model: Any) -> str:
