@@ -1,0 +1,6 @@
+"""Run Tobkiri with ``python -m tobkiri``."""
+
+from .runtime import main
+
+if __name__ == "__main__":
+    main()

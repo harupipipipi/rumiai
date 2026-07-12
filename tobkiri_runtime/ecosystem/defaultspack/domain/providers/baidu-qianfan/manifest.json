@@ -1,0 +1,70 @@
+{
+  "id": "baidu-qianfan",
+  "provider_id": "baidu-qianfan",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Baidu Qianfan",
+  "description": "Baidu Qianfan typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "Baidu Qianfan",
+    "kind": "cloud",
+    "env_vars": [
+      "QIANFAN_API_KEY"
+    ],
+    "base_url_envs": [
+      "BAIDU_QIANFAN_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://qianfan.baidubce.com/v2",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "baidu-qianfan",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Baidu Qianfan",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "QIANFAN_API_KEY",
+    "base_url_env": "BAIDU_QIANFAN_BASE_URL",
+    "default_base_url": "https://qianfan.baidubce.com/v2",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding"
+      ],
+      "source_docs": "https://cloud.baidu.com/doc/WENXINWORKSHOP/s/Fm2vrveyu"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "baidu-qianfan"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "typed_inventory"
+  ]
+}

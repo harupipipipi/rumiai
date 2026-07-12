@@ -1,0 +1,108 @@
+{
+  "snapshot": {
+    "source": "https://docs.cohere.com/v2/docs/models",
+    "verified_at": "2026-07-13",
+    "lifecycle_policy": "refresh from the native inventory when available; otherwise verify official docs before retirement"
+  },
+  "models": [
+    {
+      "id": "cohere/command-a-plus-05-2026",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cohere",
+      "model_id": "command-a-plus-05-2026",
+      "display_name": "Command A Plus 05-2026",
+      "type": "chat",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": true
+      },
+      "metadata": {
+        "source": "https://docs.cohere.com/v2/docs/models",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "chat",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cohere/embed-v4.0",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cohere",
+      "model_id": "embed-v4.0",
+      "display_name": "Embed v4.0",
+      "type": "embedding",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.cohere.com/v2/docs/models",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "embedding",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cohere/rerank-v4.0-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cohere",
+      "model_id": "rerank-v4.0-pro",
+      "display_name": "Rerank v4.0 Pro",
+      "type": "rerank",
+      "enabled": true,
+      "priority": 3,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.cohere.com/v2/docs/models",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "rerank",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}
