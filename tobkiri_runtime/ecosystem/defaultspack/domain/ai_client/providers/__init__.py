@@ -60,10 +60,9 @@ _LEGACY_PROVIDER_REGISTRY = [
     ),
 ]
 
-# Legacy compatibility fallback: new provider metadata should live in
-# domain/providers/<provider_id>/manifest.json and models.json. Keep these
-# hardcoded curated tables only to preserve existing catalog behavior, and
-# retire entries gradually as provider components reach full coverage.
+# Deprecated compatibility fallback. Authoritative provider/model descriptors
+# live behind rumi.resource.ai.model.catalog.v1. This table is retained only for
+# fixed migration reads and is removed with the Wave 10 facade cleanup.
 _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
     "stub": {
         "display_name": "Stub",

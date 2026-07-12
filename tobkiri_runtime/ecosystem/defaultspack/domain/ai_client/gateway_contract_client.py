@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import (
@@ -45,3 +45,47 @@ def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any
         operation,
         dict(payload),
     )
+
+
+class ContractLLMGateway:
+    """Compatibility object for orchestration that expects gateway methods."""
+
+    def complete(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Project one legacy gateway request through the selected owner."""
+        model = str(request.get("model") or "")
+        return generate(
+            {
+                "messages": list(request.get("messages") or []),
+                "tools": list(request.get("tools") or []),
+                "parameters": dict(request.get("params") or {}),
+                "model_reference": model,
+                "conversation_id": request.get("conversation_id"),
+                "idempotency_key": request.get("idempotency_key"),
+                "requirements": {
+                    "preferred_model_id": model,
+                    "tool_calling": bool(request.get("tools")),
+                    "request_surface": "legacy.chat",
+                },
+            }
+        )
+
+    def stream(self, request: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
+        """Project one legacy stream request through the selected owner."""
+        model = str(request.get("model") or "")
+        return iter(
+            stream(
+                {
+                    "messages": list(request.get("messages") or []),
+                    "tools": list(request.get("tools") or []),
+                    "parameters": dict(request.get("params") or {}),
+                    "model_reference": model,
+                    "conversation_id": request.get("conversation_id"),
+                    "idempotency_key": request.get("idempotency_key"),
+                    "requirements": {
+                        "preferred_model_id": model,
+                        "tool_calling": bool(request.get("tools")),
+                        "request_surface": "legacy.chat_stream",
+                    },
+                }
+            )
+        )

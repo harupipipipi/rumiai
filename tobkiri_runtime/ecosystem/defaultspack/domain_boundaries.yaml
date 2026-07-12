@@ -254,9 +254,6 @@ domains:
   prompts:
     may_import: []
     path: domain/prompts
-  providers:
-    may_import: []
-    path: domain/providers
   recording:
     may_import: []
     path: domain/recording
