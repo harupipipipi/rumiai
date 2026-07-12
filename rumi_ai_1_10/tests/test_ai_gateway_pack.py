@@ -11,12 +11,16 @@ from ecosystem.rumi_ai_gateway_pack.runtime.gateway import (
     GENERATE_PROVIDER_CONTRACT,
     HEALTH_CONTRACT,
     ROUTING_CONTRACT,
+    STREAM_NORMALIZE_CONTRACT,
     STREAM_PROVIDER_CONTRACT,
     USAGE_CONTRACT,
     create_generate_operation,
     create_stream_operation,
 )
 from ecosystem.rumi_ai_routing_pack.runtime.router import create_route_operation
+from ecosystem.rumi_ai_stream_pack.runtime.normalizer import (
+    create_stream_normalize_operation,
+)
 from ecosystem.rumi_ai_usage_pack.runtime.usage import create_cost_operation
 
 
@@ -75,6 +79,8 @@ class FakeContractClient:
             return create_route_operation(None)(operation, payload)
         if contract_id == USAGE_CONTRACT:
             return create_cost_operation(None)(operation, payload)
+        if contract_id == STREAM_NORMALIZE_CONTRACT:
+            return create_stream_normalize_operation(None)(operation, payload)
         if contract_id == GENERATE_PROVIDER_CONTRACT:
             if self.fail_first and provider_instance_id == "adapter-a":
                 raise GlobalContractInvocationError(

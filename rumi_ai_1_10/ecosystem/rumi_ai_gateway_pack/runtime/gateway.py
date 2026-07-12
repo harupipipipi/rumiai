@@ -20,6 +20,7 @@ STREAM_PROVIDER_CONTRACT = "rumi.service.ai.provider.stream.v1"
 HEALTH_CONTRACT = "rumi.resource.ai.provider.health.v1"
 USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
 ROUTING_CONTRACT = "rumi.service.ai.route.v1"
+STREAM_NORMALIZE_CONTRACT = "rumi.service.ai.stream.normalize.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -199,7 +200,25 @@ def _invoke(
                 provider_instance_id=attempt_candidate.provider_instance_id,
             )
             if streaming:
-                events = _normalize_stream(value, request_id)
+                normalized = client.invoke(
+                    STREAM_NORMALIZE_CONTRACT,
+                    "normalize",
+                    {
+                        "request_id": request_id,
+                        "provider_attempt": attempt_number,
+                        "value": value,
+                    },
+                )
+                events = (
+                    normalized.get("events")
+                    if isinstance(normalized, Mapping)
+                    else None
+                )
+                if not isinstance(events, list):
+                    raise GlobalContractInvocationError(
+                        "invalid_response",
+                        "stream normalizer returned an invalid result",
+                    )
                 _attach_stream_usage_cost(client, events, attempt_candidate)
                 return {
                     "request_id": request_id,
@@ -441,52 +460,6 @@ def _normalize_result(
             value.get("usage_provenance") or "provider_reported"
         ),
     }
-
-
-def _normalize_stream(value: Any, request_id: str) -> list[dict[str, Any]]:
-    if isinstance(value, Mapping):
-        events = value.get("events")
-    else:
-        events = value
-    if not isinstance(events, Iterable) or isinstance(events, (str, bytes, Mapping)):
-        raise GlobalContractInvocationError(
-            "invalid_response",
-            "provider stream must contain iterable events",
-        )
-    normalized: list[dict[str, Any]] = []
-    allowed_types = {
-        "text_delta",
-        "thinking_delta",
-        "tool_intent_delta",
-        "usage",
-        "finish",
-        "error",
-    }
-    for sequence, event in enumerate(events):
-        if not isinstance(event, Mapping):
-            raise GlobalContractInvocationError(
-                "invalid_response",
-                "stream event must be an object",
-            )
-        event_type = str(event.get("type") or "")
-        if event_type not in allowed_types:
-            raise GlobalContractInvocationError(
-                "invalid_response",
-                f"unknown stream event type: {event_type}",
-            )
-        normalized.append(
-            {
-                "request_id": request_id,
-                "sequence": sequence,
-                "type": event_type,
-                "delta": event.get("delta"),
-                "tool_intent": event.get("tool_intent"),
-                "usage": event.get("usage"),
-                "finish_reason": event.get("finish_reason"),
-                "provider_attempt": 1,
-            }
-        )
-    return normalized
 
 
 def _attach_stream_usage_cost(
