@@ -10,10 +10,10 @@
        so there is no black frame around the animation during launch. */
     html, body { background: #ffffff; color: #171717; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; user-select: none; }
-    .loader { width: min(72vw, 760px); aspect-ratio: 2 / 1; margin-bottom: 1.25rem; opacity: 0; transform: translateY(8px); transition: opacity .3s ease, transform .3s ease; }
+    .loader { width: min(72vw, 760px); aspect-ratio: 2 / 1; margin-bottom: 1.25rem; opacity: 1; transform: translateY(0); transition: opacity .3s ease, transform .3s ease; }
     .loader.visible { opacity: 1; transform: translateY(0); }
-    .loader img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 36px rgba(0, 0, 0, .16)); }
-    .progress { font-size: 1rem; color: #666666; text-align: center; min-height: 1.5em; padding: 0 2rem; transition: color .3s, opacity .3s ease; opacity: 0; }
+    .loader object { display: block; width: 100%; height: 100%; filter: drop-shadow(0 18px 36px rgba(0, 0, 0, .16)); }
+    .progress { font-size: 1rem; color: #666666; text-align: center; min-height: 1.5em; padding: 0 2rem; transition: color .3s, opacity .3s ease; opacity: 1; }
     .progress.visible { opacity: 1; }
     .progress.error { color: #c52626; }
     .progress.ready { color: #167a3d; }
@@ -21,28 +21,39 @@
   </style>
 </head>
 <body>
-  <div class="loader" id="loader">
-    <img src="./tobkiri_launcher_startup_blade_cut.svg" alt="Tobkiri" />
+  <div class="loader visible" id="loader">
+    <object id="startup-animation" data="./tobkiri_launcher_startup_blade_cut.svg" type="image/svg+xml" aria-label="Tobkiri startup animation"></object>
   </div>
-  <div class="progress" id="progress" role="status" aria-live="polite">Initializing...</div>
+  <div class="progress visible" id="progress" role="status" aria-live="polite">Initializing...</div>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       var el = document.getElementById('progress');
       var loader = document.getElementById('loader');
-      var showDelay = 350;
-      var timer = null;
-      var shown = false;
+      var animation = document.getElementById('startup-animation');
+      var shown = true;
       var finished = false;
       function showUi() { if (shown || finished) return; shown = true; loader.classList.add('visible'); el.classList.add('visible'); }
       function hideLoader() { loader.classList.remove('visible'); }
       function setMessage(msg, type) { loader.classList.add('visible'); el.textContent = msg; el.className = 'progress visible'; if (type === 'error') el.classList.add('error'); else if (type === 'ready') el.classList.add('ready'); }
-      function scheduleShow() { if (timer) clearTimeout(timer); if (!finished) timer = setTimeout(showUi, showDelay); }
       function onProgress(msg) {
         if (finished) return;
-        if (msg.indexOf('Error') === 0) { finished = true; clearTimeout(timer); setMessage(msg, 'error'); }
-        else if (msg === 'Ready') { finished = true; clearTimeout(timer); if (shown) setMessage(msg, 'ready'); else hideLoader(); }
-        else { scheduleShow(); if (shown) { el.textContent = msg; el.className = 'progress visible'; } }
+        if (msg.indexOf('Error') === 0) { finished = true; setMessage(msg, 'error'); }
+        else if (msg === 'Ready') { finished = true; setMessage(msg, 'ready'); }
+        else { el.textContent = msg; el.className = 'progress visible'; }
       }
+      function forceStartupAnimation() {
+        var svg = animation.contentDocument && animation.contentDocument.documentElement;
+        if (!svg) return;
+        try {
+          svg.setCurrentTime(0);
+          animation.contentDocument.querySelectorAll('animate, animateTransform').forEach(function (node) {
+            if (typeof node.beginElement === 'function') node.beginElement();
+          });
+        } catch (_) {
+          // The SVG remains visible even if an older WebView lacks SMIL controls.
+        }
+      }
+      animation.addEventListener('load', forceStartupAnimation);
       function listenProgress() { if (!window.__TAURI__ || !window.__TAURI__.event) { setTimeout(listenProgress, 100); return; } window.__TAURI__.event.listen('setup-progress', function (event) { onProgress(event.payload); }); }
       function poll() { if (!window.__TAURI__ || !window.__TAURI__.core) { setTimeout(poll, 300); return; } window.__TAURI__.core.invoke('get_setup_progress').then(function (msg) { onProgress(msg); }).catch(function () {}); if (!finished) setTimeout(poll, 500); }
       listenProgress(); poll();
