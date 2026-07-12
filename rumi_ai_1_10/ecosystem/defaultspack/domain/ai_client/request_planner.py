@@ -28,5 +28,5 @@ def plan_model_request(
         provider_capabilities=provider_capabilities,
         tools=list(tools or []),
         params=dict(params or {}),
-        context=runtime_context,
+        context=runtime_context if isinstance(context, dict) else context,
     )
