@@ -37,6 +37,20 @@ class CredentialBrokerService:
             return self.store.revoke(str(data.get("handle") or ""))
         if operation == "list":
             return self.store.list()
+        if operation == "migration.apply":
+            records = data.get("records")
+            if not isinstance(records, list) or not all(
+                isinstance(item, Mapping) for item in records
+            ):
+                raise ValueError("credential migration payload is invalid")
+            return self.store.migrate(
+                records,
+                expected_source_hash=str(data.get("expected_source_hash") or ""),
+            )
+        if operation == "migration.rollback":
+            return self.store.rollback_migration(
+                str(data.get("migration_id") or "")
+            )
         if operation == "resolve":
             if not consumer:
                 raise PermissionError("credential consumer identity is missing")

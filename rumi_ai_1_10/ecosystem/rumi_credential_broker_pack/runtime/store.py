@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
 import uuid
@@ -26,6 +27,7 @@ class CredentialBrokerStore:
         self.path = self.root / "credentials.store.json"
         self.key_path = self.root / ".credential-store.key"
         self.lock_root = self.root / "locks"
+        self.backup_root = self.root / "migration_backups"
 
     def create(
         self,
@@ -143,6 +145,94 @@ class CredentialBrokerStore:
             self._write(state)
         return {"handle": str(handle), "revoked": True}
 
+    def migrate(
+        self,
+        records: list[Mapping[str, Any]],
+        *,
+        expected_source_hash: str,
+    ) -> dict[str, Any]:
+        """Atomically import explicit legacy records into encrypted handles."""
+        source = {"records": [dict(item) for item in records]}
+        if _hash(source) != expected_source_hash:
+            raise ValueError("credential migration source changed")
+        with NamedLock(self.lock_root, "credential-broker"):
+            state = self._read()
+            if state.get("migration") is not None:
+                raise RuntimeError("credential migration is already applied")
+            migration_id = f"migration-{uuid.uuid4().hex}"
+            backup = self.backup_root / migration_id
+            backup.mkdir(parents=True, exist_ok=False)
+            os.chmod(backup, 0o700)
+            self._write_backup(backup / "pre-migration.store.json", state)
+            handles: list[str] = []
+            for item in records:
+                consumer_pack_id = _identifier(
+                    item.get("consumer_pack_id"), "consumer_pack_id"
+                )
+                provider_instance_id = _identifier(
+                    item.get("provider_instance_id"), "provider_instance_id"
+                )
+                scopes = _scopes([str(value) for value in item.get("scopes", [])])
+                material = item.get("secret_material")
+                if not scopes or not isinstance(material, Mapping) or not material:
+                    raise ValueError("credential migration record is invalid")
+                handle = f"credential:{uuid.uuid4().hex}"
+                state["credentials"][handle] = {
+                    "handle": handle,
+                    "consumer_pack_id": consumer_pack_id,
+                    "provider_instance_id": provider_instance_id,
+                    "scopes": scopes,
+                    "label": str(item.get("label") or "legacy migration")[:160],
+                    "expires_at": item.get("expires_at"),
+                    "created_at": _now(),
+                    "updated_at": _now(),
+                    "ciphertext": self._fernet().encrypt(
+                        json.dumps(
+                            dict(material),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).decode("ascii"),
+                }
+                handles.append(handle)
+            state["revision"] += 1
+            state["migration"] = {
+                "migration_id": migration_id,
+                "source_hash": expected_source_hash,
+                "backup": str(backup),
+                "handles": handles,
+                "migrated_at": _now(),
+            }
+            self._write(state)
+            return {
+                "migration_id": migration_id,
+                "source_hash": expected_source_hash,
+                "credentials": [
+                    self._public(state["credentials"][item]) for item in handles
+                ],
+            }
+
+    def rollback_migration(self, migration_id: str) -> dict[str, Any]:
+        """Restore the exact encrypted pre-migration owner state."""
+        with NamedLock(self.lock_root, "credential-broker"):
+            state = self._read()
+            migration = state.get("migration")
+            if not isinstance(migration, Mapping) or migration.get(
+                "migration_id"
+            ) != migration_id:
+                raise ValueError("credential migration marker mismatch")
+            backup = Path(str(migration.get("backup") or ""))
+            backup_path = backup / "pre-migration.store.json"
+            restored = json.loads(backup_path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(restored, dict)
+                or restored.get("version") != STORE_VERSION
+            ):
+                raise RuntimeError("credential migration backup is invalid")
+            self._write_backup(self.root / f"rollback-{migration_id}.json", state)
+            self._write(restored)
+            return {"migration_id": migration_id, "rolled_back": True}
+
     def _fernet(self) -> Fernet:
         self.root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.root, 0o700)
@@ -167,6 +257,7 @@ class CredentialBrokerStore:
                 "version": STORE_VERSION,
                 "revision": 0,
                 "credentials": {},
+                "migration": None,
             }
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != STORE_VERSION:
@@ -185,6 +276,18 @@ class CredentialBrokerStore:
         )
         os.chmod(temporary, 0o600)
         temporary.replace(self.path)
+
+    @staticmethod
+    def _write_backup(path: Path, state: Mapping[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(temporary, 0o600)
+        temporary.replace(path)
 
     @staticmethod
     def _public(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -222,3 +325,13 @@ def _scopes(values: list[str]) -> list[str]:
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _hash(value: Any) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()

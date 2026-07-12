@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -98,3 +100,36 @@ def test_revocation_prevents_later_resolution(tmp_path: Path) -> None:
                 "scope": "generate",
             },
         )
+
+
+def test_credential_migration_is_atomic_redacted_and_reversible(
+    tmp_path: Path,
+) -> None:
+    service = CredentialBrokerService(user_data_root=tmp_path)
+    source = {
+        "records": [
+            {
+                "consumer_pack_id": "rumi_provider_adapters_pack",
+                "provider_instance_id": "provider.example",
+                "scopes": ["ai.generate"],
+                "secret_material": {"api_key": "not-returned"},
+            }
+        ]
+    }
+    raw = json.dumps(
+        source, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    result = service.invoke(
+        "migration.apply",
+        {
+            **source,
+            "expected_source_hash": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        },
+    )
+
+    assert result["credentials"][0]["handle"].startswith("credential:")
+    assert "not-returned" not in str(result)
+    assert service.invoke(
+        "migration.rollback", {"migration_id": result["migration_id"]}
+    )["rolled_back"]
+    assert service.invoke("list", {})["count"] == 0

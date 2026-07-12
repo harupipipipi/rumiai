@@ -10,6 +10,7 @@
     "provides": [
       "rumi.service.credential.resolve.v1",
       "rumi.action.credential.manage.v1",
+      "rumi.action.credential.migrate.v1",
       "rumi.resource.credential.status.v1"
     ]
   },
@@ -17,6 +18,7 @@
   "required_capabilities": [
     "credential.resolve",
     "credential.manage",
+    "credential.migrate",
     "credential.status.read"
   ],
   "required_network": {"allowed_domains": [], "allowed_ports": []},
