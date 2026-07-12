@@ -60,3 +60,8 @@ class CompanyTaskStore:
         if self.store.get_company(company_id) is None:
             return None
         return self.runtime_store.update_task(task_id, updates, company_id=company_id)
+
+    def delete(self, company_id: str, task_id: str) -> bool:
+        if self.store.get_company(company_id) is None:
+            return False
+        return self.runtime_store.delete_task(task_id, company_id=company_id)
