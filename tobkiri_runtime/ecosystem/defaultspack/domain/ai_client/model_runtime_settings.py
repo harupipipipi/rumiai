@@ -10,7 +10,6 @@ from domain.ai_client.api_key_store import (
     provider_has_api_key,
     provider_named_api_keys,
     read_provider_api_key,
-    set_provider_api_key,
 )
 from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
 from domain.ai_client.model_pack_store import normalize_model_packs
@@ -489,11 +488,13 @@ class ModelRuntimeSettingsService:
             ("openrouter", "openrouter_api_key", "openrouter_api_key_configured"),
         ):
             raw_key = sanitized.pop(field_id, None)
-            if isinstance(raw_key, str) and raw_key.strip():
-                result = set_provider_api_key(provider_id, raw_key, pack_root=self._pack_root)
-                sanitized[configured_field] = bool(result.get("success"))
-            else:
-                sanitized[configured_field] = provider_has_api_key(provider_id, pack_root=self._pack_root)
+            # Legacy model settings cannot carry a trusted approval context.
+            # Discard submitted secret material and preserve status only; new
+            # credentials must use the approved provider-key action.
+            del raw_key
+            sanitized[configured_field] = provider_has_api_key(
+                provider_id, pack_root=self._pack_root
+            )
             sanitized[field_id] = ""
         sanitized["model_api_routes"] = self._normalize_model_api_routes(
             sanitized.get("model_api_routes", "")

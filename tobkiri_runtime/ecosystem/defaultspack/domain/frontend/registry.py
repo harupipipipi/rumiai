@@ -17,7 +17,7 @@ from urllib.parse import quote
 from core_runtime.profile_graph_models import normalize_profile_graph_selected
 from core_runtime.profile_workspace import ProfileWorkspaceManager
 from domain.ai_client.client import AIClient
-from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
+from domain.ai_client.api_key_store import provider_key_status
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.oauth_store import provider_oauth_statuses
 from domain.capability.catalog import CapabilityCatalog
@@ -3312,37 +3312,10 @@ class FrontendRegistry:
                 models_patch = sanitized.setdefault("models", {})
                 if isinstance(models_patch, dict) and not models_patch.get("model_api_routes"):
                     models_patch["model_api_routes"] = legacy_model_routes
-            api_key_patch = apis.pop("api_keys", None)
-            if isinstance(api_key_patch, dict) and api_key_patch.get("action") == "upsert":
-                provider_id = str(api_key_patch.get("provider_id") or "").strip()
-                name = str(api_key_patch.get("name") or api_key_patch.get("api_id") or "").strip()
-                value = str(api_key_patch.get("value") or "")
-                if provider_id and name and value.strip():
-                    budget_raw = api_key_patch.get("monthly_budget_usd")
-                    request_limit_raw = api_key_patch.get("monthly_request_limit")
-                    try:
-                        budget_value = float(budget_raw) if budget_raw not in (None, "") else None
-                    except (TypeError, ValueError):
-                        budget_value = None
-                    try:
-                        request_limit_value = int(request_limit_raw) if request_limit_raw not in (None, "") else None
-                    except (TypeError, ValueError):
-                        request_limit_value = None
-                    set_provider_api_key(
-                        provider_id,
-                        value,
-                        pack_root=self._pack_root,
-                        api_id=name,
-                        name=name,
-                        base_url=str(api_key_patch.get("base_url") or "").strip() or None,
-                        allowed_models=api_key_patch.get("allowed_models"),
-                        default_model=str(api_key_patch.get("default_model") or "").strip() or None,
-                        notes=str(api_key_patch.get("notes") or "").strip() or None,
-                        quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
-                        monthly_budget_usd=budget_value,
-                        monthly_request_limit=request_limit_value,
-                        kind=str(api_key_patch.get("kind") or "").strip() or None,
-                    )
+            # Credential mutations require the signed approval flow exposed by
+            # /api/ai/provider-key. Settings patches have no trusted approval
+            # context, so they may never become a second secret-write path.
+            apis.pop("api_keys", None)
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
         legacy_external_inputs = sanitized.get("external_inputs")
