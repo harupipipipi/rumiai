@@ -15,7 +15,10 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
 from .global_contracts.manifest import load_manifest
-from .global_contract_dispatch import GlobalContractInvocationError
+from .global_contract_dispatch import (
+    GlobalContractClient,
+    GlobalContractInvocationError,
+)
 from .pack_artifact_integrity import verify_declared_artifacts
 from .paths import (
     CORE_PACK_DIR,
@@ -86,7 +89,7 @@ def register_pack_binding_handlers(
             )
             continue
 
-        process_handled, process_registered = _register_v3_process_bindings(
+        process_handled, process_registered = _register_v3_contract_bindings(
             pack_id,
             pack_location,
             interface_registry,
@@ -166,13 +169,13 @@ def register_pack_binding_handlers(
     return result
 
 
-def _register_v3_process_bindings(
+def _register_v3_contract_bindings(
     pack_id: str,
     pack_location: PackLocation,
     interface_registry: InterfaceRegistry,
     result: CapabilityBindingRegistrationResult,
 ) -> tuple[bool, bool]:
-    """Register approved v3 process providers without importing pack code."""
+    """Activate verified v3 providers only after pack approval."""
     manifest_path = pack_location.pack_subdir / "rumi.pack.v3.json"
     if not manifest_path.is_file():
         return False, False
@@ -227,8 +230,13 @@ def _register_v3_process_bindings(
     entrypoints = {
         str(item.get("contract_id") or ""): item
         for item in manifest.get("entrypoints", [])
-        if isinstance(item, dict) and item.get("loader") == "process"
+        if isinstance(item, dict) and item.get("loader") in {"process", "python"}
     }
+    required_contract_ids = frozenset(
+        str(item.get("id") or "")
+        for item in manifest.get("contracts", {}).get("requires", [])
+        if isinstance(item, dict) and item.get("id")
+    )
     providers = manifest.get("contracts", {}).get("provides", [])
     registered = 0
     expected = 0
@@ -271,10 +279,36 @@ def _register_v3_process_bindings(
                 )
             )
             continue
-        operation = _ProcessContractOperation(
-            module=module,
-            pack_location=pack_location,
-        )
+        loader = str(entrypoint.get("loader") or "")
+        if loader == "process":
+            operation = _ProcessContractOperation(
+                module=module,
+                pack_location=pack_location,
+            )
+        else:
+            try:
+                operation = _load_python_contract_operation(
+                    module=module,
+                    symbol=str(entrypoint.get("symbol") or ""),
+                    pack_location=pack_location,
+                    client=GlobalContractClient(
+                        interface_registry=interface_registry,
+                        allowed_contract_ids=required_contract_ids,
+                        consumer_pack_id=pack_id,
+                    ),
+                )
+            except Exception as exc:
+                result.ok = False
+                result.diagnostics.append(
+                    _diagnostic(
+                        "error",
+                        "v3_python_activation_failed",
+                        f"Python contract activation failed: {exc}",
+                        pack_id=pack_id,
+                        contract_id=contract_id,
+                    )
+                )
+                continue
         descriptor = {
             "contract_id": contract_id,
             "version": str(provider.get("version") or ""),
@@ -286,7 +320,7 @@ def _register_v3_process_bindings(
             "content_hash": str(manifest.get("provenance", {}).get("content_hash") or ""),
             "build_identity": str(manifest.get("provenance", {}).get("build_identity") or ""),
             "trust_class": str(manifest.get("provenance", {}).get("trust_class") or "untrusted"),
-            "isolation": "process",
+            "isolation": str(provider.get("isolation") or loader),
             "required_capabilities": list(provider.get("required_capabilities") or []),
             "operation": operation,
         }
@@ -297,15 +331,15 @@ def _register_v3_process_bindings(
                 "_source_pack_id": pack_id,
                 "_source_pack_version": descriptor["source_pack_version"],
                 "authority_grant": False,
-                "isolation": "process",
+                "isolation": descriptor["isolation"],
             },
         )
         registered += 1
     result.diagnostics.append(
         _diagnostic(
             "info" if registered else "warning",
-            "v3_process_bindings_registered",
-            f"Registered {registered} process contract providers",
+            "v3_contract_bindings_registered",
+            f"Registered {registered} contract providers",
             pack_id=pack_id,
             registered=registered,
         )
@@ -364,6 +398,38 @@ class _ProcessContractOperation:
                 "; ".join(str(item) for item in diagnostics),
             )
         return response.get("value")
+
+
+def _load_python_contract_operation(
+    *,
+    module: str,
+    symbol: str,
+    pack_location: PackLocation,
+    client: GlobalContractClient,
+) -> Any:
+    """Import one verified activation factory and return its operation only."""
+    if not symbol.isidentifier():
+        raise ValueError("python entrypoint symbol is invalid")
+    runtime_root = pack_location.pack_dir.parent.parent
+    added_path = str(runtime_root)
+    inserted = added_path not in sys.path
+    if inserted:
+        sys.path.insert(0, added_path)
+    try:
+        activated_module = importlib.import_module(module)
+        factory = getattr(activated_module, symbol)
+        if not callable(factory):
+            raise TypeError("python entrypoint factory is not callable")
+        operation = factory(client)
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(added_path)
+            except ValueError:
+                pass
+    if not callable(operation):
+        raise TypeError("python entrypoint did not return an operation")
+    return operation
 
 
 def _module_owned_by_pack(module: str, pack_id: str) -> bool:

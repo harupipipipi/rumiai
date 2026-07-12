@@ -1,0 +1,131 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {
+    "id": "rumi.ai_gateway",
+    "version": "1.0.0",
+    "kind": "service",
+    "display_name": "Rumi AI Gateway",
+    "description": "Provider-neutral generation, routing, stream, usage, and diagnostic gateway."
+  },
+  "contracts": {
+    "provides": [
+      {
+        "id": "rumi.service.ai.generate.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "ai-gateway.generate",
+        "cardinality": "one",
+        "security": "sensitive",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_ai_gateway_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["ai.gateway.generate"]
+      },
+      {
+        "id": "rumi.service.ai.stream.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "ai-gateway.stream",
+        "cardinality": "one",
+        "security": "sensitive",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_ai_gateway_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["ai.gateway.stream"]
+      },
+      {
+        "id": "rumi.resource.ai.routing.diagnostics.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "ai-gateway.routing-diagnostics",
+        "cardinality": "one",
+        "security": "sensitive",
+        "failure": "isolate",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_ai_gateway_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["ai.gateway.diagnostics.read"]
+      }
+    ],
+    "requires": [
+      {
+        "id": "rumi.resource.ai.model.catalog.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.ai.provider.generate.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.ai.provider.stream.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": true
+      },
+      {
+        "id": "rumi.resource.ai.provider.health.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": true
+      }
+    ]
+  },
+  "entrypoints": [
+    {
+      "id": "ai-gateway-generate",
+      "contract_id": "rumi.service.ai.generate.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
+      "symbol": "create_generate_operation",
+      "artifact_hash": "sha256:a3c5c66f68bb6d4b927ad3f06bf1b76ae43f5747d6eae1c9adc8dbeecd599dc5"
+    },
+    {
+      "id": "ai-gateway-stream",
+      "contract_id": "rumi.service.ai.stream.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
+      "symbol": "create_stream_operation",
+      "artifact_hash": "sha256:a3c5c66f68bb6d4b927ad3f06bf1b76ae43f5747d6eae1c9adc8dbeecd599dc5"
+    },
+    {
+      "id": "ai-gateway-routing-diagnostics",
+      "contract_id": "rumi.resource.ai.routing.diagnostics.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
+      "symbol": "create_routing_diagnostics_operation",
+      "artifact_hash": "sha256:a3c5c66f68bb6d4b927ad3f06bf1b76ae43f5747d6eae1c9adc8dbeecd599dc5"
+    }
+  ],
+  "resources": [],
+  "storage": [],
+  "permissions": [
+    {"capability": "ai.gateway.generate", "access": "execute", "approval_required": false},
+    {"capability": "ai.gateway.stream", "access": "execute", "approval_required": false},
+    {"capability": "ai.gateway.diagnostics.read", "access": "read", "approval_required": false}
+  ],
+  "provenance": {
+    "content_hash": "sha256:7cc250a046003e181f1f2763aa425a9f4a9889d7c72d6aef95ce203092e0bf90",
+    "build_identity": "rumi-ai-gateway-pack:1.0.0",
+    "trust_class": "local",
+    "signature": null
+  },
+  "migration": {
+    "from": ["defaultspack.ai_client.gateway"],
+    "compatibility_aliases": [],
+    "compatibility_projection": "none",
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31",
+    "rollback": "Remove the gateway pack from the resolved profile and restore the pinned pre-Wave-5 routing owner revision."
+  },
+  "extensions": {
+    "rumi.ai_gateway.routing": {
+      "provider_pack_id_branches": false,
+      "catalog_execution_versions_independent": true,
+      "credential_values_accepted": false,
+      "human_handoff_is_provider": false
+    }
+  }
+}
