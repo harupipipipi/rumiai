@@ -158,6 +158,7 @@ test("coding cockpit renders workspace and sidecar sections", () => {
 test("MCP requester never approves its own request", () => {
   const source = readFileSync(resolve(import.meta.dirname, "CodingCockpit.tsx"), "utf8");
   assert.doesNotMatch(source, /codingResources\.approveCodingApproval/);
-  assert.match(source, /separate Approvals queue/);
-  assert.match(source, /requesting form cannot approve its own request/);
+  assert.match(source, /Review the shared approval request below/);
+  assert.match(source, /onApproved=\{handleApprovalApproved\}/);
+  assert.match(source, /approval_token: decision\.token/);
 });

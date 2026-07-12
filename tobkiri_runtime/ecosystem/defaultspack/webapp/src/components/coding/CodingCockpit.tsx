@@ -17,6 +17,7 @@ import { DiffPanel } from "./DiffPanel";
 import { RumiLogPanel } from "./RumiLogPanel";
 import { TerminalPanel, type ApprovedTerminalDecision } from "./TerminalPanel";
 import { nextApprovalQueueRefreshSignal } from "./approvalQueueSync";
+import { approvedMcpRetryReason, isMcpApprovalRequest, sameMcpDraft, type McpConnectionDraft, type PendingMcpConnection } from "./mcpApproval";
 
 function workspaceLabel(workspace: CodingWorkspaceRecord): string {
   return workspace.label || workspace.workspace_id;
@@ -81,6 +82,7 @@ export function CodingCockpit({
   const [mcpCommand, setMcpCommand] = useState("");
   const [mcpArgs, setMcpArgs] = useState("");
   const [mcpBusy, setMcpBusy] = useState(false);
+  const [pendingMcp, setPendingMcp] = useState<PendingMcpConnection | null>(null);
   const [activeCockpitTab, setActiveCockpitTab] = useState<"review" | "workspace">("review");
   const isSidebar = variant === "sidebar";
 
@@ -101,6 +103,13 @@ export function CodingCockpit({
   useEffect(() => {
     void loadSidecarState();
   }, [loadSidecarState]);
+
+  useEffect(() => {
+    if (!pendingMcp) return;
+    if (!sameMcpDraft(pendingMcp.draft, {
+      serverId: mcpServerId.trim(), command: mcpCommand.trim(), args: parseMcpArgs(mcpArgs), workspaceId: activeWorkspaceId,
+    })) setStatus("MCP configuration or workspace changed. The pending review is stale; connect again for a new review.");
+  }, [activeWorkspaceId, mcpArgs, mcpCommand, mcpServerId, pendingMcp]);
 
   const createSession = async () => {
     const task = sessionTask.trim() || "Inspect workspace changes";
@@ -131,7 +140,25 @@ export function CodingCockpit({
     setSessions(refreshed);
   };
 
-  const handleApprovalApproved = (decision: CodingApprovalDecision, request: CodingApprovalRequest) => {
+  const currentMcpDraft = (): McpConnectionDraft => ({
+    serverId: mcpServerId.trim(), command: mcpCommand.trim(), args: parseMcpArgs(mcpArgs), workspaceId: activeWorkspaceId,
+  });
+
+  const rememberPendingMcp = (requestId: string, draft: McpConnectionDraft) => {
+    setPendingMcp({ requestId, draft });
+    setApprovalRefreshSignal((value) => value + 1);
+    setActiveCockpitTab("workspace");
+    setStatus(`MCP approval required for ${draft.serverId}. Review the shared approval request below.`);
+  };
+
+  const finishMcpConnection = async (serverId: string, tools: unknown[]) => {
+    setPendingMcp(null);
+    setMcpServerId(""); setMcpCommand(""); setMcpArgs("");
+    await loadSidecarState();
+    setStatus(`MCP connected: ${serverId}${tools.length ? ` (${tools.length} tools)` : ""}`);
+  };
+
+  const handleApprovalApproved = async (decision: CodingApprovalDecision, request: CodingApprovalRequest) => {
     const approvedDecision = {
       request_id: decision.request_id,
       approved: decision.approved,
@@ -140,9 +167,38 @@ export function CodingCockpit({
     };
     if (request.operation === "terminal.exec") {
       setApprovedTerminalDecision(approvedDecision);
+      return;
     } else if (request.operation === "file.restore") {
       setApprovedCheckpointDecision(approvedDecision);
+      return;
     }
+    if (!isMcpApprovalRequest(request)) return;
+    const draft = currentMcpDraft();
+    const retryReason = approvedMcpRetryReason(pendingMcp, draft, decision);
+    if (retryReason) { setPendingMcp(null); setApprovalRefreshSignal((value) => value + 1); setStatus(retryReason); return; }
+    if (!pendingMcp || !decision.token || mcpBusy) return;
+    const approvedAttempt = pendingMcp;
+    setPendingMcp(null);
+    setMcpBusy(true);
+    try {
+      const result = await codingResources.connectMcpServer({
+        server_id: approvedAttempt.draft.serverId,
+        workspace_id: approvedAttempt.draft.workspaceId,
+        approval_token: decision.token,
+      });
+      const nextRequestId = typeof result.approval_request_id === "string" ? result.approval_request_id : result.approval_request?.request_id;
+      if (result.approval_required && nextRequestId) { rememberPendingMcp(nextRequestId, approvedAttempt.draft); return; }
+      await finishMcpConnection(approvedAttempt.draft.serverId, Array.isArray(result.tools) ? result.tools : []);
+    } catch (err) {
+      setApprovalRefreshSignal((value) => value + 1);
+      setStatus(`MCP start or reconnect failed. Review the configuration and try again. ${err instanceof Error ? err.message : String(err)}`);
+    } finally { setMcpBusy(false); }
+  };
+
+  const handleApprovalDenied = (request: CodingApprovalRequest) => {
+    if (!isMcpApprovalRequest(request) || pendingMcp?.requestId !== request.request_id) return;
+    setPendingMcp(null);
+    setStatus("MCP connection denied. You can edit the configuration and connect again.");
   };
 
   const handleCodingActionResult = useCallback((result: unknown) => {
@@ -158,30 +214,23 @@ export function CodingCockpit({
     setMcpBusy(true);
     setStatus(null);
     try {
+      const draft = currentMcpDraft();
       const config = {
         server_id: serverId,
         name: serverId,
         transport: "stdio",
         command,
-        args: parseMcpArgs(mcpArgs),
+        args: draft.args,
       };
       await codingResources.registerMcpServer({ server_id: serverId, name: serverId, config });
-      const result = await codingResources.connectMcpServer({ server_id: serverId });
-      if (result.approval_required && typeof result.approval_request_id === "string") {
-        await loadSidecarState();
-        setStatus(
-          `MCP approval required for ${serverId}. Review request ${result.approval_request_id} ` +
-            "in the separate Approvals queue, then press Connect again. " +
-            "The requesting form cannot approve its own request.",
-        );
+      const result = await codingResources.connectMcpServer({ server_id: serverId, workspace_id: activeWorkspaceId });
+      const requestId = typeof result.approval_request_id === "string" ? result.approval_request_id : result.approval_request?.request_id;
+      if (result.approval_required) {
+        if (!requestId) throw new Error("MCP approval response did not include a request id");
+        rememberPendingMcp(requestId, draft);
         return;
       }
-      const tools = Array.isArray(result.tools) ? result.tools.length : 0;
-      setMcpServerId("");
-      setMcpCommand("");
-      setMcpArgs("");
-      await loadSidecarState();
-      setStatus(`MCP connected: ${serverId}${tools ? ` (${tools} tools)` : ""}`);
+      await finishMcpConnection(serverId, Array.isArray(result.tools) ? result.tools : []);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
     } finally {
@@ -284,6 +333,7 @@ export function CodingCockpit({
           <RumiLogPanel workspaceId={activeWorkspaceId} />
           <ApprovalQueue
             onApproved={handleApprovalApproved}
+            onDenied={handleApprovalDenied}
             refreshSignal={approvalRefreshSignal}
           />
           <DiffPanel workspaceId={activeWorkspaceId} />

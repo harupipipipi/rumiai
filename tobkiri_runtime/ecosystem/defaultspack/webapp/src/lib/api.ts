@@ -340,6 +340,40 @@ export type CodingApprovalRequest = {
   display_summary?: string;
 };
 
+export type McpApprovalReview = {
+  executable?: string;
+  normalized_executable?: string;
+  transport?: string;
+  args?: unknown[];
+  normalized_args?: unknown[];
+  cwd?: string;
+  normalized_cwd?: string;
+  redacted_env?: Record<string, unknown> | unknown[];
+  environment_redacted?: Record<string, unknown> | unknown[];
+  env?: Record<string, unknown>;
+  server_source?: string;
+  source?: string;
+  capabilities?: unknown;
+  tools?: unknown;
+  network?: unknown;
+  filesystem?: unknown;
+  persistence?: unknown;
+  consequences?: unknown;
+};
+
+export type McpConnectResponse = {
+  server_id?: string;
+  server_name?: string;
+  workspace_id?: string | null;
+  status?: string;
+  approval_required?: boolean;
+  approval_request_id?: string;
+  approval_request?: CodingApprovalRequest;
+  tools_added?: number;
+  tools?: unknown[];
+  [key: string]: unknown;
+};
+
 export type CodingApprovalDecision = {
   request_id: string;
   status: string;
@@ -4465,8 +4499,9 @@ export const api = {
     server_name?: string;
     config?: Record<string, unknown>;
     approval_token?: string;
+    workspace_id?: string | null;
   }) {
-    return request<Record<string, unknown>>("/api/tools/mcp/connect", {
+    return request<McpConnectResponse>("/api/tools/mcp/connect", {
       method: "POST",
       body: JSON.stringify(payload),
     });
