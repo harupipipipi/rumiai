@@ -37,29 +37,42 @@
         var theme = 'Rumi';
         var mode = 'dark';
 
-        try {
-          var storedTheme = localStorage.getItem('tobkiri-theme');
-          var storedMode = localStorage.getItem('tobkiri-color-mode');
-          if (storedTheme === null) {
-            var legacyTheme = localStorage.getItem('rumi-theme');
-            if (themes[legacyTheme]) {
-              storedTheme = legacyTheme;
-              try { localStorage.setItem('tobkiri-theme', legacyTheme); } catch (error) {}
-            }
+        function safeGetItem(key) {
+          try {
+            return localStorage.getItem(key);
+          } catch (error) {
+            return null;
           }
-          if (storedMode === null) {
-            var legacyMode = localStorage.getItem('rumi-color-mode');
-            if (legacyMode === 'light' || legacyMode === 'dark') {
-              storedMode = legacyMode;
-              try { localStorage.setItem('tobkiri-color-mode', legacyMode); } catch (error) {}
-            }
-          }
-          if (themes[storedTheme]) theme = storedTheme;
-          if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
-        } catch (error) {
-          theme = 'Rumi';
-          mode = 'dark';
         }
+
+        function safeSetItem(key, value) {
+          try {
+            localStorage.setItem(key, value);
+          } catch (error) {
+            // Appearance reads remain usable when persistence is unavailable.
+          }
+        }
+
+        var storedTheme = safeGetItem('tobkiri-theme');
+        if (storedTheme === null) {
+          var legacyTheme = safeGetItem('rumi-theme');
+          if (themes[legacyTheme]) {
+            storedTheme = legacyTheme;
+            safeSetItem('tobkiri-theme', legacyTheme);
+          }
+        }
+
+        var storedMode = safeGetItem('tobkiri-color-mode');
+        if (storedMode === null) {
+          var legacyMode = safeGetItem('rumi-color-mode');
+          if (legacyMode === 'light' || legacyMode === 'dark') {
+            storedMode = legacyMode;
+            safeSetItem('tobkiri-color-mode', legacyMode);
+          }
+        }
+
+        if (themes[storedTheme]) theme = storedTheme;
+        if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
 
         root.classList.add(themes[theme]);
         if (mode === 'dark') {
