@@ -7,7 +7,7 @@ import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
 import '../data/pc/pc_pairing_client.dart';
 import '../platform/platform_services.dart';
-import '../qr/qr_payload.dart';
+import '../qr/pairing_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
 import 'defaultspack_mobile_providers.g.dart';
@@ -145,10 +145,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     final pc = pcUrl.isEmpty || _pcToken.text.trim().isEmpty
         ? null
-        : PcConnection(
-            baseUrl: pcUrl,
-            token: _pcToken.text.trim(),
-          );
+        : PcConnection(baseUrl: pcUrl, token: _pcToken.text.trim());
     await widget.configStore.savePc(pc);
     if (!mounted) return;
     setState(() {
@@ -164,89 +161,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _scanApi({BuildContext? navigationContext}) async {
-    final result = await Navigator.of(
-      navigationContext ?? context,
-    ).push<(QrPayload, bool)>(
-      MaterialPageRoute(
-        builder: (_) => const QrScannerScreen(
-          purpose: QrScanPurpose.apiImport,
-          hint: 'PCの「アプリ」欄に表示されたAPI/モデルQRをスキャン',
-        ),
-      ),
-    );
-    if (result == null) return;
-    final (payload, mismatch) = result;
-    if (mismatch) {
-      _toast('このQRはAPI形式ではありません');
-      return;
-    }
-    if (payload is QrApiImport) {
-      final providerId = payload.providerId?.trim() ?? '';
-      if (providerId.isNotEmpty) {
-        await _importProviderApi(payload);
-        return;
-      }
-      setState(() {
-        _baseUrl.text = payload.baseUrl;
-        _apiKey.text = payload.apiKey;
-        if (payload.model != null && payload.model!.isNotEmpty) {
-          _model.text = payload.model!;
-        }
-        if (payload.label != null && payload.label!.isNotEmpty) {
-          _label.text = payload.label!;
-        }
-      });
-      _toast('API/モデルを取り込みました。保存してください。');
-    }
-  }
-
-  Future<void> _importProviderApi(QrApiImport payload) async {
-    final providerId = payload.providerId!.trim();
-    final existing = _providerConfigById(_providerConfigs, providerId);
-    final fallback =
-        _providerConfigById(defaultspackMobileProviderConfigs, providerId);
-    final source = existing ?? fallback;
-    if (source == null) {
-      setState(() {
-        _baseUrl.text = payload.baseUrl;
-        _apiKey.text = payload.apiKey;
-        if (payload.model?.isNotEmpty == true) _model.text = payload.model!;
-        if (payload.label?.isNotEmpty == true) _label.text = payload.label!;
-      });
-      _toast('未登録providerのAPIを取り込みました。高度な設定から保存してください。');
-      return;
-    }
-    final next = source.copyWith(
-      apiKey: payload.apiKey,
-      label: payload.label?.trim().isNotEmpty == true
-          ? payload.label!.trim()
-          : source.label,
-      baseUrl: payload.baseUrl.trim().isNotEmpty
-          ? payload.baseUrl.trim()
-          : source.baseUrl,
-      model: payload.model?.trim().isNotEmpty == true
-          ? payload.model!.trim()
-          : source.model,
-      apiCompatibility: payload.apiCompatibility?.trim().isNotEmpty == true
-          ? payload.apiCompatibility!.trim()
-          : source.apiCompatibility,
-    );
-    final nextProviders = [
-      for (final provider in _providerConfigs)
-        if (provider.providerId != providerId) provider,
-      next,
-    ]..sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
-    await widget.configStore.saveProviderConfigs(nextProviders);
-    if (!mounted) return;
-    setState(() => _providerConfigs = nextProviders);
-    if (next.isConfigured && _providerRunsOnMobile(next)) {
-      await _activateMobileProvider(next);
-    } else {
-      _toast('${next.effectiveLabel} のAPI Keyを取り込みました');
-    }
-  }
-
   Future<void> _scanPc() async {
     final result = await Navigator.of(context).push<(QrPayload, bool)>(
       MaterialPageRoute(
@@ -258,17 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (result == null) return;
     final (payload, mismatch) = result;
-    if (payload is QrPcConnection) {
-      if (!pcConnectionUrlAllowed(payload.baseUrl)) {
-        _toast('release版ではPC接続にHTTPS URLが必要です');
-        return;
-      }
-      setState(() {
-        _pcUrl.text = payload.baseUrl;
-        _pcToken.text = payload.token;
-      });
-      _toast('PC接続情報を取り込みました。保存してください。');
-    } else if (payload is QrPairingV2) {
+    if (payload is QrPairingV2) {
       await _startPairingV2(payload.payload);
     } else {
       _toast('このQRはPC接続形式ではありません');
@@ -286,11 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    const requestedScopes = [
-      'chat.read',
-      'chat.write',
-      'tools.observe',
-    ];
+    const requestedScopes = ['chat.read', 'chat.write', 'tools.observe'];
     final verificationCode = await claimVerificationCode(
       pairingId: payload.pairingId,
       device: identity,
@@ -365,10 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Future<void>.delayed(interval);
 
       try {
-        final statusResp = await client.pollStatus(
-          pc,
-          pairingId: pairingId,
-        );
+        final statusResp = await client.pollStatus(pc, pairingId: pairingId);
         if (!statusResp.isAccepted) continue;
 
         final tokenResp = await client.pickupTokenDelivery(
@@ -538,16 +435,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  MobileProviderConfig? _providerConfigById(
-    Iterable<MobileProviderConfig> configs,
-    String providerId,
-  ) {
-    for (final config in configs) {
-      if (config.providerId == providerId) return config;
-    }
-    return null;
-  }
-
   List<MobileProviderConfig> _mergeDefaultProviderConfigs(
     List<MobileProviderConfig> savedConfigs,
   ) {
@@ -650,8 +537,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final openaiCompatible = provider.openaiCompatible ||
           _usesOpenAiCompatibleFallback(provider) ||
           _baseUrlLooksOpenAiCompatible(baseUrl);
-      final apiCompatibility =
-          _apiCompatibilityForProvider(provider, baseUrl: baseUrl);
+      final apiCompatibility = _apiCompatibilityForProvider(
+        provider,
+        baseUrl: baseUrl,
+      );
       merged.add(
         MobileProviderConfig(
           providerId: provider.providerId,
@@ -901,15 +790,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 12),
                 Theme(
-                  data: Theme.of(context).copyWith(
-                    dividerColor: Colors.transparent,
-                  ),
+                  data: Theme.of(
+                    context,
+                  ).copyWith(dividerColor: Colors.transparent),
                   child: ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     childrenPadding: EdgeInsets.zero,
                     title: const Text('高度な設定'),
-                    subtitle:
-                        const Text('通常は変更不要です。provider側のURL/モデルが必要な時だけ使います。'),
+                    subtitle: const Text(
+                      '通常は変更不要です。provider側のURL/モデルが必要な時だけ使います。',
+                    ),
                     children: [
                       TextField(
                         controller: baseUrl,
@@ -986,9 +876,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setPcTaskFinishedNotifications(bool enabled) async {
-    final next = _notificationSettings.copyWith(
-      pcTaskFinishedEnabled: enabled,
-    );
+    final next = _notificationSettings.copyWith(pcTaskFinishedEnabled: enabled);
     setState(() => _notificationSettings = next);
     await widget.configStore.saveNotificationSettings(next);
     if (enabled) {
@@ -1047,14 +935,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               systemPrompt: _systemPrompt,
               isActiveProvider: _isActiveMobileProvider,
               providerRunsOnMobile: _providerRunsOnMobile,
-              onScanApi: () => refresh(
-                () => _scanApi(navigationContext: context),
-              ),
               onFetchPcCatalog: () => refresh(_fetchPcCatalog),
               onSaveDirectConfig: () => refresh(_save),
-              onUseProvider: (provider) => refresh(
-                () => _activateMobileProvider(provider),
-              ),
+              onUseProvider: (provider) =>
+                  refresh(() => _activateMobileProvider(provider)),
               onEditProvider: (provider) => refresh(
                 () => _editMobileProvider(provider, sheetContext: context),
               ),
@@ -1090,12 +974,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               isFavorite: _isModelFavorite,
               providerRunsOnMobile: _providerRunsOnMobile,
               onFetchPcCatalog: () => refresh(_fetchPcCatalog),
-              onToggleFavorite: (favorite, enabled) => refresh(
-                () => _setModelFavorite(favorite, enabled),
-              ),
-              onUseProvider: (provider) => refresh(
-                () => _activateMobileProvider(provider),
-              ),
+              onToggleFavorite: (favorite, enabled) =>
+                  refresh(() => _setModelFavorite(favorite, enabled)),
+              onUseProvider: (provider) =>
+                  refresh(() => _activateMobileProvider(provider)),
               favoriteFromPcProfile: _favoriteFromPcProfile,
             );
           },
@@ -1364,9 +1246,9 @@ List<ModelFavoriteConfig> _sortModelFavorites(
   list.sort((a, b) {
     final source = a.source.compareTo(b.source);
     if (source != 0) return source;
-    return a.effectiveLabel
-        .toLowerCase()
-        .compareTo(b.effectiveLabel.toLowerCase());
+    return a.effectiveLabel.toLowerCase().compareTo(
+          b.effectiveLabel.toLowerCase(),
+        );
   });
   return list;
 }
@@ -1486,7 +1368,6 @@ class _MobileApiSettingsPage extends StatefulWidget {
     required this.systemPrompt,
     required this.isActiveProvider,
     required this.providerRunsOnMobile,
-    required this.onScanApi,
     required this.onFetchPcCatalog,
     required this.onSaveDirectConfig,
     required this.onUseProvider,
@@ -1505,7 +1386,6 @@ class _MobileApiSettingsPage extends StatefulWidget {
   final TextEditingController systemPrompt;
   final bool Function(MobileProviderConfig provider) isActiveProvider;
   final bool Function(MobileProviderConfig provider) providerRunsOnMobile;
-  final Future<void> Function() onScanApi;
   final Future<void> Function() onFetchPcCatalog;
   final Future<void> Function() onSaveDirectConfig;
   final Future<void> Function(MobileProviderConfig provider) onUseProvider;
@@ -1522,9 +1402,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
   Widget build(BuildContext context) {
     final providers = widget.providerConfigs.toList()
       ..sort(
-        (a, b) => a.effectiveLabel
-            .toLowerCase()
-            .compareTo(b.effectiveLabel.toLowerCase()),
+        (a, b) => a.effectiveLabel.toLowerCase().compareTo(
+              b.effectiveLabel.toLowerCase(),
+            ),
       );
     final filtered = providers.where(_matchesQuery).toList();
     final configuredCount = _configuredProviderCount(widget.providerConfigs);
@@ -1576,14 +1456,6 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('QRで取り込む'),
-                      onPressed: () => unawaited(widget.onScanApi()),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: FilledButton.tonalIcon(
                       icon: widget.fetchingCatalog
@@ -1643,8 +1515,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
               ],
               const SizedBox(height: 12),
               Theme(
-                data: Theme.of(context)
-                    .copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(
+                  context,
+                ).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: EdgeInsets.zero,
@@ -1706,8 +1579,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.save_outlined),
                         label: const Text('直接設定を保存'),
@@ -1780,9 +1654,9 @@ class _ModelSettingsPageState extends State<_ModelSettingsPage> {
         .where((provider) => provider.model.trim().isNotEmpty)
         .toList()
       ..sort(
-        (a, b) => a.effectiveLabel
-            .toLowerCase()
-            .compareTo(b.effectiveLabel.toLowerCase()),
+        (a, b) => a.effectiveLabel.toLowerCase().compareTo(
+              b.effectiveLabel.toLowerCase(),
+            ),
       );
     final pcProfiles = widget.pcCatalog?.selectableProfiles ?? [];
     final filteredMobile =
@@ -1857,9 +1731,8 @@ class _ModelSettingsPageState extends State<_ModelSettingsPage> {
                             }
                           }
                         : null,
-                    onRemove: () => unawaited(
-                      widget.onToggleFavorite(favorite, false),
-                    ),
+                    onRemove: () =>
+                        unawaited(widget.onToggleFavorite(favorite, false)),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -2134,10 +2007,7 @@ class _ModelCandidateCard extends StatelessWidget {
                   children: [
                     _StatusPill(label: sourceLabel, active: supported),
                     const Spacer(),
-                    TextButton(
-                      onPressed: onUse,
-                      child: const Text('使用'),
-                    ),
+                    TextButton(onPressed: onUse, child: const Text('使用')),
                   ],
                 ),
               ],
@@ -2400,10 +2270,7 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, color: color),
-      ),
+      child: Text(label, style: TextStyle(fontSize: 11, color: color)),
     );
   }
 }
@@ -2666,8 +2533,10 @@ class _PcModelPickerState extends State<_PcModelPicker> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  Text('モデルを選択',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'モデルを選択',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
@@ -2690,8 +2559,9 @@ class _PcModelPickerState extends State<_PcModelPicker> {
                   ...providers.map(
                     (p) => DropdownMenuItem(
                       value: p.providerId,
-                      child:
-                          Text('${p.displayName}${p.configured ? " ✓" : ""}'),
+                      child: Text(
+                        '${p.displayName}${p.configured ? " ✓" : ""}',
+                      ),
                     ),
                   ),
                 ],
