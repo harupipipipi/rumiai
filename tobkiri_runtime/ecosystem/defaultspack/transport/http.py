@@ -2114,6 +2114,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 "_query_params": dict(query_params),
                 "_headers": sanitized_forwarded_headers(self.headers),
             }
+            if method == "POST" and path in {
+                "/api/tools/browser-companion/bridge/poll",
+                "/api/tools/browser-companion/bridge/result",
+            }:
+                # Authorization is normally stripped before pack dispatch. These
+                # two device-bound routes need the bearer in a reserved,
+                # server-owned context field so request JSON cannot spoof it.
+                server_context["_browser_companion_bearer"] = _bearer_token(self.headers)
             if browser_exchange_path:
                 bearer = _bearer_token(self.headers)
                 if bearer and _local_auth_token_authorized(self.headers):

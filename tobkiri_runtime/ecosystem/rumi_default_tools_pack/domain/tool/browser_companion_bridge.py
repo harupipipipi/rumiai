@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import secrets
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,17 @@ from typing import Any
 
 DEFAULT_PORT = 8766
 DEFAULT_STALE_SECONDS = 45
+ACCESS_TTL_SECONDS = 15 * 60
+REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60
+DEVICE_SCOPES = ("bridge.poll", "bridge.result")
+_CREDENTIAL_LOCKS_GUARD = threading.Lock()
+_CREDENTIAL_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _credential_lock(root: Path) -> threading.RLock:
+    key = str(root.resolve())
+    with _CREDENTIAL_LOCKS_GUARD:
+        return _CREDENTIAL_LOCKS.setdefault(key, threading.RLock())
 
 
 def _now_iso() -> str:
@@ -49,6 +62,8 @@ class BrowserCompanionBridgeStore:
         self._root = root or pack_root / "user_data" / "shared" / "browser_companion"
         self._config_path = self._root / "bridge_config.json"
         self._session_path = self._root / "session.json"
+        self._credentials_path = self._root / "device_credentials.json"
+        self._credential_lock = _credential_lock(self._root)
         self._clients_dir = self._root / "clients"
         self._commands_dir = self._root / "commands"
         self._root.mkdir(parents=True, exist_ok=True)
@@ -79,6 +94,126 @@ class BrowserCompanionBridgeStore:
         expected = self.pairing_token()
         provided = str(token or "").strip()
         return bool(expected and provided and secrets.compare_digest(expected, provided))
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+    def exchange_pairing(self, pairing_token: str, *, client_id: str, installation_id: str) -> dict[str, Any]:
+        client = _safe_id(client_id, fallback="")
+        installation = _safe_id(installation_id, fallback="")
+        if not client or not installation:
+            raise ValueError("client_id and installation_id are required")
+        with self._credential_lock:
+            if not self.pairing_authorized(pairing_token):
+                raise PermissionError("invalid or already-used pairing code")
+            now = _now_ts()
+            access_token = secrets.token_urlsafe(32)
+            refresh_token = secrets.token_urlsafe(40)
+            credential_id = f"bc_{secrets.token_hex(10)}"
+            records = _read_json(self._credentials_path, {})
+            for record in records.values():
+                if isinstance(record, dict) and record.get("client_id") == client:
+                    record["revoked_at"] = _now_iso()
+                    record["revocation_reason"] = "re-paired"
+            records[credential_id] = {
+                "credential_id": credential_id,
+                "client_id": client,
+                "installation_id": installation,
+                "scopes": list(DEVICE_SCOPES),
+                "access_hash": self._token_hash(access_token),
+                "refresh_hash": self._token_hash(refresh_token),
+                "refresh_generation": 0,
+                "issued_at": _now_iso(),
+                "issued_at_ts": now,
+                "access_expires_at_ts": now + ACCESS_TTL_SECONDS,
+                "refresh_expires_at_ts": now + REFRESH_TTL_SECONDS,
+                "last_used_at": None,
+                "revoked_at": None,
+            }
+            _write_json(self._credentials_path, records)
+            # A pairing code is single-use. Rotation also prevents legacy clients
+            # from continuing to use the exchanged secret as a bearer token.
+            self.ensure_pairing(rotate=True)
+        return {
+            "schema": "rumi.browser_companion.device_credential.v1",
+            "credential_id": credential_id,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "scopes": list(DEVICE_SCOPES),
+            "issued_at": records[credential_id]["issued_at"],
+            "expires_in": ACCESS_TTL_SECONDS,
+            "access_expires_at_ts": now + ACCESS_TTL_SECONDS,
+            "refresh_expires_at_ts": now + REFRESH_TTL_SECONDS,
+        }
+
+    def authorize_device(self, token: str, *, client_id: str, installation_id: str, scope: str) -> dict[str, Any] | None:
+        token_hash = self._token_hash(token)
+        now = _now_ts()
+        records = _read_json(self._credentials_path, {})
+        for credential_id, record in records.items():
+            if not isinstance(record, dict) or record.get("access_hash") != token_hash:
+                continue
+            if record.get("revoked_at") or float(record.get("access_expires_at_ts") or 0) <= now:
+                return None
+            if record.get("client_id") != _safe_id(client_id, fallback=""):
+                return None
+            if record.get("installation_id") != _safe_id(installation_id, fallback=""):
+                return None
+            if scope not in record.get("scopes", []):
+                return None
+            record["last_used_at"] = _now_iso()
+            records[credential_id] = record
+            _write_json(self._credentials_path, records)
+            return self._public_credential(record)
+        return None
+
+    def rotate_access(self, refresh_token: str, *, client_id: str, installation_id: str) -> dict[str, Any]:
+        refresh_hash = self._token_hash(refresh_token)
+        with self._credential_lock:
+            now = _now_ts()
+            records = _read_json(self._credentials_path, {})
+            for credential_id, record in records.items():
+                if not isinstance(record, dict) or record.get("refresh_hash") != refresh_hash:
+                    continue
+                if record.get("revoked_at") or float(record.get("refresh_expires_at_ts") or 0) <= now:
+                    raise PermissionError("refresh credential expired or revoked")
+                if record.get("client_id") != _safe_id(client_id, fallback="") or record.get("installation_id") != _safe_id(installation_id, fallback=""):
+                    raise PermissionError("device binding mismatch")
+                access_token = secrets.token_urlsafe(32)
+                next_refresh_token = secrets.token_urlsafe(40)
+                record["access_hash"] = self._token_hash(access_token)
+                record["refresh_hash"] = self._token_hash(next_refresh_token)
+                record["refresh_generation"] = int(record.get("refresh_generation") or 0) + 1
+                record["access_expires_at_ts"] = now + ACCESS_TTL_SECONDS
+                record["refresh_expires_at_ts"] = now + REFRESH_TTL_SECONDS
+                record["rotated_at"] = _now_iso()
+                records[credential_id] = record
+                _write_json(self._credentials_path, records)
+                return {
+                    **self._public_credential(record),
+                    "access_token": access_token,
+                    "refresh_token": next_refresh_token,
+                    "expires_in": ACCESS_TTL_SECONDS,
+                }
+        raise PermissionError("unknown refresh credential")
+
+    def revoke_device(self, credential_id: str, *, refresh_token: str, client_id: str, installation_id: str) -> bool:
+        records = _read_json(self._credentials_path, {})
+        record = records.get(str(credential_id))
+        if not isinstance(record, dict) or record.get("refresh_hash") != self._token_hash(refresh_token):
+            return False
+        if record.get("client_id") != _safe_id(client_id, fallback="") or record.get("installation_id") != _safe_id(installation_id, fallback=""):
+            return False
+        record["revoked_at"] = _now_iso()
+        record["revocation_reason"] = "device disconnect"
+        records[str(credential_id)] = record
+        _write_json(self._credentials_path, records)
+        return True
+
+    @staticmethod
+    def _public_credential(record: dict[str, Any]) -> dict[str, Any]:
+        return {key: record.get(key) for key in ("credential_id", "client_id", "installation_id", "scopes", "issued_at", "access_expires_at_ts", "refresh_expires_at_ts", "last_used_at", "revoked_at")}
 
     def session(self) -> dict[str, Any]:
         return _read_json(self._session_path, {})

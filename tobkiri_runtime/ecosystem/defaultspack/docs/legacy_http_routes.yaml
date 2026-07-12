@@ -2711,6 +2711,27 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/tools/browser-companion/bridge/exchange
+  legacy_block_module: blocks.tool.browser_companion_bridge_exchange
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/browser-companion/bridge/refresh
+  legacy_block_module: blocks.tool.browser_companion_bridge_refresh
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/browser-companion/bridge/revoke
+  legacy_block_module: blocks.tool.browser_companion_bridge_revoke
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
   pattern: /api/tools/create
   legacy_block_module: blocks.tool.create
   replacement_function_id: tool_create

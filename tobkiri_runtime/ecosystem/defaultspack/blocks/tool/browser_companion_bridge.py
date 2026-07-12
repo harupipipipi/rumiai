@@ -13,12 +13,15 @@ from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge impo
 )
 
 
-def _authorized_store(input_data):
+def _authorized_store(input_data, *, scope):
     store = BrowserCompanionBridgeStore()
     headers = input_data.get("_headers") if isinstance(input_data.get("_headers"), dict) else {}
-    token = bearer_token_from_headers(headers) or str(input_data.get("pairing_token") or "")
-    if not store.pairing_authorized(token):
-        response = error("invalid or missing browser companion pairing token", code="PAIRING_UNAUTHORIZED")
+    token = str(input_data.get("_browser_companion_bearer") or "") or bearer_token_from_headers(headers)
+    client = input_data.get("client") if isinstance(input_data.get("client"), dict) else input_data
+    client_id = str(input_data.get("client_id") or client.get("client_id") or "")
+    installation_id = str(client.get("installation_id") or "")
+    if not store.authorize_device(token, client_id=client_id, installation_id=installation_id, scope=scope):
+        response = error("invalid, expired, revoked, or wrong-device browser credential", code="DEVICE_CREDENTIAL_UNAUTHORIZED")
         response["_http_status"] = 401
         return None, response
     return store, None
@@ -31,7 +34,7 @@ def run_session(input_data=None, context=None):
 
 
 def run_poll(input_data, context=None):
-    store, failure = _authorized_store(input_data if isinstance(input_data, dict) else {})
+    store, failure = _authorized_store(input_data if isinstance(input_data, dict) else {}, scope="bridge.poll")
     if failure is not None:
         return failure
     payload = dict(input_data.get("client") or input_data or {})
@@ -48,7 +51,7 @@ def run_poll(input_data, context=None):
 
 
 def run_result(input_data, context=None):
-    store, failure = _authorized_store(input_data if isinstance(input_data, dict) else {})
+    store, failure = _authorized_store(input_data if isinstance(input_data, dict) else {}, scope="bridge.result")
     if failure is not None:
         return failure
     payload = input_data if isinstance(input_data, dict) else {}
@@ -109,6 +112,42 @@ def run_result(input_data, context=None):
             "command_ids": [record.get("command_id") for record in records],
         }
     )
+
+
+def run_exchange(input_data=None, context=None):
+    del context
+    payload = input_data if isinstance(input_data, dict) else {}
+    store = BrowserCompanionBridgeStore()
+    try:
+        credential = store.exchange_pairing(str(payload.get("pairing_code") or ""), client_id=str(payload.get("client_id") or ""), installation_id=str(payload.get("installation_id") or ""))
+    except (PermissionError, ValueError) as exc:
+        response = error(str(exc), code="PAIRING_EXCHANGE_DENIED")
+        response["_http_status"] = 401
+        return response
+    return ok({"credential": credential})
+
+
+def run_refresh(input_data=None, context=None):
+    del context
+    payload = input_data if isinstance(input_data, dict) else {}
+    try:
+        credential = BrowserCompanionBridgeStore().rotate_access(str(payload.get("refresh_token") or ""), client_id=str(payload.get("client_id") or ""), installation_id=str(payload.get("installation_id") or ""))
+    except PermissionError as exc:
+        response = error(str(exc), code="DEVICE_REFRESH_DENIED")
+        response["_http_status"] = 401
+        return response
+    return ok({"credential": credential})
+
+
+def run_revoke(input_data=None, context=None):
+    del context
+    payload = input_data if isinstance(input_data, dict) else {}
+    revoked = BrowserCompanionBridgeStore().revoke_device(str(payload.get("credential_id") or ""), refresh_token=str(payload.get("refresh_token") or ""), client_id=str(payload.get("client_id") or ""), installation_id=str(payload.get("installation_id") or ""))
+    if not revoked:
+        response = error("device credential revocation denied", code="DEVICE_REVOKE_DENIED")
+        response["_http_status"] = 401
+        return response
+    return ok({"revoked": True})
 
 
 def _public_command(record):
