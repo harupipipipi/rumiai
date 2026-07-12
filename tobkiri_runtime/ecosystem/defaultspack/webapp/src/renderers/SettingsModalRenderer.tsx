@@ -10,6 +10,7 @@ import { normalizeLocale, t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
+import { reviewConnectionDraft, reviewOAuthDestination, type CredentialImportReview, type OAuthDestinationReview } from "../lib/oauthConnectionReview";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
@@ -53,6 +54,11 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
     render: ContinuitySettingsField,
   },
 ]);
+
+type PendingOAuthReview = OAuthDestinationReview & {
+  popup: Window | null;
+  scopes: string[];
+};
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -968,24 +974,6 @@ function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unkn
   return {};
 }
 
-function connectionDraftKind(value: string): "connection_import" | "oauth_client" {
-  const text = value.trim();
-  if (!text.startsWith("{")) return text.includes("=") ? "connection_import" : "oauth_client";
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const importsConnection = String(parsed.schema ?? "") === "rumi.connection.credential_bundle.v1"
-      || "access_token" in parsed
-      || "api_token" in parsed
-      || "token" in parsed;
-    return importsConnection
-      ? "connection_import"
-      : "oauth_client";
-  } catch {
-    return "oauth_client";
-  }
-}
-
-
 function providerAccentClass(providerId: string): string {
   switch (providerId) {
     case "cloudflare":
@@ -1146,6 +1134,8 @@ function ProviderOAuthPanel({
   const [clientDrafts, setClientDrafts] = useState<Record<string, string>>({});
   const [busyAction, setBusyAction] = useState("");
   const [messages, setMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
+  const [oauthReviews, setOauthReviews] = useState<Record<string, PendingOAuthReview>>({});
+  const [draftReviews, setDraftReviews] = useState<Record<string, CredentialImportReview>>({});
   const oauthProviders = oauthProviderRows(providers);
 
   if (!oauthProviders.length) {
@@ -1153,6 +1143,56 @@ function ProviderOAuthPanel({
   }
 
   const refresh = (providerId: string) => onRefresh(sectionId, fieldId, { action: "oauth_refresh", provider_id: providerId });
+
+  const beginOAuthReview = async (providerId: string) => {
+    let popup: Window | null = null;
+    try {
+      popup = window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
+      setBusyAction(`${providerId}:start`);
+      const result = await settingsApiResources.startProviderOAuth(
+        providerId,
+        providerId === "google" ? { scopeMode: "google_ai", services: ["identity", "generative_language"] } : undefined,
+      );
+      const destination = reviewOAuthDestination(providerId, result.authorize_url);
+      setOauthReviews((current) => ({ ...current, [providerId]: { ...destination, popup, scopes: result.scopes ?? [] } }));
+      setMessages((current) => ({ ...current, [providerId]: { tone: "success", text: "Review the provider destination and permissions before opening OAuth." } }));
+    } catch {
+      if (popup && !popup.closed) popup.close();
+      setMessages((current) => ({ ...current, [providerId]: { tone: "error", text: "OAuth could not be started because the destination was not approved." } }));
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const confirmOAuthReview = (providerId: string) => {
+    const review = oauthReviews[providerId];
+    if (!review) return;
+    const popup = review.popup && !review.popup.closed
+      ? review.popup
+      : window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
+    if (!popup) {
+      setMessages((current) => ({ ...current, [providerId]: { tone: "error", text: "Popup was blocked. Your Settings draft was preserved; allow a popup and retry." } }));
+      return;
+    }
+    popup.location.replace(review.authorizeUrl);
+    popup.focus();
+    setOauthReviews((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+    setMessages((current) => ({ ...current, [providerId]: { tone: "success", text: "Authorization page opened. Connection is not complete until the provider callback is verified." } }));
+  };
+
+  const cancelOAuthReview = (providerId: string) => {
+    const review = oauthReviews[providerId];
+    if (review?.popup && !review.popup.closed) review.popup.close();
+    setOauthReviews((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -1178,7 +1218,9 @@ function ProviderOAuthPanel({
           : {};
         const credentialRefId = String(credentialRef.credential_id ?? "");
         const draft = clientDrafts[providerId] ?? "";
-        const isBusy = busyAction.startsWith(`${providerId}:`);
+        const oauthReview = oauthReviews[providerId];
+        const draftReview = draftReviews[providerId];
+        const isBusy = busyAction.startsWith(`${providerId}:`) || Boolean(oauthReview);
         const banner = messages[providerId];
         const oauthSurfaceLabel = providerId === "google" ? "Google AI browser login" : `${providerId} browser login`;
         const stateLabel = connected ? "Connected" : String(oauth.status_label ?? "") || (connectEnabled ? "Ready to connect" : "Client config needed");
@@ -1218,40 +1260,7 @@ function ProviderOAuthPanel({
                   type="button"
                   disabled={isBusy || !connectEnabled}
                   title={connectEnabled ? undefined : String(oauth.disabled_reason ?? hint)}
-                  onClick={async () => {
-                    let popup: Window | null = null;
-                    try {
-                      popup = window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
-                      setBusyAction(`${providerId}:start`);
-                      const result = await settingsApiResources.startProviderOAuth(
-                        providerId,
-                        providerId === "google" ? { scopeMode: "google_ai", services: ["identity", "generative_language"] } : undefined,
-                      );
-                      if (popup) {
-                        popup.location.href = result.authorize_url;
-                        popup.focus();
-                      } else {
-                        window.location.href = result.authorize_url;
-                      }
-                      setMessages((current) => ({
-                        ...current,
-                        [providerId]: { tone: "success", text: "Browser login opened in a new window." },
-                      }));
-                    } catch (errorValue) {
-                      if (popup && !popup.closed) {
-                        popup.close();
-                      }
-                      setMessages((current) => ({
-                        ...current,
-                        [providerId]: {
-                          tone: "error",
-                          text: errorValue instanceof Error ? errorValue.message : "Failed to start browser login.",
-                        },
-                      }));
-                    } finally {
-                      setBusyAction("");
-                    }
-                  }}
+                  onClick={() => void beginOAuthReview(providerId)}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-xs transition-colors",
                     isBusy || !connectEnabled
@@ -1336,6 +1345,11 @@ function ProviderOAuthPanel({
                 onChange={(event) => {
                   const nextValue = event.target.value;
                   setClientDrafts((current) => ({ ...current, [providerId]: nextValue }));
+                  setDraftReviews((current) => {
+                    const next = { ...current };
+                    delete next[providerId];
+                    return next;
+                  });
                   setMessages((current) => {
                     if (!(providerId in current)) return current;
                     const next = { ...current };
@@ -1350,31 +1364,11 @@ function ProviderOAuthPanel({
                 <button
                   type="button"
                   disabled={isBusy || !draft.trim()}
-                  onClick={async () => {
+                  onClick={() => {
                     try {
-                      setBusyAction(`${providerId}:save`);
-                      const kind = connectionDraftKind(draft);
-                      if (kind === "connection_import") {
-                        await settingsApiResources.importProviderConnection(providerId, draft);
-                      } else {
-                        await settingsApiResources.saveProviderOAuthClientConfig(providerId, draft);
-                      }
-                      setClientDrafts((current) => ({ ...current, [providerId]: "" }));
-                      refresh(providerId);
-                      setMessages((current) => ({
-                        ...current,
-                        [providerId]: { tone: "success", text: kind === "connection_import" ? "Connection credential imported." : "OAuth client config saved." },
-                      }));
-                    } catch (errorValue) {
-                      setMessages((current) => ({
-                        ...current,
-                        [providerId]: {
-                          tone: "error",
-                          text: errorValue instanceof Error ? errorValue.message : "Failed to save OAuth client config.",
-                        },
-                      }));
-                    } finally {
-                      setBusyAction("");
+                      setDraftReviews((current) => ({ ...current, [providerId]: reviewConnectionDraft(draft) }));
+                    } catch {
+                      setMessages((current) => ({ ...current, [providerId]: { tone: "error", text: "Credential data must be valid, reviewable JSON before it can be saved." } }));
                     }
                   }}
                   className={cn(
@@ -1408,6 +1402,43 @@ function ProviderOAuthPanel({
                 )}
               </div>
             </div>
+            {oauthReview && (
+              <div className="mt-3 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-50" role="status">
+                <div className="font-medium">Review external authorization</div>
+                <p className="mt-1 break-all text-amber-100/80">{oauthReview.host}{oauthReview.path}</p>
+                <p className="mt-1 text-amber-100/75">The provider may let you choose an account. This only opens the provider page; connection is verified after its callback.</p>
+                {oauthReview.scopes.length > 0 && <p className="mt-1 text-amber-100/75">Requested scopes: {oauthReview.scopes.join(", ")}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => confirmOAuthReview(providerId)} className="rounded border border-amber-300 bg-amber-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950">Open reviewed provider page</button>
+                  <button type="button" onClick={() => cancelOAuthReview(providerId)} className="rounded border border-amber-300/40 px-2.5 py-1.5 text-xs text-amber-50">Cancel</button>
+                </div>
+              </div>
+            )}
+            {draftReview && (
+              <div className="mt-3 rounded-lg border border-violet-500/35 bg-violet-500/10 p-3 text-xs text-violet-100" role="status">
+                <div className="font-medium">Review before saving</div>
+                <p className="mt-1 text-violet-100/75">{draftReview.kind === "connection_import" ? "Credential import" : "OAuth client configuration"}; {draftReview.secretFieldCount} secret field(s) detected and redacted from this review.</p>
+                {draftReview.fields.length > 0 && <p className="mt-1 text-violet-100/75">Non-secret fields: {draftReview.fields.join(", ")}</p>}
+                {draftReview.endpoints.length > 0 && <p className="mt-1 text-violet-100/75">HTTPS endpoints: {draftReview.endpoints.join(", ")}</p>}
+                {draftReview.scopes.length > 0 && <p className="mt-1 text-violet-100/75">Requested scopes: {draftReview.scopes.join(", ")}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={async () => {
+                    try {
+                      setBusyAction(`${providerId}:save`);
+                      if (draftReview.kind === "connection_import") await settingsApiResources.importProviderConnection(providerId, draft);
+                      else await settingsApiResources.saveProviderOAuthClientConfig(providerId, draft);
+                      setClientDrafts((current) => ({ ...current, [providerId]: "" }));
+                      setDraftReviews((current) => { const next = { ...current }; delete next[providerId]; return next; });
+                      refresh(providerId);
+                      setMessages((current) => ({ ...current, [providerId]: { tone: "success", text: "Saved. Status will be refreshed from the local authority." } }));
+                    } catch {
+                      setMessages((current) => ({ ...current, [providerId]: { tone: "error", text: "The credential was not confirmed as saved. Review the local status and retry if needed." } }));
+                    } finally { setBusyAction(""); }
+                  }} className="rounded border border-violet-300 bg-violet-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950">Confirm and save</button>
+                  <button type="button" onClick={() => setDraftReviews((current) => { const next = { ...current }; delete next[providerId]; return next; })} className="rounded border border-violet-300/40 px-2.5 py-1.5 text-xs text-violet-100">Keep editing</button>
+                </div>
+              </div>
+            )}
             {banner && (
               <p className={cn("mt-3 text-[11px]", banner.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
                 {banner.text}
@@ -3128,6 +3159,8 @@ export function SettingsModalRenderer({
   const [connectionMessages, setConnectionMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
   const [connectionScopeModes, setConnectionScopeModes] = useState<Record<string, string>>({});
   const [connectionCredentialDrafts, setConnectionCredentialDrafts] = useState<Record<string, string>>({});
+  const [connectionOAuthReviews, setConnectionOAuthReviews] = useState<Record<string, PendingOAuthReview>>({});
+  const [connectionDraftReviews, setConnectionDraftReviews] = useState<Record<string, CredentialImportReview>>({});
   const [codexAppServerDraft, setCodexAppServerDraft] = useState<CodexAppServerConfig>({
     transport: "off",
     enabled: false,
@@ -3357,29 +3390,57 @@ export function SettingsModalRenderer({
       popup = window.open("", `rumi-oauth-${card.providerId}`, "popup=yes,width=560,height=760");
       setConnectionBusy(`${card.providerId}:start`);
       const result = await settingsApiResources.startProviderOAuth(card.providerId, { scopeMode, services });
-      if (popup) {
-        popup.location.href = result.authorize_url;
-        popup.focus();
-      } else {
-        window.location.href = result.authorize_url;
-      }
+      const destination = reviewOAuthDestination(card.providerId, result.authorize_url);
+      setConnectionOAuthReviews((current) => ({
+        ...current,
+        [card.providerId]: { ...destination, popup, scopes: result.scopes ?? [] },
+      }));
       setConnectionMessages((current) => ({
         ...current,
-        [card.providerId]: { tone: "success", text: `${card.label} OAuth opened with ${selectedOption?.label ?? scopeMode ?? "selected"} scopes.` },
+        [card.providerId]: { tone: "success", text: `${card.label} destination is ready for review; no external page has opened yet.` },
       }));
-      refreshConnectionStatus(card.providerId);
-    } catch (errorValue) {
+    } catch {
       if (popup && !popup.closed) popup.close();
       setConnectionMessages((current) => ({
         ...current,
         [card.providerId]: {
           tone: "error",
-          text: errorValue instanceof Error ? errorValue.message : `Failed to start ${card.label} OAuth.`,
+          text: `Failed to start ${card.label} OAuth because the provider destination was not approved.`,
         },
       }));
     } finally {
       setConnectionBusy("");
     }
+  };
+
+  const confirmAccountConnectionOAuth = (card: AccountConnectionPreludeCard) => {
+    const review = connectionOAuthReviews[card.providerId];
+    if (!review) return;
+    const popup = review.popup && !review.popup.closed
+      ? review.popup
+      : window.open("", `rumi-oauth-${card.providerId}`, "popup=yes,width=560,height=760");
+    if (!popup) {
+      setConnectionMessages((current) => ({ ...current, [card.providerId]: { tone: "error", text: "Popup was blocked. Settings state was preserved; allow a popup and retry." } }));
+      return;
+    }
+    popup.location.replace(review.authorizeUrl);
+    popup.focus();
+    setConnectionOAuthReviews((current) => {
+      const next = { ...current };
+      delete next[card.providerId];
+      return next;
+    });
+    setConnectionMessages((current) => ({ ...current, [card.providerId]: { tone: "success", text: "Authorization page opened. It is not connected until the local callback status is verified." } }));
+  };
+
+  const cancelAccountConnectionOAuth = (card: AccountConnectionPreludeCard) => {
+    const review = connectionOAuthReviews[card.providerId];
+    if (review?.popup && !review.popup.closed) review.popup.close();
+    setConnectionOAuthReviews((current) => {
+      const next = { ...current };
+      delete next[card.providerId];
+      return next;
+    });
   };
 
   const saveConnectionCredential = async (card: AccountConnectionPreludeCard) => {
@@ -3448,27 +3509,37 @@ export function SettingsModalRenderer({
       return;
     }
     try {
-      setConnectionBusy(`${card.providerId}:save_json`);
-      const kind = connectionDraftKind(draft);
-      if (kind === "connection_import") {
-        await settingsApiResources.importProviderConnection(card.providerId, draft);
-      } else {
-        await settingsApiResources.saveProviderOAuthClientConfig(card.providerId, draft);
-      }
-      setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: "" }));
-      setConnectionMessages((current) => ({
-        ...current,
-        [card.providerId]: { tone: "success", text: kind === "connection_import" ? "Connection credential imported." : "OAuth client config saved." },
-      }));
-      refreshConnectionStatus(card.providerId);
-    } catch (errorValue) {
+      setConnectionDraftReviews((current) => ({ ...current, [card.providerId]: reviewConnectionDraft(draft) }));
+      setConnectionMessages((current) => ({ ...current, [card.providerId]: { tone: "success", text: "Review the redacted credential summary before saving." } }));
+    } catch {
       setConnectionMessages((current) => ({
         ...current,
         [card.providerId]: {
           tone: "error",
-          text: errorValue instanceof Error ? errorValue.message : "Failed to save connection JSON.",
+          text: "Credential data must be valid, reviewable JSON before it can be saved.",
         },
       }));
+    }
+  };
+
+  const confirmAccountConnectionJson = async (card: AccountConnectionPreludeCard) => {
+    const review = connectionDraftReviews[card.providerId];
+    const draft = String(connectionCredentialDrafts[card.providerId] ?? "").trim();
+    if (!review || !draft) return;
+    try {
+      setConnectionBusy(`${card.providerId}:save_json`);
+      if (review.kind === "connection_import") await settingsApiResources.importProviderConnection(card.providerId, draft);
+      else await settingsApiResources.saveProviderOAuthClientConfig(card.providerId, draft);
+      setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: "" }));
+      setConnectionDraftReviews((current) => {
+        const next = { ...current };
+        delete next[card.providerId];
+        return next;
+      });
+      setConnectionMessages((current) => ({ ...current, [card.providerId]: { tone: "success", text: "Saved. Local connection status will now be refreshed." } }));
+      refreshConnectionStatus(card.providerId);
+    } catch {
+      setConnectionMessages((current) => ({ ...current, [card.providerId]: { tone: "error", text: "The credential was not confirmed as saved. Check local status and retry if necessary." } }));
     } finally {
       setConnectionBusy("");
     }
@@ -3710,7 +3781,9 @@ export function SettingsModalRenderer({
 
           <div className="grid gap-4 xl:grid-cols-2">
             {accountConnectionCards.map((card) => {
-              const isBusy = connectionBusy === `${card.providerId}:start`;
+              const oauthReview = connectionOAuthReviews[card.providerId];
+              const draftReview = connectionDraftReviews[card.providerId];
+              const isBusy = connectionBusy === `${card.providerId}:start` || Boolean(oauthReview);
               const jsonBusy = connectionBusy === `${card.providerId}:save_json`;
               const message = connectionMessages[card.providerId];
               const selectedScopeOption = selectedConnectionScopeMode(card);
@@ -3895,7 +3968,14 @@ export function SettingsModalRenderer({
                           type="password"
                           autoComplete="off"
                           value={connectionCredentialDrafts[card.providerId] ?? ""}
-                          onChange={(event) => setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }))}
+                          onChange={(event) => {
+                            setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }));
+                            setConnectionDraftReviews((current) => {
+                              const next = { ...current };
+                              delete next[card.providerId];
+                              return next;
+                            });
+                          }}
                           placeholder={card.credential.placeholder}
                           className="mt-3 h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500"
                         />
@@ -3919,7 +3999,14 @@ export function SettingsModalRenderer({
                         </div>
                         <textarea
                           value={connectionCredentialDrafts[card.providerId] ?? ""}
-                          onChange={(event) => setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }))}
+                          onChange={(event) => {
+                            setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }));
+                            setConnectionDraftReviews((current) => {
+                              const next = { ...current };
+                              delete next[card.providerId];
+                              return next;
+                            });
+                          }}
                           placeholder={importPlaceholderForProvider(card.providerId, isJapanese ? "ja" : "en")}
                           spellCheck={false}
                           className="mt-3 min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-5 text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-600"
@@ -3935,6 +4022,32 @@ export function SettingsModalRenderer({
                             {card.configureLabel}
                           </button>
                         </div>
+                        {draftReview && (
+                          <div className="mt-3 rounded-lg border border-violet-500/35 bg-violet-500/10 p-3 text-[11px] leading-5 text-violet-100" role="status">
+                            <div className="font-medium">{localizedCopy("Review before saving", "保存前の確認")}</div>
+                            <p className="mt-1 text-violet-100/75">{draftReview.kind === "connection_import" ? localizedCopy("Credential import", "認証情報の読み込み") : localizedCopy("OAuth client configuration", "OAuthクライアント設定")} — {localizedCopy(`${draftReview.secretFieldCount} secret field(s) are redacted.`, `秘密情報の項目 ${draftReview.secretFieldCount} 件は表示しません。`)}</p>
+                            {draftReview.fields.length > 0 && <p className="mt-1 text-violet-100/75">{localizedCopy("Non-secret fields", "秘密情報以外の項目")}: {draftReview.fields.join(", ")}</p>}
+                            {draftReview.endpoints.length > 0 && <p className="mt-1 text-violet-100/75">HTTPS endpoints: {draftReview.endpoints.join(", ")}</p>}
+                            {draftReview.scopes.length > 0 && <p className="mt-1 text-violet-100/75">{localizedCopy("Requested scopes", "要求される権限")}: {draftReview.scopes.join(", ")}</p>}
+                            <p className="mt-2 text-amber-100/85">{localizedCopy("Saving may replace the existing local connection. This action remains subject to local approval and audit policy.", "保存すると既存のローカル接続を置き換える場合があります。ローカルの承認・監査ポリシーはこの画面では変更されません。")}</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button type="button" disabled={jsonBusy} onClick={() => void confirmAccountConnectionJson(card)} className="rounded border border-violet-300 bg-violet-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">{jsonBusy ? localizedCopy("Saving...", "保存中...") : localizedCopy("Confirm and save", "確認して保存")}</button>
+                              <button type="button" onClick={() => setConnectionDraftReviews((current) => { const next = { ...current }; delete next[card.providerId]; return next; })} className="rounded border border-violet-300/40 px-2.5 py-1.5 text-xs text-violet-100">{localizedCopy("Keep editing", "編集を続ける")}</button>
+                            </div>
+                          </div>
+                        )}
+                        {oauthReview && (
+                          <div className="mt-3 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-5 text-amber-50" role="status">
+                            <div className="font-medium">{localizedCopy("Review external authorization", "外部認可ページの確認")}</div>
+                            <p className="mt-1 break-all text-amber-100/80">{oauthReview.host}{oauthReview.path}</p>
+                            <p className="mt-1 text-amber-100/75">{localizedCopy("Choose the expected provider account. Opening this page does not mean the connection completed.", "想定したプロバイダーアカウントを選択してください。このページを開いても接続完了ではありません。")}</p>
+                            {oauthReview.scopes.length > 0 && <p className="mt-1 text-amber-100/75">{localizedCopy("Requested scopes", "要求される権限")}: {oauthReview.scopes.join(", ")}</p>}
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button type="button" onClick={() => confirmAccountConnectionOAuth(card)} className="rounded border border-amber-300 bg-amber-100 px-2.5 py-1.5 text-xs font-medium text-zinc-950">{localizedCopy("Open reviewed provider page", "確認したページを開く")}</button>
+                              <button type="button" onClick={() => cancelAccountConnectionOAuth(card)} className="rounded border border-amber-300/40 px-2.5 py-1.5 text-xs text-amber-50">{localizedCopy("Cancel", "キャンセル")}</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
