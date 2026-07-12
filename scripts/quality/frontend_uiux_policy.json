@@ -22,6 +22,7 @@
     ".dart_tool",
     ".next",
     ".turbo",
+    "assets",
     "build",
     "coverage",
     "dist",
@@ -30,7 +31,8 @@
     "vendor"
   ],
   "notes": [
-    "Pull requests are checked against added/modified lines, not every legacy line in a touched file.",
+    "Pull requests are checked against added/modified source lines, not every legacy line in a touched file.",
+    "Generated and minified asset directories are excluded; their authored source remains audited.",
     "A full repository scan is available for scheduled/manual reporting.",
     "Heuristics are guardrails, not proof of runtime accessibility, visual quality, or security."
   ]
