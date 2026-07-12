@@ -1,0 +1,24 @@
+{
+  "source": "https://developers.deepgram.com/reference/manage/models/list",
+  "verified_at": "2026-07-12",
+  "models": [
+    {
+      "model_id": "nova-3",
+      "task": "stt",
+      "display_name": "Nova-3",
+      "streaming": true
+    },
+    {
+      "model_id": "flux-general-en",
+      "task": "stt",
+      "display_name": "Flux English",
+      "streaming": true
+    },
+    {
+      "model_id": "aura-2-thalia-en",
+      "task": "tts",
+      "display_name": "Aura-2 Thalia",
+      "streaming": true
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "id": "fal-ai",
+  "provider_id": "fal-ai",
+  "category": "providers",
+  "kind": "task_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "fal.ai",
+  "description": "fal.ai task-specific media/speech provider.",
+  "provider_metadata": {
+    "display_name": "fal.ai",
+    "kind": "task_specific",
+    "env_vars": [
+      "FAL_KEY"
+    ],
+    "base_url_envs": [
+      "FAL_AI_BASE_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "https://queue.fal.run",
+    "default_model_for": {},
+    "task_types": [
+      "image",
+      "video",
+      "audio"
+    ],
+    "exclude_from_chat_picker": true,
+    "catalog_features": [
+      "image",
+      "video",
+      "audio",
+      "task_specific"
+    ]
+  },
+  "provider_manifest": {
+    "id": "fal-ai",
+    "category": "task_provider",
+    "version": "1",
+    "display_name": "fal.ai",
+    "enabled": true,
+    "priority": 500,
+    "adapter": "fal_ai_tasks",
+    "api_key_env": "FAL_KEY",
+    "base_url_env": "FAL_AI_BASE_URL",
+    "default_base_url": "https://queue.fal.run",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "model_registry_api",
+      "task_types": [
+        "image",
+        "video",
+        "audio"
+      ],
+      "exclude_from_chat_picker": true,
+      "fixture": "tests/fixtures/provider_tasks/fal-ai.json",
+      "source_docs": "https://docs.fal.ai/model-apis"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "fal-ai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "image",
+    "video",
+    "audio",
+    "task_specific"
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "id": "black-forest-labs",
+  "provider_id": "black-forest-labs",
+  "category": "providers",
+  "kind": "task_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Black Forest Labs",
+  "description": "Black Forest Labs task-specific media/speech provider.",
+  "provider_metadata": {
+    "display_name": "Black Forest Labs",
+    "kind": "task_specific",
+    "env_vars": [
+      "BFL_API_KEY"
+    ],
+    "base_url_envs": [
+      "BLACK_FOREST_LABS_BASE_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "https://api.bfl.ai",
+    "default_model_for": {},
+    "task_types": [
+      "image"
+    ],
+    "exclude_from_chat_picker": true,
+    "catalog_features": [
+      "image",
+      "task_specific"
+    ]
+  },
+  "provider_manifest": {
+    "id": "black-forest-labs",
+    "category": "task_provider",
+    "version": "1",
+    "display_name": "Black Forest Labs",
+    "enabled": true,
+    "priority": 500,
+    "adapter": "black_forest_labs_tasks",
+    "api_key_env": "BFL_API_KEY",
+    "base_url_env": "BLACK_FOREST_LABS_BASE_URL",
+    "default_base_url": "https://api.bfl.ai",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "generated_official_snapshot",
+      "task_types": [
+        "image"
+      ],
+      "exclude_from_chat_picker": true,
+      "fixture": "tests/fixtures/provider_tasks/black-forest-labs.json",
+      "source_docs": "https://docs.bfl.ai/"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "black-forest-labs"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "image",
+    "task_specific"
+  ]
+}

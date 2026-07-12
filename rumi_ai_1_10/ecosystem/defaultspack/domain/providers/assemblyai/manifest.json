@@ -1,0 +1,67 @@
+{
+  "id": "assemblyai",
+  "provider_id": "assemblyai",
+  "category": "providers",
+  "kind": "task_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "AssemblyAI",
+  "description": "AssemblyAI task-specific media/speech provider.",
+  "provider_metadata": {
+    "display_name": "AssemblyAI",
+    "kind": "task_specific",
+    "env_vars": [
+      "ASSEMBLYAI_API_KEY"
+    ],
+    "base_url_envs": [
+      "ASSEMBLYAI_BASE_URL"
+    ],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "",
+    "default_base_url": "https://api.assemblyai.com",
+    "default_model_for": {},
+    "task_types": [
+      "stt"
+    ],
+    "exclude_from_chat_picker": true,
+    "catalog_features": [
+      "stt",
+      "task_specific"
+    ]
+  },
+  "provider_manifest": {
+    "id": "assemblyai",
+    "category": "task_provider",
+    "version": "1",
+    "display_name": "AssemblyAI",
+    "enabled": true,
+    "priority": 500,
+    "adapter": "assemblyai_tasks",
+    "api_key_env": "ASSEMBLYAI_API_KEY",
+    "base_url_env": "ASSEMBLYAI_BASE_URL",
+    "default_base_url": "https://api.assemblyai.com",
+    "credential_required": true,
+    "catalog_only": true,
+    "supports_invoke": false,
+    "config": {
+      "inventory_strategy": "generated_official_snapshot",
+      "task_types": [
+        "stt"
+      ],
+      "exclude_from_chat_picker": true,
+      "fixture": "tests/fixtures/provider_tasks/assemblyai.json",
+      "source_docs": "https://www.assemblyai.com/docs/getting-started/models"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "assemblyai"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "stt",
+    "task_specific"
+  ]
+}
