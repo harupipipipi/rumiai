@@ -22,6 +22,8 @@ USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
 ROUTING_CONTRACT = "rumi.service.ai.route.v1"
 STREAM_NORMALIZE_CONTRACT = "rumi.service.ai.stream.normalize.v1"
 TOOL_BRIDGE_CONTRACT = "rumi.service.ai.tool_intent.normalize.v1"
+REQUEST_PREPARE_CONTRACT = "rumi.service.ai.request.prepare.v1"
+FAILOVER_CONTRACT = "rumi.service.ai.failover.decide.v1"
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -41,6 +43,7 @@ class RouteRequirement:
     data_residency: str | None
     maximum_cost: float | None
     preferred_model_id: str | None
+    preferred_provider_id: str | None
     preferred_provider_instance_id: str | None
     health_max_age: float
 
@@ -110,9 +113,22 @@ def _invoke(
     *,
     streaming: bool,
 ) -> dict[str, Any]:
-    request = dict(payload)
-    request_id = str(request.get("request_id") or uuid.uuid4())
-    deadline = _deadline(request)
+    prepared = client.invoke(
+        REQUEST_PREPARE_CONTRACT,
+        "prepare",
+        {
+            **dict(payload),
+            "request_id": str(payload.get("request_id") or uuid.uuid4()),
+            "decision_time": time.time(),
+        },
+    )
+    if not isinstance(prepared, Mapping):
+        raise GlobalContractInvocationError(
+            "invalid_response", "AI pipeline returned an invalid request"
+        )
+    request = dict(prepared)
+    request_id = str(request["request_id"])
+    deadline = float(request["deadline"])
     requirement = _requirement(request)
     provider_contract = (
         STREAM_PROVIDER_CONTRACT if streaming else GENERATE_PROVIDER_CONTRACT
@@ -156,14 +172,6 @@ def _invoke(
         selected=selected,
         policy_revision=str(request.get("policy_revision") or ""),
     )
-    credential_handle = request.get("credential_handle")
-    if credential_handle is not None and not str(credential_handle).startswith(
-        ("credential:", "opaque:")
-    ):
-        raise GlobalContractInvocationError(
-            "denied",
-            "gateway accepts only opaque credential handles",
-        )
     invocation = {
         "request_id": request_id,
         "model_id": str(
@@ -178,12 +186,10 @@ def _invoke(
         "required_modalities": sorted(requirement.modalities),
         "request_surface": requirement.request_surface,
         "deadline": deadline,
-        "credential_handle": credential_handle,
+        "credential_handle": request.get("credential_handle"),
         "idempotency_key": request.get("idempotency_key"),
     }
     attempts: list[dict[str, Any]] = []
-    allow_failover = bool(request.get("allow_failover", False))
-    replay_safe = bool(request.get("idempotency_key")) and not invocation["tools"]
     for attempt_number, attempt_candidate in enumerate(ordered, 1):
         invocation["attempt"] = attempt_number
         invocation["model_id"] = str(
@@ -258,34 +264,26 @@ def _invoke(
                 "error_code": failure.code,
             }
         )
-        retryable = failure.code in {
-            "provider_unavailable",
-            "quota",
-            "invalid_response",
-        }
-        if (
-            not allow_failover
-            or not replay_safe
-            or not retryable
-            or attempt_number >= len(ordered)
-        ):
+        failover = client.invoke(
+            FAILOVER_CONTRACT,
+            "decide",
+            {
+                "allow_failover": request.get("allow_failover"),
+                "idempotency_key": request.get("idempotency_key"),
+                "tools": invocation["tools"],
+                "error_code": failure.code,
+                "attempt": attempt_number,
+                "candidate_count": len(ordered),
+                "deadline": deadline,
+                "decision_time": time.time(),
+            },
+        )
+        if not isinstance(failover, Mapping) or not failover.get("allowed"):
             raise failure
     raise GlobalContractInvocationError(
         "provider_unavailable",
         "all selected providers failed",
     )
-
-
-def _deadline(request: Mapping[str, Any]) -> float:
-    now = time.time()
-    raw = request.get("deadline")
-    try:
-        deadline = float(raw)
-    except (TypeError, ValueError):
-        deadline = now + 60.0
-    if deadline <= now:
-        raise GlobalContractInvocationError("deadline", "request deadline elapsed")
-    return deadline
 
 
 def _requirement(request: Mapping[str, Any]) -> RouteRequirement:
@@ -309,6 +307,11 @@ def _requirement(request: Mapping[str, Any]) -> RouteRequirement:
         preferred_model_id=(
             str(requirement.get("preferred_model_id"))
             if requirement.get("preferred_model_id")
+            else None
+        ),
+        preferred_provider_id=(
+            str(requirement.get("preferred_provider_id"))
+            if requirement.get("preferred_provider_id")
             else None
         ),
         preferred_provider_instance_id=(
@@ -407,6 +410,7 @@ def _requirement_payload(requirement: RouteRequirement) -> dict[str, Any]:
         "data_residency": requirement.data_residency,
         "maximum_cost": requirement.maximum_cost,
         "preferred_model_id": requirement.preferred_model_id,
+        "preferred_provider_id": requirement.preferred_provider_id,
         "preferred_provider_instance_id": (
             requirement.preferred_provider_instance_id
         ),

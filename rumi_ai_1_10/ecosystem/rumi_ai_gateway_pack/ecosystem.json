@@ -14,7 +14,9 @@
       "rumi.service.ai.usage.cost.v1",
       "rumi.service.ai.route.v1",
       "rumi.service.ai.stream.normalize.v1",
-      "rumi.service.ai.tool_intent.normalize.v1"
+      "rumi.service.ai.tool_intent.normalize.v1",
+      "rumi.service.ai.request.prepare.v1",
+      "rumi.service.ai.failover.decide.v1"
     ],
     "provides": [
       "rumi.service.ai.generate.v1",
