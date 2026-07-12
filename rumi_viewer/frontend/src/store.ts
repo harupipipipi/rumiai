@@ -138,7 +138,7 @@ export interface VersionInfo {
   };
 }
 
-export type UpdateTarget = 'rumiai' | 'defaultspack';
+export type UpdateTarget = 'tobkiri' | 'defaultspack';
 
 export interface UpdateInfo {
   target: UpdateTarget;
@@ -529,7 +529,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updates: [],
-  autoUpdate: { rumiai: false, defaultspack: false },
+  autoUpdate: { tobkiri: false, defaultspack: false },
   updatesLoading: false,
   updateSettingsLoading: false,
   updateApplyingTarget: null,

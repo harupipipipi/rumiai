@@ -36,6 +36,9 @@ pub struct DesktopSystemInfo {
     pub reliable: bool,
     pub app_name: String,
     pub display_version: String,
+    pub launcher_tauri: bool,
+    pub viewer_tauri: bool,
+    pub launcher_version: String,
     pub viewer_version: String,
     pub build_channel: String,
     pub platform: String,
@@ -68,14 +71,17 @@ pub fn open_host_permission_settings(permission_id: String) -> Result<(), String
 }
 
 pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSystemInfo {
-    let viewer_version = env!("CARGO_PKG_VERSION").to_string();
+    let launcher_version = env!("CARGO_PKG_VERSION").to_string();
     let permissions = collect_permissions();
     DesktopSystemInfo {
-        source: "viewer_tauri".to_string(),
+        source: "launcher_tauri".to_string(),
         reliable: true,
         app_name: "Tobkiri".to_string(),
-        display_version: display_version_from_package_version(&viewer_version),
-        viewer_version,
+        display_version: display_version_from_package_version(&launcher_version),
+        launcher_tauri: true,
+        viewer_tauri: true,
+        launcher_version: launcher_version.clone(),
+        viewer_version: launcher_version,
         build_channel: "beta".to_string(),
         platform: std::env::consts::OS.to_string(),
         platform_release: platform_release(),
@@ -441,7 +447,7 @@ mod tests {
         );
         assert!(!info.viewer_version.is_empty());
         assert_eq!(info.permission_subject, "Rumi Viewer");
-        assert_eq!(info.source, "viewer_tauri");
+        assert_eq!(info.source, "launcher_tauri");
         assert!(info.reliable);
         assert!(info
             .host_permissions

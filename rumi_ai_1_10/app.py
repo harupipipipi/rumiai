@@ -23,6 +23,8 @@ from pathlib import Path
 import logging
 from typing import Dict
 
+from core_runtime.env_compat import read_migrated_env
+
 _kernel = None
 _logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ def _check_permissive_production_guard():
         sys.exit(1)
 
     # --- lockfile チェック ---
-    user_data_dir = os.environ.get("RUMI_USER_DATA")
+    user_data_dir = read_migrated_env("TOBKIRI_USER_DATA", "RUMI_USER_DATA")
     if user_data_dir:
         lockfile = Path(user_data_dir) / "permissive.lock"
     else:
@@ -143,8 +145,8 @@ def main():
     # --- ログ設定 ---
     import os
     from core_runtime.logging_utils import configure_logging
-    _log_level = os.environ.get("RUMI_LOG_LEVEL", "INFO")
-    _log_format = os.environ.get("RUMI_LOG_FORMAT", "json")
+    _log_level = read_migrated_env("TOBKIRI_LOG_LEVEL", "RUMI_LOG_LEVEL", "INFO")
+    _log_format = read_migrated_env("TOBKIRI_LOG_FORMAT", "RUMI_LOG_FORMAT", "json")
     configure_logging(level=_log_level, fmt=_log_format)
 
     # --- Health check mode (early exit) ---

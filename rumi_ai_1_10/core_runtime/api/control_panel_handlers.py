@@ -1419,7 +1419,7 @@ class ControlPanelHandlersMixin:
             from ..github_update_manager import GitHubUpdateError, get_github_update_manager
 
             manager = get_github_update_manager()
-            targets = ["rumiai", "defaultspack"]
+            targets = ["tobkiri", "defaultspack"]
             try:
                 checks = manager.check_many(targets)
             except GitHubUpdateError as e:
@@ -1459,7 +1459,7 @@ class ControlPanelHandlersMixin:
         auto_update = body.get("auto_update")
         if not isinstance(auto_update, dict):
             return {"error": "auto_update must be an object", "status_code": 400}
-        unknown = set(auto_update.keys()) - {"rumiai", "defaultspack"}
+        unknown = set(auto_update.keys()) - {"tobkiri", "rumiai", "defaultspack"}
         if unknown:
             return {"error": f"Unknown update target: {sorted(unknown)[0]}", "status_code": 400}
 
@@ -1467,24 +1467,29 @@ class ControlPanelHandlersMixin:
             from ..github_update_manager import get_github_update_manager
 
             manager = get_github_update_manager()
-            return manager.set_auto_update_settings(auto_update)
+            normalized = dict(auto_update)
+            if "tobkiri" not in normalized and "rumiai" in normalized:
+                normalized["tobkiri"] = normalized["rumiai"]
+            normalized.pop("rumiai", None)
+            return manager.set_auto_update_settings(normalized)
         except Exception as e:
             _log_internal_error("panel_update_update_settings", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_apply_update(self, target: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """POST /api/panel/updates/{target}/apply — GitHub Release 更新適用"""
-        if target not in {"rumiai", "defaultspack"}:
+        if target not in {"tobkiri", "rumiai", "defaultspack"}:
             return {"error": "Unknown update target", "status_code": 400}
 
         try:
-            from ..github_update_manager import GitHubUpdateError, get_github_update_manager
+            from ..github_update_manager import GitHubUpdateError, get_github_update_manager, normalize_update_target
 
             force = bool(body.get("force", False))
             manager = get_github_update_manager()
-            result = manager.apply(target, force=force)  # type: ignore[arg-type]
+            canonical_target = normalize_update_target(target)
+            result = manager.apply(canonical_target, force=force)
             payload = result.to_dict()
-            if target == "rumiai":
+            if canonical_target == "tobkiri":
                 payload["restart_required"] = True
             else:
                 payload["routes_reload_recommended"] = True

@@ -222,7 +222,7 @@ class TestPanelCheckUpdates(unittest.TestCase):
                 raise GitHubUpdateError("release metadata unavailable")
 
             def current_version(self, target):
-                return {"rumiai": "1.10.0", "defaultspack": "2.0.0"}[target]
+                return {"tobkiri": "1.10.0", "defaultspack": "2.0.0"}[target]
 
         with patch(
             "core_runtime.github_update_manager.get_github_update_manager",
@@ -233,7 +233,7 @@ class TestPanelCheckUpdates(unittest.TestCase):
         self.assertNotIn("status_code", result)
         self.assertEqual(result["check_error"], "release metadata unavailable")
         self.assertEqual(len(result["updates"]), 2)
-        self.assertEqual(result["updates"][0]["target"], "rumiai")
+        self.assertEqual(result["updates"][0]["target"], "tobkiri")
         self.assertEqual(result["updates"][0]["current_version"], "1.10.0")
         self.assertEqual(result["updates"][0]["latest_version"], "1.10.0")
         self.assertFalse(result["updates"][0]["update_available"])

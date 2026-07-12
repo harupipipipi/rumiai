@@ -166,7 +166,7 @@ export function Settings() {
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-  const updateName = (target: UpdateTarget) => target === 'rumiai' ? PRODUCT_DISPLAY_NAME : 'defaultspack';
+  const updateName = (target: UpdateTarget) => target === 'tobkiri' ? PRODUCT_DISPLAY_NAME : 'defaultspack';
   const permissionRows = desktopInfo?.permissions ?? [];
 
   const handleApplyUpdate = async (target: UpdateTarget) => {

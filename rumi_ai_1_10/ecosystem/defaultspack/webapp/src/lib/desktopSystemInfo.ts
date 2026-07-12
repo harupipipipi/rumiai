@@ -41,13 +41,16 @@ export type HostBrokerStatus = {
   recovery?: string | null;
 };
 
-export type DesktopSystemInfoSource = "viewer_tauri" | "viewer_broker" | "fallback" | string;
+export type DesktopSystemInfoSource = "launcher_tauri" | "viewer_tauri" | "viewer_broker" | "fallback" | string;
 
 export type DesktopSystemInfo = {
   source: DesktopSystemInfoSource;
   reliable: boolean;
   app_name: string;
   display_version: string;
+  launcher_version?: string;
+  launcher_tauri?: boolean;
+  viewer_tauri?: boolean;
   viewer_version: string;
   build_channel: string;
   platform: string;

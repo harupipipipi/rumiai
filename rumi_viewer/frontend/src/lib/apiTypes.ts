@@ -196,6 +196,9 @@ export interface HostBrokerStatus {
 export interface DesktopSystemInfo {
   app_name: string;
   display_version: string;
+  launcher_tauri?: boolean;
+  viewer_tauri?: boolean;
+  launcher_version?: string;
   viewer_version: string;
   build_channel: string;
   platform: string;
@@ -205,7 +208,7 @@ export interface DesktopSystemInfo {
   permissions: DesktopPermissionStatus[];
 }
 
-export type ApiUpdateTarget = 'rumiai' | 'defaultspack';
+export type ApiUpdateTarget = 'tobkiri' | 'defaultspack';
 
 export interface ApiUpdateInfo {
   target: ApiUpdateTarget;

@@ -23,13 +23,22 @@ from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping, Optional
 
 
-UpdateTarget = Literal["rumiai", "defaultspack"]
+UpdateTarget = Literal["tobkiri", "defaultspack"]
+UpdateTargetInput = Literal["tobkiri", "rumiai", "defaultspack"]
 
 DEFAULT_REPO = "harupipipipi/rumiai"
 DEFAULT_TIMEOUT = 20
 MAX_ARCHIVE_BYTES = 250 * 1024 * 1024
 AUTO_UPDATE_INTERVAL_HOURS = 24
-UPDATE_TARGETS: tuple[UpdateTarget, ...] = ("rumiai", "defaultspack")
+UPDATE_TARGETS: tuple[UpdateTarget, ...] = ("tobkiri", "defaultspack")
+
+
+def normalize_update_target(target: str) -> UpdateTarget:
+    if target == "rumiai":
+        return "tobkiri"
+    if target in UPDATE_TARGETS:
+        return target  # type: ignore[return-value]
+    raise GitHubUpdateError(f"unsupported update target: {target}")
 
 _COMMON_EXCLUDES = (
     ".git/**",
@@ -43,7 +52,7 @@ _COMMON_EXCLUDES = (
 )
 
 _PROTECTED_BY_TARGET: dict[UpdateTarget, tuple[str, ...]] = {
-    "rumiai": (
+    "tobkiri": (
         "user_data",
         "user_data/**",
         "ecosystem",
@@ -329,7 +338,7 @@ class GitHubUpdateManager:
                         "latest_version": applied.latest_version,
                         "backup_dir": applied.backup_dir,
                         "applied_count": len(applied.applied_files),
-                        "restart_required": check.target == "rumiai",
+                        "restart_required": check.target == "tobkiri",
                         "routes_reload_recommended": check.target == "defaultspack",
                     })
                 except Exception as exc:
@@ -386,7 +395,7 @@ class GitHubUpdateManager:
             raise GitHubUpdateError(f"failed to download GitHub archive: {exc}") from exc
 
     def current_version(self, target: UpdateTarget) -> str:
-        if target == "rumiai":
+        if target == "tobkiri":
             return _read_pyproject_version(self.base_dir / "pyproject.toml") or "0.0.0"
         if target == "defaultspack":
             return _read_ecosystem_version(self.base_dir / "ecosystem" / "defaultspack" / "ecosystem.json") or "0.0.0"
@@ -419,7 +428,7 @@ class GitHubUpdateManager:
     def _request(self, url: str) -> urllib.request.Request:
         headers = {
             "Accept": "application/vnd.github+json",
-            "User-Agent": f"rumi-ai-updater/{self.current_version('rumiai')}",
+            "User-Agent": f"tobkiri-updater/{self.current_version('tobkiri')}",
         }
         token = os.environ.get("RUMI_UPDATE_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if token:
@@ -468,7 +477,7 @@ class GitHubUpdateManager:
         return elapsed.total_seconds() >= AUTO_UPDATE_INTERVAL_HOURS * 60 * 60
 
     def _source_dir_for_target(self, target: UpdateTarget, extracted_root: Path) -> Path:
-        if target == "rumiai":
+        if target == "tobkiri":
             source = _find_child_with(extracted_root, Path("rumi_ai_1_10") / "app.py")
             if source is None:
                 raise GitHubUpdateError("source archive does not contain rumi_ai_1_10/app.py")
@@ -482,7 +491,7 @@ class GitHubUpdateManager:
         raise GitHubUpdateError(f"unsupported update target: {target}")
 
     def _dest_dir_for_target(self, target: UpdateTarget) -> Path:
-        if target == "rumiai":
+        if target == "tobkiri":
             return self.base_dir
         if target == "defaultspack":
             return self.base_dir / "ecosystem" / "defaultspack"
@@ -490,7 +499,7 @@ class GitHubUpdateManager:
 
     @staticmethod
     def _source_version(target: UpdateTarget, source_dir: Path) -> str | None:
-        if target == "rumiai":
+        if target == "tobkiri":
             return _read_pyproject_version(source_dir / "pyproject.toml")
         if target == "defaultspack":
             return _read_ecosystem_version(source_dir / "ecosystem.json")

@@ -142,7 +142,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
     ["Channel", info.build_channel],
     ["Platform", [info.platform, info.platform_release].filter(Boolean).join(" ")],
   ];
-  const unverified = !info.reliable || (info.source !== "viewer_tauri" && info.source !== "viewer_broker");
+  const unverified = !info.reliable || (info.source !== "launcher_tauri" && info.source !== "viewer_tauri" && info.source !== "viewer_broker");
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">

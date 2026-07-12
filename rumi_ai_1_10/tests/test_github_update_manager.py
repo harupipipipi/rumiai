@@ -90,11 +90,11 @@ def test_check_many_reads_target_versions_from_source_archive(tmp_path: Path) ->
     archive = _make_source_archive(tmp_path)
     manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
 
-    checks = {item.target: item for item in manager.check_many(["rumiai", "defaultspack"])}
+    checks = {item.target: item for item in manager.check_many(["tobkiri", "defaultspack"])}
 
-    assert checks["rumiai"].current_version == "1.0.0"
-    assert checks["rumiai"].latest_version == "1.1.0"
-    assert checks["rumiai"].update_available is True
+    assert checks["tobkiri"].current_version == "1.0.0"
+    assert checks["tobkiri"].latest_version == "1.1.0"
+    assert checks["tobkiri"].update_available is True
     assert checks["defaultspack"].current_version == "2.0.0"
     assert checks["defaultspack"].latest_version == "2.1.0"
     assert checks["defaultspack"].update_available is True
@@ -105,7 +105,7 @@ def test_rumiai_update_protects_user_data_and_ecosystem(tmp_path: Path) -> None:
     archive = _make_source_archive(tmp_path)
     manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
 
-    result = manager.apply("rumiai")
+    result = manager.apply("tobkiri")
 
     assert (base / "app.py").read_text(encoding="utf-8") == "new app"
     assert "version = \"1.1.0\"" in (base / "pyproject.toml").read_text(encoding="utf-8")
@@ -139,10 +139,10 @@ def test_auto_update_settings_are_off_by_default_and_persist(tmp_path: Path) -> 
     manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
 
     settings = manager.read_auto_update_settings()
-    assert settings["auto_update"] == {"rumiai": False, "defaultspack": False}
+    assert settings["auto_update"] == {"tobkiri": False, "defaultspack": False}
 
     updated = manager.set_auto_update_settings({"defaultspack": True})
-    assert updated["auto_update"] == {"rumiai": False, "defaultspack": True}
+    assert updated["auto_update"] == {"tobkiri": False, "defaultspack": True}
 
     manager2 = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
     assert manager2.read_auto_update_settings()["auto_update"]["defaultspack"] is True
@@ -152,7 +152,7 @@ def test_auto_update_applies_only_enabled_target(tmp_path: Path) -> None:
     base = _make_local_install(tmp_path)
     archive = _make_source_archive(tmp_path)
     manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
-    manager.set_auto_update_settings({"defaultspack": True, "rumiai": False})
+    manager.set_auto_update_settings({"defaultspack": True, "tobkiri": False})
 
     result = manager.run_auto_updates_once(force=True)
 
