@@ -1,0 +1,18 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {"id": "rumi.tool_registry", "version": "1.0.0", "kind": "service", "display_name": "Rumi Tool Registry", "description": "Authoritative provider-neutral tool definitions and aliases."},
+  "contracts": {"provides": [
+    {"id": "rumi.resource.tool.definition.v1", "version": "1.0.0", "provider_instance_id": "tool-registry.definition", "cardinality": "one", "security": "sensitive", "failure": "fail_closed", "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_tool_registry_pack"}, "schemas": {"input": {"type": "object"}, "output": {"type": "object"}}, "isolation": "in_process", "required_capabilities": ["tool.definition.read"]},
+    {"id": "rumi.action.tool.definition.manage.v1", "version": "1.0.0", "provider_instance_id": "tool-registry.manage", "cardinality": "one", "security": "restricted", "failure": "fail_closed", "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_tool_registry_pack"}, "schemas": {"input": {"type": "object"}, "output": {"type": "object"}}, "isolation": "in_process", "required_capabilities": ["tool.definition.manage"]}
+  ], "requires": []},
+  "entrypoints": [
+    {"id": "tool-definition-resource", "contract_id": "rumi.resource.tool.definition.v1", "loader": "python", "module": "ecosystem.rumi_tool_registry_pack.runtime.registry", "symbol": "create_resource_operation", "artifact_hash": "sha256:28cdb3e60f902c8e95eee13b82ebf5de7bd116a798766e5995c342c4936d0788"},
+    {"id": "tool-definition-manage", "contract_id": "rumi.action.tool.definition.manage.v1", "loader": "python", "module": "ecosystem.rumi_tool_registry_pack.runtime.registry", "symbol": "create_manage_operation", "artifact_hash": "sha256:28cdb3e60f902c8e95eee13b82ebf5de7bd116a798766e5995c342c4936d0788"}
+  ],
+  "resources": [],
+  "storage": [{"namespace": "rumi.tool_definitions", "schema_version": "1.0.0", "authoritative": true, "retention": "until explicit deletion or migration rollback", "export_import": true}],
+  "permissions": [{"capability": "tool.definition.read", "access": "read", "approval_required": false}, {"capability": "tool.definition.manage", "access": "control", "approval_required": true}],
+  "provenance": {"content_hash": "sha256:28cdb3e60f902c8e95eee13b82ebf5de7bd116a798766e5995c342c4936d0788", "build_identity": "rumi-tool-registry-pack:1.0.0", "trust_class": "local", "signature": null},
+  "migration": {"from": ["defaultspack.domain.tool.registry"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Select the prior registry provider and restore its owner-only snapshot."},
+  "extensions": {"rumi.tool_registry.boundary": {"tool_execution": false, "approval_authority": false, "domain_service_imports": false}}
+}
