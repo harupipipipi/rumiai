@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Cloud, Copy, Download, Hand, Link, Loader2, X } from "lucide-react";
+import { Hand, Loader2 } from "lucide-react";
 
 import {
   CompanyWorkspacePanel,
@@ -13,7 +13,6 @@ import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambie
 import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
-import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
@@ -39,7 +38,6 @@ import {
 } from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
-import { ConversationShareLanding, ImportedConversationNotice } from "./pages/ConversationShareLanding";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -54,13 +52,12 @@ import {
   sanitizeAssistantAuthorityBoilerplate,
 } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
+import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
-import { browserApprovalViewModel, runtimeApprovalViewModel } from "./lib/approvalPresentation";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
-import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
 import {
   canExecuteComposerEndpointAction,
   composerMentionMetadataFromWidgets,
@@ -79,7 +76,6 @@ import {
 } from "./lib/composerWidgets";
 import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
 import { toolGroupFor } from "./lib/toolUi";
-import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
@@ -95,7 +91,6 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
-import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
@@ -877,7 +872,7 @@ function CalendarComposerPanel({
         scheduleId = schedule.scheduleId;
         scheduleStatus = schedule.scheduleStatus;
       } else if (existing?.scheduleId) {
-        await deleteCalendarScheduleBeforeLocalChange(existing.scheduleId, api.deleteSchedule);
+        await api.deleteSchedule(existing.scheduleId).catch(() => undefined);
         scheduleId = undefined;
         scheduleStatus = undefined;
       }
@@ -911,7 +906,7 @@ function CalendarComposerPanel({
     setIsSavingDraft(true);
     setDraftError(null);
     try {
-      await deleteCalendarScheduleBeforeLocalChange(activeItem.scheduleId, api.deleteSchedule);
+      if (activeItem.scheduleId) await api.deleteSchedule(activeItem.scheduleId).catch(() => undefined);
       setItems((current) => current.filter((item) => item.id !== activeItem.id));
       setActiveEditor(null);
     } catch (error) {
@@ -1517,8 +1512,6 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
           thinkingLabel: String(thinking?.state ?? ""),
           thinkingDuration,
           thinkingTranscript: String(thinking?.transcript ?? ""),
-          interrupted: metadata.interrupted === true || message.finish_reason === "interrupted",
-          interruptionReason: String(metadata.interruption_reason ?? ""),
           attachedToolCount,
           pendingApproval: pendingApproval && typeof pendingApproval === "object" && !Array.isArray(pendingApproval)
             ? pendingApproval as Record<string, unknown>
@@ -2446,10 +2439,6 @@ function ChatApp() {
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const widgetContext = useMemo(
-    () => createWidgetConversationContext(activeConversationId),
-    [activeConversationId],
-  );
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
@@ -2466,14 +2455,6 @@ function ChatApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [shareBusy, setShareBusy] = useState(false);
-  const [shareCreatedUrl, setShareCreatedUrl] = useState<string | null>(null);
-  const [shareCreatedToken, setShareCreatedToken] = useState<string | null>(null);
-  const [shareExpiryHours, setShareExpiryHours] = useState("24");
-  const [shareRevoked, setShareRevoked] = useState(false);
-  const [shareDialogError, setShareDialogError] = useState<string | null>(null);
-  const [provenanceDismissedFor, setProvenanceDismissedFor] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
@@ -2511,7 +2492,6 @@ function ChatApp() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [pendingMentionAttachmentPaths, setPendingMentionAttachmentPaths] = useState<string[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
-  const [composerEntityReferences, setComposerEntityReferences] = useState<ComposerEntityReference[]>([]);
   const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
@@ -2562,15 +2542,6 @@ function ChatApp() {
       setMode("agent");
     }
   }, [mode, setMode]);
-
-  useEffect(() => {
-    if (!shareDialogOpen) return;
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setShareDialogOpen(false);
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [shareDialogOpen]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -2837,6 +2808,18 @@ function ChatApp() {
       updatedAt: latestAssistantFinal.createdAt || Date.now(),
     });
   }, [activeConversationId, latestAssistantFinal]);
+
+  useEffect(() => {
+    if (!authorityApproval) {
+      authorityApprovalWindowRequestRef.current = null;
+      return;
+    }
+    if (authorityApprovalWindowRequestRef.current === authorityApproval.requestId) return;
+    authorityApprovalWindowRequestRef.current = authorityApproval.requestId;
+    void openAuthorityApprovalWindow(authorityApproval.requestId).catch(() => {
+      authorityApprovalWindowRequestRef.current = null;
+    });
+  }, [authorityApproval?.requestId]);
 
   const composerModelStatusIndicators = useMemo<ComposerModelStatusIndicator[]>(() => {
     if (ultraYoloMode) {
@@ -3623,7 +3606,6 @@ function ChatApp() {
     setAttachedFiles([]);
     setDroppedWidgets([]);
     dismissedComposerMentionToolsRef.current.clear();
-    setComposerEntityReferences([]);
     replaceChatIdInUrl(null, false);
   };
 
@@ -4150,7 +4132,6 @@ function ChatApp() {
         setAttachedFiles([]);
         setDroppedWidgets([]);
         dismissedComposerMentionToolsRef.current.clear();
-        setComposerEntityReferences([]);
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -4825,8 +4806,7 @@ function ChatApp() {
         settleBrowserApproval(currentApproval);
         setError(staleMessage);
       } else {
-        console.error(approvalError);
-        setError("許可を保存できませんでした。リクエストの状態を更新して再試行してください。");
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
       }
     } finally {
       setIsGenerating(false);
@@ -4842,7 +4822,7 @@ function ChatApp() {
     setError(null);
     try {
       if (currentApproval.requestId) {
-        await api.denyCodingApproval(currentApproval.requestId, "User denied the request from the shared approval surface");
+        await api.denyCodingApproval(currentApproval.requestId, "Denied from chat approval card");
       }
       settleBrowserApproval(currentApproval);
       if (activeConversationId) {
@@ -4855,8 +4835,7 @@ function ChatApp() {
         settleBrowserApproval(currentApproval);
         setError(staleMessage);
       } else {
-        console.error(approvalError);
-        setError("拒否を保存できませんでした。リクエストの状態を更新して再試行してください。");
+        setError(approvalError instanceof Error ? approvalError.message : "browser/computer 承認の拒否に失敗しました。");
       }
     } finally {
       activeBrowserApprovalActionRef.current = null;
@@ -4931,8 +4910,7 @@ function ChatApp() {
         ));
         setError(staleMessage);
       } else {
-        console.error(approvalError);
-        setError("許可を保存できませんでした。リクエストの状態を更新して再試行してください。");
+        setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
       }
     } finally {
       activeRuntimeApprovalActionRef.current = null;
@@ -4954,8 +4932,7 @@ function ChatApp() {
       await loadConversation(activeConversationId, false);
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
-      console.error(approvalError);
-      setError("拒否を保存できませんでした。リクエストの状態を更新して再試行してください。");
+      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認の拒否に失敗しました。");
     } finally {
       activeRuntimeApprovalActionRef.current = null;
     }
@@ -4967,11 +4944,10 @@ function ChatApp() {
     try {
       const opened = await openAuthorityApprovalWindow(authorityApproval.requestId);
       if (!opened) {
-        setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer に戻り、ポップアップを許可して再試行してください。");
+        setError("authority 承認は Rumi Viewer の専用ウィンドウで実行してください。");
       }
     } catch (openError) {
-      console.error(openError);
-      setError("専用の承認ウィンドウを開けませんでした。Rumi Viewer から再試行してください。");
+      setError(openError instanceof Error ? openError.message : "authority 承認ウィンドウを開けませんでした。");
     }
   };
 
@@ -5143,23 +5119,17 @@ function ChatApp() {
       let result: unknown;
       if (action.id === "conversation.export") {
         if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
-        const exported = await api.exportConversation(activeConversationId, "json");
-        const blob = new Blob([exported.content], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = "history.json";
-        anchor.click();
-        URL.revokeObjectURL(url);
-        result = { exported: true, format: "json" };
+        result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
       } else if (action.id === "conversation.share") {
         if (!activeConversationId) throw new Error("共有する会話がありません。");
-        setShareCreatedUrl(null);
-        setShareCreatedToken(null);
-        setShareRevoked(false);
-        setShareDialogError(null);
-        setShareDialogOpen(true);
-        result = { dialog_opened: true };
+        const exported = await api.exportConversation(activeConversationId, "markdown");
+        result = await api.createShare({
+          target_type: "conversation",
+          target_id: activeConversationId,
+          title: activeChatTitle,
+          content: exported.content,
+          visibility: "local",
+        });
       } else if (action.id === "artifacts.list") {
         result = await api.listArtifacts();
       } else if (action.id === "research.web") {
@@ -5233,34 +5203,8 @@ function ChatApp() {
     }
   };
 
-  const createConversationShare = async (visibility: "local" | "tunnel") => {
-    if (!activeConversationId) return;
-    setShareBusy(true);
-    setShareDialogError(null);
-    try {
-      const created = await api.createShare({
-        target_type: "conversation",
-        target_id: activeConversationId,
-        title: activeChatTitle,
-        visibility,
-        expires_at: shareExpiryHours === "never" ? null : new Date(Date.now() + Number(shareExpiryHours) * 60 * 60 * 1000).toISOString(),
-      });
-      setShareCreatedUrl(String(created.share_url || ""));
-      setShareCreatedToken(String(created.token || ""));
-      setShareRevoked(false);
-    } catch (reason) {
-      setShareDialogError(reason instanceof Error ? reason.message : "共有リンクを作成できませんでした。");
-    } finally {
-      setShareBusy(false);
-    }
-  };
-
   const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
     event?.preventDefault();
-    if (activeConversation?.metadata?.shared_read_only === true) {
-      setError("This imported conversation is read-only. Import a continue copy to send messages.");
-      return;
-    }
     if (pendingMentionAttachmentRequestsRef.current.size > 0) {
       setError("workspace file の読み込みが終わるまでお待ちください。");
       return;
@@ -5294,16 +5238,10 @@ function ChatApp() {
     const droppedWidgetsForSubmit = reconciledDraft.droppedWidgets;
     const selectedToolIdsForSubmit = reconciledDraft.selectedToolIds;
     const semanticMentionToolIds = new Set(composerMentionToolIdsFromWidgets(requestedDroppedWidgets));
-    const explicitToolReferenceIds = composerEntityReferences
-      .filter((reference) => reference.kind === "tool")
-      .map((reference) => reference.id);
-    const explicitSkillReferenceIds = composerEntityReferences
-      .filter((reference) => reference.kind === "skill")
-      .map((reference) => reference.id);
-    const mentionedToolIds = [...new Set([...explicitToolReferenceIds, ...toolMentionIdsFromText(userText, composerExtensions)
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions)
       .filter((toolId) => !semanticMentionToolIds.has(toolId))
-      .filter((toolId) => !dismissedComposerMentionToolsRef.current.has(toolId))])];
-    const mentionedSkillIdsFromText = [...new Set([...explicitSkillReferenceIds, ...skillMentionIdsFromText(userText, composerSkills)])];
+      .filter((toolId) => !dismissedComposerMentionToolsRef.current.has(toolId));
+    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
     const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
       toolIds: selectedToolIdsForSubmit,
       mentionedToolIds,
@@ -5339,7 +5277,6 @@ function ChatApp() {
       setIsNewChatLaunching(true);
     }
     setInput("");
-    setComposerEntityReferences([]);
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
@@ -5422,23 +5359,8 @@ function ChatApp() {
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
-      const requestFingerprint = JSON.stringify({
-        text: userText,
-        attachments: submittedAttachments.map(({ name, size, type, source, sourcePath }) => (
-          { name, size, type, source, sourcePath }
-        )),
-      });
-      const recoverablePending = pendingRequests[conversation.id];
-      const operationId = recoverablePending?.requestFingerprint === requestFingerprint
-        && recoverablePending.operationId
-        ? recoverablePending.operationId
-        : typeof globalThis.crypto?.randomUUID === "function"
-          ? globalThis.crypto.randomUUID()
-          : `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
       rememberPendingRequest({
         conversationId: conversation.id,
-        operationId,
-        requestFingerprint,
         startedAt: requestStartedAt,
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
         toolNames: [],
@@ -5739,7 +5661,6 @@ function ChatApp() {
       const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
-        idempotency_key: operationId,
         params: templateRequestPayload.params,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
@@ -6032,12 +5953,8 @@ function ChatApp() {
     if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
     window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
-  const renderComposer = (isCentered = false) => {
-    if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
-      return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
-    }
-    return <Renderers.composer
-      widgetContext={widgetContext}
+  const renderComposer = (isCentered = false) => (
+    <Renderers.composer
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
@@ -6065,7 +5982,6 @@ function ChatApp() {
       attachedFiles={attachedFiles}
       pendingMentionAttachmentPaths={pendingMentionAttachmentPaths}
       droppedWidgets={activeDroppedWidgets}
-      entityReferences={composerEntityReferences}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
@@ -6102,7 +6018,6 @@ function ChatApp() {
       onPendingMentionAttachmentRemove={handlePendingMentionAttachmentRemove}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
-      onEntityReferencesChange={setComposerEntityReferences}
       onWidgetAction={handleWidgetAction}
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}
@@ -6112,12 +6027,12 @@ function ChatApp() {
       onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
       onCodingWorkspacesRefresh={() => void loadCodingWorkspaces()}
       onCodingContextRefresh={loadCodingContext}
-    />;
-  };
+    />
+  );
 
   return (
     <RendererBoundary>
-    <div className="rumi-app-shell flex w-full flex-col bg-[#09090b] font-sans text-zinc-300 selection:bg-zinc-800">
+    <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-300 font-sans overflow-hidden selection:bg-zinc-800">
       {showRegion("title_bar") && <Renderers.titleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />}
 
       <div className="flex flex-1 min-h-0">
@@ -6185,10 +6100,10 @@ function ChatApp() {
         )}
 
         <main
-          className={cn("rumi-workspace-main relative flex min-h-0 min-w-0 flex-1 bg-[#09090b]", isActivityPreviewVisible && "has-activity-preview")}
+          className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
-          <div className={cn("rumi-chat-pane flex min-h-0 min-w-0 flex-1 flex-col rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             <WorkspaceTabBar
               tabs={workspaceTabs}
               activeTabId={activeWorkspaceTabId}
@@ -6240,10 +6155,6 @@ function ChatApp() {
                   </button>
                 </div>
               </div>
-            )}
-
-            {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
-              <ImportedConversationNotice importMode={activeConversation.metadata?.shared_import_mode} onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
             )}
 
             {isDesktopsWorkspace ? (
@@ -6300,7 +6211,6 @@ function ChatApp() {
               <div className="flex min-h-0 flex-1 p-1.5">
                 <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
                   <Renderers.toolPreviewPanel
-                    widgetContext={widgetContext}
                     previews={canvasPreviews}
                     showPreview
                     onClose={() => {
@@ -6370,13 +6280,37 @@ function ChatApp() {
                   />
                 )}
                 {visibleBrowserApproval && (
-                  <ApprovalDecisionSurface
-                    approval={browserApprovalViewModel(visibleBrowserApproval)}
-                    onDeny={() => void denyBrowserAction()}
-                    onApprove={() => void approveBrowserAction()}
-                    keyboardShortcuts={{ deny: "2", approve: "3" }}
-                    className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
-                  />
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {JSON.stringify(visibleBrowserApproval.payload, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={denyBrowserAction}
+                          aria-label="browser/computer の承認を拒否"
+                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
+                        >
+                          拒否 (2)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={approveBrowserAction}
+                          aria-label="browser/computer の承認を許可"
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可 (3)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
                 {!visibleBrowserApproval && authorityApproval && (
                   <AuthorityApprovalNotice
@@ -6386,15 +6320,60 @@ function ChatApp() {
                   />
                 )}
                 {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
-                  <ApprovalDecisionSurface
-                    approval={runtimeApprovalViewModel(runtimeApproval)}
-                    onDeny={() => void denyCodingAction()}
-                    onApprove={() => void approveCodingAction()}
-                    keyboardShortcuts={{ deny: "2", approve: "3" }}
-                    className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
-                  />
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={cn(
+                            "shrink-0 rounded border px-1.5 py-0.5 text-[10px]",
+                            runtimeApproval.riskLevel === "high"
+                              ? "border-red-500/30 bg-red-500/10 text-red-200"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-200",
+                          )}>
+                            {runtimeApproval.riskLevel ?? "approval"}
+                          </span>
+                          <p className="truncate text-sm font-medium text-zinc-100">{runtimeApproval.operation} の承認が必要です</p>
+                        </div>
+                        {runtimeApproval.summary && (
+                          <p className="mt-1 truncate text-[11px] text-zinc-500">{runtimeApproval.summary}</p>
+                        )}
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {approvalPayloadPreview(runtimeApproval.payload)}
+                          </pre>
+                        </details>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            void denyCodingAction();
+                          }}
+                          onClick={denyCodingAction}
+                          aria-label="runtime 操作の承認を拒否"
+                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
+                        >
+                          拒否 (2)
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            void approveCodingAction();
+                          }}
+                          onClick={approveCodingAction}
+                          aria-label="runtime 操作の承認を許可"
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可 (3)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
-                {!visibleBrowserApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!visibleBrowserApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
@@ -6433,7 +6412,6 @@ function ChatApp() {
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
-                widgetContext={widgetContext}
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
                 onClose={() => setShowPreview(false)}
@@ -6450,7 +6428,6 @@ function ChatApp() {
         {showRegion("right_sidebar") && (
           <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
-            widgetContext={widgetContext}
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
@@ -6537,35 +6514,6 @@ function ChatApp() {
       )}
 
       <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
-      {shareDialogOpen && (
-        <LayerPortal layer="globalOverlay">
-          <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShareDialogOpen(false); }}>
-            <section role="dialog" aria-modal="true" aria-labelledby="share-dialog-title" className="w-full max-w-lg border border-zinc-700 bg-zinc-950 p-5 shadow-2xl">
-              <div className="flex items-center justify-between gap-4">
-                <h2 id="share-dialog-title" className="text-lg font-semibold text-zinc-100">Share conversation</h2>
-                <button autoFocus type="button" title="Close" aria-label="Close share dialog" onClick={() => setShareDialogOpen(false)} className="inline-flex h-8 w-8 items-center justify-center text-zinc-400 hover:bg-zinc-900 hover:text-white"><X size={17} /></button>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">The transcript is redacted before sharing. Attachments and executable permissions are never included.</p>
-              <label className="mt-4 block text-xs font-medium text-zinc-400">Link expiry
-                <select value={shareExpiryHours} onChange={(event) => setShareExpiryHours(event.target.value)} className="mt-2 h-10 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100">
-                  <option value="1">1 hour</option>
-                  <option value="24">24 hours</option>
-                  <option value="168">7 days</option>
-                  <option value="never">No expiry</option>
-                </select>
-              </label>
-              <div className="mt-5 grid gap-2 sm:grid-cols-2">
-                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("local")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Link size={18} className="mt-0.5 text-emerald-300" /><span><strong className="block text-sm text-zinc-100">Local share link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Private to this defaultspack host.</span></span></button>
-                <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
-              </div>
-              {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
-              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
-              {shareCreatedUrl && <div className={`mt-4 border p-3 ${shareRevoked ? "border-red-500/25 bg-red-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}><p className={`break-all text-sm ${shareRevoked ? "text-red-100 line-through" : "text-emerald-100"}`}>{shareCreatedUrl}</p><div className="mt-3 flex flex-wrap gap-2">{!shareRevoked && <button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button>}{shareCreatedToken && !shareRevoked && <button type="button" onClick={() => void api.revokeShare(shareCreatedToken).then(() => setShareRevoked(true)).catch((reason) => setShareDialogError(reason instanceof Error ? reason.message : "Could not revoke link."))} className="inline-flex h-9 items-center gap-2 border border-red-400/25 px-3 text-xs font-semibold text-red-200 hover:bg-red-500/10"><X size={14} /> Revoke link</button>}</div>{shareRevoked && <p role="status" className="mt-2 text-xs text-red-200">Revoked. This link can no longer be viewed or imported.</p>}</div>}
-              <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
-            </section>
-          </div>
-        </LayerPortal>
-      )}
     </div>
     </RendererBoundary>
   );
@@ -6583,10 +6531,15 @@ function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
     try {
       const opened = await openFingerRecordingWindow();
       if (opened) return;
+      const approvalPath = browserApprovalTokenizedPath("/finger-recording");
+      if (!approvalPath) {
+        setFallbackVisible(true);
+        return;
+      }
       const popup = window.open(
-        "/finger-recording",
+        defaultspackUrlWithLocalAuth(approvalPath),
         "rumi-finger-recording",
-        "width=380,height=520,noopener,noreferrer",
+        "width=380,height=520",
       );
       if (popup) popup.focus();
       else setFallbackVisible(true);
@@ -6637,9 +6590,6 @@ export default function App() {
   }
   if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
     return <UiPrecisionComparator />;
-  }
-  if (pathname.startsWith("/share/")) {
-    return <ConversationShareLanding />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;

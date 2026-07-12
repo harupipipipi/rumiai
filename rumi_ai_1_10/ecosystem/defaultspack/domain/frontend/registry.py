@@ -33,10 +33,6 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
-from domain.frontend_settings_store import (
-    FrontendSettingsCorruptError,
-    FrontendSettingsStore,
-)
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import (
@@ -65,7 +61,6 @@ class FrontendRegistry:
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
-        self._settings_store = FrontendSettingsStore(self._settings_path)
 
     def build_catalog(self, profile_id: str | None = None, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
@@ -164,17 +159,13 @@ class FrontendRegistry:
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
+        current = self._read_settings()
         sanitized_patch = self._sanitize_settings_patch(patch or {})
-        def merge(current: dict[str, Any]) -> dict[str, Any]:
-            values = self._deep_merge(self._default_settings(), current)
-            self._mark_explicit_keyboard_navigation_change(
-                values, sanitized_patch
-            )
-            return self._refresh_derived_settings(
-                self._deep_merge(values, sanitized_patch)
-            )
-
-        return self._settings_store.update(merge)
+        self._mark_explicit_keyboard_navigation_change(current, sanitized_patch)
+        merged = self._deep_merge(current, sanitized_patch)
+        merged = self._refresh_derived_settings(merged)
+        self._write_settings_atomically(merged)
+        return merged
 
     def build_conversation_preview(self, conversation_id: str) -> dict[str, Any]:
         store = ChatStore()
@@ -2116,7 +2107,7 @@ class FrontendRegistry:
         paths: list[str] = []
         if isinstance(value, dict):
             preferred = ""
-            for key in ("model_image_path", "screenshot_path", "workspace_path", "path"):
+            for key in ("model_image_path", "screenshot_path", "path"):
                 item = value.get(key)
                 if isinstance(item, str) and item.strip():
                     preferred = item.strip()
@@ -2125,7 +2116,7 @@ class FrontendRegistry:
                 seen.add(preferred)
                 paths.append(preferred)
             for key, item in value.items():
-                if key in {"path", "workspace_path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
+                if key in {"path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
                     continue
                 paths.extend(self._artifact_paths_from_value(item, seen))
         elif isinstance(value, list):
@@ -2632,21 +2623,18 @@ class FrontendRegistry:
 
     def _read_settings(self) -> dict[str, Any]:
         values = self._default_settings()
-        try:
-            saved = self._settings_store.read()
-        except FrontendSettingsCorruptError:
+        if self._settings_path.exists():
             try:
                 raw_settings = self._settings_path.read_bytes()
+                saved = json.loads(raw_settings.decode("utf-8"))
             except OSError:
                 return self._refresh_derived_settings(values)
-            self._backup_corrupt_settings(raw_settings)
-            return self._refresh_derived_settings(values)
-        saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
-        if migrated:
-            saved = self._settings_store.update(
-                lambda current: self._migrate_legacy_keyboard_navigation(current)[0]
-            )
-        if saved:
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._backup_corrupt_settings(raw_settings)
+                return self._refresh_derived_settings(values)
+            saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
+            if migrated:
+                self._write_settings_atomically(saved)
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)

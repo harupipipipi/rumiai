@@ -11,8 +11,6 @@ import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs
 import type { ActionApprovalMode } from "../features/tools/ActionApprovalControl";
 import type { PendingToolReview, ToolSelectionChip } from "../features/tools/types";
 import type { ComposerMentionMetadata } from "../lib/composerWidgets";
-import type { ComposerEntityReference } from "../lib/composerReferences";
-import type { WidgetConversationContext } from "../lib/widgetContext";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -31,12 +29,12 @@ export type ChatUiMessage = {
     thinkingLabel?: string;
     thinkingDuration?: string;
     thinkingTranscript?: string;
-    interrupted?: boolean;
-    interruptionReason?: string;
     attachedToolCount?: number;
     pendingApproval?: Record<string, unknown>;
     pendingAuthorityApproval?: Record<string, unknown>;
     authorityFollowup?: Record<string, unknown>;
+    interrupted?: boolean;
+    interruptionReason?: string;
     chatDisplay?: {
       hidden?: boolean;
       reason?: string;
@@ -156,7 +154,6 @@ export type ChatMessagesRendererProps = {
 };
 
 export type ComposerRendererProps = {
-  widgetContext?: WidgetConversationContext;
   input: string;
   placeholder: string;
   isNewConversation?: boolean;
@@ -184,7 +181,6 @@ export type ComposerRendererProps = {
   attachedFiles?: AttachedFile[];
   pendingMentionAttachmentPaths?: string[];
   droppedWidgets?: DroppedWidget[];
-  entityReferences?: ComposerEntityReference[];
   selectedToolIds?: string[];
   actionApprovalMode?: ActionApprovalMode;
   toolSelectionTargets?: ToolSelectionChip[];
@@ -221,7 +217,6 @@ export type ComposerRendererProps = {
   onPendingMentionAttachmentRemove?: (path: string) => void;
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
-  onEntityReferencesChange?: (references: ComposerEntityReference[]) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;
   onWidgetToggle?: (widgetId: string) => void;
   onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
@@ -234,7 +229,6 @@ export type ComposerRendererProps = {
 };
 
 export type ToolPreviewPanelRendererProps = {
-  widgetContext?: WidgetConversationContext;
   previews: ToolPreviewItem[];
   showPreview: boolean;
   previewMode: ToolPreviewMode;
@@ -246,7 +240,6 @@ export type ToolPreviewPanelRendererProps = {
 };
 
 export type RightSidebarRendererProps = {
-  widgetContext?: WidgetConversationContext;
   items: SidebarItem[];
   activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
