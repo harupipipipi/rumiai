@@ -76,6 +76,29 @@ test("user messages restore human mention badges from semantic metadata", () => 
   assert.doesNotMatch(html, />@browser_computer</);
 });
 
+test("markdown links render as destination-aware review controls", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      role: "agent",
+      content: [{ type: "markdown", text: "[Account portal](https://example.com/account)" }],
+      rawText: "[Account portal](https://example.com/account)",
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /<button[^>]+aria-label="Account portal; destination example\.com; web"/);
+  assert.doesNotMatch(html, /<a[^>]+href="https:\/\/example\.com/);
+});
+
 test("assistant authority retry boilerplate is stripped while preserving the answer", () => {
   const leakedText = "The model/API authority is now approved. Retrying the request to DeepSeek V4 Flash via OpenCode Go with the provided credentials and network context.\n\n---\n\nHello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
   const answer = "Hello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
