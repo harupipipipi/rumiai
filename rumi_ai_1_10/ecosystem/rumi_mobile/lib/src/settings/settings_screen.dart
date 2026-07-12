@@ -7,7 +7,7 @@ import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
 import '../data/pc/pc_pairing_client.dart';
 import '../platform/platform_services.dart';
-import '../qr/qr_payload.dart';
+import '../qr/pairing_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
 import 'defaultspack_mobile_providers.g.dart';
@@ -82,49 +82,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    try {
-      final api = await widget.configStore.loadApi();
-      final savedProviderConfigs =
-          await widget.configStore.loadProviderConfigs();
-      final providerConfigs =
-          _mergeDefaultProviderConfigs(savedProviderConfigs);
-      final modelFavorites = await widget.configStore.loadModelFavorites();
-      final pc = await widget.configStore.loadPc();
-      final notificationSettings =
-          await widget.configStore.loadNotificationSettings();
-      final paired = await widget.deviceStore.loadPairedDevice();
-      final pairedDevices = await widget.deviceStore.loadPairedDevices();
-      final identity = await widget.deviceStore.loadOrCreateIdentity();
-      if (!mounted) return;
-      setState(() {
-        _config = api;
-        _providerConfigs = providerConfigs;
-        _modelFavorites = modelFavorites;
-        _pc = pc;
-        _notificationSettings = notificationSettings;
-        _pairedDevices = pairedDevices;
-        if (_pc == null && paired != null) {
-          _pc = paired.toPcConnection();
-        }
-        _deviceIdentity = identity;
-        _syncControllers();
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _config = ApiConfig.defaults;
-        _providerConfigs =
-            _mergeDefaultProviderConfigs(const <MobileProviderConfig>[]);
-        _modelFavorites = const [];
-        _pc = null;
-        _notificationSettings = MobileNotificationSettings.defaults;
-        _pairedDevices = const [];
-        _deviceIdentity = null;
-        _syncControllers();
-        _loading = false;
-      });
-    }
+    final api = await widget.configStore.loadApi();
+    final savedProviderConfigs = await widget.configStore.loadProviderConfigs();
+    final providerConfigs = _mergeDefaultProviderConfigs(savedProviderConfigs);
+    final modelFavorites = await widget.configStore.loadModelFavorites();
+    final pc = await widget.configStore.loadPc();
+    final notificationSettings =
+        await widget.configStore.loadNotificationSettings();
+    final paired = await widget.deviceStore.loadPairedDevice();
+    final pairedDevices = await widget.deviceStore.loadPairedDevices();
+    final identity = await widget.deviceStore.loadOrCreateIdentity();
+    if (!mounted) return;
+    setState(() {
+      _config = api;
+      _providerConfigs = providerConfigs;
+      _modelFavorites = modelFavorites;
+      _pc = pc;
+      _notificationSettings = notificationSettings;
+      _pairedDevices = pairedDevices;
+      if (_pc == null && paired != null) {
+        _pc = paired.toPcConnection();
+      }
+      _deviceIdentity = identity;
+      _syncControllers();
+      _loading = false;
+    });
   }
 
   void _syncControllers() {
@@ -163,10 +145,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     final pc = pcUrl.isEmpty || _pcToken.text.trim().isEmpty
         ? null
-        : PcConnection(
-            baseUrl: pcUrl,
-            token: _pcToken.text.trim(),
-          );
+        : PcConnection(baseUrl: pcUrl, token: _pcToken.text.trim());
     await widget.configStore.savePc(pc);
     if (!mounted) return;
     setState(() {
@@ -183,7 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _scanPc() async {
-    final result = await Navigator.of(context).push<(QrPayload, bool)>(
+    final result = await Navigator.of(context).push<(ScannedPairingPayload, bool)>(
       MaterialPageRoute(
         builder: (_) => const QrScannerScreen(
           purpose: QrScanPurpose.general,
@@ -193,17 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (result == null) return;
     final (payload, mismatch) = result;
-    if (payload is QrPcConnection) {
-      if (!pcConnectionUrlAllowed(payload.baseUrl)) {
-        _toast('release版ではPC接続にHTTPS URLが必要です');
-        return;
-      }
-      setState(() {
-        _pcUrl.text = payload.baseUrl;
-        _pcToken.text = payload.token;
-      });
-      _toast('PC接続情報を取り込みました。保存してください。');
-    } else if (payload is QrPairingV2) {
+    if (payload is QrPairingV2) {
       await _startPairingV2(payload.payload);
     } else {
       _toast('このQRはPC接続形式ではありません');
@@ -221,11 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    const requestedScopes = [
-      'chat.read',
-      'chat.write',
-      'tools.observe',
-    ];
+    const requestedScopes = ['chat.read', 'chat.write', 'tools.observe'];
     final verificationCode = await claimVerificationCode(
       pairingId: payload.pairingId,
       device: identity,
@@ -300,10 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Future<void>.delayed(interval);
 
       try {
-        final statusResp = await client.pollStatus(
-          pc,
-          pairingId: pairingId,
-        );
+        final statusResp = await client.pollStatus(pc, pairingId: pairingId);
         if (!statusResp.isAccepted) continue;
 
         final tokenResp = await client.pickupTokenDelivery(
@@ -575,8 +537,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final openaiCompatible = provider.openaiCompatible ||
           _usesOpenAiCompatibleFallback(provider) ||
           _baseUrlLooksOpenAiCompatible(baseUrl);
-      final apiCompatibility =
-          _apiCompatibilityForProvider(provider, baseUrl: baseUrl);
+      final apiCompatibility = _apiCompatibilityForProvider(
+        provider,
+        baseUrl: baseUrl,
+      );
       merged.add(
         MobileProviderConfig(
           providerId: provider.providerId,
@@ -826,15 +790,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 12),
                 Theme(
-                  data: Theme.of(context).copyWith(
-                    dividerColor: Colors.transparent,
-                  ),
+                  data: Theme.of(
+                    context,
+                  ).copyWith(dividerColor: Colors.transparent),
                   child: ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     childrenPadding: EdgeInsets.zero,
                     title: const Text('高度な設定'),
-                    subtitle:
-                        const Text('通常は変更不要です。provider側のURL/モデルが必要な時だけ使います。'),
+                    subtitle: const Text(
+                      '通常は変更不要です。provider側のURL/モデルが必要な時だけ使います。',
+                    ),
                     children: [
                       TextField(
                         controller: baseUrl,
@@ -911,22 +876,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setPcTaskFinishedNotifications(bool enabled) async {
-    final next = _notificationSettings.copyWith(
-      pcTaskFinishedEnabled: enabled,
-    );
+    final next = _notificationSettings.copyWith(pcTaskFinishedEnabled: enabled);
     setState(() => _notificationSettings = next);
     await widget.configStore.saveNotificationSettings(next);
     if (enabled) {
       unawaited(const PlatformNotifications().requestAuthorization());
     }
-  }
-
-  Future<void> _setPcToolDelegation(bool enabled) async {
-    final next = _notificationSettings.copyWith(
-      delegatePhoneToolsToPcWhenAvailable: enabled,
-    );
-    setState(() => _notificationSettings = next);
-    await widget.configStore.saveNotificationSettings(next);
   }
 
   Future<void> _pickModelFromCatalog() async {
@@ -982,9 +937,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               providerRunsOnMobile: _providerRunsOnMobile,
               onFetchPcCatalog: () => refresh(_fetchPcCatalog),
               onSaveDirectConfig: () => refresh(_save),
-              onUseProvider: (provider) => refresh(
-                () => _activateMobileProvider(provider),
-              ),
+              onUseProvider: (provider) =>
+                  refresh(() => _activateMobileProvider(provider)),
               onEditProvider: (provider) => refresh(
                 () => _editMobileProvider(provider, sheetContext: context),
               ),
@@ -1020,12 +974,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               isFavorite: _isModelFavorite,
               providerRunsOnMobile: _providerRunsOnMobile,
               onFetchPcCatalog: () => refresh(_fetchPcCatalog),
-              onToggleFavorite: (favorite, enabled) => refresh(
-                () => _setModelFavorite(favorite, enabled),
-              ),
-              onUseProvider: (provider) => refresh(
-                () => _activateMobileProvider(provider),
-              ),
+              onToggleFavorite: (favorite, enabled) =>
+                  refresh(() => _setModelFavorite(favorite, enabled)),
+              onUseProvider: (provider) =>
+                  refresh(() => _activateMobileProvider(provider)),
               favoriteFromPcProfile: _favoriteFromPcProfile,
             );
           },
@@ -1083,17 +1035,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: _notificationSettings.pcTaskFinishedEnabled,
                 onChanged: (value) {
                   unawaited(_setPcTaskFinishedNotifications(value));
-                },
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                secondary: const Icon(Icons.construction_outlined),
-                title: const Text('PC環境のtoolを使う'),
-                subtitle: const Text('このスマホでチャット中でも、接続中のPCで実行できるtoolへ委譲します。'),
-                value:
-                    _notificationSettings.delegatePhoneToolsToPcWhenAvailable,
-                onChanged: (value) {
-                  unawaited(_setPcToolDelegation(value));
                 },
               ),
               const SizedBox(height: 12),
@@ -1305,9 +1246,9 @@ List<ModelFavoriteConfig> _sortModelFavorites(
   list.sort((a, b) {
     final source = a.source.compareTo(b.source);
     if (source != 0) return source;
-    return a.effectiveLabel
-        .toLowerCase()
-        .compareTo(b.effectiveLabel.toLowerCase());
+    return a.effectiveLabel.toLowerCase().compareTo(
+          b.effectiveLabel.toLowerCase(),
+        );
   });
   return list;
 }
@@ -1461,9 +1402,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
   Widget build(BuildContext context) {
     final providers = widget.providerConfigs.toList()
       ..sort(
-        (a, b) => a.effectiveLabel
-            .toLowerCase()
-            .compareTo(b.effectiveLabel.toLowerCase()),
+        (a, b) => a.effectiveLabel.toLowerCase().compareTo(
+              b.effectiveLabel.toLowerCase(),
+            ),
       );
     final filtered = providers.where(_matchesQuery).toList();
     final configuredCount = _configuredProviderCount(widget.providerConfigs);
@@ -1513,18 +1454,24 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                icon: widget.fetchingCatalog
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.cloud_download_outlined),
-                label: const Text('PCから安全に取得'),
-                onPressed: widget.fetchingCatalog
-                    ? null
-                    : () => unawaited(widget.onFetchPcCatalog()),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      icon: widget.fetchingCatalog
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_download_outlined),
+                      label: const Text('PCから取得'),
+                      onPressed: widget.fetchingCatalog
+                          ? null
+                          : () => unawaited(widget.onFetchPcCatalog()),
+                    ),
+                  ),
+                ],
               ),
               if (widget.catalogError != null) ...[
                 const SizedBox(height: 8),
@@ -1568,8 +1515,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
               ],
               const SizedBox(height: 12),
               Theme(
-                data: Theme.of(context)
-                    .copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(
+                  context,
+                ).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: EdgeInsets.zero,
@@ -1631,8 +1579,9 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.save_outlined),
                         label: const Text('直接設定を保存'),
@@ -1705,9 +1654,9 @@ class _ModelSettingsPageState extends State<_ModelSettingsPage> {
         .where((provider) => provider.model.trim().isNotEmpty)
         .toList()
       ..sort(
-        (a, b) => a.effectiveLabel
-            .toLowerCase()
-            .compareTo(b.effectiveLabel.toLowerCase()),
+        (a, b) => a.effectiveLabel.toLowerCase().compareTo(
+              b.effectiveLabel.toLowerCase(),
+            ),
       );
     final pcProfiles = widget.pcCatalog?.selectableProfiles ?? [];
     final filteredMobile =
@@ -1782,9 +1731,8 @@ class _ModelSettingsPageState extends State<_ModelSettingsPage> {
                             }
                           }
                         : null,
-                    onRemove: () => unawaited(
-                      widget.onToggleFavorite(favorite, false),
-                    ),
+                    onRemove: () =>
+                        unawaited(widget.onToggleFavorite(favorite, false)),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -2059,10 +2007,7 @@ class _ModelCandidateCard extends StatelessWidget {
                   children: [
                     _StatusPill(label: sourceLabel, active: supported),
                     const Spacer(),
-                    TextButton(
-                      onPressed: onUse,
-                      child: const Text('使用'),
-                    ),
+                    TextButton(onPressed: onUse, child: const Text('使用')),
                   ],
                 ),
               ],
@@ -2325,10 +2270,7 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, color: color),
-      ),
+      child: Text(label, style: TextStyle(fontSize: 11, color: color)),
     );
   }
 }
@@ -2591,8 +2533,10 @@ class _PcModelPickerState extends State<_PcModelPicker> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  Text('モデルを選択',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'モデルを選択',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
@@ -2615,8 +2559,9 @@ class _PcModelPickerState extends State<_PcModelPicker> {
                   ...providers.map(
                     (p) => DropdownMenuItem(
                       value: p.providerId,
-                      child:
-                          Text('${p.displayName}${p.configured ? " ✓" : ""}'),
+                      child: Text(
+                        '${p.displayName}${p.configured ? " ✓" : ""}',
+                      ),
                     ),
                   ),
                 ],

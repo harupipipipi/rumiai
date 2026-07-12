@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import 'qr_payload.dart';
+import 'pairing_payload.dart';
 
 enum QrScanPurpose { pcConnect, general }
 
@@ -44,14 +44,14 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   String get _title => switch (widget.purpose) {
-        QrScanPurpose.pcConnect => 'PCにQRで接続',
-        QrScanPurpose.general => 'QRスキャン',
-      };
+    QrScanPurpose.pcConnect => 'PCにQRで接続',
+    QrScanPurpose.general => 'QRスキャン',
+  };
 
-  bool _matchesPurpose(QrPayload payload) {
+  bool _matchesPurpose(ScannedPairingPayload payload) {
     switch (widget.purpose) {
       case QrScanPurpose.pcConnect:
-        return payload is QrPcConnection || payload is QrPairingV2;
+        return payload is QrPairingV2;
       case QrScanPurpose.general:
         return true;
     }
@@ -62,7 +62,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     raw = raw.trim();
     if (raw.isEmpty) return;
     _handled = true;
-    final payload = parseQrPayload(raw);
+    final payload = parsePairingPayload(raw);
     final mismatch = !_matchesPurpose(payload);
     Navigator.of(context).pop((payload, mismatch));
   }

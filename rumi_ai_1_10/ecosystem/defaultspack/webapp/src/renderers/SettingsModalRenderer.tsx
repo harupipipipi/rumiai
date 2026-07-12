@@ -5,13 +5,12 @@ import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil,
 import { cn } from "../lib/cn";
 import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
-import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
 import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
-import { t } from "../lib/i18n";
+import { normalizeLocale, t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
-import { settingsFieldSearchText } from "../lib/settingsSearch";
+import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
@@ -23,6 +22,7 @@ import {
   buildAccountConnectionPrelude,
   filterControlCenterSections,
   mapSettingsSectionId,
+  localizedSettingsSourceLabel,
   safeSettingsLabel,
   type AccountConnectionPreludeCard,
   type AccountConnectionScopeModeOption,
@@ -1034,13 +1034,58 @@ function capabilityToneClass(tone: "enabled" | "approval" | "rejected" | "scope"
   }
 }
 
+function plainRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function plainRecordList(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.map(plainRecord).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+function cloudflareProvisioningRows(provisioning: Record<string, unknown>, japanese = false): Array<{ label: string; ready: boolean; value: string }> {
+  const environment = plainRecord(provisioning.environment);
+  const status = String(provisioning.environment_status || environment.status || "").trim();
+  if (!status && Object.keys(environment).length === 0) return [];
+  return [
+    { label: japanese ? "実行環境" : "Sandbox", ready: Boolean(provisioning.sandbox_ready || environment.sandbox_ready), value: provisioning.sandbox_ready || environment.sandbox_ready ? japanese ? "利用可能" : "Ready" : japanese ? "利用不可" : "Blocked" },
+    { label: "Pages", ready: Boolean(provisioning.pages_ready || environment.pages_ready), value: provisioning.pages_ready || environment.pages_ready ? japanese ? "利用可能" : "Ready" : japanese ? "要確認" : "Check" },
+    { label: japanese ? "固定トンネル" : "Named tunnel", ready: Boolean(provisioning.stable_pc_tunnel_ready || environment.stable_pc_tunnel_ready), value: provisioning.stable_pc_tunnel_ready || environment.stable_pc_tunnel_ready ? japanese ? "利用可能" : "Ready" : japanese ? "未設定" : "Missing" },
+    { label: japanese ? "PC接続" : "PC bridge", ready: Boolean(provisioning.pc_tool_bridge_ready || environment.pc_tool_bridge_ready), value: provisioning.pc_tool_bridge_ready || environment.pc_tool_bridge_ready ? japanese ? "利用可能" : "Ready" : japanese ? "未設定" : "Missing" },
+  ];
+}
+
+function cloudflareProvisioningFacts(provisioning: Record<string, unknown>, japanese = false): string[] {
+  const constraints = plainRecord(provisioning.constraints);
+  const facts: string[] = [];
+  if (constraints.cloudflare_sandbox_requires_workers_paid) facts.push(japanese ? "実行環境にはWorkers有料プランが必要" : "Sandbox: Workers Paid plan");
+  if (constraints.pages_dev_is_not_a_pc_tunnel_hostname) facts.push(japanese ? "pages.devはPC接続先には使えません" : "pages.dev is not a PC tunnel");
+  if (constraints.all_tools_cloudflare_native_supported === false) facts.push(japanese ? "Cloudflareだけで使える機能には制限があります" : "Cloudflare-native tools: partial");
+  if (constraints.pc_local_tools_require_pc_bridge) facts.push(japanese ? "PC上の機能にはPC接続が必要" : "PC-local tools: PC bridge");
+  if (constraints.wrangler_diagnostics_require_explicit_command_or_local_install) facts.push(japanese ? "診断にはWranglerの設定が必要" : "Wrangler: explicit command or local install");
+  return facts;
+}
+
+function cloudflareProvisioningBlockers(provisioning: Record<string, unknown>, japanese = false): string[] {
+  const blockers = plainRecordList(provisioning.blockers);
+  return blockers
+    .map((item) => japanese
+      ? ({
+          CLOUDFLARE_WRANGLER_MISSING: "Cloudflareの診断を使うにはWranglerを設定してください。",
+          CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED: "Cloudflareの実行環境にはWorkers有料プランが必要です。",
+          CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED: "PCへ接続する固定トンネルを設定してください。",
+        }[String(item.code || "")] ?? "Cloudflareの実行環境を確認してください。")
+      : String(item.message || item.code || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
 function compactCredentialRef(value: string): string {
   const text = value.trim();
   if (text.length <= 32) return text;
   return `${text.slice(0, 14)}…${text.slice(-10)}`;
 }
 
-function importPlaceholderForProvider(providerId: string): string {
+function importPlaceholderForProvider(providerId: string, locale: "en" | "ja" = "en"): string {
   if (providerId === "cloudflare") {
     return [
       "{",
@@ -1064,12 +1109,18 @@ function importPlaceholderForProvider(providerId: string): string {
     ].join("\n");
   }
   if (providerId === "google") {
-    return "Paste Google OAuth client JSON or a credential bundle JSON. Token values are stored in SecretsStore and never echoed back.";
+    return locale === "ja" ? "Google OAuthクライアントJSONまたは認証情報セットJSONを貼り付けます。トークンは安全に保存され、再表示されません。" : "Paste Google OAuth client JSON or a credential bundle JSON. Token values are stored in SecretsStore and never echoed back.";
   }
-  return "Paste credential bundle JSON or .env-style token lines. Raw secrets are stored only in Rumi secret storage.";
+  return locale === "ja" ? "認証情報セットJSONまたは環境変数形式のトークンを貼り付けます。秘密情報はRumiの秘密情報ストレージだけに保存します。" : "Paste credential bundle JSON or .env-style token lines. Raw secrets are stored only in Rumi secret storage.";
 }
 
-function connectionDraftHelp(providerId: string): string {
+function connectionDraftHelp(providerId: string, locale: "en" | "ja" = "en"): string {
+  if (locale === "ja") {
+    if (providerId === "cloudflare") return "トークンを直接読み込むか、セルフホストのブラウザ接続用OAuthクライアントを設定します。書き込み操作には承認が必要です。";
+    if (providerId === "github") return "細かな権限を設定したトークン、またはOAuthトークンを読み込みます。Rumiが利用できる操作は、選んだ権限の範囲に限られます。";
+    if (providerId === "google") return "ブラウザ接続で使う権限を選ぶか、セルフホスト用クライアントJSONを貼り付けます。Gmail本文など影響の大きい権限は接続前に表示します。";
+    return "ここから読み込むと、秘密情報そのものを設定画面に残さず安全に保存できます。";
+  }
   if (providerId === "cloudflare") {
     return "Use credential JSON for direct token import, or OAuth client JSON for self-host browser connect. Pages/Workers write capabilities require approval.";
   }
@@ -2011,7 +2062,6 @@ function SettingsField({
     providerId: string;
     providerLabel?: string;
     apiId?: string;
-    refreshOnClose?: boolean;
   } | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
@@ -2296,13 +2346,10 @@ function SettingsField({
             candidate_models: [],
             reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
           });
-          const savedProviderId = apiProvider;
-          const savedApiId = apiName;
           setCredentialTransfer({
-            providerId: savedProviderId,
+            providerId: apiProvider,
             providerLabel: selectedProviderOption?.label,
-            apiId: savedApiId,
-            refreshOnClose: true,
+            apiId: apiName,
           });
           setApiSecret("");
           setApiBaseUrl("");
@@ -2311,6 +2358,9 @@ function SettingsField({
           setApiQuotaLabel("");
           setApiNotes("");
           setApiSaveState("saved");
+          onChange(sectionId, field.id, {
+            action: "oauth_refresh",
+          });
         } catch (saveError) {
           setApiSaveState("idle");
           setApiSaveError(saveError instanceof Error ? saveError.message : "API key save failed.");
@@ -2999,8 +3049,8 @@ function SettingsField({
     }
     case "readonly":
       control = (
-        <div className="group/readonly flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <div className="whitespace-pre-wrap text-sm leading-6 text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>
+        <div className="group/readonly flex min-w-0 items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="min-w-0 flex-1 whitespace-pre-wrap break-all text-sm leading-6 text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>
           <button
             type="button"
             onClick={() => void copyTextToClipboard(formatReadonlyValue(value, field.default))}
@@ -3052,13 +3102,8 @@ function SettingsField({
           providerLabel={credentialTransfer.providerLabel}
           apiId={credentialTransfer.apiId}
           onClose={() => {
-            const shouldRefresh = credentialTransfer.refreshOnClose;
             setCredentialTransfer(null);
-            if (shouldRefresh) {
-              onChange(sectionId, field.id, {
-                action: "oauth_refresh",
-              });
-            }
+            onChange(sectionId, field.id, { action: "oauth_refresh" });
           }}
         />
       )}
@@ -3088,8 +3133,14 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
-  const kernelBaseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8765` : "http://127.0.0.1:8765";
-  const cloudflarePagesUrl = String(settingsValues.apps?.cloudflare_pages_url ?? "").trim();
+  const isJapanese = normalizeLocale(locale) === "ja";
+  const localizedCopy = (english: string, japanese: string) => isJapanese ? japanese : english;
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const placementMenuRef = useRef<HTMLDivElement | null>(null);
+  const placementTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<ControlCenterSection["id"]>(
     () => mapSettingsSectionId(requestedSectionId) ?? "quick_setup",
   );
@@ -3113,12 +3164,12 @@ export function SettingsModalRenderer({
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const controlCenterSections = useMemo(
-    () => buildControlCenterSections(settingsSections),
-    [settingsSections],
+    () => buildControlCenterSections(settingsSections, locale),
+    [locale, settingsSections],
   );
   const accountConnectionCards = useMemo(
-    () => buildAccountConnectionPrelude(settingsValues),
-    [settingsValues],
+    () => buildAccountConnectionPrelude(settingsValues, locale),
+    [locale, settingsValues],
   );
   const codexAppServerPrelude = useMemo<CodexAppServerPrelude>(
     () => buildCodexAppServerPrelude(settingsValues),
@@ -3162,7 +3213,7 @@ export function SettingsModalRenderer({
     if (mappedSectionId && controlCenterSections.some((section) => section.id === mappedSectionId)) {
       setActiveSectionId(mappedSectionId);
     }
-  }, [controlCenterSections, requestedSectionId]);
+  }, [controlCenterSections, isOpen, requestedSectionId]);
   useEffect(() => {
     if (!normalizedSearch) return;
     if (!visibleSections.some((section) => section.id === activeSectionId)) {
@@ -3172,15 +3223,92 @@ export function SettingsModalRenderer({
   useEffect(() => {
     if (!placementMenuOpen) return;
     const handlePointerDown = () => setPlacementMenuOpen(false);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPlacementMenuOpen(false);
-    };
     document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     };
+  }, [placementMenuOpen]);
+  useEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const layer = layerRef.current;
+    const parent = layer?.parentElement;
+    const backgroundSiblings = parent
+      ? Array.from(parent.children).filter((element) => element !== layer && !element.contains(layer))
+      : [];
+    const previousState = backgroundSiblings.map((element) => ({
+      element: element as HTMLElement,
+      inert: (element as HTMLElement).inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    for (const { element } of previousState) {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    }
+    const frame = requestAnimationFrame(() => dialogTitleRef.current?.focus());
+    return () => {
+      cancelAnimationFrame(frame);
+      for (const { element, inert, ariaHidden } of previousState) {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      }
+      const opener = openerRef.current;
+      requestAnimationFrame(() => {
+        if (opener?.isConnected && !opener.hasAttribute("disabled")) opener.focus();
+      });
+    };
+  }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const focusableSelector = [
+      "button:not([disabled])",
+      "[href]",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (placementMenuOpen) {
+          setPlacementMenuOpen(false);
+          placementTriggerRef.current?.focus();
+        } else {
+          onClose();
+        }
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const scope = placementMenuOpen ? placementMenuRef.current : dialogRef.current;
+      if (!scope) return;
+      const focusable = Array.from(scope.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true" && element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        (placementMenuOpen ? placementMenuRef.current : dialogTitleRef.current)?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !scope.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleDialogKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDialogKeyDown, true);
+  }, [isOpen, onClose, placementMenuOpen]);
+  useEffect(() => {
+    if (!placementMenuOpen) return;
+    requestAnimationFrame(() => {
+      placementMenuRef.current?.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+    });
   }, [placementMenuOpen]);
   useEffect(() => {
     setCodexAppServerDraft({
@@ -3232,10 +3360,10 @@ export function SettingsModalRenderer({
     setActiveSectionId(mapSettingsSectionId(sectionId) ?? "packs_extensions");
     onOpenSection?.(sectionId);
   };
-  const refreshConnectionStatus = (providerId: string) => {
+  const refreshConnectionStatus = (providerId: string, activeDiagnostics = false) => {
     onSettingChange("apis", "api_keys", providerId === "codex"
       ? { action: "oauth_refresh" }
-      : { action: "oauth_refresh", provider_id: providerId });
+      : { action: "oauth_refresh", provider_id: providerId, active_diagnostics: activeDiagnostics });
   };
   const selectedConnectionScopeMode = (card: AccountConnectionPreludeCard): AccountConnectionScopeModeOption | undefined => {
     const selectedId = connectionScopeModes[card.providerId] || card.scopeMode || card.scopeModes[0]?.id || "";
@@ -3461,7 +3589,7 @@ export function SettingsModalRenderer({
     <div
       key={`${field.sourceSectionId}.${field.id}`}
       className={cn(
-        "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
+        "min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
         settingsFieldTakesFullWidth(field) ? "lg:col-span-2" : "",
       )}
     >
@@ -3492,13 +3620,21 @@ export function SettingsModalRenderer({
   const renderSettingsPlacement = (manifest: PlacementManifest) => {
     const action = manifest.renderer.action;
     const settingsTarget = action?.type === "open_settings_section" ? action.target ?? "" : "";
+    const placementLabel = localizedSettingsSourceLabel(
+      String(manifest.source.sourceId ?? settingsTarget),
+      manifest.label,
+      locale,
+    );
+    const placementDescription = isJapanese
+      ? "この項目を設定画面からすぐ開けるようにします。"
+      : manifest.description;
     return (
       <div key={manifest.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h4 className="text-sm font-medium text-zinc-100">{manifest.label}</h4>
-            {manifest.description && (
-              <p className="mt-1 text-xs leading-5 text-zinc-500">{manifest.description}</p>
+            <h4 className="text-sm font-medium text-zinc-100">{placementLabel}</h4>
+            {placementDescription && (
+              <p className="mt-1 text-xs leading-5 text-zinc-500">{placementDescription}</p>
             )}
           </div>
           <button
@@ -3506,7 +3642,7 @@ export function SettingsModalRenderer({
             onClick={() => updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "settings" }))}
             className="rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
           >
-            Unpin
+            {isJapanese ? "表示を外す" : "Unpin"}
           </button>
         </div>
         {manifest.renderer.kind === "html" ? (
@@ -3523,7 +3659,7 @@ export function SettingsModalRenderer({
           </button>
         ) : (
           <p className="mt-3 text-xs text-zinc-500">
-            この配置は settings surface で利用できます。
+            {isJapanese ? "この項目は設定画面で利用できます。" : "This item is available in Settings."}
           </p>
         )}
       </div>
@@ -3565,32 +3701,32 @@ export function SettingsModalRenderer({
             <div className="bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-amber-500/15 px-4 py-4 sm:px-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-2xl">
-                  <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-cyan-200/80">Accounts & Connections</div>
-                  <h3 className="mt-2 text-base font-semibold text-zinc-50">接続は “ログイン・credential・権限” を分けて管理</h3>
+                  <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-cyan-200/80">{localizedCopy("Accounts & Connections", "アカウントと接続")}</div>
+                  <h3 className="mt-2 text-base font-semibold text-zinc-50">{localizedCopy("Manage sign-in, credentials, and permissions separately", "ログイン、認証情報、権限を分けて管理します")}</h3>
                   <p className="mt-2 text-xs leading-5 text-zinc-400">
-                    OAuth tokenやAPI tokenはSecretsStoreへ保存し、Settingsにはcredential_ref・scopes・capabilitiesだけを表示します。requested_capabilitiesがRumi側の実行範囲を絞ります。
+                    {localizedCopy("OAuth and API tokens stay in secret storage. Settings shows only connection state and the permissions Rumi may request.", "OAuthやAPIのトークンは秘密情報ストレージへ保存します。この画面には接続状態と、Rumiが利用を求める権限だけを表示します。")}
                   </p>
                 </div>
                 <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center text-[11px]">
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-emerald-200">
                     <div className="text-base font-semibold">{connectedCount}</div>
-                    <div className="text-[10px] text-emerald-200/70">connected</div>
+                    <div className="text-[10px] text-emerald-200/70">{localizedCopy("connected", "接続済み")}</div>
                   </div>
                   <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">
                     <div className="text-base font-semibold">{approvalCount}</div>
-                    <div className="text-[10px] text-amber-100/70">approval</div>
+                    <div className="text-[10px] text-amber-100/70">{localizedCopy("approval", "承認待ち")}</div>
                   </div>
                   <div className="rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-zinc-300">
                     <div className="text-base font-semibold">{blockedCount}</div>
-                    <div className="text-[10px] text-zinc-500">needs setup</div>
+                    <div className="text-[10px] text-zinc-500">{localizedCopy("needs setup", "設定が必要")}</div>
                   </div>
                 </div>
               </div>
             </div>
             <div className="grid gap-3 border-t border-zinc-800 px-4 py-3 text-[11px] text-zinc-500 sm:grid-cols-3 sm:px-5">
-              <div><span className="text-zinc-300">1. Connect</span> — browser OAuth or credential bundle JSON.</div>
-              <div><span className="text-zinc-300">2. Store</span> — raw secrets stay in Rumi secret storage.</div>
-              <div><span className="text-zinc-300">3. Govern</span> — high-risk capabilities require approval.</div>
+              <div><span className="text-zinc-300">{localizedCopy("1. Connect", "1. 接続")}</span> — {localizedCopy("Use browser sign-in or import a credential bundle.", "ブラウザでログインするか、認証情報セットを読み込みます。")}</div>
+              <div><span className="text-zinc-300">{localizedCopy("2. Store", "2. 保存")}</span> — {localizedCopy("Raw secrets stay in Rumi secret storage.", "秘密情報そのものはRumiの秘密情報ストレージに保存します。")}</div>
+              <div><span className="text-zinc-300">{localizedCopy("3. Govern", "3. 権限管理")}</span> — {localizedCopy("High-risk capabilities require approval.", "影響の大きい操作には承認が必要です。")}</div>
             </div>
           </div>
 
@@ -3603,6 +3739,9 @@ export function SettingsModalRenderer({
               const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
               const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;
               const hasPermissionSummary = selectedScopes.length > 0 || card.credentialRef || card.capabilities.length > 0 || card.approvalRequiredCapabilities.length > 0 || card.rejectedCapabilities.length > 0 || card.expiresAt;
+              const cloudflareRows = card.providerId === "cloudflare" ? cloudflareProvisioningRows(card.provisioning, isJapanese) : [];
+              const cloudflareFacts = card.providerId === "cloudflare" ? cloudflareProvisioningFacts(card.provisioning, isJapanese) : [];
+              const cloudflareBlockers = card.providerId === "cloudflare" ? cloudflareProvisioningBlockers(card.provisioning, isJapanese) : [];
               return (
                 <article key={card.providerId} className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
                   <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass(card.providerId))} />
@@ -3626,24 +3765,72 @@ export function SettingsModalRenderer({
 
                     <div className="mt-4 grid gap-2 sm:grid-cols-3">
                       <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Identity</div>
-                        <div className="mt-1 text-xs text-zinc-200">{card.connected ? "Connected" : card.canConnect ? "Ready" : "Needs setup"}</div>
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{localizedCopy("Identity", "ログイン")}</div>
+                        <div className="mt-1 text-xs text-zinc-200">{card.connected ? localizedCopy("Connected", "接続済み") : card.canConnect ? localizedCopy("Ready", "接続できます") : localizedCopy("Needs setup", "設定が必要")}</div>
                       </div>
                       <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Credential</div>
-                        <div className="mt-1 break-all text-xs text-zinc-200">{card.credentialRef ? compactCredentialRef(card.credentialRef) : card.credential?.configured ? "Stored" : "Not stored"}</div>
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{localizedCopy("Credential", "認証情報")}</div>
+                        <div className="mt-1 break-all text-xs text-zinc-200">{card.credentialRef ? compactCredentialRef(card.credentialRef) : card.credential?.configured ? localizedCopy("Stored", "保存済み") : localizedCopy("Not stored", "未保存")}</div>
                       </div>
                       <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Permission</div>
-                        <div className="mt-1 text-xs text-zinc-200">{card.approvalRequiredCapabilities.length ? "Approval needed" : card.capabilities.length ? "Granted" : "Limited"}</div>
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{localizedCopy("Permission", "利用権限")}</div>
+                        <div className="mt-1 text-xs text-zinc-200">{card.approvalRequiredCapabilities.length ? localizedCopy("Approval needed", "承認が必要") : card.capabilities.length ? localizedCopy("Granted", "許可済み") : localizedCopy("Limited", "制限あり")}</div>
                       </div>
                     </div>
 
+                    {card.providerId === "cloudflare" && (cloudflareRows.length > 0 || cloudflareFacts.length > 0 || cloudflareBlockers.length > 0) && (
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-zinc-200">{localizedCopy("Cloudflare runtime", "Cloudflare実行環境")}</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">{localizedCopy("Sandbox + PC bridge", "実行環境とPC接続")}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConnectionMessages((current) => ({
+                                  ...current,
+                                  [card.providerId]: { tone: "success", text: "Cloudflare diagnostics requested." },
+                                }));
+                                refreshConnectionStatus(card.providerId, true);
+                              }}
+                              className="rounded-lg border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+                            >
+                              {localizedCopy("Run diagnostics", "診断を実行")}
+                            </button>
+                          </div>
+                        </div>
+                        {cloudflareRows.length > 0 && (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                            {cloudflareRows.map((row) => (
+                              <div key={row.label} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-2">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{row.label}</div>
+                                <div className={cn("mt-1 text-xs", row.ready ? "text-emerald-200" : "text-amber-100")}>{row.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {cloudflareFacts.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {cloudflareFacts.map((fact) => (
+                              <span key={fact} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("neutral"))}>{fact}</span>
+                            ))}
+                          </div>
+                        )}
+                        {cloudflareBlockers.length > 0 && (
+                          <div className="mt-3 space-y-1.5">
+                            {cloudflareBlockers.map((blocker) => (
+                              <div key={blocker} className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-5 text-amber-100/85">{blocker}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {card.scopeModes.length > 0 && (
-                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3" role="radiogroup" aria-label={`${card.label} OAuth scope mode`}>
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3" role="radiogroup" aria-label={`${card.label} ${localizedCopy("OAuth permission mode", "OAuth権限の選択")}`}>
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <div className="text-xs font-medium text-zinc-200">Choose permission mode</div>
-                          <div className="text-[10px] text-zinc-600">before browser connect</div>
+                          <div className="text-xs font-medium text-zinc-200">{localizedCopy("Choose permission mode", "利用する権限を選択")}</div>
+                          <div className="text-[10px] text-zinc-600">{localizedCopy("before browser connect", "ブラウザで接続する前に選びます")}</div>
                         </div>
                         <div className="grid gap-2">
                           {card.scopeModes.map((mode) => {
@@ -3668,7 +3855,7 @@ export function SettingsModalRenderer({
                                 />
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="text-xs font-medium text-zinc-100">{mode.label}</span>
-                                  {mode.restricted && <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("approval"))}>Restricted</span>}
+                                  {mode.restricted && <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("approval"))}>{localizedCopy("Restricted", "制限付き")}</span>}
                                 </span>
                                 <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{mode.description}</span>
                                 {mode.restricted && mode.warning && (
@@ -3684,32 +3871,32 @@ export function SettingsModalRenderer({
                     {hasPermissionSummary && (
                       <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-xs font-medium text-zinc-200">Resolved permission state</div>
-                          {card.expiresAt && <div className="text-[10px] text-zinc-600">expires {card.expiresAt}</div>}
+                          <div className="text-xs font-medium text-zinc-200">{localizedCopy("Resolved permission state", "現在の利用権限")}</div>
+                          {card.expiresAt && <div className="text-[10px] text-zinc-600">{localizedCopy("expires", "有効期限")} {card.expiresAt}</div>}
                         </div>
-                        {card.credentialRef && <div className="mt-2 text-[11px] text-zinc-500">Credential ref: <span className="font-mono text-zinc-300">{compactCredentialRef(card.credentialRef)}</span></div>}
+                        {card.credentialRef && <div className="mt-2 text-[11px] text-zinc-500">{localizedCopy("Stored credential", "保存済みの認証情報")}: <span className="font-mono text-zinc-300">{compactCredentialRef(card.credentialRef)}</span></div>}
                         <div className="mt-3 space-y-2">
                           {selectedScopes.length > 0 && (
                             <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">Selected scopes</div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">{localizedCopy("Selected permissions", "選択した権限")}</div>
                               <div className="flex flex-wrap gap-1.5">{selectedScopes.map((scope) => <span key={scope} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("scope"))}>{scope}</span>)}</div>
                             </div>
                           )}
                           {card.capabilities.length > 0 && (
                             <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">Enabled capabilities</div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">{localizedCopy("Enabled capabilities", "利用できる操作")}</div>
                               <div className="flex flex-wrap gap-1.5">{card.capabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("enabled"))}>{capability}</span>)}</div>
                             </div>
                           )}
                           {card.approvalRequiredCapabilities.length > 0 && (
                             <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-amber-300/70">Needs approval</div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-amber-300/70">{localizedCopy("Needs approval", "承認が必要")}</div>
                               <div className="flex flex-wrap gap-1.5">{card.approvalRequiredCapabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("approval"))}>{capability}</span>)}</div>
                             </div>
                           )}
                           {card.rejectedCapabilities.length > 0 && (
                             <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-rose-300/70">Not granted</div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-rose-300/70">{localizedCopy("Not granted", "許可されていません")}</div>
                               <div className="flex flex-wrap gap-1.5">{card.rejectedCapabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("rejected"))}>{capability}</span>)}</div>
                             </div>
                           )}
@@ -3721,10 +3908,10 @@ export function SettingsModalRenderer({
                       <div className="mt-4 rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <div className="text-xs font-medium text-violet-100">Codex access token</div>
-                            <p className="mt-1 text-[11px] leading-5 text-violet-100/65">This is not a Platform API key or App Server auth. It is stored as a local credential.</p>
+                            <div className="text-xs font-medium text-violet-100">{localizedCopy("Codex access token", "Codexアクセストークン")}</div>
+                            <p className="mt-1 text-[11px] leading-5 text-violet-100/65">{localizedCopy("This is separate from a model API key or App Server authentication and is stored only on this device.", "モデル用APIキーやApp Serverの認証とは別の情報として、この端末だけに保存します。")}</p>
                           </div>
-                          <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", card.credential.configured ? capabilityToneClass("enabled") : capabilityToneClass("approval"))}>{card.credential.configured ? "Saved" : "Missing"}</span>
+                          <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", card.credential.configured ? capabilityToneClass("enabled") : capabilityToneClass("approval"))}>{card.credential.configured ? localizedCopy("Saved", "保存済み") : localizedCopy("Missing", "未設定")}</span>
                         </div>
                         <input
                           type="password"
@@ -3736,10 +3923,10 @@ export function SettingsModalRenderer({
                         />
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" disabled={connectionBusy === `${card.providerId}:save_credential`} onClick={() => void saveConnectionCredential(card)} className="rounded-lg border border-violet-500/50 bg-violet-500/15 px-3 py-1.5 text-xs text-violet-100 transition-colors hover:border-violet-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
-                            {connectionBusy === `${card.providerId}:save_credential` ? "Saving..." : card.credential.saveLabel}
+                            {connectionBusy === `${card.providerId}:save_credential` ? localizedCopy("Saving...", "保存中...") : card.credential.saveLabel}
                           </button>
                           <button type="button" disabled={!card.credential.canClear || connectionBusy === `${card.providerId}:clear_credential`} onClick={() => void clearConnectionCredential(card)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700">
-                            {connectionBusy === `${card.providerId}:clear_credential` ? "Clearing..." : card.credential.clearLabel}
+                            {connectionBusy === `${card.providerId}:clear_credential` ? localizedCopy("Clearing...", "削除中...") : card.credential.clearLabel}
                           </button>
                         </div>
                       </div>
@@ -3747,24 +3934,24 @@ export function SettingsModalRenderer({
                       <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <div className="text-xs font-medium text-zinc-200">Credential bundle / client config</div>
-                            <p className="mt-1 text-[11px] leading-5 text-zinc-500">{connectionDraftHelp(card.providerId)}</p>
+                            <div className="text-xs font-medium text-zinc-200">{localizedCopy("Credential bundle / client config", "認証情報セット・クライアント設定")}</div>
+                            <p className="mt-1 text-[11px] leading-5 text-zinc-500">{connectionDraftHelp(card.providerId, isJapanese ? "ja" : "en")}</p>
                           </div>
-                          <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Secrets never echo</span>
+                          <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">{localizedCopy("Secrets are never shown again", "秘密情報は再表示しません")}</span>
                         </div>
                         <textarea
                           value={connectionCredentialDrafts[card.providerId] ?? ""}
                           onChange={(event) => setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }))}
-                          placeholder={importPlaceholderForProvider(card.providerId)}
+                          placeholder={importPlaceholderForProvider(card.providerId, isJapanese ? "ja" : "en")}
                           spellCheck={false}
                           className="mt-3 min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-5 text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-600"
                         />
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" disabled={jsonBusy || !String(connectionCredentialDrafts[card.providerId] ?? "").trim()} onClick={() => void saveAccountConnectionJson(card)} className="rounded-lg border border-zinc-100 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
-                            {jsonBusy ? "Saving..." : "Import credential JSON / save client"}
+                            {jsonBusy ? localizedCopy("Saving...", "保存中...") : localizedCopy("Import credential JSON / save client", "認証情報を読み込んで保存")}
                           </button>
                           <button type="button" disabled={!card.canConnect || isBusy} onClick={() => void startAccountConnection(card, selectedScopeOption)} title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`} className={cn("rounded-lg border px-3 py-1.5 text-xs transition-colors", !card.canConnect || isBusy ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600" : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35")}>
-                            {isBusy ? "Opening..." : card.primaryLabel}
+                            {isBusy ? localizedCopy("Opening...", "接続を開いています...") : card.primaryLabel}
                           </button>
                           <button type="button" onClick={() => openSection(card.configureSectionId)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200">
                             {card.configureLabel}
@@ -3789,9 +3976,9 @@ export function SettingsModalRenderer({
           </div>
 
           <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
-            <div className="text-sm font-medium text-sky-100">OSS / official app mode</div>
+            <div className="text-sm font-medium text-sky-100">{localizedCopy("Open-source / official app", "オープンソース版・公式アプリ")}</div>
             <p className="mt-1 text-xs leading-5 text-sky-100/75">
-              Official secrets are not bundled. Hosted broker flows can live in the official app; self-hosted installs can import a credential bundle or configure their own OAuth client.
+              {localizedCopy("Official secrets are not bundled. The official app can provide hosted sign-in, while self-hosted installations can import credentials or configure their own OAuth client.", "公式の秘密情報はアプリに同梱しません。公式アプリではホスト型ログインを利用でき、セルフホスト版では認証情報の読み込みや独自OAuthクライアントの設定ができます。")}
             </p>
           </div>
         </div>
@@ -3932,27 +4119,27 @@ export function SettingsModalRenderer({
     <aside className="hidden border-l border-zinc-800 bg-zinc-950/40 p-4 md:block">
       <div className="sticky top-4 space-y-4">
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
-          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Control Center</div>
-          <h3 className="mt-2 text-sm font-medium text-zinc-100">{section?.label ?? "Settings"}</h3>
-          <p className="mt-2 text-xs leading-5 text-zinc-500">{section?.help ?? "Settings are grouped by user intent and risk."}</p>
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">{localizedCopy("Control Center", "設定ガイド")}</div>
+          <h3 className="mt-2 text-sm font-medium text-zinc-100">{section?.label ?? localizedCopy("Settings", "設定")}</h3>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">{section?.help ?? localizedCopy("Settings are grouped by user intent and risk.", "設定は目的と影響に応じて整理されています。")}</p>
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
-          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Active profile</div>
-          <div className="mt-2 break-words text-sm text-zinc-100">{activeProfile.label}</div>
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">{localizedCopy("Active profile", "使用中のプロファイル")}</div>
+          <div className="mt-2 break-words text-sm text-zinc-100">{isJapanese && activeProfile.label === "No active profile reported" ? "使用中のプロファイルは報告されていません" : activeProfile.label}</div>
           <p className="mt-2 text-xs leading-5 text-zinc-500">
-            {activeProfile.detail}
+            {isJapanese && activeProfile.label === "No active profile reported" ? "バックエンドが使用中のプロファイルを返していません。" : activeProfile.detail}
           </p>
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
-          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Source sections</div>
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">{localizedCopy("Source sections", "設定の提供元")}</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {(section?.sourceSections ?? []).slice(0, 8).map((source) => (
               <span key={source.id} className="rounded-md border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500">
-                {safeSettingsLabel(source.label, source.id)}
+                {localizedSettingsSourceLabel(source.id, source.label, locale)}
               </span>
             ))}
             {(section?.sourceSections.length ?? 0) === 0 && (
-              <span className="text-xs text-zinc-600">Registry-only section</span>
+              <span className="text-xs text-zinc-600">{localizedCopy("Provided by the settings registry", "設定システムから提供されています")}</span>
             )}
           </div>
         </section>
@@ -3963,15 +4150,21 @@ export function SettingsModalRenderer({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center">
+        <div ref={layerRef} className="fixed inset-0 rumi-layer-modal flex items-center justify-center" data-testid="settings-modal-layer">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={onClose}
+            aria-hidden="true"
           />
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rumi-settings-dialog-title"
+            aria-describedby="rumi-settings-dialog-description"
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -3979,8 +4172,16 @@ export function SettingsModalRenderer({
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div className="min-w-0">
-                <h2 className="text-lg font-medium text-zinc-100">Rumi Control Center</h2>
-                <p className="text-xs text-zinc-500 mt-1">
+                <h2
+                  ref={dialogTitleRef}
+                  id="rumi-settings-dialog-title"
+                  tabIndex={-1}
+                  className="text-lg font-medium text-zinc-100 outline-none"
+                >
+                  {t(locale, "settings.title")}
+                </h2>
+                <p id="rumi-settings-dialog-description" className="text-xs text-zinc-500 mt-1">
+                  {t(locale, "settings.description")} {" "}
                   {t(locale, "settings.backendRegistry", {
                     extensionPoints: catalog?.extension_points.length ?? 0,
                     parts: catalog?.parts?.length ?? 0,
@@ -3991,23 +4192,34 @@ export function SettingsModalRenderer({
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <button
+                    ref={placementTriggerRef}
                     type="button"
                     onClick={() => setPlacementMenuOpen((current) => !current)}
                     className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-2.5 py-2 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    title="settings に配置を追加"
+                    title={t(locale, "settings.addPlacement")}
+                    aria-label={t(locale, "settings.addPlacement")}
+                    aria-haspopup="menu"
+                    aria-expanded={placementMenuOpen}
                   >
                     <Plus size={15} />
                   </button>
                   {placementMenuOpen && (
-                    <div className="absolute right-0 top-[calc(100%+8px)] rumi-layer-local-popover w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+                    <div
+                      ref={placementMenuRef}
+                      role="menu"
+                      tabIndex={-1}
+                      aria-label={t(locale, "settings.addPlacement")}
+                      className="absolute right-0 top-[calc(100%+8px)] rumi-layer-local-popover w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl"
+                    >
                       <div className="border-b border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
-                        Settings placement candidates
+                        {localizedCopy("Items available to add", "追加できる設定項目")}
                       </div>
                       <div className="max-h-72 overflow-y-auto py-1">
                         {settingsPlacementCandidates.length > 0 ? settingsPlacementCandidates.map((manifest) => (
                           <button
                             key={manifest.id}
                             type="button"
+                            role="menuitem"
                             onClick={() => {
                               updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "settings" }));
                               setPlacementMenuOpen(false);
@@ -4015,9 +4227,9 @@ export function SettingsModalRenderer({
                             className="flex w-full items-start justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-zinc-900"
                           >
                             <span className="min-w-0">
-                              <span className="block truncate text-sm text-zinc-100">{manifest.label}</span>
-                              {manifest.description && (
-                                <span className="mt-0.5 block text-[11px] leading-5 text-zinc-500">{manifest.description}</span>
+                              <span className="block truncate text-sm text-zinc-100">{localizedSettingsSourceLabel(String(manifest.source.sourceId ?? ""), manifest.label, locale)}</span>
+                              {(manifest.description || isJapanese) && (
+                                <span className="mt-0.5 block text-[11px] leading-5 text-zinc-500">{isJapanese ? "設定画面からすぐ開けるように追加します。" : manifest.description}</span>
                               )}
                             </span>
                             <Plus size={14} className="mt-0.5 flex-shrink-0 text-zinc-500" />
@@ -4029,7 +4241,7 @@ export function SettingsModalRenderer({
                     </div>
                   )}
                 </div>
-                <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+                <button type="button" onClick={onClose} aria-label={t(locale, "settings.close")} className="rounded p-1 text-zinc-500 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-300">
                   <X size={18} />
                 </button>
               </div>
@@ -4122,12 +4334,6 @@ export function SettingsModalRenderer({
                     {activeSection.id === "computer_automation" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
                     )}
-                    {activeSection.id === "accounts_connections" && (
-                      <AppsSettingsPanel
-                        kernelBaseUrl={kernelBaseUrl}
-                        cloudflarePagesUrl={cloudflarePagesUrl}
-                      />
-                    )}
                     <div className="grid gap-4 lg:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}
                     </div>
@@ -4138,13 +4344,17 @@ export function SettingsModalRenderer({
                     )}
                     {!normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-                        Pack or provider contributions for this section will appear here after registry validation.
+                        {localizedCopy(
+                          "Pack or provider contributions for this section will appear here after registry validation.",
+                          "パックや外部サービスから追加される設定は、利用可能になるとここに表示されます。",
+                        )}
                       </div>
                     )}
                     {visibleAdvancedFields.length > 0 && (
                       <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
                         <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
                           {t(locale, "settings.advanced")}
+                          <span className="mt-1 block font-normal leading-5 text-zinc-600">{t(locale, "settings.advancedHelp")}</span>
                         </summary>
                         <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
                           {visibleAdvancedFields.map(renderField)}

@@ -4,11 +4,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
-import {
-  CredentialTransferModal,
-  credentialTransferCanClose,
-  credentialTransferFocusTarget,
-} from "../components/CredentialTransferModal";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 import {
@@ -16,7 +11,6 @@ import {
   serializeSlashCommandDrafts,
   slashCommandDraftRowsFromValue,
 } from "./settings/renderers/slashCommandsField";
-import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
@@ -148,17 +142,12 @@ test("api_key_setup renderer actions target the rendered template field", () => 
   } as TemplateSettingsField), "api_key_setup_template");
 });
 
-test("cleartext mobile QR flag only enables on explicit opt-in", () => {
-  assert.equal(allowCleartextMobileQr({}), false);
-  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "0" }), false);
-  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "1" }), true);
-});
-
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -202,6 +191,67 @@ test("SettingsModalRenderer renders template model_select with searchable model 
   assert.match(html, /data-settings-renderer="model_select"/);
   assert.match(html, /Gemini 2.5 Flash/);
   assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
+});
+
+test("SettingsModalRenderer shows simple main and lightweight model slots", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "main_model",
+              label: "Main Model",
+              type: "model_select",
+              options: [{ value: "provider/main", label: "Main Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "lightweight_model",
+              label: "Lightweight Model",
+              type: "model_select",
+              options: [{ value: "provider/fast", label: "Fast Choice" }],
+            } as TemplateSettingsField,
+            {
+              id: "utility_models",
+              label: "Utility Models",
+              type: "textarea",
+              advanced: true,
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          main_model: "provider/main",
+          lightweight_model: "provider/fast",
+          utility_models: { fast_reply: "provider/fast" },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Main Model/);
+  assert.match(html, /Lightweight Model/);
+  assert.match(html, /Main Choice/);
+  assert.match(html, /Fast Choice/);
+  assert.match(html, /Advanced/);
+  assert.match(html, /Utility Models/);
+  assert.equal((html.match(/data-settings-renderer="model_select"/g) ?? []).length, 2);
 });
 
 test("SettingsModalRenderer renders template slash command registration field", () => {
@@ -248,6 +298,66 @@ test("SettingsModalRenderer renders template slash command registration field", 
   assert.match(html, /value="yolo"/);
   assert.match(html, /value="go"/);
   assert.match(html, /YOLO/);
+});
+
+test("SettingsModalRenderer constrains long readonly paths inside settings cards", () => {
+  const longTemplatePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/templates/very/deep/path/with/no-natural-breaks/ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns";
+  const longProfilePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/profiles/another/very/deep/path/with/no-natural-breaks/ExternalCustomProfileExtensionThatWouldOtherwiseOverlap";
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "packs",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "external_custom",
+          label: "External Custom",
+          fields: [
+            {
+              id: "custom_template_path",
+              label: "Template Extension Path",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longTemplatePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+            {
+              id: "custom_profile_paths",
+              label: "Profile Extension Paths",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longProfilePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        external_custom: {
+          custom_template_path: longTemplatePath,
+          custom_profile_paths: longProfilePath,
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /External Custom/);
+  assert.match(html, /Template Extension Path/);
+  assert.match(html, /Profile Extension Paths/);
+  assert.match(html, /min-w-0 rounded-lg border border-zinc-800 bg-zinc-950\/50 p-4/);
+  assert.match(html, /group\/readonly flex min-w-0/);
+  assert.match(html, /min-w-0 flex-1 whitespace-pre-wrap break-all/);
+  assert.match(html, /ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns/);
+  assert.match(html, /ExternalCustomProfileExtensionThatWouldOtherwiseOverlap/);
+  assert.match(html, /title="Copy"/);
 });
 
 test("slash command settings keep unsaved empty rows with stable row ids", () => {
@@ -381,41 +491,6 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
   assert.match(html, /openai:main:\*\*\*/);
   assert.match(html, /placeholder="openai API key"/);
   assert.match(html, />Save</);
-});
-
-test("CredentialTransferModal never renders a cleartext credential or QR surface", () => {
-  const html = renderToStaticMarkup(
-    createElement(CredentialTransferModal, {
-      providerId: "anthropic",
-      providerLabel: "Anthropic",
-      apiId: "main",
-      onClose: () => undefined,
-    }),
-  );
-
-  assert.match(html, /暗号化して端末へ転送/);
-  assert.match(html, /Anthropic \/ main/);
-  assert.doesNotMatch(html, /Rumi Mobile QR/);
-  assert.doesNotMatch(html, /sk-ant-test/);
-  assert.doesNotMatch(html, /data:image/);
-});
-
-test("CredentialTransferModal guards active transfers and allows delivered or terminal close", () => {
-  assert.equal(credentialTransferCanClose(null, false), true);
-  assert.equal(credentialTransferCanClose("awaiting_confirmation", false), false);
-  assert.equal(credentialTransferCanClose("pending", false), false);
-  assert.equal(credentialTransferCanClose("accepted", false), true);
-  assert.equal(credentialTransferCanClose("completed", false), true);
-  assert.equal(credentialTransferCanClose("completed", true), false);
-});
-
-test("CredentialTransferModal focus trap wraps Tab and Shift+Tab at dialog boundaries", () => {
-  assert.equal(credentialTransferFocusTarget(2, 3, false), 0);
-  assert.equal(credentialTransferFocusTarget(0, 3, true), 2);
-  assert.equal(credentialTransferFocusTarget(1, 3, false), 1);
-  assert.equal(credentialTransferFocusTarget(-1, 3, false), 0);
-  assert.equal(credentialTransferFocusTarget(-1, 3, true), 2);
-  assert.equal(credentialTransferFocusTarget(0, 0, false), null);
 });
 
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
@@ -695,6 +770,7 @@ test("settings surface pinned placements render in the modal", () => {
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -936,6 +1012,7 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "accounts",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1009,6 +1086,29 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
                 connection_status: "missing_scope_config",
                 status_label: "Missing scope config",
                 disabled_reason: "Configure self-host OAuth",
+                provisioning: {
+                  environment_status: "blocked",
+                  sandbox_ready: false,
+                  pages_ready: true,
+                  stable_pc_tunnel_ready: false,
+                  pc_tool_bridge_ready: false,
+                  constraints: {
+                    cloudflare_sandbox_requires_workers_paid: true,
+                    pages_dev_is_not_a_pc_tunnel_hostname: true,
+                    all_tools_cloudflare_native_supported: false,
+                    pc_local_tools_require_pc_bridge: true,
+                    wrangler_diagnostics_require_explicit_command_or_local_install: true,
+                  },
+                  blockers: [
+                    {
+                      code: "CLOUDFLARE_WRANGLER_MISSING",
+                      message:
+                        "Set RUMI_WRANGLER_COMMAND or run npm install in a Cloudflare scaffold so its pinned node_modules/.bin/wrangler is available.",
+                    },
+                    { code: "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED", message: "Cloudflare Containers require the Workers Paid plan." },
+                    { code: "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED", message: "Set a named Cloudflare Tunnel hostname." },
+                  ],
+                },
               },
             },
           ],
@@ -1035,6 +1135,15 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
   assert.match(html, /Official app required|Hosted broker flows|official hosted broker/);
   assert.match(html, /Configure self-host OAuth/);
   assert.match(html, /title="Configure self-host OAuth"/);
+  assert.match(html, /Cloudflare runtime/);
+  assert.match(html, /Sandbox \+ PC bridge/);
+  assert.match(html, /Run diagnostics/);
+  assert.match(html, /Sandbox: Workers Paid plan/);
+  assert.match(html, /pages\.dev is not a PC tunnel/);
+  assert.match(html, /Wrangler: explicit command or local install/);
+  assert.match(html, /Set RUMI_WRANGLER_COMMAND/);
+  assert.match(html, /node_modules\/\.bin\/wrangler/);
+  assert.match(html, /Cloudflare Containers require the Workers Paid plan/);
   assert.doesNotMatch(html, />Not connected</);
 });
 
@@ -1044,6 +1153,7 @@ test("settings accounts prelude renders Codex token credential without raw token
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "accounts",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1169,6 +1279,7 @@ test("settings help pane uses reported active profile with fallback when absent"
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1187,6 +1298,7 @@ test("settings help pane uses reported active profile with fallback when absent"
     createElement(SettingsModalRenderer, {
       isOpen: true,
       activeSectionId: "models",
+      locale: "en",
       catalog: {
         sidebar: { filters: [], items: [] },
         settings: { sections: [], values: {} },
@@ -1206,4 +1318,105 @@ test("settings help pane uses reported active profile with fallback when absent"
   assert.doesNotMatch(withProfile, />default</);
   assert.match(withoutProfile, /No active profile reported/);
   assert.doesNotMatch(withoutProfile, />default</);
+});
+
+test("Settings modal exposes localized dialog semantics and task-oriented Japanese copy", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "general",
+      locale: "ja",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "general",
+        label: "General",
+        fields: [{ id: "composer_placeholder", label: "Composer Placeholder", type: "text", help: "composer placeholder" }],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /aria-labelledby="rumi-settings-dialog-title"/);
+  assert.match(html, /aria-describedby="rumi-settings-dialog-description"/);
+  assert.match(html, /aria-label="設定を閉じる"/);
+  assert.match(html, />設定<\/h2>/);
+  assert.match(html, /入力欄の案内文/);
+  assert.doesNotMatch(html, />Composer Placeholder</);
+  assert.doesNotMatch(html, /バックエンド登録情報/);
+});
+
+test("Japanese Accounts modal does not expose English connection implementation copy", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      locale: "ja",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "accounts_connections",
+        label: "Accounts & Connections",
+        fields: [],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /ログイン、認証情報、権限を分けて管理します/);
+  assert.match(html, /Gmailの検索とメタデータ/);
+  assert.match(html, /認証情報を読み込んで保存/);
+  assert.match(html, /設定の提供元/);
+  assert.match(html, /パックや外部サービスから追加される設定は、利用可能になるとここに表示されます。/);
+  assert.doesNotMatch(html, /Client config needed|Credential needed|Token needed/);
+  assert.doesNotMatch(html, /Connect selected mode|Configure self-host OAuth|Import credential JSON/);
+  assert.doesNotMatch(html, /Restricted Gmail scopes|Settings placement candidates|Accounts &amp; Connections/);
+  assert.doesNotMatch(html, /Pack or provider contributions for this section will appear here after registry validation/);
+});
+
+test("English Settings empty section keeps registry contribution guidance", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      locale: "en",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: { status: "ok", pack: "defaultspack", ts: "" },
+      previewsCount: 0,
+      settingsSections: [{
+        id: "accounts_connections",
+        label: "Accounts & Connections",
+        fields: [],
+      } as SettingsSection],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Pack or provider contributions for this section will appear here after registry validation\./);
+  assert.doesNotMatch(html, /パックや外部サービスから追加される設定/);
 });

@@ -144,7 +144,7 @@ REGEX_RULES: tuple[RegexRule, ...] = (
         "Long-lived secrets must not be serialized into display QR payloads.",
         rx(
             r"(?:QRCode|qrCode|qr_payload|qrPayload)[\s\S]{0,900}?"
-            r"(?:api[_-]?key|access[_-]?key)",
+            r"(?:api[_-]?key|access[_-]?key|token|secret)",
             flags=re.IGNORECASE,
         ),
         frozenset({".ts", ".tsx", ".js", ".jsx", ".dart"}),
