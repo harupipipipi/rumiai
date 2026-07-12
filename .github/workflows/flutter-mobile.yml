@@ -4,12 +4,12 @@ on:
   pull_request:
     branches: [master, soon]
     paths:
-      - "rumi_mobile/**"
+      - "tobkiri_mobile/**"
       - ".github/workflows/flutter-mobile.yml"
   push:
     branches: [master, soon]
     paths:
-      - "rumi_mobile/**"
+      - "tobkiri_mobile/**"
       - ".github/workflows/flutter-mobile.yml"
 
 concurrency:
@@ -30,17 +30,17 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        working-directory: rumi_mobile
+        working-directory: tobkiri_mobile
         run: flutter pub get
 
       - name: Check formatting
-        working-directory: rumi_mobile
+        working-directory: tobkiri_mobile
         run: dart format --set-exit-if-changed lib test
 
       - name: Analyze
-        working-directory: rumi_mobile
+        working-directory: tobkiri_mobile
         run: flutter analyze
 
       - name: Test
-        working-directory: rumi_mobile
+        working-directory: tobkiri_mobile
         run: flutter test

@@ -1,0 +1,207 @@
+{
+  "snapshot": {
+    "source": "https://developers.cloudflare.com/ai/models/",
+    "verified_at": "2026-07-13",
+    "lifecycle_policy": "refresh from the native inventory when available; otherwise verify official docs before retirement"
+  },
+  "models": [
+    {
+      "id": "cloudflare-workers-ai/@cf/meta/llama-3.1-8b-instruct",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/meta/llama-3.1-8b-instruct",
+      "display_name": "Llama 3.1 8B Instruct",
+      "type": "chat",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": true
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "chat",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai/@cf/baai/bge-base-en-v1.5",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/baai/bge-base-en-v1.5",
+      "display_name": "BGE Base English v1.5",
+      "type": "embedding",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "embedding",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai/@cf/baai/bge-reranker-base",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/baai/bge-reranker-base",
+      "display_name": "BGE Reranker Base",
+      "type": "rerank",
+      "enabled": true,
+      "priority": 3,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "rerank",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai/@cf/black-forest-labs/flux-1-schnell",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/black-forest-labs/flux-1-schnell",
+      "display_name": "FLUX.1 Schnell",
+      "type": "image",
+      "enabled": true,
+      "priority": 4,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": true,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "image",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai/@cf/openai/whisper",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/openai/whisper",
+      "display_name": "Whisper",
+      "type": "transcription",
+      "enabled": true,
+      "priority": 5,
+      "capabilities": {
+        "text_input": false,
+        "image_input": false,
+        "audio_input": true,
+        "text_output": true,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "transcription",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai/@cf/myshell-ai/melotts",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cloudflare-workers-ai",
+      "model_id": "@cf/myshell-ai/melotts",
+      "display_name": "MeloTTS",
+      "type": "tts",
+      "enabled": true,
+      "priority": 6,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": true,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://developers.cloudflare.com/ai/models/",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "tts",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

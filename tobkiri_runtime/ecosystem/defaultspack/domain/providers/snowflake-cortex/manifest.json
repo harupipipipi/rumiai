@@ -1,0 +1,78 @@
+{
+  "id": "snowflake-cortex",
+  "provider_id": "snowflake-cortex",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Snowflake Cortex",
+  "entrypoints": {
+    "adapter": "../../ai_client/providers/enterprise_native_providers.py",
+    "models": "models.json"
+  },
+  "description": "Snowflake Cortex enterprise control-plane provider with scoped deployment identity.",
+  "provider_metadata": {
+    "display_name": "Snowflake Cortex",
+    "kind": "enterprise",
+    "env_vars": [
+      "SNOWFLAKE_PRIVATE_KEY_PATH"
+    ],
+    "base_url_envs": [
+      "SNOWFLAKE_ACCOUNT"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "control-plane://snowflake-cortex",
+    "default_model_for": {},
+    "identity_fields": [
+      "account",
+      "region"
+    ],
+    "catalog_features": [
+      "enterprise",
+      "account_scoped_inventory",
+      "deployment_identity"
+    ]
+  },
+  "provider_manifest": {
+    "id": "snowflake-cortex",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Snowflake Cortex",
+    "enabled": true,
+    "priority": 300,
+    "adapter": "snowflake_cortex",
+    "api_key_env": "SNOWFLAKE_PRIVATE_KEY_PATH",
+    "base_url_env": "SNOWFLAKE_ACCOUNT",
+    "default_base_url": "control-plane://snowflake-cortex",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "entrypoint": "domain.ai_client.providers.enterprise_native_providers:SnowflakeCortexProvider",
+    "config": {
+      "credential_chain_activation_envs": [
+        "SNOWFLAKE_CONNECTION_NAME",
+        "SNOWFLAKE_ACCOUNT"
+      ],
+      "inventory_strategy": "CORTEX_MODELS",
+      "inventory_scope": "account_project_region",
+      "identity_fields": [
+        "account",
+        "region"
+      ],
+      "source_docs": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/llm-functions"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "snowflake-cortex"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "enterprise",
+    "account_scoped_inventory",
+    "deployment_identity"
+  ]
+}

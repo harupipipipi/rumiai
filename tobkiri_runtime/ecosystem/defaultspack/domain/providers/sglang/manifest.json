@@ -1,0 +1,78 @@
+{
+  "id": "sglang",
+  "provider_id": "sglang",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "SGLang",
+  "description": "SGLang served-model endpoint with side-effect-free discovery.",
+  "provider_metadata": {
+    "display_name": "SGLang",
+    "kind": "local",
+    "env_vars": [
+      "SGLANG_API_KEY"
+    ],
+    "base_url_envs": [
+      "SGLANG_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "http://127.0.0.1:30000/v1",
+    "default_model_for": {},
+    "state_dimensions": [
+      "installed",
+      "served",
+      "loaded",
+      "healthy"
+    ],
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "openai_compatible",
+      "runtime_model_discovery"
+    ]
+  },
+  "provider_manifest": {
+    "id": "sglang",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "SGLang",
+    "enabled": true,
+    "priority": 400,
+    "adapter": "openai_compatible",
+    "api_key_env": "SGLANG_API_KEY",
+    "base_url_env": "SGLANG_BASE_URL",
+    "default_base_url": "http://127.0.0.1:30000/v1",
+    "credential_required": false,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "api_compatibility": "openai",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "health_path": "/health",
+      "discovery_side_effects": "none",
+      "state_dimensions": [
+        "installed",
+        "served",
+        "loaded",
+        "healthy"
+      ],
+      "source_docs": "https://docs.sglang.ai/backend/openai_api_completions.html"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "sglang"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "openai_compatible",
+    "runtime_model_discovery"
+  ]
+}

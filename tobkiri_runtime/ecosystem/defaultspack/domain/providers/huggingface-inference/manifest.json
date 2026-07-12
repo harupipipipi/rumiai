@@ -1,0 +1,82 @@
+{
+  "id": "huggingface-inference",
+  "provider_id": "huggingface-inference",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Hugging Face Inference",
+  "description": "Hugging Face Inference typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "Hugging Face Inference",
+    "kind": "cloud",
+    "env_vars": [
+      "HF_TOKEN"
+    ],
+    "base_url_envs": [
+      "HUGGINGFACE_INFERENCE_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://router.huggingface.co/v1",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding",
+      "image",
+      "stt",
+      "tts"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "image",
+      "stt",
+      "tts",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "huggingface-inference",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Hugging Face Inference",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "HF_TOKEN",
+    "base_url_env": "HUGGINGFACE_INFERENCE_BASE_URL",
+    "default_base_url": "https://router.huggingface.co/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding",
+        "image",
+        "stt",
+        "tts"
+      ],
+      "source_docs": "https://huggingface.co/docs/inference-providers/index"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "huggingface-inference"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "image",
+    "stt",
+    "tts",
+    "typed_inventory"
+  ]
+}
