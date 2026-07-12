@@ -12,15 +12,17 @@
     ],
     "provides": [
       "rumi.service.ai.provider.generate.v1",
-      "rumi.service.ai.provider.stream.v1"
+      "rumi.service.ai.provider.stream.v1",
+      "rumi.service.ai.provider.embedding.v1",
+      "rumi.service.ai.provider.image.v1"
     ]
   },
   "required_secrets": [],
-  "required_capabilities": ["ai.provider.generate", "ai.provider.stream"],
+  "required_capabilities": ["ai.provider.generate", "ai.provider.stream", "ai.provider.embedding", "ai.provider.image"],
   "required_network": {"allowed_domains": ["registry-selected"], "allowed_ports": [80, 443]},
   "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:24aee70a8f7d45aeed7bded2f3d9cacff0a5e5b4ab3477e24e4d58a839ffe365", "build_identity": "rumi-provider-adapters-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:03a333351fb5c9966dd9a73c527a645d604bfd5e412aa0787ca4daec983fe7a3", "build_identity": "rumi-provider-adapters-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {
     "authoritative_owner": true,
     "owner_surfaces": ["provider_protocol_execution"],

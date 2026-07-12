@@ -8,7 +8,7 @@
   "risk_level": "high",
   "supports_all_ok": false,
   "depends_on": ["rumi_provider_registry_pack", "rumi_credential_broker_pack"],
-  "required_permissions": ["ai.provider.generate", "ai.provider.stream"],
+  "required_permissions": ["ai.provider.generate", "ai.provider.stream", "ai.provider.embedding", "ai.provider.image"],
   "conflicts_with": [],
   "compatibility": {"python": ">=3.10", "platforms": ["macos", "linux", "windows"]},
   "marketplace": {"id": "rumi.provider_adapters", "registry": "bundled", "publisher": "rumi-ai", "status": "verified", "category": "ai-runtime", "channel": "experimental"},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import urllib.error
@@ -27,6 +28,16 @@ def create_stream_operation(client: GlobalContractClient):
     return _operation(client, streaming=True)
 
 
+def create_embedding_operation(client: GlobalContractClient):
+    """Create an OpenAI-compatible embedding provider operation."""
+    return _modality_operation(client, kind="embedding")
+
+
+def create_image_operation(client: GlobalContractClient):
+    """Create an OpenAI-compatible image provider operation."""
+    return _modality_operation(client, kind="image")
+
+
 def _operation(client: GlobalContractClient, *, streaming: bool):
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         allowed = {"invoke", "stream" if streaming else "generate"}
@@ -42,6 +53,31 @@ def _operation(client: GlobalContractClient, *, streaming: bool):
         )
         adapter = _adapter(str(connection.get("adapter_id") or ""))
         return adapter(request, connection, credential, streaming)
+
+    return operation
+
+
+def _modality_operation(client: GlobalContractClient, *, kind: str):
+    def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        expected = "embed" if kind == "embedding" else "generate"
+        if name not in {expected, "invoke"}:
+            raise ValueError(f"unknown provider modality operation: {name}")
+        request = dict(payload)
+        connection = _connection(client, request)
+        credential = _credential(
+            client,
+            request,
+            connection,
+            scope=f"ai.{kind}",
+        )
+        adapter_id = str(connection.get("adapter_id") or "")
+        if adapter_id not in {"openai", "openai-compatible"}:
+            raise GlobalContractInvocationError(
+                "incompatible", "provider modality protocol is unavailable"
+            )
+        if kind == "embedding":
+            return _openai_embedding(request, connection, credential)
+        return _openai_image(request, connection, credential)
 
     return operation
 
@@ -196,6 +232,80 @@ def _anthropic(
         "finish_reason": value.get("stop_reason"),
     }
     return _stream_result(result) if streaming else result
+
+
+def _openai_embedding(
+    request: Mapping[str, Any],
+    connection: Mapping[str, Any],
+    credential: Mapping[str, Any],
+) -> dict[str, Any]:
+    value = _post(
+        _endpoint(connection, "/embeddings"),
+        _bearer_headers(credential),
+        {"model": _provider_model_id(request), "input": request.get("input")},
+        request,
+    )
+    data = value.get("data")
+    data = data if isinstance(data, list) else []
+    vectors = [
+        list(item.get("embedding") or [])
+        for item in data
+        if isinstance(item, Mapping)
+    ]
+    return {"vectors": vectors, "usage": dict(value.get("usage") or {})}
+
+
+def _openai_image(
+    request: Mapping[str, Any],
+    connection: Mapping[str, Any],
+    credential: Mapping[str, Any],
+) -> dict[str, Any]:
+    body = {
+        "model": _provider_model_id(request),
+        "prompt": request.get("prompt"),
+        **dict(request.get("parameters") or {}),
+    }
+    value = _post(
+        _endpoint(connection, "/images/generations"),
+        _bearer_headers(credential),
+        body,
+        request,
+    )
+    data = value.get("data")
+    artifacts = []
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        material = str(item.get("url") or item.get("b64_json") or "")
+        if not material:
+            continue
+        artifacts.append(
+            {
+                "artifact_id": "sha256:"
+                + hashlib.sha256(material.encode("utf-8")).hexdigest(),
+                "uri": item.get("url"),
+                "base64": item.get("b64_json"),
+                "revised_prompt": item.get("revised_prompt"),
+            }
+        )
+    return {"artifacts": artifacts}
+
+
+def _bearer_headers(credential: Mapping[str, Any]) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    token = credential.get("api_key") or credential.get("token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _provider_model_id(request: Mapping[str, Any]) -> str:
+    model_id = str(request.get("model_id") or "")
+    provider_id = str(request.get("provider_id") or "")
+    prefix = f"{provider_id}/"
+    if provider_id and model_id.startswith(prefix):
+        return model_id[len(prefix):]
+    return model_id
 
 
 def _stream_result(result: Mapping[str, Any]) -> dict[str, Any]:

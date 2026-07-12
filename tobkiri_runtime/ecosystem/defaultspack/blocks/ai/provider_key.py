@@ -109,7 +109,12 @@ def _upsert(provider_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
             "secret_material": {"api_key": secret},
             "consumer_pack_id": "rumi_provider_adapters_pack",
             "provider_instance_id": provider_instance_id,
-            "scopes": ["ai.generate", "ai.stream"],
+            "scopes": [
+                "ai.generate",
+                "ai.stream",
+                "ai.embedding",
+                "ai.image",
+            ],
             "label": str(data.get("name") or provider_id),
         },
     )
