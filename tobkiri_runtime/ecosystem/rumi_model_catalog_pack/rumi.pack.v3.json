@@ -1,0 +1,66 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {
+    "id": "rumi.model_catalog",
+    "version": "2.0.0",
+    "kind": "resource",
+    "display_name": "Rumi Model Catalog",
+    "description": "Immutable verified provider and model descriptors without execution code."
+  },
+  "contracts": {
+    "provides": [
+      {
+        "id": "rumi.resource.ai.model.catalog.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "model-catalog.bundled",
+        "cardinality": "many",
+        "security": "public",
+        "failure": "isolate",
+        "lifecycle": {"introduced": "2.0.0", "deprecated": false, "data_owner": "rumi_model_catalog_pack", "migration_id": "provider-catalog-v2", "rollback_id": "provider-catalog-v2"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["ai.model.catalog.read"]
+      }
+    ],
+    "requires": []
+  },
+  "entrypoints": [
+    {
+      "id": "bundled-model-catalog",
+      "contract_id": "rumi.resource.ai.model.catalog.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_model_catalog_pack.runtime.catalog",
+      "symbol": "create_model_catalog_operation",
+      "artifact_hash": "sha256:6a0e58679c2e7e540621aeb2a37ddc2c1687d5b8c9c505a72ac60cfc93646e5b"
+    }
+  ],
+  "resources": [
+    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:7cfe6ec701dc689fc0f117f0a6702f96d2564df45c9280b9bc32e2f058dab606"}
+  ],
+  "storage": [],
+  "permissions": [
+    {"capability": "ai.model.catalog.read", "access": "read", "approval_required": false}
+  ],
+  "provenance": {
+    "content_hash": "sha256:7cfe6ec701dc689fc0f117f0a6702f96d2564df45c9280b9bc32e2f058dab606",
+    "build_identity": "rumi-model-catalog-pack:2.0.0",
+    "trust_class": "local",
+    "signature": null
+  },
+  "migration": {
+    "from": ["defaultspack.domain.providers"],
+    "compatibility_aliases": [],
+    "compatibility_projection": "read_only",
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31",
+    "rollback": "Restore the catalog resource directory to the pinned pre-Wave-5 owner revision."
+  },
+  "extensions": {
+    "rumi.model_catalog.boundary": {
+      "provider_additions": false,
+      "provider_execution_adapters": false,
+      "provider_credentials": false,
+      "catalog_execution_versions_independent": true
+    }
+  }
+}

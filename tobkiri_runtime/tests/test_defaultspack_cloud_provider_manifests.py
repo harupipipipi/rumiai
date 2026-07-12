@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+MODEL_CATALOG_ROOT = ROOT / "ecosystem" / "rumi_model_catalog_pack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
@@ -23,7 +24,9 @@ def _catalog_and_models(provider_id: str):
 
 
 def _bundled_model_catalog_paths():
-    yield from (DEFAULTSPACK_ROOT / "domain" / "providers").glob("*/models.json")
+    yield from (MODEL_CATALOG_ROOT / "catalog" / "providers").glob(
+        "*/models.json"
+    )
     yield from (
         ROOT
         / "ecosystem"
@@ -35,7 +38,9 @@ def _bundled_model_catalog_paths():
 
 
 def _bundled_provider_manifest_paths():
-    yield from (DEFAULTSPACK_ROOT / "domain" / "providers").glob("*/manifest.json")
+    yield from (MODEL_CATALOG_ROOT / "catalog" / "providers").glob(
+        "*/manifest.json"
+    )
     yield from (
         ROOT
         / "ecosystem"
@@ -58,7 +63,7 @@ def test_bundled_provider_model_json_uses_strict_canonical_schema():
             validate_model_catalog_source({"models": [payload]}, path=path)
 
 
-def test_openrouter_domain_catalog_matches_model_catalog_pack_models():
+def test_openrouter_legacy_catalog_matches_extension_models():
     from domain.ai_client.metadata_json import load_strict_metadata_json
 
     def keys_from_model_payload(payload):
@@ -69,10 +74,10 @@ def test_openrouter_domain_catalog_matches_model_catalog_pack_models():
             if isinstance(model, dict)
         }
 
-    domain_payload = load_strict_metadata_json(
-        DEFAULTSPACK_ROOT / "domain" / "providers" / "openrouter" / "models.json"
+    legacy_payload = load_strict_metadata_json(
+        MODEL_CATALOG_ROOT / "catalog" / "providers" / "openrouter" / "models.json"
     )
-    domain_keys = keys_from_model_payload(domain_payload)
+    legacy_keys = keys_from_model_payload(legacy_payload)
     catalog_dir = (
         ROOT
         / "ecosystem"
@@ -87,8 +92,8 @@ def test_openrouter_domain_catalog_matches_model_catalog_pack_models():
     for path in sorted(catalog_dir.glob("*.json")):
         catalog_keys.update(keys_from_model_payload(load_strict_metadata_json(path)))
 
-    assert domain_keys
-    assert domain_keys == catalog_keys
+    assert legacy_keys
+    assert legacy_keys == catalog_keys
 
 
 def test_model_catalog_validation_rejects_duplicate_ids_and_context_drift():
