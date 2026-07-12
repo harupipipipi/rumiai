@@ -3414,11 +3414,18 @@ function ChatApp() {
       setIsLoading(true);
       const pendingConversationId = chatIdFromLocation();
       if (pendingConversationId && isPendingInLocation()) {
+        // A reload can arrive through the pending URL after the transport has
+        // already committed the request. Keep the operation id persisted in
+        // local storage so a retry replays that logical send instead of
+        // creating a second user turn. The URL only carries the conversation
+        // id and therefore cannot reconstruct this identity by itself.
+        const storedPending = pendingRequests[pendingConversationId];
         rememberPendingRequest({
+          ...storedPending,
           conversationId: pendingConversationId,
-          startedAt: Date.now(),
-          status: "Processing...",
-          toolNames: [],
+          startedAt: storedPending?.startedAt ?? Date.now(),
+          status: storedPending?.status ?? "Processing...",
+          toolNames: storedPending?.toolNames ?? [],
           recoveredFromLocation: true,
         });
       }
