@@ -33,6 +33,8 @@ export type ChatUiMessage = {
     pendingApproval?: Record<string, unknown>;
     pendingAuthorityApproval?: Record<string, unknown>;
     authorityFollowup?: Record<string, unknown>;
+    interrupted?: boolean;
+    interruptionReason?: string;
     chatDisplay?: {
       hidden?: boolean;
       reason?: string;

@@ -6531,8 +6531,13 @@ function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
     try {
       const opened = await openFingerRecordingWindow();
       if (opened) return;
+      const approvalPath = browserApprovalTokenizedPath("/finger-recording");
+      if (!approvalPath) {
+        setFallbackVisible(true);
+        return;
+      }
       const popup = window.open(
-        defaultspackUrlWithLocalAuth(browserApprovalTokenizedPath("/finger-recording")),
+        defaultspackUrlWithLocalAuth(approvalPath),
         "rumi-finger-recording",
         "width=380,height=520",
       );
