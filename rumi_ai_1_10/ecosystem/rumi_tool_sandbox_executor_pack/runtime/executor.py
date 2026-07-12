@@ -8,6 +8,8 @@ from typing import Any, Callable, Mapping
 from core_runtime.capability_executor import get_capability_executor
 from core_runtime.di_container import get_container
 
+_EXPECTED_CONSUMER = "rumi_tool_broker_pack"
+
 
 def create_execute_operation(
     client: Any,
@@ -18,6 +20,8 @@ def create_execute_operation(
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         if name != "execute":
             raise ValueError(f"unknown sandbox executor operation: {name}")
+        if payload.get("_contract_consumer_pack_id") != _EXPECTED_CONSUMER:
+            raise PermissionError("sandbox executor consumer is not authorized")
         definition = payload.get("definition")
         definition = definition if isinstance(definition, Mapping) else {}
         execution = definition.get("execution")

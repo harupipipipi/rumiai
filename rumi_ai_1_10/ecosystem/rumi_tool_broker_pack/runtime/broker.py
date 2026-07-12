@@ -181,6 +181,7 @@ def _invoke(
                 "arguments": normalized_arguments,
                 "definition": definition,
                 "deadline": deadline,
+                "authorization": dict(authorization),
             },
             provider_instance_id=provider_instance_id,
         )

@@ -10,6 +10,7 @@ from core_runtime.global_contract_dispatch import GlobalContractClient
 MCP_CALL = "rumi.service.mcp.tool.call.v1"
 _NAMESPACE = re.compile(r"^mcp\.[a-z0-9][a-z0-9._-]{0,127}$")
 _OPERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_EXPECTED_CONSUMER = "rumi_tool_broker_pack"
 
 
 def create_execute_operation(
@@ -20,6 +21,8 @@ def create_execute_operation(
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         if name != "execute":
             raise ValueError(f"unknown MCP executor operation: {name}")
+        if payload.get("_contract_consumer_pack_id") != _EXPECTED_CONSUMER:
+            raise PermissionError("MCP executor consumer is not authorized")
         definition = payload.get("definition")
         definition = definition if isinstance(definition, Mapping) else {}
         execution = definition.get("execution")

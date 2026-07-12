@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 from core_runtime.global_contract_dispatch import GlobalContractClient
 
 REMOTE_OPERATION = "rumi.service.tool.remote.operation.v1"
+_EXPECTED_CONSUMER = "rumi_tool_broker_pack"
 
 
 def create_execute_operation(
@@ -17,6 +18,8 @@ def create_execute_operation(
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         if name != "execute":
             raise ValueError(f"unknown remote executor operation: {name}")
+        if payload.get("_contract_consumer_pack_id") != _EXPECTED_CONSUMER:
+            raise PermissionError("remote executor consumer is not authorized")
         definition = payload.get("definition")
         definition = definition if isinstance(definition, Mapping) else {}
         execution = definition.get("execution")

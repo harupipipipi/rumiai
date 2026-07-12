@@ -15,10 +15,10 @@
       {"id": "rumi.event.tool.invocation.v1", "version": "^1.0.0", "cardinality": "one", "optional": false, "failure": "fail_closed", "required_capabilities": ["tool.audit.emit"]}
     ]
   },
-  "entrypoints": [{"id": "tool-invoke", "contract_id": "rumi.service.tool.invoke.v1", "loader": "python", "module": "ecosystem.rumi_tool_broker_pack.runtime.broker", "symbol": "create_invoke_operation", "artifact_hash": "sha256:f9cd0ee442b2e5b232e7937dbfe0303bcfa978ed95dd466160cd4357de0e9213"}],
+  "entrypoints": [{"id": "tool-invoke", "contract_id": "rumi.service.tool.invoke.v1", "loader": "python", "module": "ecosystem.rumi_tool_broker_pack.runtime.broker", "symbol": "create_invoke_operation", "artifact_hash": "sha256:59665bafb6d6c716121efc21daf5888611f099c6bdd05e30df71c732c9cd3868"}],
   "resources": [], "storage": [],
   "permissions": [{"capability": "tool.invoke", "access": "execute", "approval_required": false}],
-  "provenance": {"content_hash": "sha256:f9cd0ee442b2e5b232e7937dbfe0303bcfa978ed95dd466160cd4357de0e9213", "build_identity": "rumi-tool-broker-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:59665bafb6d6c716121efc21daf5888611f099c6bdd05e30df71c732c9cd3868", "build_identity": "rumi-tool-broker-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {"from": ["defaultspack.domain.tool.broker", "defaultspack.domain.tool.executor", "defaultspack.blocks.tool.invoke"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Select the pinned prior broker and revoke unconsumed invocation approvals."},
   "extensions": {"rumi.tool_broker.boundary": {"concrete_tool_branches": false, "domain_service_imports": false, "client_approved_flag_trusted": false, "pipeline": ["resolve", "validate", "guard", "policy", "authorize", "select", "execute", "normalize", "audit"]}}
 }

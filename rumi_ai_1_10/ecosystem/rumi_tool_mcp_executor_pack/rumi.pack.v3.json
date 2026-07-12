@@ -5,9 +5,9 @@
     "provides": [{"id": "rumi.service.tool.execute.v1", "version": "1.0.0", "provider_instance_id": "tool-executor.mcp", "routing_keys": ["mcp"], "cardinality": "many", "security": "restricted", "failure": "fail_closed", "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "mcp-gateway"}, "schemas": {"input": {"type": "object"}, "output": {"type": "object"}}, "isolation": "in_process", "required_capabilities": ["tool.execute"]}],
     "requires": [{"id": "rumi.service.mcp.tool.call.v1", "version": "^1.0.0", "cardinality": "many", "optional": false, "failure": "fail_closed", "required_capabilities": ["mcp.tool.call"]}]
   },
-  "entrypoints": [{"id": "tool-mcp-execute", "contract_id": "rumi.service.tool.execute.v1", "loader": "python", "module": "ecosystem.rumi_tool_mcp_executor_pack.runtime.executor", "symbol": "create_execute_operation", "artifact_hash": "sha256:a32ba2e782d39065a90b8df64b600f98f9a9ab5a03c198f433b1cd79857d56ea"}],
+  "entrypoints": [{"id": "tool-mcp-execute", "contract_id": "rumi.service.tool.execute.v1", "loader": "python", "module": "ecosystem.rumi_tool_mcp_executor_pack.runtime.executor", "symbol": "create_execute_operation", "artifact_hash": "sha256:20d284ba94433a371b9e6e46d5e489c8c7517068edce472bf8d9f6ed233cd5be"}],
   "resources": [], "storage": [], "permissions": [{"capability": "tool.execute", "access": "execute", "approval_required": false}],
-  "provenance": {"content_hash": "sha256:a32ba2e782d39065a90b8df64b600f98f9a9ab5a03c198f433b1cd79857d56ea", "build_identity": "rumi-tool-mcp-executor-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:20d284ba94433a371b9e6e46d5e489c8c7517068edce472bf8d9f6ed233cd5be", "build_identity": "rumi-tool-mcp-executor-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {"from": ["defaultspack.domain.tool.executor.mcp"], "compatibility_aliases": [], "compatibility_projection": "none", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove this executor; MCP gateway remains independently available."},
   "extensions": {"rumi.tool_executor.boundary": {"execution_kind": "mcp", "namespace_required": true, "gateway_selection": "manifest_selected_exact"}}
 }
