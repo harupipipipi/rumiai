@@ -180,6 +180,19 @@ jobs:
         working-directory: tobkiri_runtime
         run: python scripts/quality/check_defaultspack_http_fallbacks.py
 
+      - name: Run repository pack architecture boundary scan
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          reference="${RUNNER_TEMP}/pack-architecture-reference.json"
+          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
+            git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
+           python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
+           else
+             python scripts/quality/scan_pack_architecture.py
+           fi
+
   frontend-security-audit:
     strategy:
       fail-fast: false
