@@ -176,6 +176,10 @@ jobs:
         working-directory: tobkiri_runtime
         run: python scripts/quality/scan_defaultspack_boundaries.py
 
+      - name: Validate defaultspack HTTP fallback metadata
+        working-directory: tobkiri_runtime
+        run: python scripts/quality/check_defaultspack_http_fallbacks.py
+
   frontend-security-audit:
     strategy:
       fail-fast: false
