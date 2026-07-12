@@ -1,0 +1,108 @@
+{
+  "snapshot": {
+    "source": "https://docs.voyageai.com/docs/introduction",
+    "verified_at": "2026-07-13",
+    "lifecycle_policy": "refresh from the native inventory when available; otherwise verify official docs before retirement"
+  },
+  "models": [
+    {
+      "id": "voyage-ai/voyage-4-large",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "voyage-ai",
+      "model_id": "voyage-4-large",
+      "display_name": "Voyage 4 Large",
+      "type": "embedding",
+      "enabled": true,
+      "priority": 1,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.voyageai.com/docs/introduction",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "embedding",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "voyage-ai/voyage-4",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "voyage-ai",
+      "model_id": "voyage-4",
+      "display_name": "Voyage 4",
+      "type": "embedding",
+      "enabled": true,
+      "priority": 2,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.voyageai.com/docs/introduction",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "embedding",
+        "capability_provenance": "official_documentation"
+      }
+    },
+    {
+      "id": "voyage-ai/rerank-2.5",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "voyage-ai",
+      "model_id": "rerank-2.5",
+      "display_name": "Rerank 2.5",
+      "type": "rerank",
+      "enabled": true,
+      "priority": 3,
+      "capabilities": {
+        "text_input": true,
+        "image_input": false,
+        "audio_input": false,
+        "text_output": false,
+        "image_output": false,
+        "audio_output": false,
+        "video_output": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "thinking": false,
+        "streaming": false
+      },
+      "metadata": {
+        "source": "https://docs.voyageai.com/docs/introduction",
+        "verified_at": "2026-07-13",
+        "lifecycle": "active",
+        "task": "rerank",
+        "capability_provenance": "official_documentation"
+      }
+    }
+  ]
+}

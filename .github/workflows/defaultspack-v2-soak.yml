@@ -45,8 +45,8 @@ jobs:
           import sys, os, json, time, shutil, subprocess
           from pathlib import Path
 
-          sys.path.insert(0, 'rumi_ai_1_10/ecosystem/defaultspack')
-          sys.path.insert(0, 'rumi_ai_1_10')
+          sys.path.insert(0, 'tobkiri_runtime/ecosystem/defaultspack')
+          sys.path.insert(0, 'tobkiri_runtime')
 
           from domain.agent.self_improvement_live_loop import run_multi_task_dogfood, run_vision_qa
           from domain.agent.self_improvement_runtime import create_mimo_profile

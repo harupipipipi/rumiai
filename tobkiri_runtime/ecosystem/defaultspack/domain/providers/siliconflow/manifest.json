@@ -1,0 +1,78 @@
+{
+  "id": "siliconflow",
+  "provider_id": "siliconflow",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "SiliconFlow",
+  "description": "SiliconFlow typed hosted model surfaces.",
+  "provider_metadata": {
+    "display_name": "SiliconFlow",
+    "kind": "cloud",
+    "env_vars": [
+      "SILICONFLOW_API_KEY"
+    ],
+    "base_url_envs": [
+      "SILICONFLOW_BASE_URL"
+    ],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_model": "",
+    "default_base_url": "https://api.siliconflow.cn/v1",
+    "default_model_for": {},
+    "task_types": [
+      "chat",
+      "embedding",
+      "rerank",
+      "image"
+    ],
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "rerank",
+      "image",
+      "typed_inventory"
+    ]
+  },
+  "provider_manifest": {
+    "id": "siliconflow",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "SiliconFlow",
+    "enabled": true,
+    "priority": 350,
+    "adapter": "openai_compatible",
+    "api_key_env": "SILICONFLOW_API_KEY",
+    "base_url_env": "SILICONFLOW_BASE_URL",
+    "default_base_url": "https://api.siliconflow.cn/v1",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "config": {
+      "inventory_strategy": "remote_merge",
+      "model_list_path": "/models",
+      "inventory_scope": "account",
+      "task_types": [
+        "chat",
+        "embedding",
+        "rerank",
+        "image"
+      ],
+      "source_docs": "https://docs.siliconflow.cn/en/api-reference/models/get-model-list"
+    }
+  },
+  "aliases": {
+    "provider_ids": [
+      "siliconflow"
+    ]
+  },
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "rerank",
+    "image",
+    "typed_inventory"
+  ]
+}

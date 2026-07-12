@@ -18,8 +18,8 @@ import zipfile
 from pathlib import Path
 
 
-APP_SOURCE_DIR = "rumi_ai_1_10"
-APP_RESOURCE_DIR = "rumi_viewer/src-tauri/gen/app"
+APP_SOURCE_DIR = "tobkiri_runtime"
+APP_RESOURCE_DIR = "tobkiri_launcher/src-tauri/gen/app"
 
 EXCLUDED_DIR_NAMES = {
     ".git",
