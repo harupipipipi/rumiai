@@ -23,6 +23,13 @@ DEFAULT_PROFILE_ID = "default-profile"
 DEFAULTSPACK_PACK_ID = "defaultspack"
 DEFAULTSPACK_PACK_IDENTITY = "rumi:ecosystem/defaultspack"
 DESKTOP_APP_EXECUTE_PERMISSION = "desktop_app.execute"
+WAVE7_DEFAULT_OWNER_PACKS = (
+    "rumi_conversation_store_pack",
+    "rumi_memory_store_pack",
+    "rumi_knowledge_store_pack",
+    "rumi_turn_runtime_pack",
+    "rumi_context_runtime_pack",
+)
 
 # --- graph loader (lazy import to avoid circular dependency) ---
 _graph_loader = None
@@ -957,6 +964,11 @@ class StartupProfileManager:
             normalized.get("capability_profile_id") or "defaultspack.startup"
         )
         normalized["launch_capability_graph"] = True
+        selected_packs = [str(item) for item in normalized.get("packs") or []]
+        for pack_id in WAVE7_DEFAULT_OWNER_PACKS:
+            if pack_id not in selected_packs:
+                selected_packs.append(pack_id)
+        normalized["packs"] = selected_packs
 
         surfaces = normalized.get("surfaces")
         legacy_default = surfaces in (
