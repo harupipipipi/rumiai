@@ -296,3 +296,49 @@ def test_google_models_endpoint_paginates_and_replaces_the_curated_fallback(monk
 
     assert [model["model_id"] for model in models] == ["gemini-live-a", "gemini-live-b"]
     assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
+
+
+def test_cohere_models_endpoint_paginates_and_uses_native_chat_adapter(monkeypatch):
+    from domain.ai_client.providers.cohere_provider import CohereProvider
+
+    pages = {
+        "": {
+            "models": [{"name": "command-live-a", "endpoints": ["chat"], "features": ["chat-completions"], "context_length": 128000}],
+            "next_page_token": "page-two",
+        },
+        "page-two": {
+            "models": [{"name": "embed-live-b", "endpoints": ["embed"], "features": ["embeddings"], "context_length": 1024}],
+        },
+    }
+    monkeypatch.setenv("COHERE_API_KEY", "test-cohere-token")
+    CohereProvider._MODEL_INVENTORY_CACHE.clear()
+    provider = CohereProvider()
+    monkeypatch.setattr(provider, "_fetch_models_page", lambda token="": pages[token])
+
+    models = provider.list_models()
+
+    assert [model["model_id"] for model in models] == ["command-live-a", "embed-live-b"]
+    assert [model["type"] for model in models] == ["chat", "embedding"]
+    assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
+
+    captured = {}
+
+    def fake_request(method, path, body=None):
+        captured.update({"method": method, "path": path, "body": body})
+        return {
+            "id": "cohere-response",
+            "finish_reason": "COMPLETE",
+            "message": {"content": [{"type": "text", "text": "live response"}]},
+            "usage": {"tokens": {"input_tokens": 3, "output_tokens": 2}},
+        }
+
+    monkeypatch.setattr(provider, "_request_json", fake_request)
+    response = provider.complete("command-live-a", [{"role": "user", "content": "hello"}], [], {"max_tokens": 32})
+
+    assert captured == {
+        "method": "POST",
+        "path": "/v2/chat",
+        "body": {"model": "command-live-a", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 32},
+    }
+    assert response["content"] == [{"type": "text", "text": "live response"}]
+    assert response["usage"]["total_tokens"] == 5

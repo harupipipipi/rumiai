@@ -17,6 +17,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "baidu-qianfan": ["QIANFAN_API_KEY"],
     "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
     "cerebras": ["CEREBRAS_API_KEY"],
+    "cohere": ["COHERE_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "deepinfra": ["DEEPINFRA_API_KEY"],
     "fireworks": ["FIREWORKS_API_KEY"],
