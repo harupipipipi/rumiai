@@ -474,6 +474,40 @@ def test_named_openai_compatible_connection_activates_a_program_placeholder(monk
     assert provider._base_url == "https://gateway.example/v1"
 
 
+def test_every_connection_required_program_provider_can_use_a_saved_live_endpoint(monkeypatch):
+    from domain.ai_client import providers
+    from domain.ai_client.provider_program import provider_program_manifests
+
+    program = provider_program_manifests()
+    raw_manifests = providers._provider_manifest_map()
+    connection_required_ids = sorted(
+        provider_id
+        for provider_id in program
+        if str(raw_manifests[provider_id].get("adapter") or "") == "connection_required"
+    )
+    connections = [
+        {
+            "provider_id": provider_id,
+            "api_id": "main",
+            "name": "main",
+            "configured": True,
+            "kind": "llm",
+            "base_url": f"https://{provider_id}.example/v1",
+            "credential_mode": "api_key",
+        }
+        for provider_id in connection_required_ids
+    ]
+    monkeypatch.setattr(providers, "list_custom_providers", lambda: [])
+    monkeypatch.setattr(providers, "provider_named_api_keys", lambda *_args, **_kwargs: connections)
+
+    configured = providers._provider_manifest_map()
+
+    assert connection_required_ids
+    assert all(configured[provider_id]["adapter"] == "openai_compatible" for provider_id in connection_required_ids)
+    assert all(configured[provider_id]["models"] == [] for provider_id in connection_required_ids)
+    assert all(configured[provider_id]["config"]["custom_openai_compatible"] for provider_id in connection_required_ids)
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider
