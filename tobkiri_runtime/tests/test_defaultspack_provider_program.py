@@ -481,6 +481,46 @@ def test_model_availability_discovers_each_named_connection_with_its_own_credent
     assert runtime_provider._base_url == "https://primary.example/v1"
 
 
+def test_elevenlabs_discovers_the_key_visible_audio_models_and_invokes_tts(monkeypatch):
+    from domain.ai_client.providers import detect_available_providers
+    from domain.ai_client.providers.elevenlabs_provider import ElevenLabsProvider
+
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-eleven-key")
+    ElevenLabsProvider._MODEL_INVENTORY_CACHE.clear()
+    provider = ElevenLabsProvider()
+    requests = []
+    monkeypatch.setattr(
+        provider,
+        "_request_json",
+        lambda method, path, body=None: (
+            requests.append((method, path, body))
+            or [{"model_id": "tts-live", "name": "TTS live", "can_do_text_to_speech": True}]
+        ),
+    )
+
+    models = provider.list_models()
+
+    assert requests == [("GET", "/v1/models", None)]
+    assert models[0]["model_id"] == "tts-live"
+    assert models[0]["type"] == "tts"
+    assert models[0]["capabilities"]["tts"] is True
+
+    captured = {}
+    monkeypatch.setattr(
+        provider,
+        "_request_audio",
+        lambda path, body: captured.update({"path": path, "body": body}) or b"audio",
+    )
+    response = provider.tts("elevenlabs/tts-live", "hello", "voice id")
+
+    assert captured == {
+        "path": "/v1/text-to-speech/voice%20id",
+        "body": {"text": "hello", "model_id": "tts-live"},
+    }
+    assert response["audio"].startswith("data:audio/mpeg;base64,")
+    assert isinstance(detect_available_providers()["elevenlabs"], ElevenLabsProvider)
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 

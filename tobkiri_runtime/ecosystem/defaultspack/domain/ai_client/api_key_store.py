@@ -20,6 +20,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "cohere": ["COHERE_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "deepinfra": ["DEEPINFRA_API_KEY"],
+    "elevenlabs": ["ELEVENLABS_API_KEY"],
     "fireworks": ["FIREWORKS_API_KEY"],
     "friendli": ["FRIENDLI_API_KEY"],
     "github-models": ["GITHUB_TOKEN", "GH_TOKEN"],

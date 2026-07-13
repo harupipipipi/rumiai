@@ -755,6 +755,21 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
+    manifests.setdefault(
+        "elevenlabs",
+        {
+            "id": "elevenlabs",
+            "display_name": "ElevenLabs",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.elevenlabs_provider:ElevenLabsProvider",
+            "api_key_env": ["ELEVENLABS_API_KEY"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
