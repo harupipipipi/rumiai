@@ -159,6 +159,19 @@ class MemoryStore:
         )
         return dict(result.get("item") or {})
 
+    def put_record(self, item: Mapping[str, Any]) -> dict[str, Any]:
+        """Upsert a finite compatibility record while retaining its ID."""
+        result = _invoke(
+            MANAGE,
+            "put",
+            {"item": dict(item), "expected_revision": self._revision()},
+        )
+        return dict(result.get("item") or {})
+
+    def list_records(self) -> list[dict[str, Any]]:
+        """Return the complete read-only compatibility projection."""
+        return self._items()
+
     def _items(self) -> list[dict[str, Any]]:
         snapshot = _invoke(RESOURCE, "snapshot", {})
         return [dict(item) for item in snapshot.get("items") or []]
