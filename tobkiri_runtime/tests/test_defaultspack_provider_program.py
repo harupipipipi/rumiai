@@ -415,6 +415,11 @@ def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(m
     assert calls[-1] == ("POST", "predictions", {"version": "owner/second:version-b", "input": {"text": "new prompt"}})
     assert response["content"] == [{"type": "text", "text": "live output"}]
 
+    image = provider.image_gen("owner/first", "draw this", {})
+
+    assert calls[-1] == ("POST", "predictions", {"version": "owner/first:version-a", "input": {"prompt": "draw this"}})
+    assert image["images"] == ["live output"]
+
 
 def test_litellm_proxy_discovers_every_model_served_by_the_configured_gateway():
     from domain.ai_client.providers import _openai_compatible_spec_manifest

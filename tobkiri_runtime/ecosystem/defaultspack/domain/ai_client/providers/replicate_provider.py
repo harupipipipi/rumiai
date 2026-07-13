@@ -206,10 +206,7 @@ class ReplicateProvider(BaseProvider):
             return ""
         return json.dumps(value, ensure_ascii=False)
 
-    def complete(self, model, messages, tools, params):
-        del tools
-        model_id = str(model or "").removeprefix("replicate/")
-        input_data = self._input_for(model_id, messages, dict(params or {}))
+    def _run_prediction(self, model_id: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
         prediction = self._request_json("POST", "predictions", {"version": self._version_ref(model_id), "input": input_data}, wait=True)
         status = str(prediction.get("status") or "").lower()
         if status in {"starting", "processing"}:
@@ -222,6 +219,13 @@ class ReplicateProvider(BaseProvider):
                     break
         if status != "succeeded":
             raise RuntimeError(f"Replicate prediction did not succeed: {prediction.get('error') or status or 'unknown status'}")
+        return prediction
+
+    def complete(self, model, messages, tools, params):
+        del tools
+        model_id = str(model or "").removeprefix("replicate/")
+        input_data = self._input_for(model_id, messages, dict(params or {}))
+        prediction = self._run_prediction(model_id, input_data)
         text = self._text_output(prediction.get("output"))
         return {
             "content": [{"type": "text", "text": text}],
@@ -229,6 +233,23 @@ class ReplicateProvider(BaseProvider):
             "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
             "raw_extra": {"id": prediction.get("id", ""), "model": model_id},
         }
+
+    def image_gen(self, model, prompt, params):
+        model_id = str(model or "").removeprefix("replicate/")
+        input_data = self._input_for(
+            model_id,
+            [{"role": "user", "content": str(prompt or "")}],
+            dict(params or {}),
+        )
+        prediction = self._run_prediction(model_id, input_data)
+        output = prediction.get("output")
+        if isinstance(output, list):
+            images = [str(item) for item in output if isinstance(item, str)]
+        elif isinstance(output, str):
+            images = [output]
+        else:
+            images = []
+        return {"images": images, "raw_extra": {"id": prediction.get("id", ""), "model": model_id}}
 
     def stream(self, model, messages, tools, params):
         response = self.complete(model, messages, tools, params)
