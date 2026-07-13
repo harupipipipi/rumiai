@@ -45,6 +45,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "openai_compatible": ["OPENAI_COMPATIBLE_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],
     "perplexity": ["PERPLEXITY_API_KEY"],
+    "replicate": ["REPLICATE_API_TOKEN"],
     "sambanova": ["SAMBANOVA_API_KEY"],
     "siliconflow": ["SILICONFLOW_API_KEY"],
     "together": ["TOGETHER_API_KEY"],

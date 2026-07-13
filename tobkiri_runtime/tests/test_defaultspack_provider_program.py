@@ -358,3 +358,37 @@ def test_native_provider_inventory_is_bound_to_the_saved_api_key_without_model_t
     )
 
     assert service._live_model_ids("cohere") == ["account-visible-model"]
+
+
+def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
+    from domain.ai_client.providers.replicate_provider import ReplicateProvider
+
+    pages = {
+        "models": {
+            "results": [{"owner": "owner", "name": "first", "latest_version": {"id": "version-a"}, "default_example": {"input": {"prompt": "old"}}}],
+            "next": "https://replicate.example/v1/models?cursor=two",
+        },
+        "https://replicate.example/v1/models?cursor=two": {
+            "results": [{"owner": "owner", "name": "second", "latest_version": {"id": "version-b"}, "default_example": {"input": {"text": "old"}}}],
+            "next": None,
+        },
+    }
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "test-replicate-token")
+    ReplicateProvider._INVENTORY_CACHE.clear()
+    provider = ReplicateProvider()
+    calls = []
+
+    def fake_request(method, path, body=None, **_kwargs):
+        calls.append((method, path, body))
+        if method == "GET":
+            return pages[path]
+        return {"id": "prediction", "status": "succeeded", "output": "live output"}
+
+    monkeypatch.setattr(provider, "_request_json", fake_request)
+    models = provider.list_models()
+    response = provider.complete("owner/second", [{"role": "user", "content": "new prompt"}], [], {})
+
+    assert [model["model_id"] for model in models] == ["owner/first", "owner/second"]
+    assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
+    assert calls[-1] == ("POST", "predictions", {"version": "owner/second:version-b", "input": {"text": "new prompt"}})
+    assert response["content"] == [{"type": "text", "text": "live output"}]

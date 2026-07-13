@@ -740,6 +740,21 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
+    manifests.setdefault(
+        "replicate",
+        {
+            "id": "replicate",
+            "display_name": "Replicate",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.replicate_provider:ReplicateProvider",
+            "api_key_env": ["REPLICATE_API_TOKEN"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
