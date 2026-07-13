@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import time
 import urllib.error
@@ -183,7 +185,10 @@ class OpenAICompatibleProvider(OpenAIProvider):
             credential_required=bool(manifest.get("credential_required", True)),
             known_models=known_models,
             extra_headers=dict(manifest.get("headers", {})),
-            remote_model_discovery=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_sync") or "").strip().lower() in {"remote_merge", "remote_discovery"},
+            # Every OpenAI-compatible API may publish additional models at
+            # /models.  Discover them by default; providers that do not expose
+            # the endpoint fall back to their declared catalog without failing.
+            remote_model_discovery=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_sync") or "remote_merge").strip().lower() in {"remote_merge", "remote_discovery"},
             remote_model_discovery_requires_auth=bool(
                 ((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get(
                     "model_list_requires_auth",
@@ -454,7 +459,23 @@ class OpenAICompatibleProvider(OpenAIProvider):
     def _remote_model_cache_path(self) -> Path:
         cache_root = Path(__file__).resolve().parents[3] / "user_data" / "shared" / "provider_model_cache"
         cache_root.mkdir(parents=True, exist_ok=True)
-        return cache_root / f"{self.provider_id}.models.json"
+        # A provider id is not an inventory scope: the same provider may be
+        # configured with different accounts, projects, or custom endpoints.
+        # Keep the cache filename opaque and account/endpoint-scoped so a
+        # visible model list can never leak from one connection to another.
+        return cache_root / f"{self.provider_id}.{self._inventory_scope_hash()}.models.json"
+
+    def _inventory_scope_hash(self) -> str:
+        """Return a stable opaque cache scope without persisting credentials.
+
+        The API key is used only as an HMAC key and is never written to disk.
+        Including the resolved endpoint also isolates region/project endpoints
+        that happen to share a credential.
+        """
+        endpoint = self._base_url.rstrip("/")
+        material = f"{self.provider_id}\0{endpoint}".encode("utf-8")
+        key = (self._api_key or "no-credential").encode("utf-8")
+        return hmac.new(key, material, hashlib.sha256).hexdigest()[:24]
 
     def _load_remote_model_cache(self) -> Dict[str, Any] | None:
         path = self._remote_model_cache_path()
@@ -462,13 +483,21 @@ class OpenAICompatibleProvider(OpenAIProvider):
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, ValueError):
             return None
-        return payload if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        # Do not reuse legacy provider-only cache records.  They were not
+        # connection-scoped and therefore cannot satisfy the inventory privacy
+        # contract.  The next successful discovery transparently replaces them.
+        if payload.get("inventory_scope") != self._inventory_scope_hash():
+            return None
+        return payload
 
     def _save_remote_model_cache(self, models: List[Dict[str, Any]], *, now: int | None = None) -> None:
         path = self._remote_model_cache_path()
         timestamp = int(now if now is not None else time.time())
         payload = {
             "provider_id": self.provider_id,
+            "inventory_scope": self._inventory_scope_hash(),
             "saved_at": timestamp,
             "expires_at": timestamp + self._remote_model_cache_ttl_seconds,
             "models": models,

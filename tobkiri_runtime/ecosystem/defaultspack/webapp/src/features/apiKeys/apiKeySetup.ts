@@ -1,17 +1,25 @@
 export const BUILTIN_API_PROVIDER_IDS: string[] = [
   "anthropic",
+  "avian",
   "cerebras",
   "deepseek",
+  "deepinfra",
+  "fireworks",
+  "friendli",
   "gitlawb-opengateway",
   "glm",
   "google",
   "groq",
+  "hyperbolic",
+  "inference-net",
   "llama_cpp",
   "lmstudio",
   "longcat",
   "mistral",
   "moonshotai",
   "nvidia",
+  "nebius",
+  "novita",
   "ollama",
   "opencode-go",
   "opencode-zen",
@@ -19,7 +27,9 @@ export const BUILTIN_API_PROVIDER_IDS: string[] = [
   "openai_compatible",
   "openrouter",
   "perplexity",
+  "sambanova",
   "together",
+  "upstage",
   "vllm",
   "xai",
   "xiaomi-token-plan-ams",
@@ -140,14 +150,15 @@ export function collectApiProviderOptions(
     : [...builtinProviderIds, ...builtinExternalProviderIds];
   const collected = new Map<string, ApiProviderOption>();
 
-  if (providers.length === 0) {
-    for (const providerId of builtinProviderIds) {
-      collected.set(providerId, { provider_id: providerId, label: providerId, kind: "llm", builtin: true });
-    }
-    if (options.includeExternalBuiltins !== false) {
-      for (const providerId of builtinExternalProviderIds) {
-        collected.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
-      }
+  // The backend commonly returns only configured providers.  Seed the complete
+  // built-in catalog first, then let returned rows enrich it, so adding one key
+  // never makes every other supported provider disappear from Settings.
+  for (const providerId of builtinProviderIds) {
+    collected.set(providerId, { provider_id: providerId, label: providerId, kind: "llm", builtin: true });
+  }
+  if (options.includeExternalBuiltins !== false) {
+    for (const providerId of builtinExternalProviderIds) {
+      collected.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
     }
   }
   for (const provider of providers) {

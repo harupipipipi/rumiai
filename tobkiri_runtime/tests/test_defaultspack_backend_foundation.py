@@ -219,6 +219,111 @@ def test_catalog_and_profiles_include_live_models_from_an_active_provider():
     assert profiles["openrouter/acme/all-model"]["availability"]["active"] is True
 
 
+def test_custom_openai_compatible_provider_discovers_and_exposes_all_live_models(monkeypatch):
+    from unittest.mock import patch
+
+    from ecosystem.defaultspack.domain.ai_client.api_key_store import set_provider_api_key
+    from ecosystem.defaultspack.domain.ai_client.client import AIClient
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    saved = set_provider_api_key(
+        "acme-compatible",
+        "test-key",
+        api_id="main",
+        name="main",
+        base_url="https://api.acme.example/v1",
+    )
+    assert saved["success"] is True
+    AIClient._instance = None
+
+    live_models = [
+        {
+            "id": "acme-compatible/remote-model-a",
+            "model_id": "remote-model-a",
+            "provider": "acme-compatible",
+            "provider_id": "acme-compatible",
+            "name": "Remote Model A",
+            "display_name": "Remote Model A",
+            "type": "chat",
+            "metadata": {"source": "remote_models_endpoint"},
+        },
+        {
+            "id": "acme-compatible/remote-model-b",
+            "model_id": "remote-model-b",
+            "provider": "acme-compatible",
+            "provider_id": "acme-compatible",
+            "name": "Remote Model B",
+            "display_name": "Remote Model B",
+            "type": "chat",
+            "metadata": {"source": "remote_models_endpoint"},
+        },
+    ]
+    with (
+        patch.object(OpenAICompatibleProvider, "_load_remote_model_cache", return_value=None),
+        patch.object(OpenAICompatibleProvider, "_save_remote_model_cache"),
+        patch.object(OpenAICompatibleProvider, "_fetch_remote_models", return_value=live_models),
+    ):
+        client = AIClient()
+        provider_ids = {provider["provider_id"] for provider in client.list_providers()}
+        models = {model["qualified_model_id"]: model for model in client.list_models("acme-compatible")}
+        catalog_models = {
+            model["qualified_model_id"]
+            for model in list_model_catalog("acme-compatible")
+        }
+        catalog_profiles = {
+            profile["profile_id"]
+            for profile in list_profile_catalog()
+            if profile.get("provider_id") == "acme-compatible"
+        }
+        provider, model_name = client.resolve_provider("acme-compatible/remote-model-b")
+
+    assert "acme-compatible" in provider_ids
+    assert set(models) == {"acme-compatible/remote-model-a", "acme-compatible/remote-model-b"}
+    assert catalog_models == set(models)
+    assert catalog_profiles == set(models)
+    assert models["acme-compatible/remote-model-a"]["metadata"]["source"] == "remote_models_endpoint"
+    assert provider.provider_id == "acme-compatible"
+    assert model_name == "remote-model-b"
+    assert provider._base_url == "https://api.acme.example/v1"
+
+
+def test_every_generic_openai_compatible_provider_has_a_key_setup_path():
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    missing = set(OPENAI_COMPATIBLE_PROVIDER_SPECS) - set(PROVIDER_SECRET_KEYS)
+
+    assert not missing
+
+
+def test_openai_compatible_inventory_cache_is_connection_scoped_and_secret_free(tmp_path, monkeypatch):
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setattr(
+        OpenAICompatibleProvider,
+        "_remote_model_cache_path",
+        lambda provider: tmp_path / f"{provider.provider_id}.{provider._inventory_scope_hash()}.json",
+    )
+    first = OpenAICompatibleProvider(
+        provider_id="shared-provider",
+        api_key="first-secret",
+        base_url="https://first.example/v1",
+        remote_model_discovery=True,
+    )
+    second = OpenAICompatibleProvider(
+        provider_id="shared-provider",
+        api_key="second-secret",
+        base_url="https://second.example/v1",
+        remote_model_discovery=True,
+    )
+
+    first._save_remote_model_cache([{"id": "first-visible-model"}], now=100)
+
+    assert first._load_remote_model_cache() is not None
+    assert second._load_remote_model_cache() is None
+    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert "first-secret" not in next(tmp_path.glob("*.json")).read_text(encoding="utf-8")
+
+
 def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp_path):
     registry = ProviderRegistry(storage_dir=tmp_path / "providers")
     registry.register_profile(

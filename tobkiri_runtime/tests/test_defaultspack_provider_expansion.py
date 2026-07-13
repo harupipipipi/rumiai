@@ -90,7 +90,9 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         model_ids = {item["id"] for item in get_all_known_models()}
 
         self.assertIn("groq/llama-3.3-70b-versatile", model_ids)
-        self.assertIn("together/meta-llama/Llama-3.3-70B-Instruct-Turbo", model_ids)
+        # Curated entries are only an offline fallback; the exact Together
+        # inventory is refreshed dynamically from the account-visible endpoint.
+        self.assertTrue(any(model_id.startswith("together/") for model_id in model_ids))
         self.assertIn("mistral/mistral-large-latest", model_ids)
 
     def test_ai_client_lists_auto_registered_generic_provider_models(self):

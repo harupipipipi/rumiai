@@ -34,7 +34,14 @@ class OpenAIProvider(BaseProvider):
 
     def __init__(self):
         self._api_key = os.environ.get("OPENAI_API_KEY", "")
-        self._ssl_ctx = ssl.create_default_context()
+        # Provider discovery must not disappear merely because a minimal host
+        # environment lacks Windows certificate-location variables.  Requests
+        # still use urllib's verified default context when this construction is
+        # deferred; no insecure TLS fallback is introduced.
+        try:
+            self._ssl_ctx = ssl.create_default_context()
+        except ssl.SSLError:
+            self._ssl_ctx = None
 
     # ── internal helpers ────────────────────────────────────────────────
 

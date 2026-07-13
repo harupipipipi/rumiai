@@ -7,7 +7,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
-from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
+from ..api_key_store import (
+    list_custom_providers,
+    load_provider_api_keys_into_env,
+    provider_has_api_key,
+    provider_named_api_keys,
+    read_provider_api_key,
+)
 from ..model_metadata_schema import (
     context_window_value,
     normalize_capability_map,
@@ -21,7 +27,10 @@ from .component_metadata import (
     provider_manifests_from_components,
 )
 from .openai_compatible_provider import OpenAICompatibleProvider
-from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
+from .provider_catalog import (
+    OPENAI_COMPATIBLE_PROVIDER_CLASSES,
+    OPENAI_COMPATIBLE_PROVIDER_SPECS,
+)
 from . import google_provider as google_provider
 
 """
@@ -665,6 +674,101 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             manifests[provider_id] = dict(manifest)
     for provider_id, manifest in provider_manifests_from_components().items():
         manifests.setdefault(provider_id, dict(manifest))
+    # The compatibility registry is an executable provider definition, not just
+    # a documentation table.  Promote every one of its entries to a manifest so
+    # an API key enables the provider and its complete /models inventory.
+    for provider_id, spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
+        manifests.setdefault(provider_id, _openai_compatible_spec_manifest(spec))
+    # A user can add any OpenAI-compatible service from Settings.  Treat those
+    # saved definitions exactly like extension manifests so they are discoverable
+    # by the provider/model catalog and not merely shown as inert API-key rows.
+    for provider_id, manifest in _custom_openai_provider_manifests().items():
+        manifests.setdefault(provider_id, manifest)
+    return manifests
+
+
+def _openai_compatible_spec_manifest(spec: Dict[str, Any]) -> Dict[str, Any]:
+    provider_id = str(spec.get("provider_name") or "").strip()
+    return {
+        "id": provider_id,
+        "display_name": str(spec.get("display_name") or provider_id),
+        "adapter": "openai_compatible",
+        "credential_required": True,
+        "supports_invoke": True,
+        "api_key_env": list(spec.get("env_vars") or []),
+        "base_url_env": list(spec.get("base_url_env_vars") or []),
+        "default_base_url": str(spec.get("default_base_url") or ""),
+        "models": [dict(model) for model in spec.get("curated_models", []) if isinstance(model, dict)],
+        "config": {
+            "model_sync": "remote_merge",
+            "model_list_path": str(spec.get("remote_model_list_path") or "/models"),
+            "model_cache_ttl_seconds": int(spec.get("remote_model_cache_ttl_seconds", 3600) or 3600),
+        },
+    }
+
+
+def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
+    definitions = {
+        str(item.get("provider_id") or "").strip(): dict(item)
+        for item in list_custom_providers()
+        if isinstance(item, dict) and str(item.get("provider_id") or "").strip()
+    }
+    apis_by_provider: Dict[str, List[Dict[str, Any]]] = {}
+    for api in provider_named_api_keys():
+        if not isinstance(api, dict):
+            continue
+        provider_id = str(api.get("provider_id") or "").strip()
+        if provider_id:
+            apis_by_provider.setdefault(provider_id, []).append(dict(api))
+
+    manifests: Dict[str, Dict[str, Any]] = {}
+    for provider_id in sorted(set(definitions) | set(apis_by_provider)):
+        if provider_id in _CURATED_PROVIDER_METADATA:
+            continue
+        definition = definitions.get(provider_id, {})
+        apis = apis_by_provider.get(provider_id, [])
+        # "custom" represents non-LLM integrations in the settings UI.  Only
+        # LLM entries can be safely treated as an OpenAI-compatible endpoint.
+        llm_apis = [api for api in apis if str(api.get("kind") or "llm").lower() == "llm"]
+        if not llm_apis and str(definition.get("kind") or "llm").lower() != "llm":
+            continue
+        selected_api = next((api for api in llm_apis if api.get("configured")), llm_apis[0] if llm_apis else {})
+        base_url = str(selected_api.get("base_url") or "").strip().rstrip("/")
+        known_models: List[Dict[str, Any]] = []
+        for model_id in [
+            str(selected_api.get("default_model") or "").strip(),
+            *[str(item or "").strip() for item in selected_api.get("allowed_models", [])],
+        ]:
+            if model_id and all(item["model_id"] != model_id for item in known_models):
+                known_models.append(
+                    {
+                        "id": f"{provider_id}/{model_id}",
+                        "model_id": model_id,
+                        "name": model_id,
+                        "display_name": model_id,
+                        "provider": provider_id,
+                        "provider_id": provider_id,
+                        "type": "chat",
+                    }
+                )
+        manifests[provider_id] = {
+            "id": provider_id,
+            "display_name": str(definition.get("label") or provider_id),
+            "description": "User-configured OpenAI-compatible model provider.",
+            "adapter": "openai_compatible",
+            "credential_required": True,
+            "supports_invoke": True,
+            "default_base_url": base_url,
+            "models": known_models,
+            "config": {
+                "custom_openai_compatible": True,
+                "api_id": str(selected_api.get("api_id") or "").strip(),
+                "model_sync": "remote_merge",
+                "model_list_path": "/models",
+                "model_list_requires_auth": True,
+                "model_cache_ttl_seconds": 3600,
+            },
+        }
     return manifests
 
 
@@ -1345,6 +1449,26 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     if adapter == "openai_compatible":
+        config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+        if config.get("custom_openai_compatible"):
+            api_id = str(config.get("api_id") or "").strip()
+            if not api_id:
+                return None
+            api_key = read_provider_api_key(provider_id, api_id) or ""
+            if not api_key:
+                return None
+            return OpenAICompatibleProvider(
+                provider_id=provider_id,
+                display_name=str(manifest.get("display_name") or provider_id),
+                api_key=api_key,
+                base_url=str(manifest.get("default_base_url") or ""),
+                known_models=list(manifest.get("models") or []),
+                credential_required=True,
+                remote_model_discovery=True,
+                remote_model_discovery_requires_auth=True,
+                remote_model_list_path=str(config.get("model_list_path") or "/models"),
+                remote_model_cache_ttl_seconds=config.get("model_cache_ttl_seconds", 3600),
+            )
         provider_cls = OPENAI_COMPATIBLE_PROVIDER_CLASSES.get(
             provider_id,
             OpenAICompatibleProvider,
