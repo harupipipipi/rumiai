@@ -691,6 +691,25 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
         manifests.setdefault(provider_id, _openai_compatible_spec_manifest(spec))
     for provider_id, manifest in local_openai_runtime_manifests().items():
         manifests.setdefault(provider_id, manifest)
+    # Native providers whose invocation protocol is not OpenAI-compatible can
+    # still expose their complete account inventory from an official Models
+    # endpoint.  Register the executable adapter before the program's honest
+    # connection placeholder is applied.
+    manifests.setdefault(
+        "anthropic",
+        {
+            "id": "anthropic",
+            "display_name": "Anthropic",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.anthropic_provider:AnthropicProvider",
+            "api_key_env": ["ANTHROPIC_API_KEY"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

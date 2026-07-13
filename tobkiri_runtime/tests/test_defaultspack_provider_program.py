@@ -154,3 +154,42 @@ def test_openai_compatible_provider_specs_do_not_freeze_glm_dashscope_or_silicon
         provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
         assert provider._base_url == endpoint
         assert provider._remote_model_list_path == "/models"
+
+
+def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
+    from domain.ai_client.client import AIClient
+    from domain.ai_client.providers.anthropic_provider import AnthropicProvider
+
+    pages = {
+        "": {
+            "data": [{"id": "claude-live-a", "display_name": "Claude Live A", "capabilities": {"thinking": {"supported": True}}}],
+            "has_more": True,
+            "last_id": "claude-live-a",
+        },
+        "claude-live-a": {
+            "data": [{"id": "claude-live-b", "display_name": "Claude Live B", "capabilities": {"image_input": {"supported": True}}}],
+            "has_more": False,
+        },
+    }
+    monkeypatch.setattr(AnthropicProvider, "_fetch_models_page", lambda self, after_id="": pages[after_id])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-token")
+    AnthropicProvider._MODEL_INVENTORY_CACHE.clear()
+    AIClient._instance = None
+
+    models = AIClient().list_models(provider="anthropic")
+
+    assert [model["model_id"] for model in models] == ["claude-live-a", "claude-live-b"]
+    assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
+    assert "vision" in models[1]["capabilities"]
+
+
+def test_openai_spec_uses_live_models_endpoint_without_a_checked_in_model_list():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["openai"]
+    assert spec["curated_models"] == []
+    provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+    assert provider._base_url == "https://api.openai.com/v1"
+    assert provider._remote_model_list_path == "/models"

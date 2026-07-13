@@ -12,6 +12,18 @@ def _embedding(provider, model_id, name):
 
 _OPENAI_COMPATIBLE_PROVIDERS = [
     {
+        # OpenAI's authenticated /v1/models inventory is authoritative.  No
+        # product-model snapshot is needed to make new account models appear.
+        "provider_name": "openai",
+        "display_name": "OpenAI",
+        "env_vars": ("OPENAI_API_KEY",),
+        "base_url_env_vars": ("OPENAI_BASE_URL",),
+        "default_base_url": "https://api.openai.com/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         # DashScope exposes its account-visible Qwen inventory through the
         # same OpenAI-compatible endpoint used for inference.  Regional
         # endpoints remain configurable through DASHSCOPE_BASE_URL.
