@@ -22,7 +22,8 @@
   と Operations Company の直接経路
 - 新authoritative owner: Wave 9 scheduler、connector、Company、agent owner packs
 - 追加するglobal contract: schedule/job、connector gateway/OAuth、Company
-  state/coordinator/runtime/work、profile-scoped UI projections
+  state/coordinator/runtime/work、Kanban state/conversation import、profile-scoped
+  UI projections
 - 削除する旧経路: canonical vendor-to-chat/Company imports と UI からの
   secret/credential handle exposure
 - compatibility／migration: deterministic inbound IDs、receipt-bound delivery、
@@ -60,6 +61,10 @@
   mutation が approved action/tool に限定されること
 - artifact/project/Kanban/office-authoring/research/data-analysis product pack の
   workflow/UI content が host core を編集せず profile pack set で出入りすること
+- Kanban legacy snapshot import の source hash dedupe、changed source 拒否、
+  stale revision、event dedupe、conversation task import の idempotency
+- Kanban isolated UI の profile scope、read-only RPC、pack 削除時の route 消失。
+  Wave 10 cutover 前は legacy Kanban UI と同じ profile で同時に有効化しないこと
 - migration、rollback、clean shutdown
 
 ## Security／integrity

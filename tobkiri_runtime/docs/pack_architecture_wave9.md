@@ -14,6 +14,7 @@ host implementation.
 | connector OAuth pending flow | `rumi_connector_oauth_broker_pack` | exact vendor OAuth provider; Slack supplies a PKCE provider |
 | Company organizations, roles, members, channels, tasks, routes, inbound, messages | `rumi_company_state_store_pack` | coordinator, agent adapter, connector adapter, read-only Companies UI |
 | Company coordination | `rumi_company_coordinator_pack` | state/action, exact agent-work provider, global supervisor job adapter |
+| Kanban boards, columns, cards, and events | `rumi_kanban_state_store_pack` | deterministic conversation-task adapter and removable read-only Kanban surface |
 | product content | the selected product pack that declares it | profile-scoped host contribution projection only; no product pack receives broad host authority |
 
 The scheduler UI reads `rumi.resource.schedule.v1` and
@@ -67,12 +68,24 @@ declare hash-verified v3 content manifests and profile-scoped declarative route
 contributions. Removing one selected product pack removes only its contribution;
 it does not change host/runtime code or grant product authority.
 
+Kanban state is now represented by `rumi.resource.kanban.v1` and
+`rumi.action.kanban.v1`. The state owner uses profile-scoped atomic state,
+revision checks, exact receipt redemption, and a one-shot caller-supplied
+legacy snapshot import that records an immutable source hash. The conversation
+projection reads `rumi.resource.conversation.v1`; it never imports or writes a
+chat store, and obtains a fresh scoped receipt for every Kanban transition.
+`rumi_kanban_surface_pack` is an isolated read-only UI contribution, kept out
+of the default profile until the Wave 10 legacy route cutover prevents two
+visible Kanban views from diverging.
+
 ## Remaining compatibility cleanup before Wave 9 closure
 
-The legacy defaultspack Kanban block still owns a SQLite store, HTTP routes, and
-direct chat/agent synchronization. It cannot be relabeled as an adapter: its
-state owner, action contract, UI projection, and one-way migration still need
-to be extracted before the defaultspack facade cleanup can be accepted.
+The legacy defaultspack Kanban block still owns the currently routed SQLite
+store, HTTP routes, React workspace UI, and direct chat/agent synchronization.
+It cannot be relabeled as an adapter. Wave 10 must add a one-shot source export
+and route shims, cut all legacy reads and writes over to the global contracts,
+then remove the old primary store/UI paths. Until then the new owner is not a
+fallback and the isolated surface is opt-in only.
 
 
 ## Data ownership matrix
@@ -86,6 +99,7 @@ to be extracted before the defaultspack facade cleanup can be accepted.
 | OAuth pending flows | `rumi_connector_oauth_broker_pack` | 1.0.0 | profile pending-flow state | none | none | cancel state/revoke failed binding | ten minutes | no |
 | Company state | `rumi_company_state_store_pack` | 1.0.0 | profile atomic JSON | owner snapshot | one-shot legacy snapshot import | stop new coordinator; never dual-write | profile lifetime | owner contract |
 | Company coordination | no persistent coordinator owner | 1.0.0 | bounded in-process active-task set | none | none | cancel through exact work provider | process lifetime | event projection |
+| Kanban state | `rumi_kanban_state_store_pack` | 1.0.0 | profile atomic JSON | owner snapshot | one-shot legacy board snapshot import | select prior owner; no dual write | profile lifetime | owner contract |
 | agent state | `rumi_agent_state_store_pack` | 1.0.0 | profile owner storage | owner snapshot | owner migration | owner rollback | profile policy | owner contract |
 | product workflows and feature UI content | selected product pack | pack-defined | pack-owned declarative assets | pack release/source backup | manifest cutover | remove selected pack projection | pack lifecycle | pack-defined |
 
