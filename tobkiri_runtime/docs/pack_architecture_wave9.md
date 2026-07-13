@@ -66,6 +66,19 @@ The pre-v3 asset-only product manifests and any direct defaultspack feature UI
 are a Wave 10 facade-cleanup target. They are recorded here instead of being
 silently treated as new authoritative runtime owners.
 
+## Remaining compatibility cleanup before Wave 9 closure
+
+The legacy defaultspack Kanban block still owns a SQLite store, HTTP routes, and
+direct chat/agent synchronization. It cannot be relabeled as an adapter: its
+state owner, action contract, UI projection, and one-way migration still need
+to be extracted before the defaultspack facade cleanup can be accepted.
+
+Likewise, the artifact, office-authoring, research, customer-research, and
+data-analysis packs need their existing declarative assets represented as
+selected-profile v3 contributions. This work is intentionally tracked as
+remaining implementation rather than claiming host-independent product UI
+ownership prematurely.
+
 ## Data ownership matrix
 
 | Resource | Authoritative pack | Schema version | Storage | Backup | Migration | Rollback | Retention | Export/import |
