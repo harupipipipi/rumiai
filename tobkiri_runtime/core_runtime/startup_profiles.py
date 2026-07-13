@@ -62,6 +62,7 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_connector_inbound_broker_pack",
     "rumi_connector_outbound_broker_pack",
     "rumi_connector_transport_gateway_pack",
+    "rumi_connector_settings_surface_pack",
     "rumi_generic_webhook_connector_pack",
     "rumi_slack_connector_pack",
     "rumi_line_connector_pack",
