@@ -134,17 +134,17 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # xAI publishes every model visible to the API key at /v1/models,
+        # including language, image, and video models.  Never freeze Grok
+        # releases in the launcher.
         "provider_name": "xai",
         "display_name": "xAI",
         "env_vars": ("XAI_API_KEY",),
         "base_url_env_vars": ("XAI_BASE_URL",),
         "default_base_url": "https://api.x.ai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("xai", "grok-4", "Grok 4"),
-            _chat("xai", "grok-3", "Grok 3"),
-            _chat("xai", "grok-3-mini", "Grok 3 Mini"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "groq",
@@ -154,41 +154,31 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "default_base_url": "https://api.groq.com/openai/v1",
         "supports_embeddings": False,
         "remote_model_discovery": True,
-        "curated_models": [
-            _chat("groq", "llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
-            _chat("groq", "llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
-            _chat("groq", "qwen/qwen3-32b", "Qwen 3 32B"),
-            _chat("groq", "allam-2-7b", "Allam 2 7B"),
-            _chat("groq", "groq/compound", "Groq Compound"),
-            _chat("groq", "groq/compound-mini", "Groq Compound Mini"),
-            _chat("groq", "meta-llama/llama-4-maverick-17b-128e-instruct", "Llama 4 Maverick 17B 128E Instruct"),
-            _chat("groq", "mixtral-8x7b-32768", "Mixtral 8x7B"),
-        ],
+        "curated_models": [],
     },
     {
+        # Together's OpenAI-compatible /v1/models inventory is authoritative
+        # for both hosted and account-enabled models.
         "provider_name": "together",
         "display_name": "Together",
         "env_vars": ("TOGETHER_API_KEY",),
         "base_url_env_vars": ("TOGETHER_BASE_URL",),
         "default_base_url": "https://api.together.xyz/v1",
         "supports_embeddings": True,
-        "curated_models": [
-            _chat("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Instruct Turbo"),
-            _chat("together", "deepseek-ai/DeepSeek-V3", "DeepSeek V3"),
-            _embedding("together", "togethercomputer/m2-bert-80M-8k-retrieval", "M2 BERT Retrieval"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
+        # DeepSeek's documented GET /models endpoint returns the current API
+        # model inventory, so no release-name snapshot is needed.
         "provider_name": "deepseek",
         "display_name": "DeepSeek",
         "env_vars": ("DEEPSEEK_API_KEY",),
         "base_url_env_vars": ("DEEPSEEK_BASE_URL",),
         "default_base_url": "https://api.deepseek.com/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("deepseek", "deepseek-chat", "DeepSeek Chat"),
-            _chat("deepseek", "deepseek-reasoner", "DeepSeek Reasoner"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "fireworks",
@@ -211,12 +201,7 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "default_base_url": "https://api.cerebras.ai/v1",
         "supports_embeddings": False,
         "remote_model_discovery": True,
-        "curated_models": [
-            _chat("cerebras", "gpt-oss-120b", "GPT OSS 120B"),
-            _chat("cerebras", "zai-glm-4.7", "ZAI GLM 4.7"),
-            _chat("cerebras", "qwen-3-235b-a22b-instruct-2507", "Qwen 3 235B Instruct"),
-            _chat("cerebras", "llama3.1-8b", "Llama 3.1 8B"),
-        ],
+        "curated_models": [],
     },
     {
         "provider_name": "sambanova",
@@ -255,17 +240,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         ],
     },
     {
+        # Mistral's authenticated GET /v1/models endpoint lists every model
+        # available to the user, including fine-tuned models.
         "provider_name": "mistral",
         "display_name": "Mistral",
         "env_vars": ("MISTRAL_API_KEY",),
         "base_url_env_vars": ("MISTRAL_BASE_URL",),
         "default_base_url": "https://api.mistral.ai/v1",
         "supports_embeddings": True,
-        "curated_models": [
-            _chat("mistral", "mistral-large-latest", "Mistral Large Latest"),
-            _chat("mistral", "ministral-8b-latest", "Ministral 8B Latest"),
-            _embedding("mistral", "mistral-embed", "Mistral Embed"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "nvidia",

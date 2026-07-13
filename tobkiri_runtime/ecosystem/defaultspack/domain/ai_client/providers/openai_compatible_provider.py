@@ -767,6 +767,28 @@ class OpenAICompatibleProvider(OpenAIProvider):
         }
         if normalized_declared in declared_types:
             return declared_types[normalized_declared]
+        input_modalities = {
+            str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+            for field in ("input_modalities", "modalities")
+            for value in OpenAICompatibleProvider._remote_feature_values((raw or {}).get(field))
+            if str(value or "").strip()
+        }
+        output_modalities = {
+            str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+            for value in OpenAICompatibleProvider._remote_feature_values((raw or {}).get("output_modalities"))
+            if str(value or "").strip()
+        }
+        modalities = input_modalities | output_modalities
+        if any("embed" in value for value in modalities):
+            return "embedding"
+        if any("rerank" in value for value in modalities):
+            return "rerank"
+        if any(value in {"image", "image_generation", "text_to_image"} for value in output_modalities):
+            return "image_gen"
+        if any(value in {"video", "video_generation", "text_to_video"} for value in output_modalities):
+            return "video_gen"
+        if any(value in {"audio", "speech", "tts", "text_to_speech"} for value in output_modalities):
+            return "tts"
         lowered = str(model_id or "").strip().lower()
         if not lowered:
             return "chat"
@@ -857,29 +879,42 @@ class OpenAICompatibleProvider(OpenAIProvider):
         }
         tasks = {
             str(item).strip().lower()
-            for field in ("tasks", "supported_tasks", "modalities", "input_modalities", "output_modalities")
+            for field in ("tasks", "supported_tasks", "modalities")
             for item in cls._remote_feature_values((raw or {}).get(field))
             if str(item).strip()
         }
+        input_modalities = {
+            str(item).strip().lower()
+            for item in cls._remote_feature_values((raw or {}).get("input_modalities"))
+            if str(item).strip()
+        }
+        output_modalities = {
+            str(item).strip().lower()
+            for item in cls._remote_feature_values((raw or {}).get("output_modalities"))
+            if str(item).strip()
+        }
         feature_set = endpoints | features | tasks
+        all_modalities = feature_set | input_modalities | output_modalities
         if {"chat", "chat-completions", "chat_completions", "completions", "text-generation", "text_generation"} & feature_set:
             capabilities.update({"chat": True, "text_input": True, "text_output": True})
-        if any("embed" in value for value in feature_set):
+        if any("embed" in value for value in all_modalities):
             capabilities["embeddings"] = True
-        if any("rerank" in value for value in feature_set):
+        if any("rerank" in value for value in all_modalities):
             capabilities["rerank"] = True
-        if any(value in {"image", "image_generation", "text_to_image", "images/generations"} for value in feature_set):
+        if any(value in {"image", "image_generation", "text_to_image", "images/generations"} for value in feature_set | output_modalities):
             capabilities["image_generation"] = True
-        if any(value in {"video", "video_generation", "text_to_video"} for value in feature_set):
+        if any(value in {"video", "video_generation", "text_to_video"} for value in feature_set | output_modalities):
             capabilities["video_generation"] = True
-        if any(value in {"tts", "speech", "text_to_speech"} for value in feature_set):
+        if any(value in {"tts", "speech", "text_to_speech"} for value in feature_set | output_modalities):
             capabilities["tts"] = True
-        if any(value in {"transcription", "stt", "speech_to_text", "audio_transcription"} for value in feature_set):
+        if any(value in {"transcription", "stt", "speech_to_text", "audio_transcription"} for value in feature_set | input_modalities):
             capabilities["transcription"] = True
         if {"tools", "tool_calls", "tool-calling", "tool_calling", "function-calling", "function_calling"} & feature_set:
             capabilities["tool_calling"] = True
         if capabilities.get("tool_calling"):
             capabilities["tool_calls"] = True
+        if "image" in input_modalities:
+            capabilities["image_input"] = True
         if capabilities.get("image_input"):
             capabilities["vision"] = True
         return capabilities

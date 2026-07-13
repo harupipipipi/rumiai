@@ -330,6 +330,34 @@ def test_openai_compatible_provider_specs_do_not_freeze_glm_dashscope_or_silicon
         assert provider._remote_model_list_path == "/models"
 
 
+def test_openai_compatible_provider_specs_use_live_models_endpoints_instead_of_release_lists():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    for provider_id in ("xai", "groq", "together", "deepseek", "cerebras", "mistral"):
+        spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
+        assert spec["remote_model_discovery"] is True
+        assert spec["curated_models"] == []
+        provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+        assert provider._remote_model_list_path == "/models"
+
+    xai_model = OpenAICompatibleProvider._normalize_remote_model(
+        OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["xai"])),
+        {"id": "grok-imagine-video", "output_modalities": ["video"]},
+    )
+    assert xai_model is not None
+    assert xai_model["type"] == "video_gen"
+    xai_vision_model = OpenAICompatibleProvider._normalize_remote_model(
+        OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["xai"])),
+        {"id": "grok-vision", "input_modalities": ["text", "image"], "output_modalities": ["text"]},
+    )
+    assert xai_vision_model is not None
+    assert xai_vision_model["type"] == "chat"
+    assert xai_vision_model["capabilities"]["vision"] is True
+    assert xai_vision_model["capabilities"]["image_generation"] is False
+
+
 def test_openai_compatible_manifest_never_exposes_a_checked_in_model_snapshot():
     from domain.ai_client.providers import _openai_compatible_spec_manifest
     from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
