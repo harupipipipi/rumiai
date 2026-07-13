@@ -67,6 +67,7 @@ def authorize_legacy_coding_operation(
     input_data: Mapping[str, Any],
     context: Mapping[str, Any] | None,
     selected_workspace_id: str,
+    allow_without_approval: bool = False,
 ) -> dict[str, Any]:
     """Consume one legacy approval and mint one exact service receipt."""
 
@@ -75,7 +76,7 @@ def authorize_legacy_coding_operation(
         dict(context) if isinstance(context, Mapping) else None
     )
     verification = None
-    if not internal:
+    if not internal and not allow_without_approval:
         token = _approval_token(request)
         if not token:
             return {"authorized": False, "reason": "approval_required"}
