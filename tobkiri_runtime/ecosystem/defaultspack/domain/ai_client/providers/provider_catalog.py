@@ -181,17 +181,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Fireworks exposes the models available to a key through its
+        # OpenAI-compatible /v1/models endpoint.
         "provider_name": "fireworks",
         "display_name": "Fireworks",
         "env_vars": ("FIREWORKS_API_KEY",),
         "base_url_env_vars": ("FIREWORKS_BASE_URL",),
         "default_base_url": "https://api.fireworks.ai/inference/v1",
         "supports_embeddings": True,
-        "curated_models": [
-            _chat("fireworks", "accounts/fireworks/models/llama-v3p1-70b-instruct", "Llama v3.1 70B Instruct"),
-            _chat("fireworks", "accounts/fireworks/models/deepseek-v3", "DeepSeek V3"),
-            _embedding("fireworks", "nomic-ai/nomic-embed-text-v1.5", "Nomic Embed Text v1.5"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "cerebras",
@@ -204,28 +203,28 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # SambaNova's /models endpoint is explicitly scoped to the active
+        # environment, including self-hosted SambaStack deployments.
         "provider_name": "sambanova",
         "display_name": "SambaNova",
         "env_vars": ("SAMBANOVA_API_KEY",),
         "base_url_env_vars": ("SAMBANOVA_BASE_URL",),
         "default_base_url": "https://api.sambanova.ai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("sambanova", "Meta-Llama-3.3-70B-Instruct", "Meta Llama 3.3 70B Instruct"),
-            _chat("sambanova", "DeepSeek-R1-Distill-Llama-70B", "DeepSeek R1 Distill Llama 70B"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
+        # Perplexity publishes its complete current Agent API inventory at
+        # /v1/models in the OpenAI list format.
         "provider_name": "perplexity",
         "display_name": "Perplexity",
         "env_vars": ("PERPLEXITY_API_KEY",),
         "base_url_env_vars": ("PERPLEXITY_BASE_URL",),
-        "default_base_url": "https://api.perplexity.ai",
+        "default_base_url": "https://api.perplexity.ai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("perplexity", "sonar-pro", "Sonar Pro"),
-            _chat("perplexity", "sonar", "Sonar"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "moonshotai",

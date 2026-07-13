@@ -335,12 +335,19 @@ def test_openai_compatible_provider_specs_use_live_models_endpoints_instead_of_r
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
     from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
 
-    for provider_id in ("xai", "groq", "together", "deepseek", "cerebras", "mistral"):
+    for provider_id in (
+        "xai", "groq", "together", "deepseek", "fireworks", "cerebras", "sambanova", "perplexity", "mistral",
+    ):
         spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
         assert spec["remote_model_discovery"] is True
         assert spec["curated_models"] == []
         provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
         assert provider._remote_model_list_path == "/models"
+
+    perplexity = OpenAICompatibleProvider.from_manifest(
+        _openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["perplexity"])
+    )
+    assert perplexity._base_url == "https://api.perplexity.ai/v1"
 
     xai_model = OpenAICompatibleProvider._normalize_remote_model(
         OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["xai"])),
