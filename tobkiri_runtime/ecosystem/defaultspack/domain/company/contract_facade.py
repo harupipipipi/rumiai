@@ -15,6 +15,8 @@ AUTHORITY = "rumi.service.host.authorize.v1"
 RESOURCE = "rumi.resource.company.v1"
 ACTION = "rumi.action.company.state.v1"
 STATE_PACK_ID = "rumi_company_state_store_pack"
+COORDINATOR = "rumi.action.company.coordinator.v1"
+COORDINATOR_PACK_ID = "rumi_company_coordinator_pack"
 
 
 class CompanyFacadeError(RuntimeError):
@@ -91,6 +93,8 @@ class CompanyContractFacade:
             return self._upsert_task(_company_id(self.input))
         if operation == "delete_task":
             return self._delete_task(_company_id(self.input), _required_id(self.input, "task_id"))
+        if operation == "dispatch_task":
+            return self._dispatch_task(_company_id(self.input), _required_id(self.input, "task_id"))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -436,6 +440,29 @@ class CompanyContractFacade:
         self._mutate("task.delete", {"company_id": company_id, "task_id": task_id})
         return True
 
+    def _dispatch_task(self, company_id: str, task_id: str) -> dict[str, Any]:
+        company = self._raw_company(company_id)
+        if company is None:
+            raise CompanyFacadeError("NOT_FOUND", "company not found", 404)
+        _reject_subagent_team_write(_legacy_company(company))
+        arguments = {"company_id": company_id, "task_id": task_id}
+        receipt = _receipt_for(
+            self.input,
+            self.context,
+            self.profile_id,
+            "dispatch_task",
+            arguments,
+            service_pack_id=COORDINATOR_PACK_ID,
+            authority="company.coordinate",
+            operation="company.coordinator.dispatch_task",
+        )
+        result = _invoke(
+            COORDINATOR,
+            "dispatch_task",
+            {**arguments, **receipt, "profile_id": self.profile_id},
+        )
+        return dict(result) if isinstance(result, Mapping) else {}
+
     def _required(self, company_id: str) -> dict[str, Any]:
         value = self._get(company_id)
         if value is None:
@@ -481,6 +508,19 @@ def _receipt(
     name: str,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    return _receipt_for(
+        input_data, context, profile_id, name, arguments,
+        service_pack_id=STATE_PACK_ID,
+        authority="company.state.manage",
+        operation=f"company.state.{name}",
+    )
+
+
+def _receipt_for(
+    input_data: Mapping[str, Any], context: Mapping[str, Any], profile_id: str,
+    name: str, arguments: Mapping[str, Any], *, service_pack_id: str,
+    authority: str, operation: str,
+) -> dict[str, Any]:
     if not tool_server_approval_context_is_internal(dict(context)):
         token = _approval_token(input_data)
         if not token:
@@ -507,9 +547,9 @@ def _receipt(
         or "defaultspack.local_user"
     )
     scope = {
-        "service_pack_id": STATE_PACK_ID,
-        "operation": f"company.state.{name}",
-        "authority": "company.state.manage",
+        "service_pack_id": service_pack_id,
+        "operation": operation,
+        "authority": authority,
         "caller_id": caller_id,
         "caller_pack_id": "defaultspack",
         "caller_function_id": f"domain.company.contract_facade.{name}",
