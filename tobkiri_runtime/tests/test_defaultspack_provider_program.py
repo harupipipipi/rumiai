@@ -558,6 +558,53 @@ def test_cloudflare_workers_ai_discovers_account_scoped_models_and_runs_text_gen
     assert response["content"] == [{"type": "text", "text": "live answer"}]
 
 
+def test_deepgram_discovers_live_stt_tts_models_and_calls_native_tasks(monkeypatch):
+    from domain.ai_client.providers.deepgram_provider import DeepgramProvider
+
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram-key")
+    DeepgramProvider._MODEL_INVENTORY_CACHE.clear()
+    provider = DeepgramProvider()
+    requests = []
+
+    def fake_json(method, path, body=None):
+        requests.append((method, path, body))
+        if method == "GET":
+            return {
+                "stt": [{"canonical_name": "nova-live", "languages": ["ja"], "streaming": True}],
+                "tts": [{"canonical_name": "aura-live", "languages": ["ja"]}],
+            }
+        return {"results": {"channels": [{"alternatives": [{"transcript": "live transcript"}]}]}}
+
+    monkeypatch.setattr(provider, "_request_json", fake_json)
+    models = provider.list_models()
+    transcript = provider.transcribe("deepgram/nova-live", "https://audio.example/input.wav", {})
+
+    assert requests[0] == ("GET", "/v1/models?include_outdated=true", None)
+    assert [model["type"] for model in models] == ["transcription", "tts"]
+    assert requests[-1] == (
+        "POST",
+        "/v1/listen?model=nova-live",
+        {"url": "https://audio.example/input.wav"},
+    )
+    assert transcript == {"text": "live transcript"}
+
+    captured = {}
+    monkeypatch.setattr(
+        provider,
+        "_request",
+        lambda method, path, body=None, **kwargs: captured.update({"method": method, "path": path, "body": body, **kwargs}) or b"audio",
+    )
+    response = provider.tts("deepgram/aura-live", "hello", None)
+
+    assert captured == {
+        "method": "POST",
+        "path": "/v1/speak?model=aura-live",
+        "body": {"text": "hello"},
+        "accept": "audio/mpeg",
+    }
+    assert response["audio"].startswith("data:audio/mpeg;base64,")
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 

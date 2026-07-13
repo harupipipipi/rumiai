@@ -19,6 +19,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "cerebras": ["CEREBRAS_API_KEY"],
     "cohere": ["COHERE_API_KEY"],
     "cloudflare-workers-ai": ["CLOUDFLARE_API_TOKEN"],
+    "deepgram": ["DEEPGRAM_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "deepinfra": ["DEEPINFRA_API_KEY"],
     "elevenlabs": ["ELEVENLABS_API_KEY"],

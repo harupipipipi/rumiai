@@ -785,6 +785,21 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/models/search"},
         },
     )
+    manifests.setdefault(
+        "deepgram",
+        {
+            "id": "deepgram",
+            "display_name": "Deepgram",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.deepgram_provider:DeepgramProvider",
+            "api_key_env": ["DEEPGRAM_API_KEY"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
