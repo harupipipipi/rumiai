@@ -402,6 +402,18 @@ def test_openai_compatible_manifest_never_exposes_a_checked_in_model_snapshot():
     )
 
 
+def test_external_provider_catalog_never_uses_curated_model_fallbacks(monkeypatch):
+    from domain.ai_client import providers
+
+    monkeypatch.setattr(providers, "_load_model_manifests", lambda _provider_id: [])
+    monkeypatch.setattr(providers, "model_manifests_from_provider_components", lambda _provider_id: [])
+    monkeypatch.setattr(providers, "_load_known_models_from_entry", lambda _entrypoint: [])
+    monkeypatch.setattr(providers, "get_extension_registry", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    assert providers._load_models_for_provider({"provider_id": "openrouter", "entrypoint": ""}) == []
+    assert providers.get_best_model_for_provider("openrouter") is None
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider

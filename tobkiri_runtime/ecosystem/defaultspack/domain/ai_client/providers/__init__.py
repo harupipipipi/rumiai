@@ -1320,7 +1320,12 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
     _append(_load_model_manifests(provider_id))
     _append(model_manifests_from_provider_components(provider_id))
     _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
-    _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
+    # External provider inventories must never fall back to a checked-in
+    # release list: it is necessarily incomplete and can expose retired or
+    # unauthorized models.  Only the two internal pseudo-providers have no
+    # remote catalog by design.
+    if provider_id in {"stub", "rumi"}:
+        _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
     return models
 
 
@@ -1735,4 +1740,6 @@ def get_best_model_for_provider(name, use_case="chat"):
                 return str(provider_manifest["default_model"])
     except Exception:
         pass
-    return _BEST_MODEL_BY_PROVIDER.get(name)
+    # A stale preferred external model is worse than no default: model
+    # selection must be based on the connected provider's live inventory.
+    return _BEST_MODEL_BY_PROVIDER.get(name) if name in {"stub", "rumi"} else None
