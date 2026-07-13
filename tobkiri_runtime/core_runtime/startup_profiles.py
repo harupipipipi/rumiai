@@ -56,6 +56,18 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_schedule_store_pack",
     "rumi_job_action_broker_pack",
     "rumi_scheduler_runtime_pack",
+    "rumi_connector_registry_service_pack",
+    "rumi_connector_inbound_broker_pack",
+    "rumi_connector_outbound_broker_pack",
+    "rumi_generic_webhook_connector_pack",
+    "rumi_slack_connector_pack",
+    "rumi_line_connector_pack",
+    "rumi_discord_connector_pack",
+    "rumi_email_connector_pack",
+    "rumi_p2p_connector_pack",
+    "rumi_http_api_connector_pack",
+    "rumi_mobile_pairing_connector_pack",
+    "rumi_qr_pairing_connector_pack",
 )
 
 # --- graph loader (lazy import to avoid circular dependency) ---
