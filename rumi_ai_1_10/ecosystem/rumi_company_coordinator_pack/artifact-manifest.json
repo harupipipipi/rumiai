@@ -1,0 +1,1 @@
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/coordinator.py","sha256":"2cbc9e52e3ee88fc1d59ea1e83e98252d45c2c394c94d46c756e06a9a686ce0b","role":"runtime"}]}
