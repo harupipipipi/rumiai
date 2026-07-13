@@ -52,6 +52,11 @@ WAVE8_DEFAULT_SERVICE_PACKS = (
     "rumi_ai_modality_pack",
     "rumi_media_analysis_adapter_pack",
 )
+WAVE9_DEFAULT_SERVICE_PACKS = (
+    "rumi_schedule_store_pack",
+    "rumi_job_action_broker_pack",
+    "rumi_scheduler_runtime_pack",
+)
 
 # --- graph loader (lazy import to avoid circular dependency) ---
 _graph_loader = None
@@ -987,7 +992,11 @@ class StartupProfileManager:
         )
         normalized["launch_capability_graph"] = True
         selected_packs = [str(item) for item in normalized.get("packs") or []]
-        for pack_id in (*WAVE7_DEFAULT_OWNER_PACKS, *WAVE8_DEFAULT_SERVICE_PACKS):
+        for pack_id in (
+            *WAVE7_DEFAULT_OWNER_PACKS,
+            *WAVE8_DEFAULT_SERVICE_PACKS,
+            *WAVE9_DEFAULT_SERVICE_PACKS,
+        ):
             if pack_id not in selected_packs:
                 selected_packs.append(pack_id)
         normalized["packs"] = selected_packs
