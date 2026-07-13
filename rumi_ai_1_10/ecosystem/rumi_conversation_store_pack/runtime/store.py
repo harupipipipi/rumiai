@@ -120,8 +120,13 @@ class ConversationStore:
                 "tags",
                 "is_starred",
                 "is_pinned",
+                "pinned_at",
+                "pin_scope",
                 "is_archived",
                 "current_node_id",
+                "parent_conversation_id",
+                "child_conversation_ids",
+                "conversation_kind",
                 "group_id",
                 "metadata",
             ):
@@ -186,6 +191,7 @@ class ConversationStore:
             normalized["sequence"] = len(messages)
             messages.append(normalized)
             current["messages"] = messages
+            current["current_node_id"] = normalized["id"]
             current["updated_at"] = _now_ms()
             current["conversation_revision"] += 1
             state["conversations"][conversation_id] = current
@@ -229,7 +235,21 @@ class ConversationStore:
                 action = "message_deleted"
                 result_message = None
             else:
-                for key in ("content", "parts", "metadata", "status"):
+                for key in (
+                    "content",
+                    "parts",
+                    "metadata",
+                    "status",
+                    "parent_id",
+                    "children_ids",
+                    "sequence_number",
+                    "raw_text",
+                    "finish_reason",
+                    "usage",
+                    "widget",
+                    "events",
+                    "tool_logs",
+                ):
                     if patch is not None and key in patch:
                         messages[index][key] = _safe(patch[key])
                 messages[index]["updated_at"] = _now_ms()
@@ -238,6 +258,10 @@ class ConversationStore:
             for sequence, item in enumerate(messages):
                 item["sequence"] = sequence
             current["messages"] = messages
+            if delete and current.get("current_node_id") == message_id:
+                current["current_node_id"] = (
+                    messages[-1]["id"] if messages else None
+                )
             current["updated_at"] = _now_ms()
             current["conversation_revision"] += 1
             state["conversations"][conversation_id] = current
@@ -274,6 +298,9 @@ class ConversationStore:
             current = dict(current)
             _assert_conversation_revision(current, expected_conversation_revision)
             current["messages"] = normalized
+            current["current_node_id"] = (
+                normalized[-1]["id"] if normalized else None
+            )
             current["updated_at"] = _now_ms()
             current["conversation_revision"] += 1
             state["conversations"][conversation_id] = current
@@ -525,6 +552,8 @@ def _conversation(value: Mapping[str, Any], *, allow_messages: bool) -> dict[str
         "tags": _safe(value.get("tags") or []),
         "is_starred": bool(value.get("is_starred", False)),
         "is_pinned": bool(value.get("is_pinned", False)),
+        "pinned_at": value.get("pinned_at"),
+        "pin_scope": str(value.get("pin_scope") or "global"),
         "is_archived": bool(value.get("is_archived", False)),
         "current_node_id": value.get("current_node_id"),
         "parent_conversation_id": value.get("parent_conversation_id"),
@@ -548,6 +577,15 @@ def _message(value: Mapping[str, Any]) -> dict[str, Any]:
         "updated_at": int(value.get("updated_at") or created_at),
         "sequence": max(0, int(value.get("sequence") or 0)),
         "metadata": _safe(value.get("metadata") or {}),
+        "parent_id": value.get("parent_id"),
+        "children_ids": _safe(value.get("children_ids") or []),
+        "sequence_number": max(1, int(value.get("sequence_number") or 1)),
+        "raw_text": str(value.get("raw_text") or ""),
+        "finish_reason": value.get("finish_reason"),
+        "usage": _safe(value.get("usage")),
+        "widget": _safe(value.get("widget")),
+        "events": _safe(value.get("events")),
+        "tool_logs": _safe(value.get("tool_logs")),
     }
 
 
