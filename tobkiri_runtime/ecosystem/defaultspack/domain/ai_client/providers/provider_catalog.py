@@ -107,6 +107,20 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # LiteLLM Proxy returns the complete, deployment-specific inventory
+        # from its OpenAI-compatible /models endpoint. A single proxy can
+        # surface models from every upstream provider without copying them
+        # into this application.
+        "provider_name": "litellm-proxy",
+        "display_name": "LiteLLM Proxy",
+        "env_vars": ("LITELLM_API_KEY",),
+        "base_url_env_vars": ("LITELLM_BASE_URL",),
+        "default_base_url": "http://127.0.0.1:4000/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         "provider_name": "xai",
         "display_name": "xAI",
         "env_vars": ("XAI_API_KEY",),

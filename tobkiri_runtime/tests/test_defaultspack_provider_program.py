@@ -392,3 +392,16 @@ def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(m
     assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
     assert calls[-1] == ("POST", "predictions", {"version": "owner/second:version-b", "input": {"text": "new prompt"}})
     assert response["content"] == [{"type": "text", "text": "live output"}]
+
+
+def test_litellm_proxy_discovers_every_model_served_by_the_configured_gateway():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["litellm-proxy"]
+    provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+
+    assert spec["curated_models"] == []
+    assert provider._base_url == "http://127.0.0.1:4000/v1"
+    assert provider._remote_model_list_path == "/models"
