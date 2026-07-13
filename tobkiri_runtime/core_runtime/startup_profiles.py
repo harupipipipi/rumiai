@@ -56,6 +56,7 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_schedule_store_pack",
     "rumi_job_action_broker_pack",
     "rumi_scheduler_runtime_pack",
+    "rumi_scheduler_surface_pack",
     "rumi_connector_registry_service_pack",
     "rumi_connector_inbound_broker_pack",
     "rumi_connector_outbound_broker_pack",
