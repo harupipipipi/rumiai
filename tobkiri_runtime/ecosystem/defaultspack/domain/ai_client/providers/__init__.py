@@ -14,7 +14,11 @@ from ..api_key_store import (
     provider_named_api_keys,
     read_provider_api_key,
 )
-from ..provider_program import missing_program_provider_ids, provider_program_manifests
+from ..provider_program import (
+    local_openai_runtime_manifests,
+    missing_program_provider_ids,
+    provider_program_manifests,
+)
 from ..model_metadata_schema import (
     context_window_value,
     normalize_capability_map,
@@ -685,6 +689,8 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     # an API key enables the provider and its complete /models inventory.
     for provider_id, spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
         manifests.setdefault(provider_id, _openai_compatible_spec_manifest(spec))
+    for provider_id, manifest in local_openai_runtime_manifests().items():
+        manifests.setdefault(provider_id, manifest)
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

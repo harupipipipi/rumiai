@@ -97,6 +97,23 @@ PROVIDER_PROGRAM_RECORDS = (
 )
 
 
+# These runtimes expose an OpenAI-compatible served-model endpoint.  There is
+# deliberately no model list here: the server is authoritative for its loaded
+# inventory.  A user can override every endpoint through the listed env var.
+LOCAL_OPENAI_RUNTIME_CONNECTIONS = {
+    "vllm": ("VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
+    "llamacpp": ("LLAMACPP_BASE_URL", "http://127.0.0.1:8080/v1"),
+    "localai": ("LOCALAI_BASE_URL", "http://127.0.0.1:8080/v1"),
+    "huggingface-tgi": ("TGI_BASE_URL", "http://127.0.0.1:8080/v1"),
+    "jan": ("JAN_BASE_URL", "http://127.0.0.1:1337/v1"),
+    "llamafile": ("LLAMAFILE_BASE_URL", "http://127.0.0.1:8080/v1"),
+    "mlc-llm-server": ("MLC_LLM_BASE_URL", "http://127.0.0.1:8000/v1"),
+    "mlx-lm-server": ("MLX_LM_BASE_URL", "http://127.0.0.1:8080/v1"),
+    "sglang": ("SGLANG_BASE_URL", "http://127.0.0.1:30000/v1"),
+    "text-generation-webui": ("TEXT_GENERATION_WEBUI_BASE_URL", "http://127.0.0.1:5000/v1"),
+}
+
+
 def provider_program_manifests() -> Dict[str, Dict[str, Any]]:
     manifests: Dict[str, Dict[str, Any]] = {}
     for provider_id, display_name, family, inventory_strategy in PROVIDER_PROGRAM_RECORDS:
@@ -120,6 +137,29 @@ def provider_program_manifests() -> Dict[str, Dict[str, Any]]:
                 "family": family,
                 "inventory_strategy": inventory_strategy,
                 "connection_required": True,
+            },
+        }
+    return manifests
+
+
+def local_openai_runtime_manifests() -> Dict[str, Dict[str, Any]]:
+    program = provider_program_manifests()
+    manifests: Dict[str, Dict[str, Any]] = {}
+    for provider_id, (base_url_env, default_base_url) in LOCAL_OPENAI_RUNTIME_CONNECTIONS.items():
+        record = program[provider_id]
+        manifests[provider_id] = {
+            **record,
+            "adapter": "openai_compatible",
+            "credential_required": False,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "base_url_env": base_url_env,
+            "default_base_url": default_base_url,
+            "config": {
+                **dict(record["config"]),
+                "model_sync": "remote_merge",
+                "model_list_path": "/models",
+                "model_list_requires_auth": False,
             },
         }
     return manifests
