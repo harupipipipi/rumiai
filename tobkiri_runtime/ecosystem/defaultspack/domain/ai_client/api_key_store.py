@@ -18,6 +18,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
     "cerebras": ["CEREBRAS_API_KEY"],
     "cohere": ["COHERE_API_KEY"],
+    "cloudflare-workers-ai": ["CLOUDFLARE_API_TOKEN"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "deepinfra": ["DEEPINFRA_API_KEY"],
     "elevenlabs": ["ELEVENLABS_API_KEY"],

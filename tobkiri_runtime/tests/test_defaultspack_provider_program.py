@@ -521,6 +521,43 @@ def test_elevenlabs_discovers_the_key_visible_audio_models_and_invokes_tts(monke
     assert isinstance(detect_available_providers()["elevenlabs"], ElevenLabsProvider)
 
 
+def test_cloudflare_workers_ai_discovers_account_scoped_models_and_runs_text_generation(monkeypatch):
+    from domain.ai_client.providers.cloudflare_workers_ai_provider import CloudflareWorkersAIProvider
+
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-cloudflare-token")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "account-id")
+    CloudflareWorkersAIProvider._MODEL_INVENTORY_CACHE.clear()
+    provider = CloudflareWorkersAIProvider()
+    calls = []
+
+    def fake_request(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return {
+                "result": [
+                    {"id": "@cf/meta/llama", "name": "Llama", "task": {"name": "text-generation"}},
+                    {"id": "@cf/stability/image", "name": "Image", "task": {"name": "text-to-image"}},
+                    {"id": "@cf/baai/embed", "name": "Embed", "task": {"name": "text-embedding"}},
+                ],
+                "result_info": {"total_pages": 1},
+            }
+        return {"result": {"response": "live answer"}}
+
+    monkeypatch.setattr(provider, "_request_json", fake_request)
+    models = provider.list_models()
+    response = provider.complete("@cf/meta/llama", [{"role": "user", "content": "hello"}], [], {"max_tokens": 8})
+
+    assert calls[0] == ("GET", "/models/search?format=openrouter&page=1&per_page=100", None)
+    assert [model["type"] for model in models] == ["chat", "image_gen", "embedding"]
+    assert models[1]["capabilities"]["image_generation"] is True
+    assert calls[-1] == (
+        "POST",
+        "/run/@cf/meta/llama",
+        {"messages": [{"role": "user", "content": "hello"}], "max_tokens": 8},
+    )
+    assert response["content"] == [{"type": "text", "text": "live answer"}]
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 
