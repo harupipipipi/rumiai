@@ -42,6 +42,11 @@ selected database in SQLite `mode=ro`, performs no schema migration, and reads
 only the board, column, card, and bounded event rows needed for a caller-
 selected one-shot export.
 
+Unused legacy Kanban models, projections, task-board import helpers, and agent
+links have also been removed. The remaining defaultspack Kanban modules are
+the HTTP facade, migration export/reader, prompt-note compatibility helper, and
+explicit no-write diagnostics.
+
 The old UI/client removal is now complete, so `rumi_kanban_surface_pack` is in
 the Wave 9 default profile set. Its route remains isolated and read-only; pack
 removal removes the route without changing Kanban state ownership.
