@@ -94,6 +94,19 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Qianfan exposes the models enabled for the authenticated account at
+        # GET /v2/models. Keep this live inventory separate from a product
+        # snapshot: it includes both platform and account custom models.
+        "provider_name": "baidu-qianfan",
+        "display_name": "Baidu Qianfan / ERNIE",
+        "env_vars": ("QIANFAN_API_KEY",),
+        "base_url_env_vars": ("QIANFAN_BASE_URL",),
+        "default_base_url": "https://qianfan.baidubce.com/v2",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         "provider_name": "xai",
         "display_name": "xAI",
         "env_vars": ("XAI_API_KEY",),

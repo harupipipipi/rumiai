@@ -14,6 +14,7 @@ from .provider_program import provider_program_manifests
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
     "avian": ["AVIAN_API_KEY"],
+    "baidu-qianfan": ["QIANFAN_API_KEY"],
     "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
     "cerebras": ["CEREBRAS_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],

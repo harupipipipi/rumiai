@@ -146,6 +146,48 @@ def test_huggingface_inference_uses_its_live_models_endpoint_without_a_checked_i
     assert all(model["provider_id"] == "huggingface-inference" for model in models)
 
 
+def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatch):
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES, OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["baidu-qianfan"]
+    provider = OPENAI_COMPATIBLE_PROVIDER_CLASSES["baidu-qianfan"].from_manifest(
+        _openai_compatible_spec_manifest(spec)
+    )
+    provider._api_key = "qianfan-key"
+    assert spec["curated_models"] == []
+    assert provider.BASE_URL == "https://qianfan.baidubce.com/v2"
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"object":"list","data":[{"id":"account-custom-model","owned_by":"me"}]}'
+
+    seen = {}
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    models = provider.list_models()
+
+    assert seen == {
+        "url": "https://qianfan.baidubce.com/v2/models",
+        "authorization": "Bearer qianfan-key",
+    }
+    assert [model["model_id"] for model in models] == ["account-custom-model"]
+    assert models[0]["metadata"]["source"] == "remote_models_endpoint"
+
+
 def test_github_models_uses_its_account_catalog_and_openai_compatible_inference_endpoint():
     from domain.ai_client.providers import _openai_compatible_spec_manifest
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
