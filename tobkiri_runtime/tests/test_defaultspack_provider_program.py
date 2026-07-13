@@ -191,6 +191,65 @@ def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatc
     assert models[0]["capabilities"]["embeddings"] is True
 
 
+def test_openai_compatible_inventory_accepts_common_catalog_envelopes_and_same_origin_next_links(monkeypatch):
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        provider_id="gateway",
+        api_key="gateway-key",
+        base_url="https://gateway.example/v1",
+        known_models=[],
+        remote_model_discovery=True,
+    )
+    responses = {
+        "https://gateway.example/v1/models": {
+            "result": {
+                "items": [
+                    {"name": "account-chat", "features": ["chat-completions", "function-calling"]},
+                    {"slug": "account-image", "task": "image-generation", "capabilities": ["text-to-image"]},
+                ]
+            },
+            "links": {"next": "https://gateway.example/v1/models?page=2"},
+        },
+        "https://gateway.example/v1/models?page=2": {
+            "models": ["account-embed"],
+            "next_page_token": "",
+        },
+    }
+    requested = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            import json
+
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        requested.append(request.full_url)
+        return Response(responses[request.full_url])
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+
+    models = provider.list_models()
+
+    assert requested == ["https://gateway.example/v1/models", "https://gateway.example/v1/models?page=2"]
+    assert [model["model_id"] for model in models] == ["account-chat", "account-image", "account-embed"]
+    assert models[0]["capabilities"]["tool_calling"] is True
+    assert models[1]["type"] == "image_gen"
+    assert models[1]["capabilities"]["image_generation"] is True
+    assert models[2]["type"] == "embedding"
+
+
 def test_github_models_uses_its_account_catalog_and_openai_compatible_inference_endpoint():
     from domain.ai_client.providers import _openai_compatible_spec_manifest
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider

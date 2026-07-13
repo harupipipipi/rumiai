@@ -541,6 +541,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
         # every account-visible page instead of silently exposing page one.
         for _ in range(self._remote_model_max_pages()):
             request_url = self._remote_model_page_url(url, cursor)
+            if not request_url:
+                break
             req = urllib.request.Request(request_url, headers=self._headers(content_type=""), method="GET")
             try:
                 with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout_seconds) as resp:
@@ -568,6 +570,21 @@ class OpenAICompatibleProvider(OpenAIProvider):
     def _remote_model_page_url(self, url: str, cursor: str) -> str:
         if not cursor:
             return url
+        # A number of catalog APIs return an opaque cursor, while others
+        # return the complete URL for the next page.  Both are inventory
+        # pagination, not model ids.  Follow absolute/relative links only on
+        # the configured endpoint origin so a compromised catalog response
+        # cannot redirect an authenticated discovery request elsewhere.
+        cursor_url = urllib.parse.urlsplit(cursor)
+        base_url = urllib.parse.urlsplit(url)
+        if cursor_url.scheme and cursor_url.netloc:
+            if (cursor_url.scheme, cursor_url.netloc) == (base_url.scheme, base_url.netloc):
+                return cursor
+            return ""
+        if cursor.startswith("/"):
+            return urllib.parse.urlunsplit(
+                (base_url.scheme, base_url.netloc, cursor_url.path, cursor_url.query, cursor_url.fragment)
+            )
         parameter = str(self._remote_model_pagination.get("cursor_param") or "after").strip() or "after"
         parsed = urllib.parse.urlsplit(url)
         query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -577,28 +594,77 @@ class OpenAICompatibleProvider(OpenAIProvider):
         )
 
     def _remote_models_page(self, payload: Any) -> tuple[List[Dict[str, Any]], str]:
-        # Some official account catalogs are a bare JSON array instead of
-        # OpenAI's {data: [...]} shape.  They are still complete inventories.
-        if isinstance(payload, list):
-            return [dict(model) for model in payload if isinstance(model, dict)], ""
+        # Official catalog APIs use several equivalent envelopes.  Normalize
+        # the envelope here rather than adding a provider-owned model file for
+        # each vendor.  A bare list and string-only ids are also valid lists.
+        raw_models = self._remote_model_records(payload)
         if not isinstance(payload, dict):
-            return [], ""
-        raw_models = payload.get("data")
-        if not isinstance(raw_models, list):
-            raw_models = payload.get("models")
-        models = [dict(model) for model in raw_models or [] if isinstance(model, dict)]
+            return raw_models, ""
+        models = raw_models
         pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        links = payload.get("links") if isinstance(payload.get("links"), dict) else {}
+        page = payload.get("page") if isinstance(payload.get("page"), dict) else {}
         configured_field = str(self._remote_model_pagination.get("next_cursor_field") or "").strip()
         candidates = [
             payload.get(configured_field) if configured_field else None,
             payload.get("next_cursor"),
+            payload.get("next_page_token"),
+            payload.get("nextPageToken"),
+            payload.get("next_page"),
+            payload.get("nextPage"),
+            payload.get("next_page_url"),
             payload.get("next"),
             pagination.get(configured_field) if configured_field else None,
             pagination.get("next_cursor"),
+            pagination.get("next_page_token"),
+            pagination.get("nextPageToken"),
+            pagination.get("next_page"),
+            pagination.get("next_page_url"),
             pagination.get("next"),
+            links.get("next"),
+            page.get("next"),
         ]
         next_cursor = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
         return models, next_cursor
+
+    @staticmethod
+    def _remote_model_records(payload: Any) -> List[Dict[str, Any]]:
+        def records(value: Any) -> List[Dict[str, Any]]:
+            if isinstance(value, list):
+                normalized: List[Dict[str, Any]] = []
+                for item in value:
+                    if isinstance(item, dict):
+                        normalized.append(dict(item))
+                    elif isinstance(item, str) and item.strip():
+                        normalized.append({"id": item.strip()})
+                return normalized
+            return []
+
+        direct = records(payload)
+        if direct or not isinstance(payload, dict):
+            return direct
+        # These are response envelope names, not provider-specific model
+        # snapshots.  Keep the extraction shallow so fields within an actual
+        # model record are never mistaken for a second inventory.
+        for name in ("data", "models", "results", "items", "model_list", "modelList"):
+            value = payload.get(name)
+            direct = records(value)
+            if direct:
+                return direct
+            if isinstance(value, dict):
+                for nested_name in ("data", "models", "results", "items"):
+                    nested = records(value.get(nested_name))
+                    if nested:
+                        return nested
+        for name in ("result", "response"):
+            container = payload.get(name)
+            if not isinstance(container, dict):
+                continue
+            for nested_name in ("data", "models", "results", "items"):
+                nested = records(container.get(nested_name))
+                if nested:
+                    return nested
+        return []
 
     def _normalize_remote_models(self, raw_models: Any) -> List[Dict[str, Any]]:
         if not isinstance(raw_models, list):
@@ -613,7 +679,16 @@ class OpenAICompatibleProvider(OpenAIProvider):
     def _normalize_remote_model(self, raw: Any) -> Dict[str, Any] | None:
         if not isinstance(raw, dict):
             return None
-        model_id = str(raw.get("id") or raw.get("model") or "").strip()
+        model_id = str(
+            raw.get("id")
+            or raw.get("model_id")
+            or raw.get("modelId")
+            or raw.get("model")
+            or raw.get("slug")
+            or raw.get("identifier")
+            or raw.get("name")
+            or ""
+        ).strip()
         if not model_id:
             return None
         qualified_model_id = model_id if model_id.startswith(f"{self.provider_id}/") else f"{self.provider_id}/{model_id}"
@@ -662,7 +737,14 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
     @staticmethod
     def _remote_model_type(model_id: str, raw: Optional[Dict[str, Any]] = None) -> str:
-        declared = str((raw or {}).get("type") or (raw or {}).get("model_type") or "").strip().lower()
+        declared = str(
+            (raw or {}).get("type")
+            or (raw or {}).get("model_type")
+            or (raw or {}).get("modelType")
+            or (raw or {}).get("task")
+            or (raw or {}).get("task_type")
+            or ""
+        ).strip().lower()
         normalized_declared = declared.replace("-", "_").replace(" ", "_")
         declared_types = {
             "chat": "chat",
@@ -742,27 +824,81 @@ class OpenAICompatibleProvider(OpenAIProvider):
             for key, value in normalized.items():
                 if key in capabilities:
                     capabilities[key] = value
+        elif isinstance(reported, (list, tuple, set, str)):
+            reported_values = [reported] if isinstance(reported, str) else reported
+            for value in reported_values:
+                canonical = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+                aliases = {
+                    "completion": "chat",
+                    "chat_completions": "chat",
+                    "function_calling": "tool_calling",
+                    "tools": "tool_calling",
+                    "embeddings": "embeddings",
+                    "image_generation": "image_generation",
+                    "text_to_image": "image_generation",
+                    "text_to_video": "video_generation",
+                    "text_to_speech": "tts",
+                    "speech_to_text": "transcription",
+                    "audio_transcription": "transcription",
+                    "vision": "image_input",
+                }
+                canonical = aliases.get(canonical, canonical)
+                if canonical in capabilities:
+                    capabilities[canonical] = True
         endpoints = {
             str(item).strip().lower()
-            for item in ((raw or {}).get("endpoints") or [])
+            for item in cls._remote_feature_values((raw or {}).get("endpoints"))
             if str(item).strip()
         }
         features = {
             str(item).strip().lower()
-            for item in ((raw or {}).get("features") or [])
+            for item in cls._remote_feature_values((raw or {}).get("features"))
             if str(item).strip()
         }
-        if {"chat", "chat-completions", "completions"} & (endpoints | features):
+        tasks = {
+            str(item).strip().lower()
+            for field in ("tasks", "supported_tasks", "modalities", "input_modalities", "output_modalities")
+            for item in cls._remote_feature_values((raw or {}).get(field))
+            if str(item).strip()
+        }
+        feature_set = endpoints | features | tasks
+        if {"chat", "chat-completions", "chat_completions", "completions", "text-generation", "text_generation"} & feature_set:
             capabilities.update({"chat": True, "text_input": True, "text_output": True})
-        if any("embed" in value for value in endpoints | features):
+        if any("embed" in value for value in feature_set):
             capabilities["embeddings"] = True
-        if any("rerank" in value for value in endpoints | features):
+        if any("rerank" in value for value in feature_set):
             capabilities["rerank"] = True
+        if any(value in {"image", "image_generation", "text_to_image", "images/generations"} for value in feature_set):
+            capabilities["image_generation"] = True
+        if any(value in {"video", "video_generation", "text_to_video"} for value in feature_set):
+            capabilities["video_generation"] = True
+        if any(value in {"tts", "speech", "text_to_speech"} for value in feature_set):
+            capabilities["tts"] = True
+        if any(value in {"transcription", "stt", "speech_to_text", "audio_transcription"} for value in feature_set):
+            capabilities["transcription"] = True
+        if {"tools", "tool_calls", "tool-calling", "tool_calling", "function-calling", "function_calling"} & feature_set:
+            capabilities["tool_calling"] = True
         if capabilities.get("tool_calling"):
             capabilities["tool_calls"] = True
         if capabilities.get("image_input"):
             capabilities["vision"] = True
         return capabilities
+
+    @staticmethod
+    def _remote_feature_values(value: Any) -> List[Any]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        if isinstance(value, dict):
+            values: List[Any] = []
+            for key, enabled in value.items():
+                if isinstance(enabled, dict):
+                    enabled = enabled.get("supported", enabled.get("enabled", True))
+                if enabled:
+                    values.append(key)
+            return values
+        return []
 
     def _headers(self, content_type="application/json"):
         headers = dict(self._extra_headers)
