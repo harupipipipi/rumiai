@@ -813,6 +813,22 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("values", settings)
         self.assertIn("models", settings["values"])
 
+    def test_lightweight_settings_skip_expensive_runtime_discovery(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = FrontendRegistry(pack_root=Path(tmpdir))
+            with patch(
+                "domain.frontend.registry.ModelRuntimeSettingsService.default_model_settings",
+                side_effect=AssertionError("bootstrap settings must not resolve model packs"),
+            ), patch(
+                "domain.frontend.registry.provider_key_status",
+                side_effect=AssertionError("bootstrap settings must not load provider credentials"),
+            ):
+                settings = registry.get_settings(lightweight=True)
+
+        self.assertEqual(settings["values"]["models"]["preferred_model"], "stub/default")
+
     def test_lightweight_catalog_does_not_hydrate_model_catalog(self):
         from domain.frontend.registry import FrontendRegistry
 
