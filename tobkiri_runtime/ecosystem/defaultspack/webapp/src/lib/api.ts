@@ -2958,9 +2958,10 @@ export const api = {
     return request<UICatalog>("/api/ui/catalog");
   },
 
-  uiSettings() {
+  uiSettings(options: { full?: boolean } = {}) {
+    const query = options.full ? "?full=true" : "";
     return request<{ sections: SettingsSection[]; values: Record<string, Record<string, unknown>> }>(
-      "/api/ui/settings",
+      `/api/ui/settings${query}`,
       { cache: "no-store" },
     );
   },
