@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'authority_approval_screen.dart';
 import 'models.dart';
 import 'rumi_api_client.dart';
 import 'secure_settings_store.dart';
@@ -280,6 +281,17 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
             onPressed: _busy ? null : () => _refresh(),
+          ),
+          IconButton(
+            tooltip: 'Authority approvals',
+            icon: const Icon(Icons.shield_outlined),
+            onPressed: _busy
+                ? null
+                : () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AuthorityApprovalScreen(),
+                      ),
+                    ),
           ),
           IconButton(
             tooltip: 'Settings',
