@@ -60,14 +60,21 @@ class MediaHostService:
             if limit:
                 normalized_arguments["duration_ms"] = duration
         caller_context = dict(context or {})
+        payload_pack_id = normalized_arguments.pop("_contract_consumer_pack_id", "")
+        payload_function_id = normalized_arguments.pop(
+            "_contract_consumer_function_id",
+            normalized_arguments.pop("_source_function_id", ""),
+        )
         caller_pack_id = str(
             caller_context.get("_contract_consumer_pack_id")
             or caller_context.get("caller_pack_id")
+            or payload_pack_id
             or ""
         ).strip()
         caller_function_id = str(
             caller_context.get("_contract_consumer_function_id")
             or caller_context.get("caller_function_id")
+            or payload_function_id
             or ""
         ).strip()
         if not caller_pack_id or not caller_function_id:

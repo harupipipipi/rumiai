@@ -36,6 +36,13 @@ class ClipboardHostService:
                 "error_type": "client_authority_material_forbidden",
                 "forbidden_arguments": forbidden,
             }
+        caller_pack_id_from_payload = normalized_arguments.pop(
+            "_contract_consumer_pack_id", ""
+        )
+        caller_function_id_from_payload = normalized_arguments.pop(
+            "_contract_consumer_function_id",
+            normalized_arguments.pop("_source_function_id", ""),
+        )
         if self.access == "read" and normalized_arguments:
             return {
                 "status": "denied",
@@ -62,11 +69,13 @@ class ClipboardHostService:
         caller_pack_id = str(
             caller_context.get("_contract_consumer_pack_id")
             or caller_context.get("caller_pack_id")
+            or caller_pack_id_from_payload
             or ""
         ).strip()
         caller_function_id = str(
             caller_context.get("_contract_consumer_function_id")
             or caller_context.get("caller_function_id")
+            or caller_function_id_from_payload
             or ""
         ).strip()
         if not caller_pack_id or not caller_function_id:

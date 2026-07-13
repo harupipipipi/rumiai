@@ -39,8 +39,8 @@
     ]
   },
   "entrypoints": [
-    {"id": "browser-host-observe", "contract_id": "rumi.resource.browser.host.v1", "loader": "python", "module": "ecosystem.rumi_browser_host_service_pack.runtime.service", "symbol": "create_browser_observer", "artifact_hash": "sha256:e14ff4f96c05413a66514c3ea316c4058e83bf912a1182e9d66f38917f6cd3bb"},
-    {"id": "browser-host-control", "contract_id": "rumi.action.browser.host.v1", "loader": "python", "module": "ecosystem.rumi_browser_host_service_pack.runtime.service", "symbol": "create_browser_control", "artifact_hash": "sha256:e14ff4f96c05413a66514c3ea316c4058e83bf912a1182e9d66f38917f6cd3bb"}
+    {"id": "browser-host-observe", "contract_id": "rumi.resource.browser.host.v1", "loader": "python", "module": "ecosystem.rumi_browser_host_service_pack.runtime.service", "symbol": "create_browser_observer", "artifact_hash": "sha256:853d54f750a4110a342ab1cb8becec118522743a7097bccb847bc4c65ab28c03"},
+    {"id": "browser-host-control", "contract_id": "rumi.action.browser.host.v1", "loader": "python", "module": "ecosystem.rumi_browser_host_service_pack.runtime.service", "symbol": "create_browser_control", "artifact_hash": "sha256:853d54f750a4110a342ab1cb8becec118522743a7097bccb847bc4c65ab28c03"}
   ],
   "resources": [],
   "storage": [
@@ -52,7 +52,7 @@
     {"capability": "browser.host.control", "access": "control", "approval_required": true},
     {"capability": "host.authority.consume", "access": "control", "approval_required": false}
   ],
-  "provenance": {"content_hash": "sha256:e14ff4f96c05413a66514c3ea316c4058e83bf912a1182e9d66f38917f6cd3bb", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:853d54f750a4110a342ab1cb8becec118522743a7097bccb847bc4c65ab28c03", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {
     "from": ["rumi_default_tools_pack.domain.tool.browser_computer", "defaultspack.domain.tool.browser_artifact_tools"],
     "compatibility_aliases": ["browser_computer", "browser_use"],
