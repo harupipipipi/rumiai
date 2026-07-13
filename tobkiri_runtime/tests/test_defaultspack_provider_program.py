@@ -414,6 +414,24 @@ def test_external_provider_catalog_never_uses_curated_model_fallbacks(monkeypatc
     assert providers.get_best_model_for_provider("openrouter") is None
 
 
+def test_external_provider_catalog_ignores_pack_model_manifests(monkeypatch):
+    from domain.ai_client import providers
+
+    monkeypatch.setattr(providers, "_load_model_manifests", lambda _provider_id: [{"model_id": "stale"}])
+    monkeypatch.setattr(
+        providers,
+        "model_manifests_from_provider_components",
+        lambda _provider_id: [{"model_id": "also-stale"}],
+    )
+    monkeypatch.setattr(
+        providers,
+        "_load_known_models_from_entry",
+        lambda _entrypoint: [{"model_id": "still-stale"}],
+    )
+
+    assert providers._load_models_for_provider({"provider_id": "openrouter", "entrypoint": "ignored"}) == []
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider
@@ -479,6 +497,30 @@ def test_native_openai_models_endpoint_replaces_its_static_fallback(monkeypatch)
     assert [model["type"] for model in models] == ["chat", "embedding", "image_gen"]
     assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
     assert OpenAIProvider.KNOWN_MODELS == []
+
+
+def test_gitlawb_gateway_uses_live_models_without_a_client_side_allowlist(monkeypatch):
+    from domain.ai_client.providers.gitlawb_opengateway_provider import GitlawbOpengatewayProvider
+
+    monkeypatch.setenv("GITLAWB_OPENGATEWAY_API_KEY", "test-gateway-token")
+    provider = GitlawbOpengatewayProvider()
+    monkeypatch.setattr(
+        provider,
+        "_remote_discovered_models",
+        lambda: [{
+            "id": "gitlawb-opengateway/account-visible-model",
+            "model_id": "account-visible-model",
+            "provider_id": "gitlawb-opengateway",
+            "provider": "gitlawb-opengateway",
+            "type": "chat",
+            "metadata": {"source": "remote_models_endpoint"},
+        }],
+    )
+
+    models = provider.list_models()
+
+    assert [model["model_id"] for model in models] == ["account-visible-model"]
+    provider._assert_supported_model("newly-provisioned-model")
 
 
 def test_google_models_endpoint_paginates_and_replaces_the_curated_fallback(monkeypatch):

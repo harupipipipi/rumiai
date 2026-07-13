@@ -1317,14 +1317,14 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
             seen[key] = item
             models.append(item)
 
-    _append(_load_model_manifests(provider_id))
-    _append(model_manifests_from_provider_components(provider_id))
-    _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
     # External provider inventories must never fall back to a checked-in
-    # release list: it is necessarily incomplete and can expose retired or
-    # unauthorized models.  Only the two internal pseudo-providers have no
-    # remote catalog by design.
+    # release list (including extension/pack model manifests): it is
+    # necessarily incomplete and can expose retired or unauthorized models.
+    # Only the two internal pseudo-providers have no remote catalog by design.
     if provider_id in {"stub", "rumi"}:
+        _append(_load_model_manifests(provider_id))
+        _append(model_manifests_from_provider_components(provider_id))
+        _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
         _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
     return models
 
