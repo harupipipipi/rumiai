@@ -758,7 +758,11 @@ def _openai_compatible_spec_manifest(spec: Dict[str, Any]) -> Dict[str, Any]:
         "base_url_env": list(spec.get("base_url_env_vars") or []),
         "default_base_url": str(spec.get("default_base_url") or ""),
         "headers": dict(spec.get("headers") or {}),
-        "models": [dict(model) for model in spec.get("curated_models", []) if isinstance(model, dict)],
+        # An OpenAI-compatible connection must expose the inventory returned
+        # by its authenticated server, never a hand-maintained provider/model
+        # snapshot.  The adapter handles /models (and its account-scoped cache)
+        # after the user supplies a connection.
+        "models": [],
         "config": {
             "model_sync": "remote_merge",
             "model_list_path": str(spec.get("remote_model_list_path") or "/models"),

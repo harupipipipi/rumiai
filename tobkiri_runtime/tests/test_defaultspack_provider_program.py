@@ -224,6 +224,17 @@ def test_openai_compatible_provider_specs_do_not_freeze_glm_dashscope_or_silicon
         assert provider._remote_model_list_path == "/models"
 
 
+def test_openai_compatible_manifest_never_exposes_a_checked_in_model_snapshot():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    assert OPENAI_COMPATIBLE_PROVIDER_SPECS
+    assert all(
+        _openai_compatible_spec_manifest(spec)["models"] == []
+        for spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.values()
+    )
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider
