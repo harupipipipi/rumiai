@@ -405,3 +405,28 @@ def test_litellm_proxy_discovers_every_model_served_by_the_configured_gateway():
     assert spec["curated_models"] == []
     assert provider._base_url == "http://127.0.0.1:4000/v1"
     assert provider._remote_model_list_path == "/models"
+
+
+def test_saved_litellm_connection_endpoint_overrides_the_builtin_default(monkeypatch):
+    import domain.ai_client.providers as providers
+
+    monkeypatch.setattr(providers, "list_custom_providers", lambda: [])
+    monkeypatch.setattr(
+        providers,
+        "provider_named_api_keys",
+        lambda provider_id="": [
+            {
+                "provider_id": "litellm-proxy",
+                "api_id": "team",
+                "configured": True,
+                "kind": "llm",
+                "base_url": "https://gateway.example/v1",
+            }
+        ] if provider_id in {"", "litellm-proxy"} else [],
+    )
+
+    manifest = providers._provider_manifest_map()["litellm-proxy"]
+
+    assert manifest["adapter"] == "openai_compatible"
+    assert manifest["default_base_url"] == "https://gateway.example/v1"
+    assert manifest["models"] == []

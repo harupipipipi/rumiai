@@ -766,10 +766,17 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     for provider_id, manifest in _custom_openai_provider_manifests().items():
         existing = manifests.get(provider_id, {})
         existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
-        # A program record is an honest "connection required" placeholder.
-        # Once the user explicitly supplies an OpenAI-compatible endpoint for
-        # that provider, promote the saved connection to the executable adapter.
-        if existing_config.get("provider_program") and manifest.get("default_base_url"):
+        # A saved endpoint is an explicit user choice.  It must override both
+        # a program placeholder and a built-in OpenAI-compatible default so
+        # account/project/proxy-specific model inventories are fetched from
+        # the endpoint the user actually configured.
+        if (
+            manifest.get("default_base_url")
+            and (
+                existing_config.get("provider_program")
+                or str(existing.get("adapter") or "") == "openai_compatible"
+            )
+        ):
             manifests[provider_id] = manifest
         else:
             manifests.setdefault(provider_id, manifest)
