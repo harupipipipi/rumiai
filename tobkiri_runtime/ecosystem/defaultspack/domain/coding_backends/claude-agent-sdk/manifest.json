@@ -1,0 +1,41 @@
+{
+  "id": "claude-agent-sdk",
+  "aliases": ["claude-code"],
+  "category": "coding_backends",
+  "kind": "coding_backend",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Claude Agent SDK",
+  "description": "Structured Claude Agent SDK coding backend with explicit settings and Authority-controlled tools.",
+  "entrypoints": {
+    "adapter": "blocks/coding/claude_agent_sdk.py",
+    "schema": "schema.json"
+  },
+  "security": {
+    "read_only_default": true,
+    "setting_sources_default": [],
+    "requires_workspace_root": true,
+    "sensitive_tools_require_authority": true,
+    "bypass_permissions_default": false,
+    "strict_mcp_config": true
+  },
+  "capabilities": {
+    "structured_stream": true,
+    "sessions": true,
+    "resume": true,
+    "fork": true,
+    "hooks": true,
+    "subagent_grouping": true,
+    "mcp": true,
+    "runtime_model_inventory": true
+  },
+  "policy": {
+    "do_not_treat_as_llm_provider": true,
+    "anthropic_api_provider_independent": true,
+    "official_product_claim": false,
+    "secrets_or_user_content_in_diagnostics": false
+  },
+  "official_source": "https://code.claude.com/docs/en/agent-sdk/overview",
+  "verified_at": "2026-07-13",
+  "source_pack_id": "defaultspack"
+}
