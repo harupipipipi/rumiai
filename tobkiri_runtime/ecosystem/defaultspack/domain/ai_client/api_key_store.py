@@ -31,6 +31,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "hyperbolic": ["HYPERBOLIC_API_KEY"],
     "huggingface-inference": ["HF_TOKEN", "HUGGINGFACE_API_KEY"],
     "inference-net": ["INFERENCE_NET_API_KEY", "INFERENCENET_API_KEY"],
+    "jina-ai": ["JINA_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
     "gitlawb-opengateway": ["GITLAWB_OPENGATEWAY_API_KEY"],
     "llama_cpp": ["LLAMACPP_API_KEY"],

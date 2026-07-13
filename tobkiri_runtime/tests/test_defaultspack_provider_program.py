@@ -146,6 +146,50 @@ def test_huggingface_inference_uses_its_live_models_endpoint_without_a_checked_i
     assert all(model["provider_id"] == "huggingface-inference" for model in models)
 
 
+def test_jina_discovers_its_live_models_without_a_checked_in_snapshot(monkeypatch):
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["jina-ai"]
+    provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+    provider._api_key = "jina-key"
+    assert spec["curated_models"] == []
+    assert provider._base_url == "https://api.jina.ai/v1"
+    assert provider._remote_model_list_path == "/models"
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return (
+                b'{"data":[{"id":"jina-embeddings-v4","name":"Jina Embeddings v4",'
+                b'"type":"embedding","input_modalities":["text"],'
+                b'"output_modalities":["embeddings"],"context_length":32768}]}'
+            )
+
+    seen = {}
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    models = provider.list_models()
+
+    assert seen == {"url": "https://api.jina.ai/v1/models", "authorization": "Bearer jina-key"}
+    assert [model["model_id"] for model in models] == ["jina-embeddings-v4"]
+    assert models[0]["type"] == "embedding"
+    assert models[0]["capabilities"]["embeddings"] is True
+    assert models[0]["metadata"]["source"] == "remote_models_endpoint"
+
+
 def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatch):
     from domain.ai_client.providers import _openai_compatible_spec_manifest
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider

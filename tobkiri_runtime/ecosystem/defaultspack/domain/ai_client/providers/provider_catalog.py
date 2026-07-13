@@ -94,6 +94,19 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Jina serves its account-visible model list from /v1/models and its
+        # embedding/chat APIs use the same OpenAI-compatible contract.  Keep
+        # this live: a Jina model release must appear without an app update.
+        "provider_name": "jina-ai",
+        "display_name": "Jina AI",
+        "env_vars": ("JINA_API_KEY",),
+        "base_url_env_vars": ("JINA_BASE_URL",),
+        "default_base_url": "https://api.jina.ai/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         # Qianfan exposes the models enabled for the authenticated account at
         # GET /v2/models. Keep this live inventory separate from a product
         # snapshot: it includes both platform and account custom models.
