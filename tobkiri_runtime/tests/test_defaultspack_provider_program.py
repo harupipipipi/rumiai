@@ -193,3 +193,27 @@ def test_openai_spec_uses_live_models_endpoint_without_a_checked_in_model_list()
     provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
     assert provider._base_url == "https://api.openai.com/v1"
     assert provider._remote_model_list_path == "/models"
+
+
+def test_google_models_endpoint_paginates_and_replaces_the_curated_fallback(monkeypatch):
+    from domain.ai_client.client import AIClient
+    from domain.ai_client.providers.google_provider import GoogleProvider
+
+    pages = {
+        "": {
+            "models": [{"name": "models/gemini-live-a", "displayName": "Gemini Live A", "supportedGenerationMethods": ["generateContent"]}],
+            "nextPageToken": "page-two",
+        },
+        "page-two": {
+            "models": [{"name": "models/gemini-live-b", "displayName": "Gemini Live B", "supportedGenerationMethods": ["embedContent"]}],
+        },
+    }
+    monkeypatch.setattr(GoogleProvider, "_fetch_native_models_page", lambda self, token="": pages[token])
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-token")
+    GoogleProvider._MODEL_INVENTORY_CACHE.clear()
+    AIClient._instance = None
+
+    models = AIClient().list_models(provider="google")
+
+    assert [model["model_id"] for model in models] == ["gemini-live-a", "gemini-live-b"]
+    assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
