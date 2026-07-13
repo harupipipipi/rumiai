@@ -1,0 +1,1 @@
+"""Connector registry service pack."""

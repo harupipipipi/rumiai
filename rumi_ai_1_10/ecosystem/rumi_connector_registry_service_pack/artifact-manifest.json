@@ -1,0 +1,1 @@
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/registry.py","sha256":"77ae96f0f2b6b996ae63069535b0f14f597da9389685b4fa3fcba3463087cd79","role":"runtime"}]}
