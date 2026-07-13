@@ -30,6 +30,12 @@ Those public IDs remain only until a selected task-board adapter exposes their
 contract-native replacement; they must not silently recreate state in the
 defaultspack namespace.
 
+The defaultspack React workspace no longer imports Kanban components, resources,
+or `/api/kanban` client methods. A legacy Kanban tab is now a finite navigation
+shim to `/kanban`; the selected `rumi_kanban_surface_pack` owns the removable
+isolated UI projection. The old component tree and its direct API test were
+removed rather than retained as a hidden fallback.
+
 The shim cutover must occur in this order:
 
 1. Export a caller-selected old board through a migration-only entrypoint.

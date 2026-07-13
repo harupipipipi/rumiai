@@ -15,7 +15,6 @@ import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
-import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
@@ -1420,45 +1419,6 @@ function buildChatItems(conversations: Conversation[]): ChatItem[] {
     .map(build);
 }
 
-function visitChatItems(items: ChatItem[], visitor: (chat: ChatItem) => void) {
-  for (const item of items) {
-    visitor(item);
-    visitChatItems(item.children ?? [], visitor);
-  }
-}
-
-function kanbanConversationOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; groupId?: string | null }> {
-  const options: Array<{ id: string; title: string; groupId?: string | null }> = [];
-  visitChatItems(chatItems, (chat) => {
-    options.push({
-      id: chat.id,
-      title: chat.title,
-      groupId: cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId),
-    });
-  });
-  return options;
-}
-
-function kanbanGroupOptions(chatItems: ChatItem[]): Array<{ id: string; title: string; description?: string | null }> {
-  const groups = new Map<string, { id: string; title: string; count: number }>();
-  visitChatItems(chatItems, (chat) => {
-    const groupId = cleanOptionalString(chat.metadata?.group_id ?? chat.metadata?.groupId);
-    if (!groupId) return;
-    const groupTitle = cleanOptionalString(chat.metadata?.group_title ?? chat.metadata?.groupTitle) ?? groupId;
-    const existing = groups.get(groupId);
-    if (existing) {
-      existing.count += 1;
-      return;
-    }
-    groups.set(groupId, { id: groupId, title: groupTitle, count: 1 });
-  });
-  return [...groups.values()].map((group) => ({
-    id: group.id,
-    title: group.title,
-    description: `${group.count} chats`,
-  }));
-}
-
 function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
   if (typeof message.content === "string") {
     return [{ type: "text", text: message.content }];
@@ -2584,8 +2544,6 @@ function ChatApp() {
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
-  const kanbanChatOptions = useMemo(() => kanbanConversationOptions(chatItems), [chatItems]);
-  const kanbanGroups = useMemo(() => kanbanGroupOptions(chatItems), [chatItems]);
   const recentSpotlightResults = useMemo(
     () => conversations
       .filter((conversation) => conversationMatchesSpotlightFilter(conversation, spotlightFilter))
@@ -6028,26 +5986,11 @@ function ChatApp() {
     handleWorkspaceTabCreate("calendar");
   };
 
-  const openKanbanScope = (scope: KanbanBoardScope = { type: "global", id: "default" }, label = "All Rumi Runs") => {
-    const existingKanbanTab = workspaceTabs.find((tab) => tab.kind === "kanban");
-    if (existingKanbanTab) {
-      const updatedTab = {
-        ...existingKanbanTab,
-        title: label ? `Kanban: ${label}` : "Kanban",
-        kanbanScope: scope,
-        kanbanScopeLabel: label,
-      };
-      setWorkspaceTabs((current) => current.map((tab) => tab.id === existingKanbanTab.id ? updatedTab : tab));
-      activateWorkspaceTab(updatedTab);
-      return;
-    }
-    const tab = createWorkspaceTab("kanban", {
-      title: label ? `Kanban: ${label}` : "Kanban",
-      kanbanScope: scope,
-      kanbanScopeLabel: label,
-    });
-    setWorkspaceTabs((current) => [...current, tab]);
-    activateWorkspaceTab(tab);
+  const openKanbanScope = (
+    _scope: KanbanBoardScope = { type: "global", id: "default" },
+    _label = "All Rumi Runs",
+  ) => {
+    window.location.assign("/kanban");
   };
 
   const handleKanbanModeToggle = () => {
@@ -6061,17 +6004,6 @@ function ChatApp() {
       return;
     }
     handleWorkspaceTabCreate("desktops");
-  };
-
-  const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
-    setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
-      ? {
-          ...tab,
-          title: label ? `Kanban: ${label}` : "Kanban",
-          kanbanScope: scope,
-          kanbanScopeLabel: label ?? null,
-        }
-      : tab));
   };
 
   const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
@@ -6297,26 +6229,16 @@ function ChatApp() {
             {isDesktopsWorkspace ? (
               <DesktopMonitorWorkspace />
             ) : isKanbanMode ? (
-              <div className="flex min-h-0 flex-1 p-1.5">
-                <KanbanWorkspacePanel
-                  activeConversationId={activeConversationId}
-                  activeConversationTitle={activeChatTitle}
-                  initialScope={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScope ?? null : null}
-                  initialScopeLabel={activeWorkspaceTab?.kind === "kanban" ? activeWorkspaceTab.kanbanScopeLabel ?? null : null}
-                  conversationOptions={kanbanChatOptions}
-                  groupOptions={kanbanGroups}
-                  workspaceId={effectiveWorkspaceId}
-                  workspaceLabel={activeConversationWorkspaceContext.workspaceLabel}
-                  workspaceRoot={activeConversationWorkspaceContext.workspaceRoot}
-                  companyId={activeConversationCompanyId}
-                  modelId={activeModelId}
-                  modelProfiles={selectableModelProfiles}
-                  onOpenChat={(conversationId) => {
-                    handleHistoryClick(conversationId);
-                  }}
-                  onScopeChange={handleKanbanScopeChange}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
-                />
+              <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+                <section className="max-w-lg rounded-2xl border border-zinc-700/70 bg-zinc-900/70 p-6 text-center shadow-xl">
+                  <h2 className="text-lg font-semibold text-zinc-100">Kanban moved to a pack surface</h2>
+                  <p className="mt-3 text-sm leading-6 text-zinc-400">
+                    This legacy workspace no longer owns Kanban UI or data. Open the selected profile’s isolated Kanban route.
+                  </p>
+                  <a className="mt-5 inline-flex rounded-xl border border-zinc-600 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800" href="/kanban">
+                    Open Kanban
+                  </a>
+                </section>
               </div>
             ) : isCalendarMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
