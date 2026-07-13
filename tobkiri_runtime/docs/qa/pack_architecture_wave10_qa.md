@@ -29,6 +29,8 @@
   に read/write しないこと。二重 writer がないこと
 - old React Kanban view の撤去後、isolated Kanban route の profile scope、pack
   削除時の route 消失、read-only RPC、approved action 境界を確認
+- legacy `tool_task_board` / agent-session ID が旧 state を作成・更新せず、
+  stable deprecated code と contract-native recovery を返すこと
 - startup/shutdown、restart persistence、upgrade/downgrade、clean-install、
   macOS/Windows/Linux を記録すること
 

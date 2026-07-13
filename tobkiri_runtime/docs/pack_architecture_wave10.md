@@ -23,6 +23,13 @@ snapshot export and one-shot owner import. The remaining agent/sync aliases
 return `KANBAN_LEGACY_ACTION_DEPRECATED` until their contract-native adapters
 are selected; they do not resume the old service.
 
+The legacy `tool_task_board` and `tool_task_board_agent_session` handlers now
+return stable `*_LEGACY_TOOL_DEPRECATED` recovery diagnostics. Their former
+SQLite writers, JSON import, and direct agent/session coupling were removed.
+Those public IDs remain only until a selected task-board adapter exposes their
+contract-native replacement; they must not silently recreate state in the
+defaultspack namespace.
+
 The shim cutover must occur in this order:
 
 1. Export a caller-selected old board through a migration-only entrypoint.
@@ -48,6 +55,7 @@ source through the one-shot import before routing any writes.
 | `domain/kanban/store.py` | caller-selected one-shot snapshot export | state reads/writes, board bootstrap, card/column mutation |
 | `domain/kanban/service.py` | none; remove after route shim is complete | chat, agent, or Kanban orchestration |
 | React Kanban workspace | temporary deprecated route shim | primary UI, direct API client, direct implementation URL |
+| `tool_task_board*` | explicit deprecated tool diagnostics | SQLite/JSON state ownership or agent/session dispatch |
 | `rumi_kanban_surface_pack` | selected isolated read-only content | state/action ownership or receipt handling |
 
 ## Release boundary
