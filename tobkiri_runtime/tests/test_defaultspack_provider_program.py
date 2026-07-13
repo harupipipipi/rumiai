@@ -45,4 +45,4 @@ def test_local_openai_runtimes_discover_served_models_without_credentials(monkey
         client = AIClient()
         models = client.list_models(provider="vllm")
 
-    assert "vllm/served-model" in {model["qualified_model_id"] for model in models}
+    assert [model["qualified_model_id"] for model in models] == ["vllm/served-model"]
