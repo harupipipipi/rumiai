@@ -70,7 +70,7 @@ class KanbanStateStore:
             state = self._read()
             _assert_revision(state, int(arguments["expected_revision"]))
             result = self._transition(state, name, arguments)
-            if name == "migration.import_snapshot" and result.get("deduplicated"):
+            if result.get("deduplicated"):
                 return {**result, "revision": state["revision"]}
             state["revision"] += 1
             self._write(state)
