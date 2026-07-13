@@ -71,6 +71,10 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_agent_state_store_pack",
     "rumi_agent_runtime_service_pack",
     "rumi_connector_turn_adapter_pack",
+    "rumi_company_state_store_pack",
+    "rumi_company_agent_adapter_pack",
+    "rumi_company_coordinator_pack",
+    "rumi_connector_company_adapter_pack",
 )
 
 # --- graph loader (lazy import to avoid circular dependency) ---
