@@ -167,7 +167,7 @@ def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatc
             return False
 
         def read(self):
-            return b'{"object":"list","data":[{"id":"account-custom-model","owned_by":"me"}]}'
+            return b'{"object":"list","data":[{"id":"account-custom-model","owned_by":"me","type":"embeddings","context_length":8192}]}'
 
     seen = {}
 
@@ -186,6 +186,9 @@ def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatc
     }
     assert [model["model_id"] for model in models] == ["account-custom-model"]
     assert models[0]["metadata"]["source"] == "remote_models_endpoint"
+    assert models[0]["type"] == "embedding"
+    assert models[0]["context_window"] == 8192
+    assert models[0]["capabilities"]["embeddings"] is True
 
 
 def test_github_models_uses_its_account_catalog_and_openai_compatible_inference_endpoint():

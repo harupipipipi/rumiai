@@ -306,6 +306,21 @@ class OpenAICompatibleProvider(OpenAIProvider):
     @staticmethod
     def _public_capability_map(raw_capabilities: Any) -> Dict[str, Any]:
         capability_map = normalize_capability_map(raw_capabilities)
+        if isinstance(raw_capabilities, dict):
+            # Keep task capabilities reported by the live catalog even when
+            # they are not part of the chat-oriented normalization schema.
+            for key in (
+                "embeddings",
+                "rerank",
+                "image_generation",
+                "video_generation",
+                "tts",
+                "transcription",
+                "moderation",
+            ):
+                if key in raw_capabilities:
+                    value = raw_capabilities[key]
+                    capability_map[key] = bool(value.get("supported")) if isinstance(value, dict) else bool(value)
         capability_map.setdefault("chat", bool(capability_map.get("text_input") or capability_map.get("text_output")))
         capability_map.setdefault("vision", bool(capability_map.get("image_input")))
         capability_map.setdefault("reasoning", bool(capability_map.get("thinking")))
@@ -602,8 +617,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
         if not model_id:
             return None
         qualified_model_id = model_id if model_id.startswith(f"{self.provider_id}/") else f"{self.provider_id}/{model_id}"
-        model_type = self._remote_model_type(model_id)
-        capability_map = self._remote_model_capabilities(model_id, model_type)
+        model_type = self._remote_model_type(model_id, raw)
+        capability_map = self._remote_model_capabilities(model_id, model_type, raw)
         metadata: Dict[str, Any] = {
             "source": "remote_models_endpoint",
             "capability_source": "remote_models_endpoint",
@@ -613,7 +628,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             value = raw.get(key)
             if value not in (None, ""):
                 metadata[f"remote_{key}"] = value
-        return {
+        model = {
             "id": qualified_model_id,
             "model_id": model_id,
             "provider_id": self.provider_id,
@@ -625,9 +640,51 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "thinking": {"supported": False, "levels": [], "provider_mapping": {}},
             "metadata": metadata,
         }
+        for key in ("context_length", "max_context", "max_context_tokens", "max_context_length"):
+            try:
+                context_window = int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                context_window = 0
+            if context_window > 0:
+                model["context_window"] = context_window
+                model["max_context"] = context_window
+                model["max_context_tokens"] = context_window
+                break
+        for key in ("max_completion_tokens", "max_output_tokens", "max_tokens"):
+            try:
+                max_output = int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                max_output = 0
+            if max_output > 0:
+                metadata["max_output_tokens"] = max_output
+                break
+        return model
 
     @staticmethod
-    def _remote_model_type(model_id: str) -> str:
+    def _remote_model_type(model_id: str, raw: Optional[Dict[str, Any]] = None) -> str:
+        declared = str((raw or {}).get("type") or (raw or {}).get("model_type") or "").strip().lower()
+        normalized_declared = declared.replace("-", "_").replace(" ", "_")
+        declared_types = {
+            "chat": "chat",
+            "text": "chat",
+            "text_generation": "chat",
+            "completion": "chat",
+            "embeddings": "embedding",
+            "embedding": "embedding",
+            "rerank": "rerank",
+            "image": "image_gen",
+            "image_generation": "image_gen",
+            "text2image": "image_gen",
+            "image2image": "image_gen",
+            "text2video": "video_gen",
+            "speech": "tts",
+            "tts": "tts",
+            "transcription": "transcription",
+            "stt": "transcription",
+            "moderation": "moderation",
+        }
+        if normalized_declared in declared_types:
+            return declared_types[normalized_declared]
         lowered = str(model_id or "").strip().lower()
         if not lowered:
             return "chat"
@@ -642,9 +699,14 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return "chat"
 
     @classmethod
-    def _remote_model_capabilities(cls, model_id: str, model_type: str) -> Dict[str, Any]:
+    def _remote_model_capabilities(
+        cls,
+        model_id: str,
+        model_type: str,
+        raw: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         is_chat_like = model_type in {"chat", "reasoning", "vision"}
-        return {
+        capabilities = {
             "chat": is_chat_like,
             "text_input": is_chat_like,
             "text_output": is_chat_like,
@@ -656,7 +718,51 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "parallel_tool_calls": False,
             "image_input": False,
             "vision": False,
+            "embeddings": model_type == "embedding",
+            "rerank": model_type == "rerank",
+            "image_generation": model_type == "image_gen",
+            "video_generation": model_type == "video_gen",
+            "tts": model_type == "tts",
+            "transcription": model_type == "transcription",
         }
+        reported = (raw or {}).get("capabilities")
+        if isinstance(reported, dict):
+            normalized = normalize_capability_map(reported)
+            aliases = {
+                "completion_chat": "chat",
+                "function_calling": "tool_calling",
+                "vision": "image_input",
+                "stream": "streaming",
+            }
+            for key, value in reported.items():
+                canonical = aliases.get(str(key), str(key))
+                enabled = bool(value.get("supported")) if isinstance(value, dict) else bool(value)
+                if canonical in capabilities:
+                    capabilities[canonical] = enabled
+            for key, value in normalized.items():
+                if key in capabilities:
+                    capabilities[key] = value
+        endpoints = {
+            str(item).strip().lower()
+            for item in ((raw or {}).get("endpoints") or [])
+            if str(item).strip()
+        }
+        features = {
+            str(item).strip().lower()
+            for item in ((raw or {}).get("features") or [])
+            if str(item).strip()
+        }
+        if {"chat", "chat-completions", "completions"} & (endpoints | features):
+            capabilities.update({"chat": True, "text_input": True, "text_output": True})
+        if any("embed" in value for value in endpoints | features):
+            capabilities["embeddings"] = True
+        if any("rerank" in value for value in endpoints | features):
+            capabilities["rerank"] = True
+        if capabilities.get("tool_calling"):
+            capabilities["tool_calls"] = True
+        if capabilities.get("image_input"):
+            capabilities["vision"] = True
+        return capabilities
 
     def _headers(self, content_type="application/json"):
         headers = dict(self._extra_headers)
