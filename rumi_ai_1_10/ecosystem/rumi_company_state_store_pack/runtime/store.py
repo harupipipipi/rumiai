@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -74,6 +75,8 @@ class CompanyStateStore:
             state = self._read()
             _assert_revision(state, int(arguments["expected_revision"]))
             result = self._transition(state, name, arguments)
+            if name == "migration.operations.import" and result.get("deduplicated"):
+                return {**result, "revision": state["revision"]}
             state["revision"] += 1
             self._write(state)
             return {**result, "revision": state["revision"]}
@@ -106,6 +109,8 @@ class CompanyStateStore:
             }
             state["companies"][company_id] = company
             return {"company": _copy(company)}
+        if name == "migration.operations.import":
+            return self._import_operations_company(state, arguments, now_ms)
         company = state["companies"].get(company_id)
         if company is None:
             raise KeyError("Company is unknown")
@@ -182,6 +187,105 @@ class CompanyStateStore:
             return {result_key: _copy(record), "deduplicated": False}
         raise ValueError(f"unknown Company action: {name}")
 
+    def _import_operations_company(
+        self,
+        state: dict[str, Any],
+        arguments: Mapping[str, Any],
+        now_ms: int,
+    ) -> dict[str, Any]:
+        """Import one redacted legacy Operations Company snapshot exactly once."""
+
+        legacy = _legacy_operations_state(arguments["legacy_state"])
+        source_hash = _canonical_hash(legacy)
+        migration_id = "operations-company-v1"
+        previous = state["migrations"].get(migration_id)
+        company_id = _identifier(arguments["company_id"])
+        if isinstance(previous, Mapping):
+            if previous.get("source_hash") != source_hash:
+                raise CompanyStateConflict("Operations Company migration differs")
+            existing = state["companies"].get(company_id)
+            if not isinstance(existing, Mapping):
+                raise CompanyStateConflict("Operations Company migration is incomplete")
+            return {
+                "company": _copy(existing),
+                "migration_id": migration_id,
+                "deduplicated": True,
+            }
+        if company_id in state["companies"]:
+            raise CompanyStateConflict("Company exists before Operations migration")
+        conversation_id = _legacy_text(legacy.get("conversation_id"), 255)
+        group_id = _legacy_text(legacy.get("conversation_group_id"), 255)
+        company = {
+            "id": company_id,
+            "name": "Rumi Operations Company",
+            "status": "active",
+            "settings": {
+                "legacy_operations": {
+                    "source_hash": source_hash,
+                    "org_id": _legacy_text(legacy.get("org_id"), 255),
+                    "conversation_id": conversation_id,
+                    "conversation_group_id": group_id,
+                    "schedule_ids": _legacy_schedule_ids(legacy.get("schedule_ids")),
+                }
+            },
+            "roles": {
+                "legacy-client-manager": {
+                    "id": "legacy-client-manager",
+                    "name": "Client Manager",
+                    "work_type": "agent",
+                    "created_at_ms": now_ms,
+                    "updated_at_ms": now_ms,
+                },
+                "legacy-operations-monitor": {
+                    "id": "legacy-operations-monitor",
+                    "name": "Operations Monitor",
+                    "work_type": "agent",
+                    "created_at_ms": now_ms,
+                    "updated_at_ms": now_ms,
+                },
+            },
+            "members": {
+                "client_manager": _legacy_member(
+                    "client_manager",
+                    "Client Manager",
+                    "legacy-client-manager",
+                    now_ms,
+                ),
+                "operations_monitor": _legacy_member(
+                    "operations_monitor",
+                    "Operations Monitor",
+                    "legacy-operations-monitor",
+                    now_ms,
+                ),
+            },
+            "channels": {
+                "ops-company": {
+                    "id": "ops-company",
+                    "name": "Operations",
+                    "created_at_ms": now_ms,
+                    "updated_at_ms": now_ms,
+                }
+            },
+            "tasks": {},
+            "routes": {},
+            "inbound": [],
+            "messages": [],
+            "created_at_ms": now_ms,
+            "updated_at_ms": now_ms,
+        }
+        state["companies"][company_id] = company
+        state["migrations"][migration_id] = {
+            "id": migration_id,
+            "company_id": company_id,
+            "source_hash": source_hash,
+            "imported_at_ms": now_ms,
+        }
+        return {
+            "company": _copy(company),
+            "migration_id": migration_id,
+            "deduplicated": False,
+        }
+
     def _named_record(
         self,
         company: dict[str, Any],
@@ -256,6 +360,7 @@ class CompanyStateStore:
                 "profile_id": self.profile_id,
                 "revision": 0,
                 "companies": {},
+                "migrations": {},
             }
         value = json.loads(self.path.read_text(encoding="utf-8"))
         if (
@@ -263,6 +368,7 @@ class CompanyStateStore:
             or value.get("version") != VERSION
             or value.get("profile_id") != self.profile_id
             or not isinstance(value.get("companies"), Mapping)
+            or not isinstance(value.get("migrations", {}), Mapping)
         ):
             raise ValueError("Company state is invalid")
         return {
@@ -270,6 +376,7 @@ class CompanyStateStore:
             "profile_id": self.profile_id,
             "revision": max(0, int(value.get("revision") or 0)),
             "companies": _copy(value["companies"]),
+            "migrations": _copy(value.get("migrations", {})),
         }
 
     def _write(self, value: Mapping[str, Any]) -> None:
@@ -320,6 +427,7 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         "task.transition",
         "inbound.append",
         "message.append",
+        "migration.operations.import",
     }
     if name not in allowed:
         raise ValueError(f"unknown Company action: {name}")
@@ -330,6 +438,10 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     if name == "company.create":
         arguments["name"] = str(payload.get("name") or "Company")
         arguments["settings"] = dict(_mapping(payload.get("settings")))
+    elif name == "migration.operations.import":
+        arguments["legacy_state"] = _legacy_operations_state(
+            payload.get("legacy_state")
+        )
     elif name == "company.update":
         updates = dict(_mapping(payload.get("updates")))
         if set(updates) - {"name", "status", "settings"}:
@@ -409,6 +521,71 @@ def _timeline_record(value: Mapping[str, Any]) -> dict[str, Any]:
         "text": str(value.get("text") or "")[:100_000],
         "metadata": _copy(_mapping(value.get("metadata"))),
     }
+
+
+def _legacy_operations_state(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("legacy Operations Company state is required")
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if len(encoded.encode("utf-8")) > 128 * 1024:
+        raise ValueError("legacy Operations Company state is too large")
+    normalized = {
+        "org_id": _legacy_text(value.get("org_id"), 255),
+        "conversation_id": _legacy_text(value.get("conversation_id"), 255),
+        "conversation_group_id": _legacy_text(
+            value.get("conversation_group_id"),
+            255,
+        ),
+        "schedule_ids": _legacy_schedule_ids(value.get("schedule_ids")),
+    }
+    if not any(
+        (
+            normalized["org_id"],
+            normalized["conversation_id"],
+            normalized["conversation_group_id"],
+            normalized["schedule_ids"],
+        )
+    ):
+        raise ValueError("legacy Operations Company state is empty")
+    return normalized
+
+
+def _legacy_schedule_ids(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        _legacy_text(key, 100): _legacy_text(item, 255)
+        for key, item in value.items()
+        if _legacy_text(key, 100) and _legacy_text(item, 255)
+    }
+
+
+def _legacy_member(
+    member_id: str,
+    display_name: str,
+    role_id: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    return {
+        "id": member_id,
+        "display_name": display_name,
+        "role_id": role_id,
+        "agent_profile_id": "default",
+        "mentions": [member_id],
+        "enabled": True,
+        "metadata": {"migration_source": "operations-company-v1"},
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+
+
+def _legacy_text(value: Any, limit: int) -> str:
+    return str(value or "").strip().replace("\x00", "")[:limit]
+
+
+def _canonical_hash(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _identifier(value: Any) -> str:
