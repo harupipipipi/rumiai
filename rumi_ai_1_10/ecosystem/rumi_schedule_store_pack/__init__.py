@@ -1,0 +1,1 @@
+"""Authoritative schedule state pack."""
