@@ -48,6 +48,32 @@ def test_local_openai_runtimes_discover_served_models_without_credentials(monkey
     assert [model["qualified_model_id"] for model in models] == ["vllm/served-model"]
 
 
+def test_ollama_uses_its_live_openai_compatible_models_endpoint_without_credentials(monkeypatch):
+    from unittest.mock import patch
+
+    from domain.ai_client.client import AIClient
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS", "1")
+    AIClient._instance = None
+    with patch.object(
+        OpenAICompatibleProvider,
+        "_fetch_remote_models",
+        return_value=[
+            {
+                "id": "ollama/locally-loaded-model",
+                "model_id": "locally-loaded-model",
+                "provider_id": "ollama",
+                "type": "chat",
+                "metadata": {"source": "remote_models_endpoint"},
+            }
+        ],
+    ), patch.object(OpenAICompatibleProvider, "_load_remote_model_cache", return_value=None):
+        models = AIClient().list_models(provider="ollama")
+
+    assert [model["qualified_model_id"] for model in models] == ["ollama/locally-loaded-model"]
+
+
 def test_loopback_openai_compatible_connection_discovers_models_without_storing_a_fake_key(tmp_path, monkeypatch):
     from unittest.mock import patch
 
