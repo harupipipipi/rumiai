@@ -68,6 +68,9 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_http_api_connector_pack",
     "rumi_mobile_pairing_connector_pack",
     "rumi_qr_pairing_connector_pack",
+    "rumi_agent_state_store_pack",
+    "rumi_agent_runtime_service_pack",
+    "rumi_connector_turn_adapter_pack",
 )
 
 # --- graph loader (lazy import to avoid circular dependency) ---
