@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .oauth_store import provider_has_oauth_connection, provider_oauth_status
+from .provider_program import provider_program_manifests
 
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
@@ -736,14 +737,16 @@ def read_provider_api_key(provider_id: str, api_id: str, *, pack_root: Path | No
 
 
 def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
+    program_manifests = provider_program_manifests()
+    builtin_provider_ids = sorted(set(PROVIDER_SECRET_KEYS) | set(program_manifests))
     builtin_rows = [
         {
             "provider_id": provider_id,
-            "key": keys[0],
+            "key": keys[0] if keys else named_provider_secret_key(provider_id, api_id="DEFAULT"),
             "keys": list(keys),
             "kind": _KIND_LLM,
             "builtin": True,
-            "label": provider_id,
+            "label": str(program_manifests.get(provider_id, {}).get("display_name") or provider_id),
             "configured": (
                 provider_has_api_key(provider_id, pack_root=pack_root)
                 or provider_has_oauth_connection(provider_id, pack_root=pack_root)
@@ -751,8 +754,8 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
             "apis": provider_named_api_keys(provider_id, pack_root=pack_root),
             "oauth": provider_oauth_status(provider_id, pack_root=pack_root),
         }
-        for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())
-        if keys
+        for provider_id in builtin_provider_ids
+        for keys in [PROVIDER_SECRET_KEYS.get(provider_id, [])]
     ]
 
     seen_ids = {row["provider_id"] for row in builtin_rows}
@@ -795,4 +798,4 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
 
 
 def builtin_provider_ids() -> list[str]:
-    return sorted(PROVIDER_SECRET_KEYS.keys())
+    return sorted(set(PROVIDER_SECRET_KEYS) | set(provider_program_manifests()))

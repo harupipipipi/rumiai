@@ -371,6 +371,20 @@ def test_provider_program_entries_are_visible_with_their_inventory_contract():
         assert provider["metadata"]["config"]["inventory_strategy"] == inventory_strategy
 
 
+def test_provider_program_entries_are_available_in_api_key_setup():
+    from ecosystem.defaultspack.domain.ai_client.api_key_store import (
+        builtin_provider_ids,
+        provider_key_status,
+    )
+
+    provider_ids = set(builtin_provider_ids())
+    key_rows = {row["provider_id"]: row for row in provider_key_status()}
+
+    assert {"aws-bedrock", "cohere", "huggingface-tgi", "stability-ai"} <= provider_ids
+    assert all(key_rows[provider_id]["builtin"] is True for provider_id in provider_ids)
+    assert key_rows["aws-bedrock"]["label"] == "Amazon Bedrock"
+
+
 def test_program_connection_with_an_explicit_compatible_endpoint_uses_live_inventory(tmp_path, monkeypatch):
     from unittest.mock import patch
 
