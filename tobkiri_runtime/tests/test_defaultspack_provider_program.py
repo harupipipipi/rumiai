@@ -710,6 +710,70 @@ def test_deepgram_discovers_live_stt_tts_models_and_calls_native_tasks(monkeypat
     assert response["audio"].startswith("data:audio/mpeg;base64,")
 
 
+def test_databricks_discovers_workspace_serving_endpoints_and_invokes_selected_endpoint(monkeypatch):
+    import json
+
+    from domain.ai_client.providers import detect_available_providers
+    from domain.ai_client.providers.databricks_model_serving_provider import DatabricksModelServingProvider
+
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-token")
+    monkeypatch.setenv("DATABRICKS_HOST", "https://workspace.cloud.databricks.com")
+    seen = []
+
+    class Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append((request.method, request.full_url, request.headers.get("Authorization"), request.data))
+        if request.method == "GET":
+            return Response(
+                {
+                    "endpoints": [
+                        {
+                            "name": "chat-endpoint",
+                            "state": {"ready": "READY"},
+                            "config": {"served_entities": [{"name": "catalog.schema.chat-model"}]},
+                        },
+                        {
+                            "name": "embedding-endpoint",
+                            "state": {"ready": "READY"},
+                            "config": {"served_entities": [{"name": "bge-embedding-model"}]},
+                        },
+                    ]
+                }
+            )
+        return Response({"choices": [{"message": {"content": "workspace reply"}, "finish_reason": "stop"}]})
+
+    monkeypatch.setattr(
+        "domain.ai_client.providers.databricks_model_serving_provider.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    provider = DatabricksModelServingProvider()
+    models = provider.list_models()
+    assert [model["model_id"] for model in models] == ["chat-endpoint", "embedding-endpoint"]
+    assert models[0]["metadata"]["ready"] is True
+    assert models[1]["type"] == "embedding"
+    response = provider.complete("databricks-model-serving/chat-endpoint", [{"role": "user", "content": "Hi"}], [], {})
+    assert response["content"][0]["text"] == "workspace reply"
+    assert seen[0][:3] == (
+        "GET",
+        "https://workspace.cloud.databricks.com/api/2.0/serving-endpoints",
+        "Bearer databricks-token",
+    )
+    assert seen[1][1].endswith("/serving-endpoints/chat-endpoint/invocations")
+    assert isinstance(detect_available_providers()["databricks-model-serving"], DatabricksModelServingProvider)
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 

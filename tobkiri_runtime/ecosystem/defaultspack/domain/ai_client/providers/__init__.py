@@ -800,6 +800,22 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
+    manifests.setdefault(
+        "databricks-model-serving",
+        {
+            "id": "databricks-model-serving",
+            "display_name": "Databricks Model Serving",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.databricks_model_serving_provider:DatabricksModelServingProvider",
+            "api_key_env": ["DATABRICKS_TOKEN"],
+            "base_url_env": ["DATABRICKS_HOST", "DATABRICKS_BASE_URL"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/api/2.0/serving-endpoints"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
