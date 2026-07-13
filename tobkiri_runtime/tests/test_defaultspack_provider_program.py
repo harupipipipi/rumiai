@@ -118,3 +118,21 @@ def test_huggingface_inference_uses_its_live_models_endpoint_without_a_checked_i
 
     assert [model["model_id"] for model in models] == ["deepseek-ai/DeepSeek-R1:fastest"]
     assert all(model["provider_id"] == "huggingface-inference" for model in models)
+
+
+def test_github_models_uses_its_account_catalog_and_openai_compatible_inference_endpoint():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["github-models"]
+    manifest = _openai_compatible_spec_manifest(spec)
+    provider = OpenAICompatibleProvider.from_manifest(manifest)
+
+    assert spec["curated_models"] == []
+    assert provider._base_url == "https://models.github.ai/inference"
+    assert provider._remote_model_base_url == "https://models.github.ai/catalog"
+    assert provider._headers()["X-GitHub-Api-Version"] == "2026-03-10"
+    page, cursor = provider._remote_models_page([{"id": "openai/gpt-4.1", "name": "OpenAI GPT-4.1"}])
+    assert page == [{"id": "openai/gpt-4.1", "name": "OpenAI GPT-4.1"}]
+    assert cursor == ""

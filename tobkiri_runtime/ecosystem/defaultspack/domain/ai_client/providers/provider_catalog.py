@@ -12,6 +12,24 @@ def _embedding(provider, model_id, name):
 
 _OPENAI_COMPATIBLE_PROVIDERS = [
     {
+        # GitHub's catalog is a bare JSON array at /catalog/models, whereas
+        # inference uses its OpenAI-compatible /inference endpoint.  Both are
+        # account-scoped and authenticated with the same models-scope token.
+        "provider_name": "github-models",
+        "display_name": "GitHub Models",
+        "env_vars": ("GITHUB_TOKEN", "GH_TOKEN"),
+        "base_url_env_vars": ("GITHUB_MODELS_BASE_URL",),
+        "default_base_url": "https://models.github.ai/inference",
+        "remote_model_base_url": "https://models.github.ai/catalog",
+        "headers": {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2026-03-10",
+        },
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         # Hugging Face documents this endpoint as OpenAI-compatible and
         # exposes its complete, current chat inventory through GET /v1/models.
         # Do not turn that inventory into a checked-in model JSON snapshot.

@@ -19,6 +19,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "deepinfra": ["DEEPINFRA_API_KEY"],
     "fireworks": ["FIREWORKS_API_KEY"],
     "friendli": ["FRIENDLI_API_KEY"],
+    "github-models": ["GITHUB_TOKEN", "GH_TOKEN"],
     "glm": ["GLM_API_KEY"],
     "groq": ["GROQ_API_KEY"],
     "hyperbolic": ["HYPERBOLIC_API_KEY"],

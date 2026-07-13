@@ -60,6 +60,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         remote_model_discovery: bool | None = None,
         remote_model_discovery_requires_auth: bool = True,
         remote_model_list_path: str | None = None,
+        remote_model_base_url: str | None = None,
         remote_model_cache_ttl_seconds: int | None = None,
         remote_model_pagination: Optional[Dict[str, Any]] = None,
     ):
@@ -85,6 +86,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             remote_model_discovery_requires_auth
         )
         self._remote_model_list_path = str(remote_model_list_path or "/models").strip() or "/models"
+        self._remote_model_base_url = str(remote_model_base_url or "").strip().rstrip("/")
         self._remote_model_pagination = dict(remote_model_pagination or {})
         try:
             self._remote_model_cache_ttl_seconds = max(60, int(remote_model_cache_ttl_seconds))
@@ -199,6 +201,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
                 )
             ),
             remote_model_list_path=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_path") or "/models"),
+            remote_model_base_url=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_base_url") or ""),
             remote_model_cache_ttl_seconds=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_cache_ttl_seconds", 21600),
             remote_model_pagination=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_pagination") or {},
         )
@@ -512,7 +515,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
             return
 
     def _fetch_remote_models(self) -> List[Dict[str, Any]]:
-        url = self._base_url.rstrip("/") + self._remote_model_list_path
+        model_base_url = self._remote_model_base_url or self._base_url
+        url = model_base_url.rstrip("/") + self._remote_model_list_path
         timeout_seconds = max(2, min(20, int(os.environ.get("RUMI_DEFAULTSPACK_REMOTE_MODEL_DISCOVERY_TIMEOUT", "6") or "6")))
         raw_models: List[Dict[str, Any]] = []
         cursor = ""
@@ -558,6 +562,10 @@ class OpenAICompatibleProvider(OpenAIProvider):
         )
 
     def _remote_models_page(self, payload: Any) -> tuple[List[Dict[str, Any]], str]:
+        # Some official account catalogs are a bare JSON array instead of
+        # OpenAI's {data: [...]} shape.  They are still complete inventories.
+        if isinstance(payload, list):
+            return [dict(model) for model in payload if isinstance(model, dict)], ""
         if not isinstance(payload, dict):
             return [], ""
         raw_models = payload.get("data")

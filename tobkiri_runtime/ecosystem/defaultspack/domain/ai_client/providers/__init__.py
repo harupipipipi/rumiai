@@ -723,10 +723,12 @@ def _openai_compatible_spec_manifest(spec: Dict[str, Any]) -> Dict[str, Any]:
         "api_key_env": list(spec.get("env_vars") or []),
         "base_url_env": list(spec.get("base_url_env_vars") or []),
         "default_base_url": str(spec.get("default_base_url") or ""),
+        "headers": dict(spec.get("headers") or {}),
         "models": [dict(model) for model in spec.get("curated_models", []) if isinstance(model, dict)],
         "config": {
             "model_sync": "remote_merge",
             "model_list_path": str(spec.get("remote_model_list_path") or "/models"),
+            "model_list_base_url": str(spec.get("remote_model_base_url") or ""),
             "model_cache_ttl_seconds": int(spec.get("remote_model_cache_ttl_seconds", 3600) or 3600),
         },
     }
