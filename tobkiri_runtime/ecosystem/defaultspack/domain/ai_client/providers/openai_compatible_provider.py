@@ -695,6 +695,12 @@ class OpenAICompatibleProvider(OpenAIProvider):
         qualified_model_id = model_id if model_id.startswith(f"{self.provider_id}/") else f"{self.provider_id}/{model_id}"
         model_type = self._remote_model_type(model_id, raw)
         capability_map = self._remote_model_capabilities(model_id, model_type, raw)
+        if raw.get("supports_image_in"):
+            capability_map.update({"image_input": True, "vision": True})
+        if raw.get("supports_video_in"):
+            capability_map["video_input"] = True
+        if raw.get("supports_reasoning"):
+            capability_map.update({"thinking": True, "reasoning": True})
         metadata: Dict[str, Any] = {
             "source": "remote_models_endpoint",
             "capability_source": "remote_models_endpoint",

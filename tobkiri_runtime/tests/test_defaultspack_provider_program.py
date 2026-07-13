@@ -338,6 +338,7 @@ def test_openai_compatible_provider_specs_use_live_models_endpoints_instead_of_r
     for provider_id in (
         "xai", "groq", "together", "deepseek", "fireworks", "cerebras", "sambanova", "perplexity", "mistral", "novita", "deepinfra",
         "friendli", "hyperbolic", "inference-net", "upstage",
+        "moonshotai", "nvidia", "nebius", "avian",
     ):
         spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
         assert spec["remote_model_discovery"] is True
@@ -364,6 +365,15 @@ def test_openai_compatible_provider_specs_use_live_models_endpoints_instead_of_r
     assert deepinfra_model is not None
     assert deepinfra_model["model_id"] == "deepinfra-live-embedding"
     assert deepinfra_model["type"] == "embedding"
+    kimi = OpenAICompatibleProvider.from_manifest(
+        _openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["moonshotai"])
+    )
+    kimi_model = kimi._normalize_remote_model(
+        {"id": "kimi-live", "supports_image_in": True, "supports_reasoning": True}
+    )
+    assert kimi_model is not None
+    assert kimi_model["capabilities"]["vision"] is True
+    assert kimi_model["capabilities"]["reasoning"] is True
 
     xai_model = OpenAICompatibleProvider._normalize_remote_model(
         OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(OPENAI_COMPATIBLE_PROVIDER_SPECS["xai"])),

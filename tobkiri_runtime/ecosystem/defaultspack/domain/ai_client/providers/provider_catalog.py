@@ -2,14 +2,6 @@ from domain.ai_client.providers.openai_compatible_provider import OpenAICompatib
 from domain.ai_client.providers.vercel_ai_gateway_provider import VercelAIGatewayProvider
 
 
-def _chat(provider, model_id, name):
-    return {"id": "{}/{}".format(provider, model_id), "name": name, "provider": provider, "type": "chat"}
-
-
-def _embedding(provider, model_id, name):
-    return {"id": "{}/{}".format(provider, model_id), "name": name, "provider": provider, "type": "embedding"}
-
-
 _OPENAI_COMPATIBLE_PROVIDERS = [
     {
         # OpenAI's authenticated /v1/models inventory is authoritative.  No
@@ -227,16 +219,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Kimi documents GET /v1/models as the authoritative list of models
+        # currently available to the API key.
         "provider_name": "moonshotai",
         "display_name": "Moonshot AI",
         "env_vars": ("MOONSHOT_API_KEY",),
         "base_url_env_vars": ("MOONSHOT_BASE_URL",),
         "default_base_url": "https://api.moonshot.ai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("moonshotai", "kimi-k2-0711-preview", "Kimi K2 Preview"),
-            _chat("moonshotai", "moonshot-v1-8k", "Moonshot v1 8K"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         # Mistral's authenticated GET /v1/models endpoint lists every model
@@ -251,20 +243,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # NVIDIA Build/NIM exposes the account-visible hosted catalog via
+        # GET /v1/models; its contents change independently of this app.
         "provider_name": "nvidia",
         "display_name": "Nvidia",
         "env_vars": ("NVIDIA_API_KEY", "NGC_API_KEY"),
         "base_url_env_vars": ("NVIDIA_BASE_URL",),
         "default_base_url": "https://integrate.api.nvidia.com/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1.5", "Nemotron Super 49B v1.5"),
-            _chat("nvidia", "meta/llama-3.3-70b-instruct", "Meta Llama 3.3 70B Instruct"),
-            _chat("nvidia", "openai/gpt-oss-120b", "GPT OSS 120B"),
-            _chat("nvidia", "openai/gpt-oss-20b", "GPT OSS 20B"),
-            _chat("nvidia", "qwen/qwen3-coder-480b-a35b-instruct", "Qwen3 Coder 480B A35B Instruct"),
-            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1", "Nemotron Super 49B v1"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         # Novita documents its OpenAI-compatible account model inventory at
@@ -279,16 +267,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Nebius Studio's OpenAI-compatible /v1/models endpoint reports the
+        # models currently supported by the Studio account.
         "provider_name": "nebius",
         "display_name": "Nebius",
         "env_vars": ("NEBIUS_API_KEY",),
         "base_url_env_vars": ("NEBIUS_BASE_URL",),
         "default_base_url": "https://api.studio.nebius.ai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("nebius", "meta-llama/Meta-Llama-3.1-70B-Instruct", "Meta Llama 3.1 70B Instruct"),
-            _chat("nebius", "Qwen/Qwen2.5-Coder-32B-Instruct", "Qwen 2.5 Coder 32B"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         # DeepInfra's native model catalog covers all modalities and is kept
@@ -341,16 +329,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Avian follows the OpenAI /v1/models contract.  Read that live
+        # catalog rather than pinning a subset of routed model names.
         "provider_name": "avian",
         "display_name": "Avian",
         "env_vars": ("AVIAN_API_KEY",),
         "base_url_env_vars": ("AVIAN_BASE_URL",),
         "default_base_url": "https://api.avian.io/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("avian", "meta-llama/llama-3.1-70b-instruct", "Meta Llama 3.1 70B Instruct"),
-            _chat("avian", "deepseek/deepseek-v3", "DeepSeek V3"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         # Upstage's authenticated OpenAI-compatible /v1/models endpoint is
