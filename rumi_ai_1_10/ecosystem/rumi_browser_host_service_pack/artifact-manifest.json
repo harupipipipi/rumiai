@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "artifacts": [
+    {"path": "runtime/service.py", "sha256": "e14ff4f96c05413a66514c3ea316c4058e83bf912a1182e9d66f38917f6cd3bb", "entrypoints": ["create_browser_observer", "create_browser_control"]}
+  ]
+}
