@@ -2,10 +2,10 @@
   "id": "codex-app-server",
   "category": "coding_backends",
   "kind": "coding_backend",
-  "version": "1",
-  "status": "experimental",
+  "version": "2",
+  "status": "stable",
   "display_name": "Codex App Server",
-  "description": "External or local Codex-style app server backend for approval-aware coding sessions.",
+  "description": "Official Codex App Server JSON-RPC backend for approval-aware coding sessions.",
   "entrypoints": {
     "adapter": "blocks/coding/codex_app_server.py",
     "schema": "schema.json"
@@ -19,17 +19,30 @@
   },
   "capabilities": {
     "coding_session": true,
+    "dynamic_model_inventory": true,
+    "account_auth_state": true,
+    "thread_start_resume_fork": true,
+    "turn_streaming": true,
     "workspace_sync": true,
     "terminal": true,
     "patch": true,
     "git": true,
     "approval_requests": true,
-    "remote_review": true
+    "remote_review": true,
+    "permission_profiles": true,
+    "mcp_startup_diagnostics": true,
+    "rate_limits_and_usage": true
   },
   "policy": {
     "do_not_treat_as_llm_provider": true,
     "server_side_approval_required": true,
-    "client_supplied_approved_ignored": true
+    "client_supplied_approved_ignored": true,
+    "read_only_default": true,
+    "required_mcp_failure": "fail_closed",
+    "permissions_and_sandbox_mutually_exclusive": true,
+    "secrets_or_user_content_in_diagnostics": false
   },
+  "official_source": "https://developers.openai.com/codex/app-server/",
+  "verified_at": "2026-07-13",
   "source_pack_id": "defaultspack"
 }
