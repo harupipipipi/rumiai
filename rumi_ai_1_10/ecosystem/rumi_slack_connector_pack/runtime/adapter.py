@@ -9,12 +9,15 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
+from urllib.parse import urlencode
 
 AUTHORITY = "rumi.service.host.authorize.v1"
 CREDENTIAL = "rumi.service.credential.resolve.v1"
 SERVICE_PACK_ID = "rumi_slack_connector_pack"
 ADAPTER_ID = "slack"
 _ENDPOINT = "https://slack.com/api/chat.postMessage"
+_OAUTH_AUTHORIZE_ENDPOINT = "https://slack.com/oauth/v2/authorize"
+_OAUTH_ACCESS_ENDPOINT = "https://slack.com/api/oauth.v2.access"
 
 
 class SlackConnector:
@@ -31,6 +34,15 @@ class SlackConnector:
         if name == "deliver":
             return self._deliver(payload)
         raise ValueError(f"unknown Slack connector operation: {name}")
+
+    def oauth(self, name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Perform the Slack-specific, broker-mediated OAuth operation."""
+
+        if name == "prepare":
+            return self._oauth_prepare(payload)
+        if name == "exchange":
+            return self._oauth_exchange(payload)
+        raise ValueError(f"unknown Slack OAuth operation: {name}")
 
     def _verify(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         connector = _connector(payload)
@@ -100,7 +112,9 @@ class SlackConnector:
         return {
             "status": "delivered" if succeeded else "failed",
             "http_status": int(response.status),
-            "provider_error": "" if succeeded else str(parsed.get("error") or "unknown_error"),
+            "provider_error": (
+                "" if succeeded else str(parsed.get("error") or "unknown_error")
+            ),
         }
 
     def _secret(
@@ -148,6 +162,98 @@ class SlackConnector:
         if not result.get("authorized"):
             raise PermissionError(str(result.get("reason") or "Slack delivery denied"))
 
+    def _oauth_prepare(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        client = self._oauth_client(payload)
+        scopes = _oauth_scopes(payload.get("scopes"))
+        query = urlencode(
+            {
+                "client_id": client["client_id"],
+                "redirect_uri": _required_text(
+                    payload.get("redirect_uri"),
+                    "redirect_uri",
+                ),
+                "scope": ",".join(scopes),
+                "state": _required_text(payload.get("state"), "state"),
+                "code_challenge": _required_text(
+                    payload.get("code_challenge"),
+                    "code_challenge",
+                ),
+                "code_challenge_method": "S256",
+            }
+        )
+        return {"authorization_url": f"{_OAUTH_AUTHORIZE_ENDPOINT}?{query}"}
+
+    def _oauth_exchange(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        client = self._oauth_client(payload)
+        form = urlencode(
+            {
+                "client_id": client["client_id"],
+                "client_secret": client["client_secret"],
+                "code": _required_text(payload.get("code"), "code"),
+                "redirect_uri": _required_text(
+                    payload.get("redirect_uri"),
+                    "redirect_uri",
+                ),
+                "code_verifier": _required_text(
+                    payload.get("code_verifier"),
+                    "code_verifier",
+                ),
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            _OAUTH_ACCESS_ENDPOINT,
+            data=form,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                content = response.read(64 * 1024 + 1)
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            raise RuntimeError("Slack OAuth token exchange failed") from exc
+        if len(content) > 64 * 1024:
+            raise RuntimeError("Slack OAuth response exceeds size limit")
+        try:
+            value = json.loads(content or b"{}")
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Slack OAuth response is invalid") from exc
+        if not isinstance(value, Mapping) or value.get("ok") is not True:
+            raise PermissionError("Slack OAuth token exchange was rejected")
+        token = _required_text(value.get("access_token"), "Slack access token")
+        return {
+            "secret_material": {
+                "bot_token": token,
+                "signing_secret": client["signing_secret"],
+            },
+            "credential_scopes": [
+                "connector.inbound.verify",
+                "connector.outbound.deliver",
+            ],
+            "consumer_pack_id": SERVICE_PACK_ID,
+            "expires_at": None,
+        }
+
+    def _oauth_client(self, payload: Mapping[str, Any]) -> dict[str, str]:
+        resolved = self.client.invoke(
+            CREDENTIAL,
+            "resolve",
+            {
+                "handle": _required_text(
+                    payload.get("client_credential_ref"),
+                    "client_credential_ref",
+                ),
+                "provider_instance_id": ADAPTER_ID,
+                "scope": "connector.oauth.client",
+            },
+        )
+        material = resolved.get("secret_material")
+        if not isinstance(material, Mapping):
+            raise PermissionError("Slack OAuth client credential is unavailable")
+        return {
+            key: _required_text(material.get(key), f"Slack OAuth {key}")
+            for key in ("client_id", "client_secret", "signing_secret")
+        }
+
 
 def create_connector_adapter(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
     """Create the Slack connector adapter."""
@@ -156,6 +262,17 @@ def create_connector_adapter(client: Any) -> Callable[[str, Mapping[str, Any]], 
 
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         return adapter.invoke(name, payload)
+
+    return operation
+
+
+def create_oauth_provider(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
+    """Create the Slack OAuth provider contract entrypoint."""
+
+    adapter = SlackConnector(client)
+
+    def operation(name: str, payload: Mapping[str, Any]) -> Any:
+        return adapter.oauth(name, payload)
 
     return operation
 
@@ -186,3 +303,19 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("object payload is required")
     return value
+
+
+def _oauth_scopes(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("OAuth scopes must be a list")
+    scopes = sorted({_required_text(item, "OAuth scope") for item in value})
+    if not scopes:
+        raise ValueError("at least one OAuth scope is required")
+    return scopes
+
+
+def _required_text(value: Any, label: str) -> str:
+    text = str(value or "").strip()
+    if not text or len(text) > 4096 or "\x00" in text:
+        raise ValueError(f"{label} is invalid")
+    return text
