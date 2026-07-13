@@ -359,7 +359,10 @@ def _column(value: Mapping[str, Any], now_ms: int) -> dict[str, Any]:
         "position": max(0, min(10_000, int(value.get("position") or 0))),
         "done": bool(value.get("done", False)),
         "wip_limit": _optional_limit(value.get("wip_limit")),
-        "created_at_ms": int(value.get("created_at_ms") or now_ms),
+        "created_at_ms": _time(
+            value.get("created_at_ms") or value.get("created_at"),
+            now_ms,
+        ),
         "updated_at_ms": now_ms,
     }
 
@@ -384,13 +387,28 @@ def _card(
         "status": status,
         "priority": _text(value.get("priority"), 32) or "normal",
         "assignee": _text(value.get("assignee"), 255),
+        "due_at": _text(value.get("due_at"), 100),
+        "source_type": _text(value.get("source_type"), 100) or "manual",
+        "source_id": _text(value.get("source_id"), 255),
         "conversation_id": _text(value.get("conversation_id"), 255),
+        "workspace_id": _text(value.get("workspace_id"), 255),
         "company_id": _text(value.get("company_id"), 255),
         "agent_run_id": _text(value.get("agent_run_id"), 255),
+        "agent_session_id": _text(value.get("agent_session_id"), 255),
+        "agent_status": _text(value.get("agent_status"), 100),
+        "branch": _text(value.get("branch"), 1_024),
+        "pr_url": _text(value.get("pr_url"), 2_048),
         "labels": _strings(value.get("labels"), 100, 100),
+        "checklist": _records(value.get("checklist"), 100),
+        "depends_on": _strings(value.get("depends_on"), 100, 255),
+        "blocked_by": _strings(value.get("blocked_by"), 100, 255),
         "metadata": _copy(_mapping(value.get("metadata"))),
-        "created_at_ms": int(value.get("created_at_ms") or now_ms),
+        "created_at_ms": _time(
+            value.get("created_at_ms") or value.get("created_at"),
+            now_ms,
+        ),
         "updated_at_ms": now_ms,
+        "archived_at_ms": _optional_time(value.get("archived_at_ms")),
     }
 
 
@@ -406,9 +424,13 @@ def _event(
         "id": _identifier(value.get("id") or uuid.uuid4().hex),
         "type": _text(value.get("type"), 120) or "event",
         "card_id": card_id,
+        "actor_type": _text(value.get("actor_type"), 100) or "user",
         "actor_id": _text(value.get("actor_id"), 255),
         "payload": _copy(_mapping(value.get("payload"))),
-        "created_at_ms": now_ms,
+        "created_at_ms": _time(
+            value.get("created_at_ms") or value.get("created_at"),
+            now_ms,
+        ),
     }
 
 
@@ -424,7 +446,10 @@ def _legacy_board(value: Any) -> dict[str, Any]:
     columns: dict[str, dict[str, Any]] = {}
     for item in columns_raw:
         if isinstance(item, Mapping):
-            column = _column(item, now_ms)
+            column = _column(
+                {**item, "id": item.get("id") or item.get("column_id")},
+                now_ms,
+            )
             columns[column["id"]] = column
     if not columns:
         default_board = _new_board(
@@ -441,22 +466,47 @@ def _legacy_board(value: Any) -> dict[str, Any]:
     board = {
         "id": board_id,
         "title": _text(value.get("title"), 200) or board_id,
-        "scope": _scope(value.get("scope")),
+        "scope": _legacy_scope(value),
         "metadata": _copy(_mapping(value.get("metadata"))),
         "columns": columns,
         "cards": {},
         "events": [],
-        "created_at_ms": now_ms,
-        "updated_at_ms": now_ms,
+        "created_at_ms": _time(
+            value.get("created_at_ms") or value.get("created_at"),
+            now_ms,
+        ),
+        "updated_at_ms": _time(
+            value.get("updated_at_ms") or value.get("updated_at"),
+            now_ms,
+        ),
     }
     cards_raw = value.get("cards") if isinstance(value.get("cards"), list) else []
     for item in cards_raw[:10_000]:
         if isinstance(item, Mapping):
-            card = _card(item, board, now_ms)
+            card = _card(
+                {
+                    **item,
+                    "id": item.get("id") or item.get("card_id"),
+                    "archived_at_ms": item.get("archived_at_ms")
+                    or item.get("archived_at"),
+                },
+                board,
+                now_ms,
+            )
             board["cards"][card["id"]] = card
     for item in value.get("events") if isinstance(value.get("events"), list) else []:
         if isinstance(item, Mapping) and len(board["events"]) < 10_000:
-            board["events"].append(_event(item, board, now_ms))
+            board["events"].append(
+                _event(
+                    {
+                        **item,
+                        "id": item.get("id") or item.get("event_id"),
+                        "type": item.get("type") or item.get("event_type"),
+                    },
+                    board,
+                    now_ms,
+                )
+            )
     return board
 
 
@@ -480,6 +530,18 @@ def _scope(value: Any) -> dict[str, str]:
     }
 
 
+def _legacy_scope(value: Mapping[str, Any]) -> dict[str, str]:
+    scope = value.get("scope")
+    if isinstance(scope, Mapping):
+        return _scope(scope)
+    return _scope(
+        {
+            "type": value.get("scope_type"),
+            "id": value.get("scope_id"),
+        }
+    )
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     if value is None:
         return {}
@@ -492,6 +554,12 @@ def _strings(value: Any, count: int, limit: int) -> list[str]:
     if not isinstance(value, list):
         return []
     return sorted({_text(item, limit) for item in value if _text(item, limit)})[:count]
+
+
+def _records(value: Any, count: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_copy(item) for item in value[:count] if isinstance(item, Mapping)]
 
 
 def _text(value: Any, limit: int) -> str:
@@ -509,6 +577,16 @@ def _optional_limit(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return max(1, min(10_000, int(value)))
+
+
+def _optional_time(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return max(0, int(value))
+
+
+def _time(value: Any, fallback: int) -> int:
+    return max(0, int(value or fallback))
 
 
 def _assert_revision(state: Mapping[str, Any], expected: int) -> None:
