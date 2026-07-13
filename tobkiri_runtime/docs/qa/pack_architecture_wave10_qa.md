@@ -21,6 +21,14 @@
   foreign pack-ID branch がないこと
 - defaultspack の旧 HTTP/function route が selected global contract を呼び、
   primary feature store/runtime/UI を直接 import しないこと
+- legacy Company CRUD route が `rumi.resource.company.v1` と
+  `rumi.action.company.state.v1` のみを通り、旧 `CompanyService`／
+  `CompanyStore` を構築しないこと。作成・更新・削除で approval token binding、
+  authority receipt、stale revision、replay、restart persistence を確認
+- Company の description、metadata、conversation-group identifier が selected
+  profile-scoped state owner にだけ保持されること。member/role 由来の legacy
+  agent projection を確認し、未移行の Company runtime／dispatch／collection route
+  は旧 state fallback を開始せず、明示的な adapter/sunset 状態であることを記録
 - legacy Kanban board の export、one-shot import、同一 source hash の no-write
   dedupe、changed source hash の fail-closed、stale revision、rollback を確認
 - migration 前の legacy Kanban route は migration-required diagnostic と recovery

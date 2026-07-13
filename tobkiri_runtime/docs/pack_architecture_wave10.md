@@ -68,6 +68,38 @@ dual write. A failed or changed source snapshot is fail-closed and provides a
 recovery path: restore the selected old owner snapshot, or retry the identical
 source through the one-shot import before routing any writes.
 
+## Company CRUD cutover boundary
+
+`rumi_company_state_store_pack` remains the sole authoritative Company data
+owner. Its normalized Company record now includes the base organization
+description, metadata, and conversation-group identifier in addition to its
+roles, members, channels, tasks, routes, inbound records, and messages. These
+fields are persisted only in the selected profile-scoped state-store pack.
+
+The legacy Company create, list, get, update, and delete route blocks now use
+`domain.company.contract_facade`. The facade reads through
+`rumi.resource.company.v1`, then translates mutations to an exact
+revision-bound `rumi.action.company.state.v1` invocation. It obtains the
+`company.state.manage` authority receipt from the host bridge and validates a
+locally bound approval token for an external route call. An internal
+tool-server approval context still goes through the host authority bridge, but
+does not ask a second time for the already approved route operation.
+
+The Company compatibility projection keeps the historic organization shape for
+these finite CRUD aliases. It derives the legacy `agents` projection from the
+authoritative member/role records; it does not read or write the legacy Company
+store. Updates for collection-specific old fields fail closed with
+`COMPANY_LEGACY_FIELD_DEPRECATED` until their corresponding member, role,
+channel, or task facade is cut over. This prevents the base CRUD aliases from
+silently starting a second Company writer.
+
+Company status, runtime reporting, dispatch, inbound, messages, threads, and
+the collection-specific legacy routes have not yet completed their adapter
+cutover. They remain Wave 10 inventory and must be converted to selected
+Company state/coordinator/agent-adapter contracts or explicit sunset shims
+before Wave 10 is declared complete. They must not be treated as evidence that
+the old store remains an allowed fallback for the cut-over CRUD routes.
+
 ## Remaining defaultspack inventory
 
 | Legacy surface | Allowed remaining role | Forbidden role after cutover |
@@ -77,6 +109,8 @@ source through the one-shot import before routing any writes.
 | React Kanban workspace | temporary deprecated route shim | primary UI, direct API client, direct implementation URL |
 | `tool_task_board*` | explicit deprecated tool diagnostics | SQLite/JSON state ownership or agent/session dispatch |
 | `rumi_kanban_surface_pack` | selected isolated read-only content | state/action ownership or receipt handling |
+| `/api/company` CRUD aliases | finite contract facade and legacy projection | `CompanyService` or `CompanyStore` construction, legacy state fallback |
+| Company status/runtime/dispatch and collection routes | temporary Wave 10 inventory pending selected-contract adapters | new primary implementation or a second Company writer |
 
 ## Release boundary
 

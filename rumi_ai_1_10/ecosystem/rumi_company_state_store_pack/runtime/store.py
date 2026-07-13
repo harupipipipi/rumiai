@@ -95,8 +95,13 @@ class CompanyStateStore:
             company = {
                 "id": company_id,
                 "name": str(arguments["name"])[:200],
+                "description": str(arguments["description"])[:4_000],
                 "status": "active",
                 "settings": _copy(arguments["settings"]),
+                "metadata": _copy(arguments["metadata"]),
+                "conversation_group_id": str(
+                    arguments["conversation_group_id"]
+                )[:255],
                 "roles": {},
                 "members": {},
                 "channels": {},
@@ -133,6 +138,17 @@ class CompanyStateStore:
                     **company["settings"],
                     **_copy(updates["settings"]),
                 }
+            if "description" in updates:
+                company["description"] = str(updates["description"])[:4_000]
+            if "metadata" in updates:
+                company["metadata"] = {
+                    **_copy(_mapping(company.get("metadata"))),
+                    **_copy(updates["metadata"]),
+                }
+            if "conversation_group_id" in updates:
+                company["conversation_group_id"] = str(
+                    updates["conversation_group_id"]
+                )[:255]
             company["updated_at_ms"] = now_ms
             return {"company": _copy(company)}
         if name.startswith("role."):
@@ -218,6 +234,7 @@ class CompanyStateStore:
         company = {
             "id": company_id,
             "name": "Rumi Operations Company",
+            "description": "Migrated legacy Operations Company.",
             "status": "active",
             "settings": {
                 "legacy_operations": {
@@ -228,6 +245,8 @@ class CompanyStateStore:
                     "schedule_ids": _legacy_schedule_ids(legacy.get("schedule_ids")),
                 }
             },
+            "metadata": {"migration_source": "operations-company-v1"},
+            "conversation_group_id": group_id or "company:" + company_id,
             "roles": {
                 "legacy-client-manager": {
                     "id": "legacy-client-manager",
@@ -438,14 +457,28 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     if name == "company.create":
         arguments["name"] = str(payload.get("name") or "Company")
         arguments["settings"] = dict(_mapping(payload.get("settings")))
+        arguments["description"] = str(payload.get("description") or "")
+        arguments["metadata"] = dict(_mapping(payload.get("metadata")))
+        arguments["conversation_group_id"] = str(
+            payload.get("conversation_group_id") or ""
+        )
     elif name == "migration.operations.import":
         arguments["legacy_state"] = _legacy_operations_state(
             payload.get("legacy_state")
         )
     elif name == "company.update":
         updates = dict(_mapping(payload.get("updates")))
-        if set(updates) - {"name", "status", "settings"}:
+        if set(updates) - {
+            "name",
+            "status",
+            "settings",
+            "description",
+            "metadata",
+            "conversation_group_id",
+        }:
             raise ValueError("Company update contains unsupported fields")
+        for key in {"settings", "metadata"} & set(updates):
+            updates[key] = dict(_mapping(updates[key]))
         arguments["updates"] = updates
     elif name.endswith(".upsert"):
         record = dict(_mapping(payload.get("record")))
