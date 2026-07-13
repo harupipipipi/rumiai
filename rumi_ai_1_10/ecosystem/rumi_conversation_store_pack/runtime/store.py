@@ -251,6 +251,41 @@ class ConversationStore:
             "store_revision": state["revision"],
         }
 
+    def replace_messages(
+        self,
+        conversation_id: str,
+        messages: list[Mapping[str, Any]],
+        *,
+        expected_conversation_revision: int,
+    ) -> dict[str, Any]:
+        """Replace the complete ordered message set in one owner transaction."""
+        conversation_id = _identifier(conversation_id)
+        normalized = [_message(item) for item in messages]
+        message_ids = [item["id"] for item in normalized]
+        if len(message_ids) != len(set(message_ids)):
+            raise ValueError("duplicate message ID in replacement")
+        for sequence, item in enumerate(normalized):
+            item["sequence"] = sequence
+        with NamedLock(self.lock_root, "conversations"):
+            state = self._read()
+            current = state["conversations"].get(conversation_id)
+            if not isinstance(current, Mapping):
+                raise KeyError("conversation is unknown")
+            current = dict(current)
+            _assert_conversation_revision(current, expected_conversation_revision)
+            current["messages"] = normalized
+            current["updated_at"] = _now_ms()
+            current["conversation_revision"] += 1
+            state["conversations"][conversation_id] = current
+            state["revision"] += 1
+            self._write(state)
+        return {
+            "action": "messages_replaced",
+            "messages": _copy(normalized),
+            "conversation_revision": current["conversation_revision"],
+            "store_revision": state["revision"],
+        }
+
     def migrate(
         self,
         conversations: list[Mapping[str, Any]],
@@ -425,6 +460,15 @@ def create_message_action(client: Any) -> Callable[[str, Mapping[str, Any]], Any
                 expected_conversation_revision=expected,
                 patch=_mapping(payload.get("patch")) if name == "update" else None,
                 delete=name == "delete",
+            )
+        if name == "replace":
+            messages = payload.get("messages")
+            if not isinstance(messages, list):
+                raise ValueError("ordered message list is required")
+            return store.replace_messages(
+                conversation_id,
+                [item for item in messages if isinstance(item, Mapping)],
+                expected_conversation_revision=expected,
             )
         raise ValueError(f"unknown message action: {name}")
 
