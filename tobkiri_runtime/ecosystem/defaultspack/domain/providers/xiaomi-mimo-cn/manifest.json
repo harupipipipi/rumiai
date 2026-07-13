@@ -7,9 +7,7 @@
   "status": "experimental",
   "display_name": "Xiaomi MiMo China Mainland",
   "description": "Experimental catalog entry for the Xiaomi MiMo China Mainland API. Runtime is disabled until official base URL and auth behavior are confirmed.",
-  "entrypoints": {
-    "models": "models.json"
-  },
+  "entrypoints": {},
   "security": {
     "credential_required": true,
     "region_explicit_selection_required": true
