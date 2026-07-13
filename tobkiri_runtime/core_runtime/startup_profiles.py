@@ -83,6 +83,7 @@ WAVE9_DEFAULT_SERVICE_PACKS = (
     "rumi_company_surface_pack",
     "rumi_kanban_state_store_pack",
     "rumi_kanban_conversation_adapter_pack",
+    "rumi_kanban_surface_pack",
 )
 
 # --- graph loader (lazy import to avoid circular dependency) ---

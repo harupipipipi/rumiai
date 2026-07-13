@@ -42,6 +42,10 @@ selected database in SQLite `mode=ro`, performs no schema migration, and reads
 only the board, column, card, and bounded event rows needed for a caller-
 selected one-shot export.
 
+The old UI/client removal is now complete, so `rumi_kanban_surface_pack` is in
+the Wave 9 default profile set. Its route remains isolated and read-only; pack
+removal removes the route without changing Kanban state ownership.
+
 The shim cutover must occur in this order:
 
 1. Export a caller-selected old board through a migration-only entrypoint.
@@ -51,8 +55,8 @@ The shim cutover must occur in this order:
    `rumi.resource.kanban.v1` and `rumi.action.kanban.v1`.
 4. Keep an old route only as a finite alias; it must return a supported
    migration diagnostic when the selected board has not been imported.
-5. Enable `rumi_kanban_surface_pack` in the default profile only after the
-   old primary React workspace view and direct resource client are removed.
+5. Enable `rumi_kanban_surface_pack` in the default profile after the old
+   primary React workspace view and direct resource client are removed.
 
 This sequence intentionally has no live fallback to the SQLite owner and no
 dual write. A failed or changed source snapshot is fail-closed and provides a
