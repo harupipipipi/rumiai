@@ -202,6 +202,12 @@ class CompanyStateStore:
             company["tasks"][task["id"]] = task
             company["updated_at_ms"] = now_ms
             return {"task": _copy(task)}
+        if name == "task.delete":
+            task_id = _identifier(arguments["record_id"])
+            if company["tasks"].pop(task_id, None) is None:
+                raise KeyError("Company task is unknown")
+            company["updated_at_ms"] = now_ms
+            return {"deleted_task_id": task_id}
         if name == "task.transition":
             task_id = _identifier(arguments["record_id"])
             task = company["tasks"].get(task_id)
@@ -480,6 +486,7 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         "route.upsert",
         "route.delete",
         "task.upsert",
+        "task.delete",
         "task.transition",
         "inbound.append",
         "message.append",
@@ -527,6 +534,8 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         record = dict(_mapping(payload.get("record")))
         arguments["record_id"] = str(record.get("id") or payload.get("record_id") or "")
         arguments["record"] = record
+    elif name == "task.delete":
+        arguments["record_id"] = str(payload.get("task_id") or "")
     elif name.endswith(".delete") and name != "company.delete":
         arguments["record_id"] = str(payload.get("record_id") or "")
     elif name == "task.transition":

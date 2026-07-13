@@ -83,6 +83,14 @@ class CompanyContractFacade:
                 _company_id(self.input),
                 _required_id(self.input, "channel_id"),
             )
+        if operation == "list_tasks":
+            return self._list_tasks(_company_id(self.input))
+        if operation == "get_task":
+            return self._get_task(_company_id(self.input), _required_id(self.input, "task_id"))
+        if operation == "upsert_task":
+            return self._upsert_task(_company_id(self.input))
+        if operation == "delete_task":
+            return self._delete_task(_company_id(self.input), _required_id(self.input, "task_id"))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -376,6 +384,58 @@ class CompanyContractFacade:
         )
         return True
 
+    def _list_tasks(self, company_id: str) -> list[dict[str, Any]] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        tasks = company.get("tasks")
+        tasks = dict(tasks) if isinstance(tasks, Mapping) else {}
+        return [_legacy_task(item) for _key, item in sorted(tasks.items()) if isinstance(item, Mapping)]
+
+    def _get_task(self, company_id: str, task_id: str) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        tasks = company.get("tasks")
+        value = tasks.get(task_id) if isinstance(tasks, Mapping) else None
+        return _legacy_task(value) if isinstance(value, Mapping) else None
+
+    def _upsert_task(self, company_id: str) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        _reject_subagent_team_write(_legacy_company(company))
+        task = _object(self.input.get("task") or self.input.get("updates"), "task")
+        if not task:
+            task = {
+                key: value
+                for key, value in self.input.items()
+                if key
+                not in {
+                    "company_id",
+                    "task_id",
+                    "id",
+                    "action",
+                    "approval_token",
+                    "_headers",
+                }
+            }
+        task_id = str(self.input.get("task_id") or task.get("id") or "task-" + uuid.uuid4().hex)
+        existing = self._get_task(company_id, task_id) or {}
+        source = {**existing, **task, "id": task_id}
+        record = _state_task(source)
+        result = self._mutate("task.upsert", {"company_id": company_id, "record": record})
+        value = result.get("task")
+        return _legacy_task(value) if isinstance(value, Mapping) else self._get_task(company_id, task_id)
+
+    def _delete_task(self, company_id: str, task_id: str) -> bool:
+        company = self._raw_company(company_id)
+        if company is None or self._get_task(company_id, task_id) is None:
+            return False
+        _reject_subagent_team_write(_legacy_company(company))
+        self._mutate("task.delete", {"company_id": company_id, "task_id": task_id})
+        return True
+
     def _required(self, company_id: str) -> dict[str, Any]:
         value = self._get(company_id)
         if value is None:
@@ -562,6 +622,46 @@ def _legacy_agent(
             for key, value in legacy.items()
             if key not in {"model", "status"}
         },
+    }
+
+
+def _legacy_task(value: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = value.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    legacy = metadata.get("legacy_task")
+    legacy = dict(legacy) if isinstance(legacy, Mapping) else {}
+    return {
+        "id": str(value.get("id") or ""),
+        "company_id": str(legacy.get("company_id") or ""),
+        "title": str(value.get("title") or "Task"),
+        "description": str(value.get("description") or ""),
+        "status": str(value.get("status") or "queued"),
+        "target_agent_ids": list(legacy.get("target_agent_ids") or []),
+        "source": str(legacy.get("source") or "manual"),
+        "dispatches": list(legacy.get("dispatches") or []),
+        "metadata": metadata,
+        "created_at_ms": value.get("created_at_ms"),
+        "updated_at_ms": value.get("updated_at_ms"),
+    }
+
+
+def _state_task(value: Mapping[str, Any]) -> dict[str, Any]:
+    targets = value.get("target_agent_ids")
+    targets = [str(item) for item in targets] if isinstance(targets, list) else []
+    metadata = _object(value.get("metadata"), "task.metadata")
+    metadata["legacy_task"] = {
+        "company_id": str(value.get("company_id") or ""),
+        "target_agent_ids": targets,
+        "source": str(value.get("source") or "manual"),
+        "dispatches": list(value.get("dispatches") or []),
+    }
+    return {
+        "id": str(value.get("id") or ""),
+        "title": str(value.get("title") or "Task"),
+        "description": str(value.get("description") or ""),
+        "status": str(value.get("status") or "queued"),
+        "assignee_member_id": targets[0] if targets else "",
+        "metadata": metadata,
     }
 
 
