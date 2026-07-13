@@ -60,40 +60,33 @@ class MediaHostService:
             if limit:
                 normalized_arguments["duration_ms"] = duration
         caller_context = dict(context or {})
-        payload_pack_id = normalized_arguments.pop("_contract_consumer_pack_id", "")
-        payload_function_id = normalized_arguments.pop(
+        normalized_arguments.pop("_contract_consumer_pack_id", None)
+        normalized_arguments.pop(
             "_contract_consumer_function_id",
             normalized_arguments.pop("_source_function_id", ""),
         )
-        caller_pack_id = str(
-            caller_context.get("_contract_consumer_pack_id")
-            or caller_context.get("caller_pack_id")
-            or payload_pack_id
-            or ""
-        ).strip()
-        caller_function_id = str(
-            caller_context.get("_contract_consumer_function_id")
-            or caller_context.get("caller_function_id")
-            or payload_function_id
-            or ""
-        ).strip()
-        if not caller_pack_id or not caller_function_id:
-            return _denied("missing_contract_caller_identity")
+        delegated_screen_capture = normalized_operation == "host.screen.capture"
         return {
             "type": "host_intent",
             "version": 1,
-            "operation": normalized_operation,
+            "operation": (
+                "host.intent.execute" if delegated_screen_capture else normalized_operation
+            ),
             "args": normalized_arguments,
             "stream": {"enabled": False},
             "reason": str(caller_context.get("reason") or "").strip(),
             "caller": {
-                "pack_id": caller_pack_id,
-                "function_id": caller_function_id,
+                "pack_id": "",
+                "function_id": "",
             },
             "conversation_id": str(
                 caller_context.get("conversation_id") or ""
             ).strip(),
-            "host_function_id": f"media.{self.access}",
+            "host_function_id": (
+                "computer.screenshot"
+                if delegated_screen_capture
+                else f"media.{self.access}"
+            ),
         }
 
 

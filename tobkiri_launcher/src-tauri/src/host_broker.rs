@@ -1483,7 +1483,18 @@ fn strip_approval_fields(args: &Value) -> Value {
 fn function_allowed(function_id: &str) -> bool {
     matches!(
         function_id,
-        "computer.doctor"
+        "browser.session"
+            | "browser.open_url"
+            | "browser.profiles.list"
+            | "browser.profile.create"
+            | "browser.profile.set_active"
+            | "browser.profile.delete"
+            | "browser.profile.clear_cache"
+            | "browser.profile.clear_cookies"
+            | "browser.cookies.list"
+            | "browser.cookies.import"
+            | "browser.cookies.delete"
+            | "computer.doctor"
             | "computer.observe"
             | "computer.screenshot"
             | "computer.ocr"
@@ -1559,7 +1570,18 @@ fn approval_result_for(
 fn high_risk_function(function_id: &str) -> bool {
     matches!(
         function_id,
-        "computer.screenshot"
+        "browser.session"
+            | "browser.open_url"
+            | "browser.profiles.list"
+            | "browser.profile.create"
+            | "browser.profile.set_active"
+            | "browser.profile.delete"
+            | "browser.profile.clear_cache"
+            | "browser.profile.clear_cookies"
+            | "browser.cookies.list"
+            | "browser.cookies.import"
+            | "browser.cookies.delete"
+            | "computer.screenshot"
             | "computer.ocr"
             | "computer.ax_tree"
             | "computer.move"

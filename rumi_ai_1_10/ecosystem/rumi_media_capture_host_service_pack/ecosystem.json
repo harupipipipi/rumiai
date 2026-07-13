@@ -11,6 +11,6 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": false,
   "resources": [],
-  "provenance": {"content_hash": "sha256:65a5c6fd81e259cfbfb55673ac221ca018518caa3b6adb1da70cbb9ac45654e1", "build_identity": "rumi-media-capture-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b", "build_identity": "rumi-media-capture-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {"authority_split": ["capture", "output"], "executor_owner": "rumi_viewer_host_broker", "raw_media_persistence": false, "network_send": false, "tool_or_ui_registry_imports": false}
 }

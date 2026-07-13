@@ -1,4 +1,4 @@
 {
   "version": 1,
-  "artifacts": [{"path": "runtime/service.py", "sha256": "837c4abd0c8a5db491c610be1d142eab97d9006b5b19264ca8d508d9d9d82aa3", "entrypoints": ["create_clipboard_reader", "create_clipboard_writer"]}]
+  "artifacts": [{"path": "runtime/service.py", "sha256": "944e78c7320bcb99ef2191cbe43bb546a94060c913434e2e1b94a12f903eb75b", "entrypoints": ["create_clipboard_reader", "create_clipboard_writer"]}]
 }

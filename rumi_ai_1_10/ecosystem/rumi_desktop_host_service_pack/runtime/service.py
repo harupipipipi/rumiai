@@ -32,6 +32,23 @@ CONTROL_OPERATIONS: Final[frozenset[str]] = frozenset(
 _FORBIDDEN_ARGUMENTS: Final[frozenset[str]] = frozenset(
     {"approved", "approval_token", "authority_token", "viewer_host_approved", "yolo_mode"}
 )
+_HOST_FUNCTIONS: Final[dict[str, str]] = {
+    "desktop.state": "computer.context",
+    "desktop.applications.list": "computer.apps",
+    "desktop.windows.list": "computer.windows",
+    "desktop.accessibility.snapshot": "computer.ax_tree",
+    "desktop.capture.frame": "computer.screenshot",
+    "desktop.application.select": "computer.select_app",
+    "desktop.application.activate": "computer.show_app",
+    "desktop.window.select": "computer.select_window",
+    "desktop.pointer.move": "computer.move",
+    "desktop.pointer.click": "computer.click",
+    "desktop.pointer.drag": "computer.drag",
+    "desktop.keyboard.type": "computer.type",
+    "desktop.keyboard.key": "computer.key",
+    "desktop.scroll": "computer.scroll",
+    "desktop.accessibility.action": "computer.semantic_action",
+}
 
 
 @dataclass(frozen=True)
@@ -69,44 +86,26 @@ class DesktopHostService:
                 "forbidden_arguments": forbidden,
             }
         caller_context = dict(context or {})
-        payload_pack_id = normalized_arguments.pop("_contract_consumer_pack_id", "")
-        payload_function_id = normalized_arguments.pop(
+        normalized_arguments.pop("_contract_consumer_pack_id", None)
+        normalized_arguments.pop(
             "_contract_consumer_function_id",
             normalized_arguments.pop("_source_function_id", ""),
         )
-        caller_pack_id = str(
-            caller_context.get("_contract_consumer_pack_id")
-            or caller_context.get("caller_pack_id")
-            or payload_pack_id
-            or ""
-        ).strip()
-        caller_function_id = str(
-            caller_context.get("_contract_consumer_function_id")
-            or caller_context.get("caller_function_id")
-            or payload_function_id
-            or ""
-        ).strip()
-        if not caller_pack_id or not caller_function_id:
-            return {
-                "status": "denied",
-                "success": False,
-                "error_type": "missing_contract_caller_identity",
-            }
         return {
             "type": "host_intent",
             "version": 1,
-            "operation": normalized_operation,
+            "operation": "host.intent.execute",
             "args": normalized_arguments,
             "stream": {"enabled": False},
             "reason": str(caller_context.get("reason") or "").strip(),
             "caller": {
-                "pack_id": caller_pack_id,
-                "function_id": caller_function_id,
+                "pack_id": "",
+                "function_id": "",
             },
             "conversation_id": str(
                 caller_context.get("conversation_id") or ""
             ).strip(),
-            "host_function_id": f"desktop.{self.access}",
+            "host_function_id": _HOST_FUNCTIONS[normalized_operation],
         }
 
 

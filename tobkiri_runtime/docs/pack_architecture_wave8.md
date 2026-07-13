@@ -29,6 +29,14 @@ approve. Browser, desktop, clipboard, and media device requests instead return
 typed HostIntents which are validated by core Authority and executed only by the
 Viewer host broker.
 
+Browser, desktop, clipboard, and screen-capture contracts expose domain-specific
+operations but emit the registered `host.intent.execute` envelope with an exact
+`host_function_id`. After core Authority consumes the approval, the executor
+issues a second one-shot Viewer token bound to the exact function and canonical
+arguments. Only then may the Viewer computer endpoint invoke its allowlisted
+helper. Unimplemented browser tab/download operations return `unavailable` and
+must not downgrade to direct execution.
+
 ## Security invariants
 
 - `approved`, `approval_token`, `authority_token`, `viewer_host_approved`, and

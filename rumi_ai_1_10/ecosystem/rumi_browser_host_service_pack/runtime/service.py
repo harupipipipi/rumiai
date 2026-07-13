@@ -36,6 +36,22 @@ CONTROL_OPERATIONS: Final[frozenset[str]] = frozenset(
 _FORBIDDEN_ARGUMENTS: Final[frozenset[str]] = frozenset(
     {"approved", "approval_token", "authority_token", "yolo_mode"}
 )
+_HOST_FUNCTIONS: Final[dict[str, str]] = {
+    "browser.session.get": "browser.session",
+    "browser.sessions.list": "browser.session",
+    "browser.profiles.list": "browser.profiles.list",
+    "browser.cookies.list": "browser.cookies.list",
+    "browser.capture.page": "computer.screenshot",
+    "browser.session.create": "browser.session",
+    "browser.profile.create": "browser.profile.create",
+    "browser.profile.set_active": "browser.profile.set_active",
+    "browser.profile.delete": "browser.profile.delete",
+    "browser.profile.clear_cache": "browser.profile.clear_cache",
+    "browser.profile.clear_cookies": "browser.profile.clear_cookies",
+    "browser.navigate": "browser.open_url",
+    "browser.cookies.import": "browser.cookies.import",
+    "browser.cookies.delete": "browser.cookies.delete",
+}
 
 
 @dataclass(frozen=True)
@@ -73,44 +89,34 @@ class BrowserHostService:
                 "forbidden_arguments": forbidden,
             }
         caller_context = dict(context or {})
-        payload_pack_id = normalized_arguments.pop("_contract_consumer_pack_id", "")
-        payload_function_id = normalized_arguments.pop(
+        normalized_arguments.pop("_contract_consumer_pack_id", None)
+        normalized_arguments.pop(
             "_contract_consumer_function_id",
             normalized_arguments.pop("_source_function_id", ""),
         )
-        caller_pack_id = str(
-            caller_context.get("_contract_consumer_pack_id")
-            or caller_context.get("caller_pack_id")
-            or payload_pack_id
-            or ""
-        ).strip()
-        caller_function_id = str(
-            caller_context.get("_contract_consumer_function_id")
-            or caller_context.get("caller_function_id")
-            or payload_function_id
-            or ""
-        ).strip()
-        if not caller_pack_id or not caller_function_id:
+        host_function_id = _HOST_FUNCTIONS.get(normalized_operation)
+        if host_function_id is None:
             return {
-                "status": "denied",
+                "status": "unavailable",
                 "success": False,
-                "error_type": "missing_contract_caller_identity",
+                "error_type": "browser_host_runner_unavailable",
+                "operation": normalized_operation,
             }
         return {
             "type": "host_intent",
             "version": 1,
-            "operation": normalized_operation,
+            "operation": "host.intent.execute",
             "args": normalized_arguments,
             "stream": {"enabled": False},
             "reason": str(caller_context.get("reason") or "").strip(),
             "caller": {
-                "pack_id": caller_pack_id,
-                "function_id": caller_function_id,
+                "pack_id": "",
+                "function_id": "",
             },
             "conversation_id": str(
                 caller_context.get("conversation_id") or ""
             ).strip(),
-            "host_function_id": f"browser.{self.access}",
+            "host_function_id": host_function_id,
         }
 
 

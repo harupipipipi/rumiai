@@ -35,7 +35,9 @@ def test_browser_observe_and_control_are_disjoint() -> None:
     intent = control.invoke("browser.navigate", {**CALLER, "url": "https://example.test"})
     assert denied["status"] == "denied"
     assert intent["type"] == "host_intent"
-    assert intent["caller"]["pack_id"] == "test.consumer"
+    assert intent["operation"] == "host.intent.execute"
+    assert intent["host_function_id"] == "browser.open_url"
+    assert intent["caller"]["pack_id"] == ""
     assert "_contract_consumer_pack_id" not in intent["args"]
 
 
@@ -43,9 +45,9 @@ def test_desktop_observe_cannot_emit_input() -> None:
     observe = create_desktop_observer()
     control = create_desktop_control()
     assert observe.invoke("desktop.pointer.click", CALLER)["status"] == "denied"
-    assert control.invoke("desktop.pointer.click", {**CALLER, "x": 10, "y": 20})[
-        "operation"
-    ] == "desktop.pointer.click"
+    intent = control.invoke("desktop.pointer.click", {**CALLER, "x": 10, "y": 20})
+    assert intent["operation"] == "host.intent.execute"
+    assert intent["host_function_id"] == "computer.click"
 
 
 def test_client_approval_material_is_rejected() -> None:
@@ -60,8 +62,10 @@ def test_client_approval_material_is_rejected() -> None:
 def test_clipboard_read_write_are_separate_and_bounded() -> None:
     reader = create_clipboard_reader()
     writer = create_clipboard_writer()
-    assert reader.invoke(CALLER)["operation"] == "host.clipboard.read"
-    assert writer.invoke({**CALLER, "text": "hello"})["operation"] == "host.clipboard.write"
+    assert reader.invoke(CALLER)["host_function_id"] == "computer.clipboard.read"
+    assert writer.invoke({**CALLER, "text": "hello"})[
+        "host_function_id"
+    ] == "computer.clipboard.write"
     oversized = writer.invoke({**CALLER, "text": "x" * 1_048_577})
     assert oversized["error_type"] == "clipboard_text_too_large"
 

@@ -14,7 +14,7 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": false,
   "resources": [],
-  "provenance": {"content_hash": "sha256:853d54f750a4110a342ab1cb8becec118522743a7097bccb847bc4c65ab28c03", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:2403e261eb1b78627be053348bf267db052840cdc35035b7da271853b091241a", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {
     "authority_split": ["observe", "control"],
     "executor_owner": "rumi_viewer_host_broker",

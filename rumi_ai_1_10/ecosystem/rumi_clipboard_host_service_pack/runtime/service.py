@@ -36,10 +36,8 @@ class ClipboardHostService:
                 "error_type": "client_authority_material_forbidden",
                 "forbidden_arguments": forbidden,
             }
-        caller_pack_id_from_payload = normalized_arguments.pop(
-            "_contract_consumer_pack_id", ""
-        )
-        caller_function_id_from_payload = normalized_arguments.pop(
+        normalized_arguments.pop("_contract_consumer_pack_id", None)
+        normalized_arguments.pop(
             "_contract_consumer_function_id",
             normalized_arguments.pop("_source_function_id", ""),
         )
@@ -67,49 +65,31 @@ class ClipboardHostService:
                 }
             normalized_arguments = {"text": text, "format": "text/plain"}
         caller_context = dict(context or {})
-        caller_pack_id = str(
-            caller_context.get("_contract_consumer_pack_id")
-            or caller_context.get("caller_pack_id")
-            or caller_pack_id_from_payload
-            or ""
-        ).strip()
-        caller_function_id = str(
-            caller_context.get("_contract_consumer_function_id")
-            or caller_context.get("caller_function_id")
-            or caller_function_id_from_payload
-            or ""
-        ).strip()
-        if not caller_pack_id or not caller_function_id:
-            return {
-                "status": "denied",
-                "success": False,
-                "error_type": "missing_contract_caller_identity",
-            }
         return {
             "type": "host_intent",
             "version": 1,
-            "operation": self.operation,
+            "operation": "host.intent.execute",
             "args": normalized_arguments,
             "stream": {"enabled": False},
             "reason": str(caller_context.get("reason") or "").strip(),
             "caller": {
-                "pack_id": caller_pack_id,
-                "function_id": caller_function_id,
+                "pack_id": "",
+                "function_id": "",
             },
             "conversation_id": str(
                 caller_context.get("conversation_id") or ""
             ).strip(),
-            "host_function_id": f"clipboard.{self.access}",
+            "host_function_id": self.operation,
         }
 
 
 def create_clipboard_reader(_context: dict[str, Any] | None = None) -> ClipboardHostService:
     """Create the clipboard read provider."""
 
-    return ClipboardHostService(access="read", operation="host.clipboard.read")
+    return ClipboardHostService(access="read", operation="computer.clipboard.read")
 
 
 def create_clipboard_writer(_context: dict[str, Any] | None = None) -> ClipboardHostService:
     """Create the clipboard write provider."""
 
-    return ClipboardHostService(access="write", operation="host.clipboard.write")
+    return ClipboardHostService(access="write", operation="computer.clipboard.write")
