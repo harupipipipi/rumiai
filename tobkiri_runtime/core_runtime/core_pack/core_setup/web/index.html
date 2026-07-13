@@ -259,13 +259,14 @@
     .selection-footer {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 14px;
       margin-top: 18px;
       padding-top: 16px;
       border-top: 1px solid var(--line);
     }
     .selection-summary { color: var(--muted); font-size: 12px; }
+    .selection-footer button { margin-left: auto; min-width: 216px; }
     @keyframes setup-rise {
       from { opacity: 0; transform: translateY(12px); }
       to { opacity: 1; transform: none; }

@@ -3476,6 +3476,10 @@ function ChatApp() {
           if (!cancelled) console.error(shellError);
         });
       try {
+        // The shell depends on the catalog and settings to render the settings
+        // entry point and the widget rail. Do not present an apparently-ready,
+        // empty workspace while those requests are still in flight.
+        await shellBootstrap;
         if (!cancelled) {
           await refreshConversations(null);
         }
@@ -3492,7 +3496,6 @@ function ChatApp() {
           setIsLoading(false);
         }
       }
-      void shellBootstrap;
     }
 
     void bootstrap();
