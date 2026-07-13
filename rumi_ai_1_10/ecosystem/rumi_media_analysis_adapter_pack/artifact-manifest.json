@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "artifacts": [{"path": "runtime/adapter.py", "sha256": "ac3a90d1b02a8eae7e995d405ab51b6474a3bd8a72f536530b046c08d42508c2", "entrypoints": ["create_media_analysis_adapter"]}]
+}
