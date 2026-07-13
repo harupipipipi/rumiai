@@ -62,9 +62,10 @@ profile's manifest projection; they may not edit shared host/runtime cores or
 gain authority merely by being installed. Product UI removal is therefore a
 profile pack-set change, not a host route exception.
 
-The pre-v3 asset-only product manifests and any direct defaultspack feature UI
-are a Wave 10 facade-cleanup target. They are recorded here instead of being
-silently treated as new authoritative runtime owners.
+Artifact, office-authoring, research, customer-research, and data-analysis now
+declare hash-verified v3 content manifests and profile-scoped declarative route
+contributions. Removing one selected product pack removes only its contribution;
+it does not change host/runtime code or grant product authority.
 
 ## Remaining compatibility cleanup before Wave 9 closure
 
@@ -73,11 +74,6 @@ direct chat/agent synchronization. It cannot be relabeled as an adapter: its
 state owner, action contract, UI projection, and one-way migration still need
 to be extracted before the defaultspack facade cleanup can be accepted.
 
-Likewise, the artifact, office-authoring, research, customer-research, and
-data-analysis packs need their existing declarative assets represented as
-selected-profile v3 contributions. This work is intentionally tracked as
-remaining implementation rather than claiming host-independent product UI
-ownership prematurely.
 
 ## Data ownership matrix
 
