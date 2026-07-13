@@ -82,6 +82,7 @@ def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
         "remote_models_endpoint",
         "openrouter_models_api",
         "vercel_gateway_models_api",
+        "vercel_ai_gateway_models_api",
         "native_models_endpoint",
         "native_server_api",
         "last_known_good_inventory",

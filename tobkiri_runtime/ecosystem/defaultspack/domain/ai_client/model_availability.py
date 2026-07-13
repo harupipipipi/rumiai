@@ -210,6 +210,7 @@ class ModelAvailabilityService:
                 "remote_models_endpoint",
                 "openrouter_models_api",
                 "vercel_gateway_models_api",
+                "vercel_ai_gateway_models_api",
                 "native_server_api",
                 "native_models_endpoint",
                 "last_known_good_inventory",

@@ -591,3 +591,47 @@ def test_live_inventory_removes_stale_bundled_models_from_the_ui_catalog(monkeyp
     models = catalog.list_model_catalog("openrouter")
 
     assert [model["model_id"] for model in models] == ["account-visible-model"]
+
+
+def test_vercel_live_inventory_replaces_its_static_overlay_and_keeps_media_task_types(monkeypatch):
+    import ecosystem.defaultspack.backend.ai_client.provider_catalog as catalog
+    from domain.ai_client.providers.vercel_ai_gateway_provider import VercelAIGatewayProvider
+
+    provider = VercelAIGatewayProvider(known_models=[])
+    image = provider._normalize_remote_model({"id": "fal/image", "type": "image", "output_modalities": ["image"]})
+    video = provider._normalize_remote_model({"id": "fal/video", "type": "video", "output_modalities": ["video"]})
+
+    assert image["type"] == "image_gen"
+    assert image["capabilities"]["image_generation"] is True
+    assert video["type"] == "video_gen"
+    assert video["capabilities"]["video_generation"] is True
+
+    class Client:
+        def list_providers(self):
+            return [{"provider_id": "vercel-ai-gateway"}]
+
+        def list_models(self, provider=None):
+            assert provider in {None, "vercel-ai-gateway"}
+            return [{
+                "id": "vercel-ai-gateway/account-visible-model",
+                "qualified_model_id": "vercel-ai-gateway/account-visible-model",
+                "provider_id": "vercel-ai-gateway",
+                "model_id": "account-visible-model",
+                "metadata": {"source": "vercel_ai_gateway_models_api"},
+            }]
+
+    monkeypatch.setattr(catalog, "_runtime_client", lambda: Client())
+    monkeypatch.setattr(
+        catalog,
+        "get_all_known_models",
+        lambda **_kwargs: [{
+            "id": "vercel-ai-gateway/stale-bundled-model",
+            "qualified_model_id": "vercel-ai-gateway/stale-bundled-model",
+            "provider_id": "vercel-ai-gateway",
+            "model_id": "stale-bundled-model",
+        }],
+    )
+
+    models = catalog.list_model_catalog("vercel-ai-gateway")
+
+    assert [model["model_id"] for model in models] == ["account-visible-model"]

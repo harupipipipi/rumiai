@@ -156,9 +156,11 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         if "embedding" in output_tokens or "embeddings" in output_tokens:
             model_type = "embedding"
         elif "image" in output_tokens and "text" not in output_tokens:
-            model_type = "image"
+            model_type = "image_gen"
+        elif "video" in output_tokens and "text" not in output_tokens:
+            model_type = "video_gen"
         elif "audio" in output_tokens and "text" not in output_tokens:
-            model_type = "audio"
+            model_type = "tts"
         normalized["type"] = model_type
 
         is_chat = model_type == "chat"
@@ -190,6 +192,11 @@ class OpenRouterProvider(OpenAICompatibleProvider):
                 "json_schema": bool(
                     parameter_tokens.intersection({"structured_outputs", "json_schema"})
                 ),
+                "embeddings": model_type == "embedding",
+                "rerank": model_type == "rerank",
+                "image_generation": model_type == "image_gen",
+                "video_generation": model_type == "video_gen",
+                "tts": model_type == "tts",
             }
         )
         normalized["capabilities"] = capabilities

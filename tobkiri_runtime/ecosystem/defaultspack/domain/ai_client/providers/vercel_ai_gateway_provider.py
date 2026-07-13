@@ -109,10 +109,12 @@ class VercelAIGatewayProvider(OpenAICompatibleProvider):
             "embeddings": "embedding",
             "rerank": "rerank",
             "reranking": "rerank",
-            "image": "image",
-            "video": "video",
-            "speech": "audio",
-            "audio": "audio",
+            "image": "image_gen",
+            "image_generation": "image_gen",
+            "video": "video_gen",
+            "video_generation": "video_gen",
+            "speech": "tts",
+            "audio": "tts",
         }
         normalized["type"] = type_aliases.get(model_type, model_type)
 
@@ -166,6 +168,11 @@ class VercelAIGatewayProvider(OpenAICompatibleProvider):
                 "reasoning": supports_reasoning,
                 "structured_output": supports_structured,
                 "json_schema": bool(parameter_tokens.intersection({"json_schema", "structured_outputs"})),
+                "embeddings": normalized["type"] == "embedding",
+                "rerank": normalized["type"] == "rerank",
+                "image_generation": normalized["type"] == "image_gen",
+                "video_generation": normalized["type"] == "video_gen",
+                "tts": normalized["type"] == "tts",
             }
         )
         normalized["capabilities"] = capabilities
