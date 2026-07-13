@@ -33,6 +33,8 @@
   approval token binding と authority receipt の arguments binding を確認
 - legacy Company agents route の role/member atomic upsert/delete、legacy projection、
   one approval token が複数 owner action に再利用されないことを確認
+- legacy Company channels route の selected-state read/write、approval binding、
+  Mimo 同期や runtime channel の write-on-read が発生しないことを確認
 - legacy Kanban board の export、one-shot import、同一 source hash の no-write
   dedupe、changed source hash の fail-closed、stale revision、rollback を確認
 - migration 前の legacy Kanban route は migration-required diagnostic と recovery

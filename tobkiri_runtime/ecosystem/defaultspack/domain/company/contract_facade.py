@@ -69,6 +69,20 @@ class CompanyContractFacade:
                 _company_id(self.input),
                 _required_id(self.input, "agent_id"),
             )
+        if operation == "list_channels":
+            return self._list_channels(_company_id(self.input))
+        if operation == "get_channel":
+            return self._get_channel(
+                _company_id(self.input),
+                _required_id(self.input, "channel_id"),
+            )
+        if operation == "upsert_channel":
+            return self._upsert_channel(_company_id(self.input))
+        if operation == "delete_channel":
+            return self._delete_channel(
+                _company_id(self.input),
+                _required_id(self.input, "channel_id"),
+            )
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -286,6 +300,79 @@ class CompanyContractFacade:
         self._mutate(
             "agent.delete",
             {"company_id": company_id, "agent_id": agent_id},
+        )
+        return True
+
+    def _list_channels(self, company_id: str) -> list[dict[str, Any]] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        channels = company.get("channels")
+        channels = dict(channels) if isinstance(channels, Mapping) else {}
+        return [
+            dict(value)
+            for _channel_id, value in sorted(channels.items())
+            if isinstance(value, Mapping)
+        ]
+
+    def _get_channel(
+        self,
+        company_id: str,
+        channel_id: str,
+    ) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        channels = company.get("channels")
+        channels = dict(channels) if isinstance(channels, Mapping) else {}
+        value = channels.get(channel_id)
+        return dict(value) if isinstance(value, Mapping) else None
+
+    def _upsert_channel(self, company_id: str) -> dict[str, Any] | None:
+        channel = self.input.get("channel")
+        if channel is None:
+            channel = {
+                key: value
+                for key, value in self.input.items()
+                if key
+                not in {
+                    "company_id",
+                    "action",
+                    "approval_token",
+                    "_headers",
+                }
+            }
+        channel = _object(channel, "channel")
+        channel_id = str(
+            channel.get("channel_id") or channel.get("id") or ""
+        ).strip()
+        if not channel_id:
+            channel_id = "channel-" + uuid.uuid4().hex
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        _reject_subagent_team_write(_legacy_company(company))
+        result = self._mutate(
+            "channel.upsert",
+            {
+                "company_id": company_id,
+                "record": {"id": channel_id, **channel},
+            },
+        )
+        value = result.get("channel")
+        return dict(value) if isinstance(value, Mapping) else self._get_channel(
+            company_id,
+            channel_id,
+        )
+
+    def _delete_channel(self, company_id: str, channel_id: str) -> bool:
+        company = self._raw_company(company_id)
+        if company is None or self._get_channel(company_id, channel_id) is None:
+            return False
+        _reject_subagent_team_write(_legacy_company(company))
+        self._mutate(
+            "channel.delete",
+            {"company_id": company_id, "record_id": channel_id},
         )
         return True
 

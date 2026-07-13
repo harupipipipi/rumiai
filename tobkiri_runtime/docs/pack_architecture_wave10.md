@@ -99,6 +99,13 @@ Legacy model, status, and agent-specific fields are carried in member metadata
 for the compatibility projection; `CompanyAgentStore` is not constructed by
 the route.
 
+The legacy channels alias now reads and mutates only the selected Company's
+channel records through the facade. It no longer synchronizes Mimo state,
+opens the legacy Company/runtime stores, or synthesizes runtime channels in a
+state route. Runtime message counts and observability are deliberately left to
+the pending Company runtime adapter, so this compatibility route has one data
+owner and no hidden write-on-read behavior.
+
 The Company compatibility projection keeps the historic organization shape for
 these finite CRUD aliases. It derives the legacy `agents` projection from the
 authoritative member/role records; it does not read or write the legacy Company
@@ -126,6 +133,7 @@ the old store remains an allowed fallback for the cut-over CRUD routes.
 | `/api/company` CRUD aliases | finite contract facade and legacy projection | `CompanyService` or `CompanyStore` construction, legacy state fallback |
 | Company settings alias | finite contract facade and selected-record policy guard | `CompanySettingsStore` construction or unbound replace semantics |
 | Company agents alias | atomic role/member compatibility action and projection | `CompanyAgentStore` construction or split writes under one approval |
+| Company channels alias | finite selected-state record facade | Mimo sync, `CompanyStore`/runtime-store reads, or synthesized state |
 | Company status/runtime/dispatch and collection routes | temporary Wave 10 inventory pending selected-contract adapters | new primary implementation or a second Company writer |
 
 ## Release boundary
