@@ -306,40 +306,39 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [],
     },
     {
+        # Friendli exposes the currently served Serverless models from the
+        # same OpenAI-compatible /models endpoint used for inference.
         "provider_name": "friendli",
         "display_name": "Friendli",
         "env_vars": ("FRIENDLI_API_KEY",),
         "base_url_env_vars": ("FRIENDLI_BASE_URL",),
         "default_base_url": "https://api.friendli.ai/serverless/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("friendli", "meta-llama-3.1-70b-instruct", "Meta Llama 3.1 70B Instruct"),
-            _chat("friendli", "mixtral-8x7b-instruct-v0-1", "Mixtral 8x7B Instruct"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
+        # Hyperbolic's OpenAI-compatible GET /v1/models lists the active
+        # inference catalog, including newly enabled account models.
         "provider_name": "hyperbolic",
         "display_name": "Hyperbolic",
         "env_vars": ("HYPERBOLIC_API_KEY",),
         "base_url_env_vars": ("HYPERBOLIC_BASE_URL",),
         "default_base_url": "https://api.hyperbolic.xyz/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("hyperbolic", "meta-llama/Meta-Llama-3.1-70B-Instruct", "Meta Llama 3.1 70B Instruct"),
-            _chat("hyperbolic", "deepseek-ai/DeepSeek-V3", "DeepSeek V3"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
+        # Inference.net supplies its complete provider catalog at /v1/models.
         "provider_name": "inference-net",
         "display_name": "InferenceNet",
         "env_vars": ("INFERENCE_NET_API_KEY", "INFERENCENET_API_KEY"),
         "base_url_env_vars": ("INFERENCE_NET_BASE_URL", "INFERENCENET_BASE_URL"),
         "default_base_url": "https://api.inference.net/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("inference-net", "llama-3.1-70b-instruct", "Llama 3.1 70B Instruct"),
-            _chat("inference-net", "deepseek-v3", "DeepSeek V3"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "avian",
@@ -354,17 +353,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         ],
     },
     {
+        # Upstage's authenticated OpenAI-compatible /v1/models endpoint is
+        # the source of truth for the models available to this key.
         "provider_name": "upstage",
         "display_name": "Upstage",
         "env_vars": ("UPSTAGE_API_KEY",),
         "base_url_env_vars": ("UPSTAGE_BASE_URL",),
         "default_base_url": "https://api.upstage.ai/v1",
         "supports_embeddings": True,
-        "curated_models": [
-            _chat("upstage", "solar-pro2-preview", "Solar Pro 2 Preview"),
-            _chat("upstage", "solar-mini", "Solar Mini"),
-            _embedding("upstage", "solar-embedding-1-large", "Solar Embedding 1 Large"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
 ]
 

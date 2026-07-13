@@ -337,6 +337,7 @@ def test_openai_compatible_provider_specs_use_live_models_endpoints_instead_of_r
 
     for provider_id in (
         "xai", "groq", "together", "deepseek", "fireworks", "cerebras", "sambanova", "perplexity", "mistral", "novita", "deepinfra",
+        "friendli", "hyperbolic", "inference-net", "upstage",
     ):
         spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
         assert spec["remote_model_discovery"] is True
