@@ -120,14 +120,10 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertIn("mistral/mistral-large-latest", model_ids)
         self.assertIn("mistral/mistral-embed", model_ids)
 
-    def test_openrouter_provider_merges_live_overlay_and_rejects_unknown_models(self):
+    def test_openrouter_provider_uses_only_live_inventory_and_rejects_unknown_models(self):
         from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
         with patch.object(
-            OpenRouterProvider,
-            "_catalog_models",
-            classmethod(lambda cls: _openrouter_catalog_models()),
-        ), patch.object(
             OpenRouterProvider,
             "_remote_discovered_models",
             return_value=[{
@@ -148,7 +144,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
             models = provider.list_models()
 
             model_ids = {item["id"] for item in models}
-            self.assertTrue({item["id"] for item in OPENROUTER_CURATED_ALLOWLIST}.issubset(model_ids))
+            self.assertEqual(model_ids, {"openrouter/openai/live-model"})
             self.assertIn("openrouter/openai/live-model", model_ids)
             for model in models:
                 provider._assert_supported_model(model["model_id"])
@@ -157,40 +153,24 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "live or last-known-good catalog"):
                 provider._assert_supported_model("openai/gpt-4o-mini")
 
-    def test_ai_client_lists_openrouter_curated_allowlist(self):
-        from domain.ai_client.client import AIClient
+    def test_openrouter_empty_seed_does_not_hide_live_account_models(self):
         from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
-        AIClient._instance = None
-        with (
-            patch.object(
-                OpenRouterProvider,
-                "_catalog_models",
-                classmethod(lambda cls: _openrouter_catalog_models()),
-            ),
-            patch.object(
-                OpenRouterProvider,
-                "_remote_discovered_models",
-                return_value=[],
-            ),
-            patch.dict(
-                os.environ,
-                {"OPENROUTER_API_KEY": "or-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
-                clear=True,
-            ),
+        provider = OpenRouterProvider(known_models=[])
+        with patch.object(
+            provider,
+            "_remote_discovered_models",
+            return_value=[{
+                "id": "openrouter/account-visible-model",
+                "model_id": "account-visible-model",
+                "provider_id": "openrouter",
+                "provider": "openrouter",
+                "type": "chat",
+            }],
         ):
-            client = AIClient()
+            models = provider.list_models()
 
-        try:
-            models = client.list_models(provider="openrouter")
-            provider, model_name = client.resolve_provider("openrouter/cohere/north-mini-code:free")
-        finally:
-            AIClient._instance = None
-
-        model_ids = {item["id"] for item in models}
-        self.assertTrue({item["id"] for item in OPENROUTER_CURATED_ALLOWLIST}.issubset(model_ids))
-        self.assertEqual(model_name, "cohere/north-mini-code:free")
-        self.assertEqual(getattr(provider, "provider_id", ""), "openrouter")
+        self.assertEqual([item["id"] for item in models], ["openrouter/account-visible-model"])
 
     def test_gitlawb_opengateway_includes_mimo_v2_omni(self):
         from domain.ai_client.client import AIClient
