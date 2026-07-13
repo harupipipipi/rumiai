@@ -12,7 +12,7 @@ class LegacyKanbanMigrationError(RuntimeError):
 def export_board_snapshot(board_id: str) -> dict[str, Any]:
     """Export one old SQLite board without exposing it as a runtime fallback.
 
-    This is the only permitted defaultspack import of the legacy Kanban store.
+    This is the only permitted defaultspack read of legacy Kanban SQLite state.
     The caller must submit the returned value to the selected global owner with
     an exact migration receipt; this function never invokes that owner itself.
     """
@@ -20,11 +20,14 @@ def export_board_snapshot(board_id: str) -> dict[str, Any]:
     target = str(board_id or "").strip()
     if not target:
         raise LegacyKanbanMigrationError("legacy Kanban board ID is required")
-    from .store import KanbanStore
+    from .legacy_snapshot_reader import (
+        LegacyKanbanSnapshotError,
+        read_board_snapshot,
+    )
 
     try:
-        legacy = KanbanStore().board_snapshot(target)
-    except Exception as exc:
+        legacy = read_board_snapshot(target)
+    except LegacyKanbanSnapshotError as exc:
         raise LegacyKanbanMigrationError(
             f"legacy Kanban board is unavailable: {target}"
         ) from exc

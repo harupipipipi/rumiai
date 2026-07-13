@@ -36,6 +36,12 @@ shim to `/kanban`; the selected `rumi_kanban_surface_pack` owns the removable
 isolated UI projection. The old component tree and its direct API test were
 removed rather than retained as a hidden fallback.
 
+`domain/kanban/service.py` and `domain/kanban/store.py` have been removed.
+The only legacy SQLite access is `legacy_snapshot_reader.py`, which opens the
+selected database in SQLite `mode=ro`, performs no schema migration, and reads
+only the board, column, card, and bounded event rows needed for a caller-
+selected one-shot export.
+
 The shim cutover must occur in this order:
 
 1. Export a caller-selected old board through a migration-only entrypoint.
@@ -58,8 +64,7 @@ source through the one-shot import before routing any writes.
 | Legacy surface | Allowed remaining role | Forbidden role after cutover |
 |---|---|---|
 | `/api/kanban/*` | finite route aliases and migration diagnostics | direct `KanbanService` construction or SQLite access outside migration export |
-| `domain/kanban/store.py` | caller-selected one-shot snapshot export | state reads/writes, board bootstrap, card/column mutation |
-| `domain/kanban/service.py` | none; remove after route shim is complete | chat, agent, or Kanban orchestration |
+| `legacy_snapshot_reader.py` | caller-selected read-only snapshot export | schema migration, DB creation, state read/write fallback |
 | React Kanban workspace | temporary deprecated route shim | primary UI, direct API client, direct implementation URL |
 | `tool_task_board*` | explicit deprecated tool diagnostics | SQLite/JSON state ownership or agent/session dispatch |
 | `rumi_kanban_surface_pack` | selected isolated read-only content | state/action ownership or receipt handling |

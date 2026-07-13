@@ -25,6 +25,8 @@
   dedupe、changed source hash の fail-closed、stale revision、rollback を確認
 - migration 前の legacy Kanban route は migration-required diagnostic と recovery
   path を返し、空 board を静かに新規作成しないこと
+- legacy snapshot reader が read-only で、旧 SQLite の schema migration・DB 作成・
+  write を行わないこと
 - migration 後の old Kanban route は global resource/action だけを通し、旧 SQLite
   に read/write しないこと。二重 writer がないこと
 - old React Kanban view の撤去後、isolated Kanban route の profile scope、pack
