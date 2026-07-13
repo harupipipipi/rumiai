@@ -60,7 +60,12 @@ class ScheduleStore:
         value = self._read()["schedules"].get(_identifier(schedule_id))
         return _copy(value) if isinstance(value, Mapping) else None
 
-    def due(self, now_ms: int, limit: int) -> dict[str, Any]:
+    def due(
+        self,
+        now_ms: int,
+        limit: int,
+        schedule_id: str = "",
+    ) -> dict[str, Any]:
         """Return due, enabled, unleased schedules without claiming them."""
 
         state = self._read()
@@ -71,6 +76,7 @@ class ScheduleStore:
             and item["status"] not in _TERMINAL
             and int(item["next_run_at_ms"]) <= now_ms
             and int(item.get("lease_expires_at_ms") or 0) <= now_ms
+            and (not schedule_id or item["id"] == schedule_id)
         ]
         values.sort(key=lambda item: (item["next_run_at_ms"], item["id"]))
         return {"revision": state["revision"], "schedules": _copy(values[:limit])}
@@ -212,6 +218,7 @@ def create_schedule_resource(client: Any) -> Callable[[str, Mapping[str, Any]], 
             return store.due(
                 max(0, int(payload.get("now_ms") or 0)),
                 max(1, min(100, int(payload.get("limit") or 20))),
+                str(payload.get("schedule_id") or ""),
             )
         raise ValueError(f"unknown schedule resource operation: {name}")
 
