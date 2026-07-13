@@ -12,6 +12,45 @@ def _embedding(provider, model_id, name):
 
 _OPENAI_COMPATIBLE_PROVIDERS = [
     {
+        # DashScope exposes its account-visible Qwen inventory through the
+        # same OpenAI-compatible endpoint used for inference.  Regional
+        # endpoints remain configurable through DASHSCOPE_BASE_URL.
+        "provider_name": "alibaba-dashscope",
+        "display_name": "Alibaba DashScope / Qwen",
+        "env_vars": ("DASHSCOPE_API_KEY",),
+        "base_url_env_vars": ("DASHSCOPE_BASE_URL",),
+        "default_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
+        # Z.AI documents this as an OpenAI-compatible REST surface.  The
+        # account-visible /models response, not a checked-in GLM snapshot, is
+        # the source of truth.
+        "provider_name": "glm",
+        "display_name": "Zhipu GLM / Z.AI",
+        "env_vars": ("GLM_API_KEY",),
+        "base_url_env_vars": ("GLM_BASE_URL",),
+        "default_base_url": "https://api.z.ai/api/paas/v4",
+        "headers": {"Accept-Language": "en-US,en"},
+        "supports_embeddings": False,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
+        # SiliconFlow's authenticated OpenAI-compatible /models catalog is
+        # authoritative for the models enabled for this account.
+        "provider_name": "siliconflow",
+        "display_name": "SiliconFlow",
+        "env_vars": ("SILICONFLOW_API_KEY",),
+        "base_url_env_vars": ("SILICONFLOW_BASE_URL",),
+        "default_base_url": "https://api.siliconflow.cn/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         # GitHub's catalog is a bare JSON array at /catalog/models, whereas
         # inference uses its OpenAI-compatible /inference endpoint.  Both are
         # account-scoped and authenticated with the same models-scope token.

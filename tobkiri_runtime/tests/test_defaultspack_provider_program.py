@@ -136,3 +136,21 @@ def test_github_models_uses_its_account_catalog_and_openai_compatible_inference_
     page, cursor = provider._remote_models_page([{"id": "openai/gpt-4.1", "name": "OpenAI GPT-4.1"}])
     assert page == [{"id": "openai/gpt-4.1", "name": "OpenAI GPT-4.1"}]
     assert cursor == ""
+
+
+def test_openai_compatible_provider_specs_do_not_freeze_glm_dashscope_or_siliconflow_models():
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    expected_endpoints = {
+        "alibaba-dashscope": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "glm": "https://api.z.ai/api/paas/v4",
+        "siliconflow": "https://api.siliconflow.cn/v1",
+    }
+    for provider_id, endpoint in expected_endpoints.items():
+        spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
+        assert spec["curated_models"] == []
+        provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+        assert provider._base_url == endpoint
+        assert provider._remote_model_list_path == "/models"

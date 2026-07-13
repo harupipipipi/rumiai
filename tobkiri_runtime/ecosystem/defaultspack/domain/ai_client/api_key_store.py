@@ -14,6 +14,7 @@ from .provider_program import provider_program_manifests
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
     "avian": ["AVIAN_API_KEY"],
+    "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
     "cerebras": ["CEREBRAS_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "deepinfra": ["DEEPINFRA_API_KEY"],
@@ -43,6 +44,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "openrouter": ["OPENROUTER_API_KEY"],
     "perplexity": ["PERPLEXITY_API_KEY"],
     "sambanova": ["SAMBANOVA_API_KEY"],
+    "siliconflow": ["SILICONFLOW_API_KEY"],
     "together": ["TOGETHER_API_KEY"],
     "upstage": ["UPSTAGE_API_KEY"],
     "vercel-ai-gateway": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],
