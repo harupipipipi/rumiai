@@ -19,12 +19,7 @@ class AnthropicProvider(BaseProvider):
     BASE_URL = "https://api.anthropic.com"
     API_VERSION = "2023-06-01"
 
-    KNOWN_MODELS = [
-        {"id": "anthropic/claude-opus-4-6", "name": "Claude Opus 4.6", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-haiku-4-5", "name": "Claude Haiku 4.5", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-sonnet-4-20250514", "name": "Claude Sonnet 4 snapshot", "provider": "anthropic", "type": "chat"},
-    ]
+    KNOWN_MODELS = []
     _MODEL_INVENTORY_CACHE = {}
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 

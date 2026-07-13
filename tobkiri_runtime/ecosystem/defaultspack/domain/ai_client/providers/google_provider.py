@@ -173,8 +173,8 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "embedding",
         },
     ]
-    CURATED_MODELS = curated_models
-    KNOWN_MODELS = curated_models
+    CURATED_MODELS: List[Dict[str, Any]] = []
+    KNOWN_MODELS: List[Dict[str, Any]] = []
     _MODEL_INVENTORY_CACHE: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 
@@ -185,7 +185,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             api_key_env=["GOOGLE_API_KEY", "GEMINI_API_KEY"],
             base_url_env="GOOGLE_BASE_URL",
             default_base_url=self.BASE_URL,
-            known_models=self.curated_models,
+            known_models=[],
         )
         self._base_url = self._normalize_google_base_url(self._base_url)
         self.BASE_URL = self._base_url
@@ -236,7 +236,7 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     @classmethod
     def _load_profile_models(cls):
-        return merge_curated_and_profiles("google", cls.curated_models, cls.PROFILE_DIR)
+        return merge_curated_and_profiles("google", [], cls.PROFILE_DIR)
 
     def _native_models_base_url(self) -> str:
         parsed = urllib.parse.urlparse(str(self._base_url or ""))

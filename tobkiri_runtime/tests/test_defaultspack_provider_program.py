@@ -453,6 +453,34 @@ def test_openai_spec_uses_live_models_endpoint_without_a_checked_in_model_list()
     assert provider._remote_model_list_path == "/models"
 
 
+def test_native_openai_models_endpoint_replaces_its_static_fallback(monkeypatch):
+    from domain.ai_client.providers.openai_provider import OpenAIProvider
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-token")
+    OpenAIProvider._MODEL_INVENTORY_CACHE.clear()
+    provider = OpenAIProvider()
+    monkeypatch.setattr(
+        provider,
+        "_fetch_live_models",
+        lambda: [
+            {"id": "account-chat", "owned_by": "project"},
+            {"id": "account-embedding", "owned_by": "project"},
+            {"id": "account-image", "owned_by": "project"},
+        ],
+    )
+
+    models = provider.list_models()
+
+    assert [model["model_id"] for model in models] == [
+        "account-chat",
+        "account-embedding",
+        "account-image",
+    ]
+    assert [model["type"] for model in models] == ["chat", "embedding", "image_gen"]
+    assert all(model["metadata"]["source"] == "native_models_endpoint" for model in models)
+    assert OpenAIProvider.KNOWN_MODELS == []
+
+
 def test_google_models_endpoint_paginates_and_replaces_the_curated_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.google_provider import GoogleProvider
