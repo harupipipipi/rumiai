@@ -267,16 +267,16 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         ],
     },
     {
+        # Novita documents its OpenAI-compatible account model inventory at
+        # /openai/v1/models.  The old /v3/openai base was not that API.
         "provider_name": "novita",
         "display_name": "Novita",
         "env_vars": ("NOVITA_API_KEY",),
         "base_url_env_vars": ("NOVITA_BASE_URL",),
-        "default_base_url": "https://api.novita.ai/v3/openai",
+        "default_base_url": "https://api.novita.ai/openai/v1",
         "supports_embeddings": False,
-        "curated_models": [
-            _chat("novita", "deepseek/deepseek-v3-turbo", "DeepSeek V3 Turbo"),
-            _chat("novita", "meta-llama/llama-3.3-70b-instruct", "Llama 3.3 70B Instruct"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "nebius",
@@ -291,17 +291,19 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         ],
     },
     {
+        # DeepInfra's native model catalog covers all modalities and is kept
+        # live at /models/list, separately from its OpenAI-compatible
+        # inference base URL.
         "provider_name": "deepinfra",
         "display_name": "DeepInfra",
         "env_vars": ("DEEPINFRA_API_KEY",),
         "base_url_env_vars": ("DEEPINFRA_BASE_URL",),
         "default_base_url": "https://api.deepinfra.com/v1/openai",
+        "remote_model_base_url": "https://api.deepinfra.com",
+        "remote_model_list_path": "/models/list",
         "supports_embeddings": True,
-        "curated_models": [
-            _chat("deepinfra", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Instruct Turbo"),
-            _chat("deepinfra", "deepseek-ai/DeepSeek-V3", "DeepSeek V3"),
-            _embedding("deepinfra", "BAAI/bge-large-en-v1.5", "BGE Large EN v1.5"),
-        ],
+        "remote_model_discovery": True,
+        "curated_models": [],
     },
     {
         "provider_name": "friendli",

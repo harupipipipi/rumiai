@@ -682,6 +682,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         model_id = str(
             raw.get("id")
             or raw.get("model_id")
+            or raw.get("model_name")
             or raw.get("modelId")
             or raw.get("model")
             or raw.get("slug")
