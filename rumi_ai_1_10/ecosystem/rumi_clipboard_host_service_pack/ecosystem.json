@@ -11,6 +11,6 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": false,
   "resources": [],
-  "provenance": {"content_hash": "sha256:7abec70a61427e74eb507bab17ef157e72949d360900a3b7d788459983eded95", "build_identity": "rumi-clipboard-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:837c4abd0c8a5db491c610be1d142eab97d9006b5b19264ca8d508d9d9d82aa3", "build_identity": "rumi-clipboard-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {"authority_split": ["read", "write"], "executor_owner": "rumi_viewer_host_broker", "payload_persistence": false, "tool_or_ui_registry_imports": false}
 }

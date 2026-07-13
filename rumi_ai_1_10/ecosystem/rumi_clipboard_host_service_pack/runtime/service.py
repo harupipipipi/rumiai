@@ -43,6 +43,7 @@ class ClipboardHostService:
             "_contract_consumer_function_id",
             normalized_arguments.pop("_source_function_id", ""),
         )
+        normalized_arguments.pop("profile_id", None)
         if self.access == "read" and normalized_arguments:
             return {
                 "status": "denied",
