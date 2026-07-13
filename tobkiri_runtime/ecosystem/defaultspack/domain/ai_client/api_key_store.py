@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -63,6 +64,8 @@ _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
 _KIND_LLM = "llm"
 _KIND_CUSTOM = "custom"
 _VALID_KINDS = {_KIND_LLM, _KIND_CUSTOM}
+_CREDENTIAL_MODE_API_KEY = "api_key"
+_CREDENTIAL_MODE_NONE = "none"
 
 
 def _pack_root() -> Path:
@@ -87,6 +90,23 @@ def _custom_providers_path(pack_root: Path | None = None) -> Path:
 def _normalize_kind(value: Any) -> str:
     text = str(value or "").strip().lower()
     return text if text in _VALID_KINDS else _KIND_LLM
+
+
+def _normalize_credential_mode(value: Any) -> str:
+    """Keep unauthenticated connections explicit rather than storing a fake key."""
+    return _CREDENTIAL_MODE_NONE if str(value or "").strip().lower() in {
+        "none", "no_auth", "no-auth", "unauthenticated"
+    } else _CREDENTIAL_MODE_API_KEY
+
+
+def _is_loopback_endpoint(value: Any) -> bool:
+    """Only a loopback endpoint may be intentionally saved without a secret."""
+    try:
+        parsed = urllib.parse.urlsplit(str(value or "").strip())
+        host = str(parsed.hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        return False
+    return host == "localhost" or host == "::1" or host.startswith("127.")
 
 
 def _read_custom_providers(pack_root: Path | None = None) -> dict[str, dict[str, Any]]:
@@ -200,6 +220,7 @@ def _metadata_patch(
     monthly_budget_usd: float | None = None,
     monthly_request_limit: int | None = None,
     kind: str | None = None,
+    credential_mode: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(existing or {})
     metadata.update(
@@ -259,6 +280,12 @@ def _metadata_patch(
             metadata.pop("kind", None)
         else:
             metadata["kind"] = normalized
+    if credential_mode is not None:
+        normalized_mode = _normalize_credential_mode(credential_mode)
+        if normalized_mode == _CREDENTIAL_MODE_NONE:
+            metadata["credential_mode"] = normalized_mode
+        else:
+            metadata.pop("credential_mode", None)
     return metadata
 
 
@@ -406,6 +433,7 @@ def set_provider_api_key(
     monthly_budget_usd: float | None = None,
     monthly_request_limit: int | None = None,
     kind: str | None = None,
+    credential_mode: str | None = None,
 ) -> dict[str, Any]:
     named = bool(api_id or name)
     key = named_provider_secret_key(provider_id, api_id=api_id, name=name) if named else provider_secret_key(provider_id)
@@ -433,6 +461,63 @@ def set_provider_api_key(
     display_name = str(name or normalized_api_id or provider_id).strip()
 
     cleaned = str(value or "").strip()
+    resolved_credential_mode = _normalize_credential_mode(credential_mode)
+    if resolved_credential_mode == _CREDENTIAL_MODE_NONE:
+        if not named:
+            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection needs a named API entry"}
+        if cleaned:
+            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection cannot include an API key"}
+        if not _is_loopback_endpoint(base_url):
+            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection must use a loopback base URL"}
+        store = _get_store(pack_root)
+        # First-time endpoint connections have nothing to delete.  Clearing a
+        # prior key is still required when converting an existing entry.
+        if store.has_secret(key):
+            deleted = store.delete_secret(
+                key,
+                actor="defaultspack",
+                reason=f"save unauthenticated {provider_id} connection",
+            )
+            if not deleted.success:
+                return {"success": False, "provider_id": provider_id, "error": deleted.error}
+        os.environ.pop(key, None)
+        metadata = _read_api_metadata(pack_root)
+        metadata[key] = _metadata_patch(
+            provider_id=provider_id,
+            api_id=normalized_api_id,
+            name=display_name,
+            existing=metadata.get(key, {}),
+            base_url=base_url,
+            allowed_models=allowed_models,
+            default_model=default_model,
+            notes=notes,
+            quota_label=quota_label,
+            monthly_budget_usd=monthly_budget_usd,
+            monthly_request_limit=monthly_request_limit,
+            kind=resolved_kind,
+            credential_mode=resolved_credential_mode,
+        )
+        _write_api_metadata(metadata, pack_root)
+        _refresh_provider_env(provider_id, pack_root=pack_root)
+        return {
+            "success": True,
+            "provider_id": provider_id,
+            "api_id": normalized_api_id,
+            "name": display_name,
+            "key": key,
+            "configured": True,
+            "created": False,
+            "kind": resolved_kind,
+            "credential_mode": resolved_credential_mode,
+            "base_url": str(base_url or "").strip(),
+            "allowed_models": _normalize_allowed_models(allowed_models),
+            "default_model": str(default_model or "").strip(),
+            "notes": str(notes or "").strip(),
+            "quota_label": str(quota_label or "").strip(),
+            "monthly_budget_usd": float(monthly_budget_usd) if monthly_budget_usd is not None and float(monthly_budget_usd) > 0 else None,
+            "monthly_request_limit": int(monthly_request_limit) if monthly_request_limit is not None and int(monthly_request_limit) > 0 else None,
+            "error": None,
+        }
     if not cleaned:
         result = _get_store(pack_root).delete_secret(
             key,
@@ -480,6 +565,7 @@ def set_provider_api_key(
                 monthly_budget_usd=monthly_budget_usd,
                 monthly_request_limit=monthly_request_limit,
                 kind=resolved_kind,
+                credential_mode=resolved_credential_mode,
             )
             _write_api_metadata(metadata, pack_root)
         if not named:
@@ -498,6 +584,7 @@ def set_provider_api_key(
         "configured": bool(result.success),
         "created": bool(result.created),
         "kind": resolved_kind,
+        "credential_mode": resolved_credential_mode,
         "base_url": str(base_url or "").strip(),
         "allowed_models": _normalize_allowed_models(allowed_models),
         "default_model": str(default_model or "").strip(),
@@ -671,31 +758,41 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
     store = _get_store(pack_root)
     metadata = _read_api_metadata(pack_root)
     items: list[dict[str, Any]] = []
-    for meta in store.list_keys():
-        key = str(meta.key or "")
-        if not key.startswith(f"{_NAMED_API_PREFIX}_") or meta.deleted:
-            continue
+    store_metadata = {str(meta.key or ""): meta for meta in store.list_keys()}
+    for key in sorted(set(store_metadata) | set(metadata)):
+        meta = store_metadata.get(key)
         stored_meta = metadata.get(key, {})
+        # A no-auth endpoint deliberately has no secret-store record.  Keep its
+        # metadata-visible connection even if an older secret was deleted.
+        if not key.startswith(f"{_NAMED_API_PREFIX}_") or (
+            meta is not None
+            and meta.deleted
+            and _normalize_credential_mode(stored_meta.get("credential_mode")) != _CREDENTIAL_MODE_NONE
+        ):
+            continue
         key_provider = str(stored_meta.get("provider_id") or _provider_from_named_key(key)).strip()
         if requested_provider and key_provider != requested_provider:
             continue
         api_id = str(stored_meta.get("api_id") or _api_id_from_named_key(key, key_provider)).strip()
         display_name = str(stored_meta.get("name") or api_id.replace("_", " ").title())
+        credential_mode = _normalize_credential_mode(stored_meta.get("credential_mode"))
+        no_auth_connection = credential_mode == _CREDENTIAL_MODE_NONE and bool(str(stored_meta.get("base_url") or "").strip())
         item = {
             "api_id": api_id,
             "name": display_name,
             "provider_id": key_provider,
             "key": key,
             "label": f"{key_provider}:{api_id}:***",
-            "configured": bool(meta.exists),
-            "created_at": meta.created_at,
-            "updated_at": meta.updated_at,
+            "configured": bool(meta and meta.exists) or no_auth_connection,
+            "created_at": getattr(meta, "created_at", ""),
+            "updated_at": getattr(meta, "updated_at", ""),
             "kind": _normalize_kind(stored_meta.get("kind")),
             "base_url": str(stored_meta.get("base_url") or ""),
             "allowed_models": _normalize_allowed_models(stored_meta.get("allowed_models", [])),
             "default_model": str(stored_meta.get("default_model") or ""),
             "notes": str(stored_meta.get("notes") or ""),
             "quota_label": str(stored_meta.get("quota_label") or ""),
+            "credential_mode": credential_mode,
         }
         items.append(item)
     return sorted(items, key=lambda item: (str(item.get("provider_id")), str(item.get("api_id"))))

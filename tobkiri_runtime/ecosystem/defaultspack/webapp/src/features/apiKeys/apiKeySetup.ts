@@ -75,6 +75,7 @@ export type ApiKeySetupDraft = {
   default_model?: string;
   quota_label?: string;
   notes?: string;
+  credential_mode?: "api_key" | "none";
 };
 
 export type ApiKeySaveOptions = {
@@ -86,6 +87,7 @@ export type ApiKeySaveOptions = {
   defaultModel?: string;
   quotaLabel?: string;
   notes?: string;
+  credentialMode?: "api_key" | "none";
 };
 
 export type ApiKeySavePayload = {
@@ -228,7 +230,8 @@ export function buildApiKeySavePayload(draft: ApiKeySetupDraft, fallbackKind: Ap
   const providerId = draft.provider_id.trim();
   const name = draft.name.trim();
   const value = draft.value;
-  if (!providerId || !name || !value.trim()) return null;
+  const credentialMode = draft.credential_mode === "none" ? "none" : "api_key";
+  if (!providerId || !name || (credentialMode === "api_key" && !value.trim()) || (credentialMode === "none" && !draft.base_url?.trim())) return null;
   const allowedModels = parseAllowedModels(draft.allowed_models);
   return {
     provider_id: providerId,
@@ -242,6 +245,7 @@ export function buildApiKeySavePayload(draft: ApiKeySetupDraft, fallbackKind: Ap
       defaultModel: draft.default_model?.trim() || undefined,
       quotaLabel: draft.quota_label?.trim() || undefined,
       notes: draft.notes?.trim() || undefined,
+      credentialMode,
     },
   };
 }

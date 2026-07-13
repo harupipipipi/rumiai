@@ -74,6 +74,7 @@ def run(input_data, context):
                 notes=(input_data or {}).get("notes"),
                 quota_label=(input_data or {}).get("quota_label"),
                 kind=str(kind_value or "").strip() or None,
+                credential_mode=(input_data or {}).get("credential_mode"),
             )
         if not result.get("success"):
             return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")

@@ -46,3 +46,43 @@ def test_local_openai_runtimes_discover_served_models_without_credentials(monkey
         models = client.list_models(provider="vllm")
 
     assert [model["qualified_model_id"] for model in models] == ["vllm/served-model"]
+
+
+def test_loopback_openai_compatible_connection_discovers_models_without_storing_a_fake_key(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from domain.ai_client.api_key_store import provider_named_api_keys, set_provider_api_key
+    from domain.ai_client.providers import _custom_openai_provider_manifests, _instantiate_manifest_provider
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    saved = set_provider_api_key(
+        "huggingface-tgi",
+        "",
+        pack_root=tmp_path,
+        api_id="local",
+        name="Local TGI",
+        base_url="http://127.0.0.1:8080/v1",
+        credential_mode="none",
+    )
+
+    assert saved["success"] is True
+    assert saved["configured"] is True
+    connections = provider_named_api_keys("huggingface-tgi", pack_root=tmp_path)
+    assert connections[0]["credential_mode"] == "none"
+    assert connections[0]["configured"] is True
+    assert not (tmp_path / "user_data" / "secrets" / f"{saved['key']}.json").exists()
+
+    # Build the executable adapter from the saved endpoint, with no fallback
+    # model JSON and no API key requirement.
+    monkeypatch.setattr(
+        "domain.ai_client.providers.provider_named_api_keys",
+        lambda provider_id="": connections if provider_id in {"", "huggingface-tgi"} else [],
+    )
+    manifest = _custom_openai_provider_manifests()["huggingface-tgi"]
+    assert manifest["credential_required"] is False
+    assert manifest["config"]["model_list_requires_auth"] is False
+    with patch.object(OpenAICompatibleProvider, "_fetch_remote_models", return_value=[]):
+        provider = _instantiate_manifest_provider(manifest)
+    assert provider is not None
+    assert provider._api_key == ""
+    assert provider._credential_required is False

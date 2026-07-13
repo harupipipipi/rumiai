@@ -759,6 +759,7 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
             continue
         selected_api = next((api for api in llm_apis if api.get("configured")), llm_apis[0] if llm_apis else {})
         base_url = str(selected_api.get("base_url") or "").strip().rstrip("/")
+        unauthenticated = str(selected_api.get("credential_mode") or "").strip().lower() == "none"
         known_models: List[Dict[str, Any]] = []
         for model_id in [
             str(selected_api.get("default_model") or "").strip(),
@@ -781,7 +782,7 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
             "display_name": str(definition.get("label") or provider_id),
             "description": "User-configured OpenAI-compatible model provider.",
             "adapter": "openai_compatible",
-            "credential_required": True,
+            "credential_required": not unauthenticated,
             "supports_invoke": True,
             "default_base_url": base_url,
             "models": known_models,
@@ -790,7 +791,7 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
                 "api_id": str(selected_api.get("api_id") or "").strip(),
                 "model_sync": "remote_merge",
                 "model_list_path": "/models",
-                "model_list_requires_auth": True,
+                "model_list_requires_auth": not unauthenticated,
                 "model_cache_ttl_seconds": 3600,
             },
         }
@@ -1480,7 +1481,8 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
             if not api_id:
                 return None
             api_key = read_provider_api_key(provider_id, api_id) or ""
-            if not api_key:
+            requires_credential = bool(manifest.get("credential_required", True))
+            if not api_key and requires_credential:
                 return None
             return OpenAICompatibleProvider(
                 provider_id=provider_id,
@@ -1488,9 +1490,9 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
                 api_key=api_key,
                 base_url=str(manifest.get("default_base_url") or ""),
                 known_models=list(manifest.get("models") or []),
-                credential_required=True,
+                credential_required=requires_credential,
                 remote_model_discovery=True,
-                remote_model_discovery_requires_auth=True,
+                remote_model_discovery_requires_auth=bool(config.get("model_list_requires_auth", True)),
                 remote_model_list_path=str(config.get("model_list_path") or "/models"),
                 remote_model_cache_ttl_seconds=config.get("model_cache_ttl_seconds", 3600),
             )
