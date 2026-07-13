@@ -63,6 +63,13 @@ capture no longer execute subprocesses or return fabricated stub data.
 clipboard contracts. HostIntent values remain top-level results so the
 capability executor can route them through Authority.
 
+The Viewer helper routes `browser.*` functions to the browser pack runner rather
+than importing `BrowserComputerController`. Browser profile, cookie, session,
+and tab metadata is written atomically by that runner under its own namespace.
+Navigation accepts HTTP(S) only. Browser download collection remains
+`unavailable` until a workspace-bound artifact transfer runner is selected; it
+does not fall back to an arbitrary Downloads directory.
+
 The large pre-Wave-8 computer/browser implementation remains only as a sunset
 source compatibility surface and is no longer the canonical function entrypoint.
 Wave 10 removes it and any remaining defaultspack host implementation after

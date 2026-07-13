@@ -12,12 +12,13 @@
   "required_secrets": [],
   "required_capabilities": ["browser.host.observe", "browser.host.control", "host.authority.consume"],
   "required_network": {"allowed_domains": [], "allowed_ports": []},
-  "host_execution": false,
+  "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:2403e261eb1b78627be053348bf267db052840cdc35035b7da271853b091241a", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:99d64a6575e0e04d7585910f219c8feee4ed8574df6d5182f3324700e01cfe0b", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {
     "authority_split": ["observe", "control"],
     "executor_owner": "rumi_viewer_host_broker",
+    "runner": "runtime/runner.py invoked only by Viewer helper after token validation",
     "operation_descriptor_owner": true,
     "tool_or_ui_registry_imports": false
   }

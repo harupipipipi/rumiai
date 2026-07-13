@@ -1,6 +1,7 @@
 {
   "version": 1,
   "artifacts": [
-    {"path": "runtime/service.py", "sha256": "2403e261eb1b78627be053348bf267db052840cdc35035b7da271853b091241a", "entrypoints": ["create_browser_observer", "create_browser_control"]}
+    {"path": "runtime/service.py", "sha256": "99d64a6575e0e04d7585910f219c8feee4ed8574df6d5182f3324700e01cfe0b", "entrypoints": ["create_browser_observer", "create_browser_control"]},
+    {"path": "runtime/runner.py", "sha256": "ff6a36d20d97eda3f07b4ffde799679d7a2cb77e2efdff9929d48b4314856d76", "entrypoints": ["run_browser_host_action"]}
   ]
 }

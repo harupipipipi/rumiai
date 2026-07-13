@@ -40,14 +40,18 @@ _HOST_FUNCTIONS: Final[dict[str, str]] = {
     "browser.session.get": "browser.session",
     "browser.sessions.list": "browser.session",
     "browser.profiles.list": "browser.profiles.list",
+    "browser.tabs.list": "browser.tabs",
     "browser.cookies.list": "browser.cookies.list",
     "browser.capture.page": "computer.screenshot",
+    "browser.downloads.list": "browser.downloads.list",
     "browser.session.create": "browser.session",
+    "browser.session.close": "browser.session",
     "browser.profile.create": "browser.profile.create",
     "browser.profile.set_active": "browser.profile.set_active",
     "browser.profile.delete": "browser.profile.delete",
     "browser.profile.clear_cache": "browser.profile.clear_cache",
     "browser.profile.clear_cookies": "browser.profile.clear_cookies",
+    "browser.tab.select": "browser.select_tab",
     "browser.navigate": "browser.open_url",
     "browser.cookies.import": "browser.cookies.import",
     "browser.cookies.delete": "browser.cookies.delete",
@@ -102,6 +106,7 @@ class BrowserHostService:
                 "error_type": "browser_host_runner_unavailable",
                 "operation": normalized_operation,
             }
+        normalized_arguments["_rumi_contract_operation"] = normalized_operation
         return {
             "type": "host_intent",
             "version": 1,

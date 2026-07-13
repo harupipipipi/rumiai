@@ -22,14 +22,27 @@ def main() -> int:
     viewer_host_approved = bool(request.get("viewer_host_approved"))
 
     try:
-        from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+        if action.startswith("browser."):
+            from ecosystem.rumi_browser_host_service_pack.runtime.runner import (
+                run_browser_host_action,
+            )
 
-        artifact_root = _validated_artifact_root(request.get("artifact_root"))
-        result = BrowserComputerController(artifact_root=artifact_root).run(
-            action,
-            payload,
-            yolo_mode=viewer_host_approved,
-        )
+            result = run_browser_host_action(
+                action,
+                payload,
+                viewer_host_approved=viewer_host_approved,
+            )
+        else:
+            from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
+                BrowserComputerController,
+            )
+
+            artifact_root = _validated_artifact_root(request.get("artifact_root"))
+            result = BrowserComputerController(artifact_root=artifact_root).run(
+                action,
+                payload,
+                yolo_mode=viewer_host_approved,
+            )
     except ValueError as exc:
         print(
             json.dumps(
