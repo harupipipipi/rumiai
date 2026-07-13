@@ -279,7 +279,7 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     elif name == "event.append":
         arguments["record"] = _mapping(payload.get("record"))
     elif name == "migration.import_snapshot":
-        arguments["snapshot"] = _legacy_board(payload.get("snapshot"))
+        arguments["snapshot"] = _migration_snapshot(payload.get("snapshot"))
     return arguments
 
 
@@ -534,6 +534,16 @@ def _legacy_board(value: Any) -> dict[str, Any]:
                 )
             )
     return board
+
+
+def _migration_snapshot(value: Any) -> Mapping[str, Any]:
+    """Bound one migration source before its exact receipt is redeemed."""
+
+    snapshot = _mapping(value)
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
+    if len(encoded.encode("utf-8")) > 2 * 1024 * 1024:
+        raise ValueError("legacy Kanban snapshot is too large")
+    return snapshot
 
 
 def _board_summary(board: Mapping[str, Any]) -> dict[str, Any]:
