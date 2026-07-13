@@ -101,6 +101,21 @@ not enable old and new writers/executors together. Sandbox rollback discards COW
 state, terminal/IDE rollback closes sessions, and browser/desktop/media rollback
 must revoke outstanding tokens and receipts first.
 
+## Cross-platform support and fallback matrix
+
+| Boundary | macOS | Windows | Linux | Unsupported behavior |
+|---|---|---|---|---|
+| workspace/file/shell/terminal/Git/patch/IDE/sandbox | platform-neutral Python with explicit process/filesystem policy | same | same | missing executable/runtime is typed `unavailable`; no host downgrade |
+| Viewer host broker | enabled with local token/audit connection | enabled with local token/audit connection | broker intentionally disabled in the current Viewer | contract remains installable but host action fails closed as broker unavailable |
+| desktop native host | Accessibility/CGEvent/visible drivers selected behind `ComputerHost` | UIA/PostMessage/visible drivers selected behind `ComputerHost` | X11/visible drivers only when locally available | no eligible driver returns an error; no simulated success |
+| browser runner | atomic local metadata plus system HTTP(S) browser handoff | same | same when a desktop browser handler exists | failed handoff is an error; download collection remains unavailable without a workspace transfer runner |
+| clipboard runner | `pbpaste`/`pbcopy` fixed argv | PowerShell read/`clip.exe` write fixed argv | Wayland/X11 command selected only when installed | missing command returns unavailable; no shell string execution |
+| media device capture/output | Viewer HostIntent permission model | Viewer HostIntent permission model | current Viewer broker unavailable | approved operation without a platform runner returns an audited error |
+
+This table is source-derived implementation intent, not runtime evidence. The
+Wave 8 QA issue requires independent macOS, Windows, and Linux results before
+merge.
+
 Focused tests are defined in `tests/test_pack_architecture_wave8.py` but were
 not executed by the implementation agent.
 

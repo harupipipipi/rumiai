@@ -97,6 +97,17 @@ def test_default_tools_adapter_has_no_direct_host_driver_imports() -> None:
         assert forbidden not in source
 
 
+def test_viewer_helper_does_not_import_legacy_tool_controller() -> None:
+    root = Path(__file__).parents[1]
+    helper = (root / "core_runtime" / "host_broker" / "computer_host_helper.py").read_text(
+        encoding="utf-8"
+    )
+    assert "domain.tool" not in helper
+    assert "BrowserComputerController" not in helper
+    assert "rumi_browser_host_service_pack.runtime.runner" in helper
+    assert "rumi_clipboard_host_service_pack.runtime.runner" in helper
+
+
 def test_defaultspack_media_has_no_clipboard_or_capture_executor() -> None:
     root = Path(__file__).parents[1] / "ecosystem" / "defaultspack"
     processor = (root / "domain" / "media" / "processor.py").read_text(
