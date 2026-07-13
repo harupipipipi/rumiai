@@ -13,6 +13,16 @@ shim never opens a second state store. The defaultspack Kanban block remains
 temporarily only because it is the source of the current SQLite snapshot and
 legacy HTTP route IDs.
 
+The legacy `/api/kanban/*` block now dispatches through
+`domain.kanban.contract_facade` rather than constructing `KanbanService`.
+Mutations are translated to exact revision-bound owner actions and require a
+locally validated approval token unless the call originates from the internal
+tool-server approval context. A new explicit
+`POST /api/kanban/boards/{board_id}/migrate` alias performs the caller-selected
+snapshot export and one-shot owner import. The remaining agent/sync aliases
+return `KANBAN_LEGACY_ACTION_DEPRECATED` until their contract-native adapters
+are selected; they do not resume the old service.
+
 The shim cutover must occur in this order:
 
 1. Export a caller-selected old board through a migration-only entrypoint.
