@@ -346,6 +346,68 @@ def test_openai_compatible_inventory_supports_cursor_pagination_without_model_js
     )
 
 
+def test_provider_program_registers_every_required_identity_without_static_models():
+    from ecosystem.defaultspack.domain.ai_client.provider_program import provider_program_manifests
+
+    manifests = provider_program_manifests()
+
+    assert len(manifests) == 79
+    assert {"aws-bedrock", "cohere", "huggingface-tgi", "stability-ai", "openrouter"} <= set(manifests)
+    assert all(manifest["models"] == [] for manifest in manifests.values())
+    assert all(manifest["config"]["inventory_strategy"] for manifest in manifests.values())
+
+
+def test_provider_program_entries_are_visible_with_their_inventory_contract():
+    providers = {provider["provider_id"]: provider for provider in list_provider_catalog()}
+
+    for provider_id, inventory_strategy in {
+        "aws-bedrock": "regional_control_plane",
+        "cohere": "official_models_api_or_snapshot",
+        "huggingface-tgi": "served_models_api_or_manual",
+        "stability-ai": "generated_official_snapshot",
+    }.items():
+        provider = providers[provider_id]
+        assert provider["availability"]["catalog_only"] is True
+        assert provider["metadata"]["config"]["inventory_strategy"] == inventory_strategy
+
+
+def test_program_connection_with_an_explicit_compatible_endpoint_uses_live_inventory(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from ecosystem.defaultspack.domain.ai_client.api_key_store import set_provider_api_key
+    from ecosystem.defaultspack.domain.ai_client.client import AIClient
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    saved = set_provider_api_key(
+        "cohere",
+        "test-key",
+        api_id="compatible",
+        name="compatible",
+        base_url="https://gateway.example/v1",
+    )
+    assert saved["success"] is True
+    AIClient._instance = None
+    with (
+        patch.object(OpenAICompatibleProvider, "_load_remote_model_cache", return_value=None),
+        patch.object(
+            OpenAICompatibleProvider,
+            "_fetch_remote_models",
+            return_value=[
+                {
+                    "id": "cohere/account-visible-model",
+                    "model_id": "account-visible-model",
+                    "provider_id": "cohere",
+                    "type": "chat",
+                }
+            ],
+        ),
+    ):
+        models = list_model_catalog("cohere")
+
+    assert [model["qualified_model_id"] for model in models] == ["cohere/account-visible-model"]
+
+
 def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp_path):
     registry = ProviderRegistry(storage_dir=tmp_path / "providers")
     registry.register_profile(

@@ -14,6 +14,7 @@ from ..api_key_store import (
     provider_named_api_keys,
     read_provider_api_key,
 )
+from ..provider_program import provider_program_manifests
 from ..model_metadata_schema import (
     context_window_value,
     normalize_capability_map,
@@ -679,11 +680,24 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     # an API key enables the provider and its complete /models inventory.
     for provider_id, spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
         manifests.setdefault(provider_id, _openai_compatible_spec_manifest(spec))
+    # The provider program supplies identity and inventory strategy for every
+    # required provider, but never a hand-maintained model list.  Dedicated
+    # component manifests above remain authoritative when present.
+    for provider_id, manifest in provider_program_manifests().items():
+        manifests.setdefault(provider_id, manifest)
     # A user can add any OpenAI-compatible service from Settings.  Treat those
     # saved definitions exactly like extension manifests so they are discoverable
     # by the provider/model catalog and not merely shown as inert API-key rows.
     for provider_id, manifest in _custom_openai_provider_manifests().items():
-        manifests.setdefault(provider_id, manifest)
+        existing = manifests.get(provider_id, {})
+        existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
+        # A program record is an honest "connection required" placeholder.
+        # Once the user explicitly supplies an OpenAI-compatible endpoint for
+        # that provider, promote the saved connection to the executable adapter.
+        if existing_config.get("provider_program") and manifest.get("default_base_url"):
+            manifests[provider_id] = manifest
+        else:
+            manifests.setdefault(provider_id, manifest)
     return manifests
 
 
