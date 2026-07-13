@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "artifacts": [{"path": "runtime/inspect.py", "sha256": "39cc9931de498f4a5f683179ad518d48c5c056e119f7117884dad370698f04c6", "entrypoints": ["create_media_inspector"]}]
+}
