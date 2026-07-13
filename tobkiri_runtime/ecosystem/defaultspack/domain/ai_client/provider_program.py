@@ -123,3 +123,8 @@ def provider_program_manifests() -> Dict[str, Dict[str, Any]]:
             },
         }
     return manifests
+
+
+def missing_program_provider_ids(manifests: Dict[str, Dict[str, Any]]) -> list[str]:
+    """Return required external provider ids absent from the canonical registry."""
+    return sorted(set(provider_program_manifests()) - set(manifests))

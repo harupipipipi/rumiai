@@ -14,7 +14,7 @@ from ..api_key_store import (
     provider_named_api_keys,
     read_provider_api_key,
 )
-from ..provider_program import provider_program_manifests
+from ..provider_program import missing_program_provider_ids, provider_program_manifests
 from ..model_metadata_schema import (
     context_window_value,
     normalize_capability_map,
@@ -665,6 +665,11 @@ def validate_provider_catalog_coverage(registry: Any = None) -> List[Dict[str, A
                     )
 
     return issues
+
+
+def validate_provider_program_coverage() -> List[str]:
+    """Hard-fail coverage gate for every required external provider identity."""
+    return missing_program_provider_ids(_provider_manifest_map())
 
 
 def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
