@@ -1,1 +1,1 @@
-{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/broker.py","sha256":"44b414f1cc8e8d033f1794e2ab0ddc87fc4df54d648df585121ed1bf3cd0331d","role":"runtime"}]}
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/broker.py","sha256":"4e56ebd51bab0de92ab59d169e7603fe2a043b11a77aa3650c865d425da16539","role":"runtime"}]}

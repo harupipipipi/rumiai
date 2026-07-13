@@ -86,6 +86,7 @@ class InboundBroker:
                     {
                         "profile_id": self.profile_id,
                         "connector_id": connector_id,
+                        "connector": _route_connector(connector),
                         "event": event,
                     },
                     provider_instance_id=str(route["provider_instance_id"]),
@@ -213,6 +214,18 @@ def _event(
     event.pop("credential", None)
     event.pop("secret", None)
     return _bounded(event)
+
+
+def _route_connector(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose public routing metadata without any credential reference."""
+
+    return {
+        "id": str(value.get("id") or ""),
+        "adapter_id": str(value.get("adapter_id") or ""),
+        "display_name": str(value.get("display_name") or ""),
+        "config": _ledger_event(value.get("config") or {}),
+        "enabled": bool(value.get("enabled")),
+    }
 
 
 def _body(value: Any) -> bytes:
