@@ -45,6 +45,7 @@ class WorkspaceMountStore:
             "version": VERSION,
             "profile_id": self.profile_id,
             "revision": state["revision"],
+            "selected_workspace_id": state["selected_workspace_id"],
             "mounts": [state["mounts"][key] for key in sorted(state["mounts"])],
         }
 
@@ -95,9 +96,59 @@ class WorkspaceMountStore:
             if workspace_id not in state["mounts"]:
                 raise KeyError("workspace mount is unknown")
             del state["mounts"][workspace_id]
+            if state["selected_workspace_id"] == workspace_id:
+                state["selected_workspace_id"] = None
             state["revision"] += 1
             self._write(state)
         return {"unmounted": workspace_id, "revision": state["revision"]}
+
+    def update(
+        self,
+        workspace_id: str,
+        *,
+        expected_revision: int,
+        root_path: str | None,
+        metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Update exact mount metadata without creating an implicit record."""
+
+        workspace_id = _identifier(workspace_id)
+        with NamedLock(self.lock_root, "mounts"):
+            state = self._read()
+            _assert_revision(state, expected_revision)
+            current = state["mounts"].get(workspace_id)
+            if current is None:
+                raise KeyError("workspace mount is unknown")
+            canonical = Path(current["root_path"])
+            if root_path:
+                canonical = Path(root_path).expanduser().resolve(strict=True)
+                if not canonical.is_dir():
+                    raise ValueError("workspace root is not a directory")
+            current["root_path"] = str(canonical)
+            current["metadata"] = {**current["metadata"], **_copy(metadata)}
+            current["updated_at"] = int(time.time() * 1000)
+            current["mount_revision"] = int(current["mount_revision"]) + 1
+            state["revision"] += 1
+            self._write(state)
+        return {"mount": _copy(current), "revision": state["revision"]}
+
+    def select(self, workspace_id: str, *, expected_revision: int) -> dict[str, Any]:
+        """Select one existing mount for the profile."""
+
+        workspace_id = _identifier(workspace_id)
+        with NamedLock(self.lock_root, "mounts"):
+            state = self._read()
+            _assert_revision(state, expected_revision)
+            if workspace_id not in state["mounts"]:
+                raise KeyError("workspace mount is unknown")
+            state["selected_workspace_id"] = workspace_id
+            state["revision"] += 1
+            self._write(state)
+        return {
+            "mount": _copy(state["mounts"][workspace_id]),
+            "selected_workspace_id": workspace_id,
+            "revision": state["revision"],
+        }
 
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -105,6 +156,7 @@ class WorkspaceMountStore:
                 "version": VERSION,
                 "profile_id": self.profile_id,
                 "revision": 0,
+                "selected_workspace_id": None,
                 "mounts": {},
             }
         value = json.loads(self.path.read_text(encoding="utf-8"))
@@ -119,6 +171,7 @@ class WorkspaceMountStore:
             "version": VERSION,
             "profile_id": self.profile_id,
             "revision": max(0, int(value.get("revision") or 0)),
+            "selected_workspace_id": value.get("selected_workspace_id"),
             "mounts": {str(key): _copy(item) for key, item in mounts.items()},
         }
 
@@ -145,23 +198,32 @@ def create_workspace_action(client: Any) -> Callable[[str, Mapping[str, Any]], A
     """Create receipt-gated workspace mount mutations."""
 
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
-        if name not in {"mount", "unmount"}:
+        if name not in {"mount", "unmount", "update", "select", "trust"}:
             raise ValueError(f"unknown workspace action: {name}")
-        arguments = {
-            "workspace_id": str(payload.get("workspace_id") or ""),
-            "root_path": str(payload.get("root_path") or "") if name == "mount" else "",
-        }
+        arguments = _action_arguments(name, payload)
         _redeem(client, payload, f"workspace.{name}", arguments)
         store = WorkspaceMountStore(_profile(payload))
-        expected = int(payload.get("expected_revision") or 0)
+        expected = int(arguments["expected_revision"])
         if name == "mount":
             return store.mount(
                 arguments["workspace_id"],
                 arguments["root_path"],
                 expected_revision=expected,
-                metadata=_mapping(payload.get("metadata")),
+                metadata=arguments["metadata"],
             )
-        return store.unmount(arguments["workspace_id"], expected_revision=expected)
+        if name == "unmount":
+            return store.unmount(
+                arguments["workspace_id"], expected_revision=expected
+            )
+        if name == "select":
+            return store.select(arguments["workspace_id"], expected_revision=expected)
+        metadata = {"trusted": True} if name == "trust" else arguments["metadata"]
+        return store.update(
+            arguments["workspace_id"],
+            expected_revision=expected,
+            root_path=arguments.get("root_path") or None,
+            metadata=metadata,
+        )
 
     return operation
 
@@ -198,6 +260,17 @@ def _identifier(value: Any) -> str:
     if not _ID.fullmatch(identifier):
         raise ValueError("workspace identifier is invalid")
     return identifier
+
+
+def _action_arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "workspace_id": str(payload.get("workspace_id") or ""),
+        "expected_revision": max(0, int(payload.get("expected_revision") or 0)),
+    }
+    if name in {"mount", "update"}:
+        arguments["root_path"] = str(payload.get("root_path") or "")
+        arguments["metadata"] = dict(_mapping(payload.get("metadata")))
+    return arguments
 
 
 def _profile(payload: Mapping[str, Any]) -> str:
