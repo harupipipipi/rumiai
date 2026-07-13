@@ -121,9 +121,57 @@ def test_defaultspack_media_has_no_clipboard_or_capture_executor() -> None:
     assert "invoke_global_contract" in adapter
 
 
+def test_defaultspack_coding_blocks_use_wave8_contract_adapter() -> None:
+    root = Path(__file__).parents[1] / "ecosystem" / "defaultspack"
+    targets = [
+        root / "blocks" / "coding" / "terminal_stream.py",
+        root / "blocks" / "coding" / "sandbox_common.py",
+        root / "blocks" / "coding" / "workspace" / "_contract.py",
+    ]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+    for forbidden in (
+        "domain.coding.terminal import Terminal",
+        "SandboxWorkspaceManager",
+        "ManagedSandboxSupervisor",
+        "WorkspaceStore",
+        "subprocess.run",
+        "subprocess.Popen",
+    ):
+        assert forbidden not in source
+    assert "TERMINAL_CONTROL" in source
+    assert "SANDBOX_CONTROL" in source
+    assert "WORKSPACE_ACTION" in source
+
+
+def test_workspace_action_receipt_binds_revision_and_metadata() -> None:
+    source = (
+        Path(__file__).parents[1]
+        / "ecosystem"
+        / "rumi_workspace_mount_pack"
+        / "runtime"
+        / "mounts.py"
+    ).read_text(encoding="utf-8")
+    assert '"expected_revision"' in source
+    assert 'arguments["metadata"]' in source
+    assert 'f"workspace.{name}"' in source
+    assert 'authority": "workspace.mount.manage"' in source
+
+
 def test_wave8_artifact_hashes_match_static_source() -> None:
     root = Path(__file__).parents[1] / "ecosystem"
     pack_ids = (
+        "rumi_workspace_mount_pack",
+        "rumi_file_inspect_pack",
+        "rumi_file_mutation_pack",
+        "rumi_file_patch_pack",
+        "rumi_shell_policy_pack",
+        "rumi_shell_execute_pack",
+        "rumi_terminal_session_pack",
+        "rumi_git_read_pack",
+        "rumi_git_write_pack",
+        "rumi_git_publish_pack",
+        "rumi_ide_bridge_service_pack",
+        "rumi_coding_sandbox_service_pack",
         "rumi_browser_host_service_pack",
         "rumi_desktop_host_service_pack",
         "rumi_clipboard_host_service_pack",

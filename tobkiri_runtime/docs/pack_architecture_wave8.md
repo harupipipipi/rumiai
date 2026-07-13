@@ -58,6 +58,12 @@ must not downgrade to direct execution.
 
 Defaultspack media blocks are finite contract adapters. Clipboard and screen
 capture no longer execute subprocesses or return fabricated stub data.
+Defaultspack coding blocks now project file, shell, terminal, Git, workspace,
+and coding-sandbox contracts instead of importing their legacy executors.
+Workspace mutations are exact-revision receipt operations. Sandbox mutation
+requires an explicit owner-issued `sandbox_id`; observe actions may prepare a
+new COW sandbox and return that ID. Sandbox artifact export is typed
+`UNAVAILABLE` until an artifact pack owns a reviewed transfer contract.
 `rumi_default_tools_pack` maps the existing `browser_computer`, `browser_use`,
 `computer_use`, and `computer_observe` IDs to the new browser, desktop, and
 clipboard contracts. HostIntent values remain top-level results so the
@@ -79,7 +85,7 @@ external migration and rollback evidence exists.
 
 | Resource | Authoritative pack | Schema version | Storage | Backup | Migration | Rollback | Retention | Export/import |
 |---|---|---:|---|---|---|---|---|---|
-| workspace mount metadata | `rumi_workspace_mount_pack` | 1.0.0 | profile atomic state | owner snapshot | explicit canonical-path import | receipt-bound restore | profile lifetime | contract JSON |
+| workspace mount metadata and selection | `rumi_workspace_mount_pack` | 1.0.0 | profile atomic state | owner snapshot | explicit canonical-path import | receipt-bound restore | profile lifetime | contract JSON |
 | browser profiles | `rumi_browser_host_service_pack` contract / Viewer host | 1.0.0 | host-owned profile storage | host policy | one-way legacy adapter | select pinned adapter, never dual-write | profile policy | host contract |
 | browser sessions | Viewer host through browser contract | 1.0.0 | host session state | none | finite action aliases | close sessions/select prior adapter | session lifetime | no |
 | terminal sessions | `rumi_terminal_session_pack` | 1.0.0 | bounded process state | none | none | shutdown/remove pack | bounded session lifetime | event projection |
