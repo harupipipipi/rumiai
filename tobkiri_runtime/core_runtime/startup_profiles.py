@@ -30,6 +30,28 @@ WAVE7_DEFAULT_OWNER_PACKS = (
     "rumi_turn_runtime_pack",
     "rumi_context_runtime_pack",
 )
+WAVE8_DEFAULT_SERVICE_PACKS = (
+    "rumi_host_authority_bridge_pack",
+    "rumi_workspace_mount_pack",
+    "rumi_file_inspect_pack",
+    "rumi_file_mutation_pack",
+    "rumi_file_patch_pack",
+    "rumi_shell_policy_pack",
+    "rumi_shell_execute_pack",
+    "rumi_terminal_session_pack",
+    "rumi_git_read_pack",
+    "rumi_git_write_pack",
+    "rumi_git_publish_pack",
+    "rumi_ide_bridge_service_pack",
+    "rumi_coding_sandbox_service_pack",
+    "rumi_browser_host_service_pack",
+    "rumi_desktop_host_service_pack",
+    "rumi_clipboard_host_service_pack",
+    "rumi_media_capture_host_service_pack",
+    "rumi_media_inspect_service_pack",
+    "rumi_ai_modality_pack",
+    "rumi_media_analysis_adapter_pack",
+)
 
 # --- graph loader (lazy import to avoid circular dependency) ---
 _graph_loader = None
@@ -965,7 +987,7 @@ class StartupProfileManager:
         )
         normalized["launch_capability_graph"] = True
         selected_packs = [str(item) for item in normalized.get("packs") or []]
-        for pack_id in WAVE7_DEFAULT_OWNER_PACKS:
+        for pack_id in (*WAVE7_DEFAULT_OWNER_PACKS, *WAVE8_DEFAULT_SERVICE_PACKS):
             if pack_id not in selected_packs:
                 selected_packs.append(pack_id)
         normalized["packs"] = selected_packs
