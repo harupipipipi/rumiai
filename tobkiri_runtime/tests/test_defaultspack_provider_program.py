@@ -445,6 +445,35 @@ def test_every_external_provider_starts_without_a_checked_in_model_inventory():
     assert {provider_id: models for provider_id, models in stale.items() if models} == {}
 
 
+def test_named_openai_compatible_connection_activates_a_program_placeholder(monkeypatch):
+    from domain.ai_client import providers
+
+    named_connection = {
+        "provider_id": "ai21",
+        "api_id": "project",
+        "name": "project",
+        "configured": True,
+        "kind": "llm",
+        "base_url": "https://gateway.example/v1",
+        "credential_mode": "api_key",
+        "allowed_models": ["stale-model"],
+        "default_model": "stale-default",
+    }
+    monkeypatch.setattr(providers, "list_custom_providers", lambda: [])
+    monkeypatch.setattr(providers, "provider_named_api_keys", lambda *_args, **_kwargs: [named_connection])
+    monkeypatch.setattr(providers, "read_provider_api_key", lambda *_args, **_kwargs: "project-token")
+
+    manifest = providers._provider_manifest_map()["ai21"]
+    provider = providers._instantiate_manifest_provider(manifest)
+
+    assert manifest["adapter"] == "openai_compatible"
+    assert manifest["models"] == []
+    assert manifest["config"]["custom_openai_compatible"] is True
+    assert provider.provider_id == "ai21"
+    assert provider._api_key == "project-token"
+    assert provider._base_url == "https://gateway.example/v1"
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider

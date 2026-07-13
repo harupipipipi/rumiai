@@ -851,7 +851,11 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             manifest.get("default_base_url")
             and (
                 existing_config.get("provider_program")
-                or str(existing.get("adapter") or "") == "openai_compatible"
+                or str(existing.get("adapter") or "") in {
+                    "openai_compatible",
+                    "connection_required",
+                    "catalog_only",
+                }
             )
         ):
             manifests[provider_id] = manifest
@@ -902,8 +906,6 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
 
     manifests: Dict[str, Dict[str, Any]] = {}
     for provider_id in sorted(set(definitions) | set(apis_by_provider)):
-        if provider_id in _CURATED_PROVIDER_METADATA:
-            continue
         definition = definitions.get(provider_id, {})
         apis = apis_by_provider.get(provider_id, [])
         # "custom" represents non-LLM integrations in the settings UI.  Only
@@ -914,23 +916,6 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
         selected_api = next((api for api in llm_apis if api.get("configured")), llm_apis[0] if llm_apis else {})
         base_url = str(selected_api.get("base_url") or "").strip().rstrip("/")
         unauthenticated = str(selected_api.get("credential_mode") or "").strip().lower() == "none"
-        known_models: List[Dict[str, Any]] = []
-        for model_id in [
-            str(selected_api.get("default_model") or "").strip(),
-            *[str(item or "").strip() for item in selected_api.get("allowed_models", [])],
-        ]:
-            if model_id and all(item["model_id"] != model_id for item in known_models):
-                known_models.append(
-                    {
-                        "id": f"{provider_id}/{model_id}",
-                        "model_id": model_id,
-                        "name": model_id,
-                        "display_name": model_id,
-                        "provider": provider_id,
-                        "provider_id": provider_id,
-                        "type": "chat",
-                    }
-                )
         manifests[provider_id] = {
             "id": provider_id,
             "display_name": str(definition.get("label") or provider_id),
@@ -939,7 +924,9 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
             "credential_required": not unauthenticated,
             "supports_invoke": True,
             "default_base_url": base_url,
-            "models": known_models,
+            # Saved model hints are routing preferences, not an inventory.
+            # The connected endpoint's live /models response is authoritative.
+            "models": [],
             "config": {
                 "custom_openai_compatible": True,
                 "api_id": str(selected_api.get("api_id") or "").strip(),
