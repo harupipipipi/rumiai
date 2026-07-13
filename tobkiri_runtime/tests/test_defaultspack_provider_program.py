@@ -441,6 +441,46 @@ def test_native_provider_inventory_is_bound_to_the_saved_api_key_without_model_t
     assert service._live_model_ids("cohere") == ["account-visible-model"]
 
 
+def test_model_availability_discovers_each_named_connection_with_its_own_credentials(monkeypatch):
+    import domain.ai_client.client as client_module
+    import domain.ai_client.model_availability as availability_module
+    from domain.ai_client.model_availability import ModelAvailabilityService
+
+    class Provider:
+        _api_key = "primary-key"
+        _base_url = "https://primary.example/v1"
+        BASE_URL = _base_url
+
+        def list_models(self):
+            return [{
+                "model_id": "secondary-only" if self._api_key == "secondary-key" else "primary-only",
+                "metadata": {"source": "remote_models_endpoint"},
+            }]
+
+    runtime_provider = Provider()
+
+    class Client:
+        _providers = {"gateway": runtime_provider}
+
+    monkeypatch.setattr(client_module, "AIClient", lambda: Client())
+    monkeypatch.setattr(
+        availability_module,
+        "provider_api_metadata",
+        lambda provider_id, api_id, **_kwargs: {"base_url": "https://secondary.example/v1"},
+    )
+    monkeypatch.setattr(
+        availability_module,
+        "read_provider_api_key",
+        lambda provider_id, api_id, **_kwargs: "secondary-key",
+    )
+
+    models = ModelAvailabilityService()._live_model_ids("gateway", "secondary")
+
+    assert models == ["secondary-only"]
+    assert runtime_provider._api_key == "primary-key"
+    assert runtime_provider._base_url == "https://primary.example/v1"
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 

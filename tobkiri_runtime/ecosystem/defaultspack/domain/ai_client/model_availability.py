@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
+from domain.ai_client.api_key_store import provider_api_metadata, read_provider_api_key
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
 
@@ -39,7 +41,7 @@ class ModelAvailabilityService:
         # usable.  Requiring users to paste every returned model id into the
         # Settings form defeats live model discovery and leaves valid provider
         # models invisible immediately after a key is saved.
-        model_ids = explicit_models or self._live_model_ids(provider)
+        model_ids = explicit_models or self._live_model_ids(provider, api)
         if model_ids:
             settings = self._upsert_api_bound_profiles(provider, api, model_ids)
         else:
@@ -192,9 +194,10 @@ class ModelAvailabilityService:
                 break
         return candidates
 
-    def _live_model_ids(self, provider_id: str) -> list[str]:
+    def _live_model_ids(self, provider_id: str, api_id: str = "") -> list[str]:
         model_ids: list[str] = []
-        for model in self._catalog_models(provider_id):
+        models = self._connection_models(provider_id, api_id) if api_id else self._catalog_models(provider_id)
+        for model in models:
             if not isinstance(model, dict):
                 continue
             metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
@@ -216,6 +219,48 @@ class ModelAvailabilityService:
             if model_id and model_id not in model_ids:
                 model_ids.append(model_id)
         return model_ids
+
+    def _connection_models(self, provider_id: str, api_id: str) -> list[dict[str, Any]]:
+        """Discover against exactly the connection that was just saved.
+
+        The provider runtime normally selects one configured connection as its
+        default.  That is useful for a simple setup, but it is incorrect for
+        settings-time discovery: an account/project endpoint must never inherit
+        the model IDs of another saved key.  Work on a shallow provider copy so
+        the active runtime keeps its selected default unchanged.
+        """
+        provider_name = str(provider_id or "").strip()
+        connection_name = str(api_id or "").strip()
+        if not provider_name or not connection_name:
+            return []
+        try:
+            from domain.ai_client.client import AIClient
+
+            runtime_provider = AIClient()._providers.get(provider_name)  # noqa: SLF001
+        except Exception:
+            runtime_provider = None
+        if runtime_provider is None or not callable(getattr(runtime_provider, "list_models", None)):
+            return []
+
+        metadata = provider_api_metadata(provider_name, connection_name, pack_root=self._pack_root)
+        api_key = read_provider_api_key(provider_name, connection_name, pack_root=self._pack_root)
+        credential_mode = str(metadata.get("credential_mode") or "").strip().lower()
+        if not api_key and credential_mode != "none":
+            return []
+        provider = copy.copy(runtime_provider)
+        base_url = str(metadata.get("base_url") or "").strip().rstrip("/")
+        try:
+            if hasattr(provider, "_api_key"):
+                provider._api_key = api_key or ""
+            if base_url:
+                if hasattr(provider, "_base_url"):
+                    provider._base_url = base_url
+                if hasattr(provider, "BASE_URL"):
+                    provider.BASE_URL = base_url
+            models = provider.list_models()
+        except Exception:
+            return []
+        return [dict(model) for model in models if isinstance(model, dict)]
 
     @staticmethod
     def _catalog_models(provider_id: str) -> list[dict[str, Any]]:
