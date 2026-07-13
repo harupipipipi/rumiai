@@ -345,3 +345,16 @@ def test_cohere_models_endpoint_paginates_and_uses_native_chat_adapter(monkeypat
     }
     assert response["content"] == [{"type": "text", "text": "live response"}]
     assert response["usage"]["total_tokens"] == 5
+
+
+def test_native_provider_inventory_is_bound_to_the_saved_api_key_without_model_text_input(monkeypatch):
+    from domain.ai_client.model_availability import ModelAvailabilityService
+
+    service = ModelAvailabilityService()
+    monkeypatch.setattr(
+        service,
+        "_catalog_models",
+        lambda _provider_id: [{"model_id": "account-visible-model", "metadata": {"source": "native_models_endpoint"}}],
+    )
+
+    assert service._live_model_ids("cohere") == ["account-visible-model"]
