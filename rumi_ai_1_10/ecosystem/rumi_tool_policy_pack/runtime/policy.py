@@ -36,6 +36,7 @@ _APPROVAL_REQUIRED = frozenset(
         "desktop.control",
         "clipboard.read",
         "clipboard.write",
+        "service.mutate",
         "remote.invoke",
         "mcp.invoke",
     }

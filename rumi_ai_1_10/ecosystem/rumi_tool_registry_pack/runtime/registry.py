@@ -16,6 +16,7 @@ from core_runtime.profile_workspace import validate_profile_id
 from core_runtime.runtime_locks import NamedLock
 
 STORE_VERSION = "rumi.tool-definition-registry.v1"
+DEFINITION_CONTRIBUTION = "rumi.resource.tool.definition.contribution.v1"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 
 
@@ -256,17 +257,114 @@ class ToolDefinitionRegistry:
 
 def create_resource_operation(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
     """Create the read-only definition resource operation."""
-    del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         registry = ToolDefinitionRegistry(_profile_id(payload))
+        catalog = _composed_catalog(client, registry)
         if name in {"list", "catalog"}:
-            return registry.snapshot()
+            return catalog
         if name in {"get", "resolve"}:
-            return registry.resolve(str(payload.get("tool_id") or ""))
+            return _resolve_composed(catalog, str(payload.get("tool_id") or ""))
         raise ValueError(f"unknown tool definition operation: {name}")
 
     return operation
+
+
+def _composed_catalog(client: Any, registry: ToolDefinitionRegistry) -> dict[str, Any]:
+    """Compose stored definitions with explicit profile contributions."""
+
+    snapshot = registry.snapshot()
+    definitions = {
+        str(item["tool_id"]): dict(item)
+        for item in snapshot.get("definitions") or []
+        if isinstance(item, Mapping)
+    }
+    aliases = {
+        _identifier(alias): _identifier(target)
+        for alias, target in (snapshot.get("aliases") or {}).items()
+    }
+    sources: list[dict[str, str]] = []
+    providers = sorted(
+        client.providers(DEFINITION_CONTRIBUTION),
+        key=lambda item: str(item.get("provider_instance_id") or ""),
+    )
+    for provider in providers:
+        provider_id = str(provider.get("provider_instance_id") or "").strip()
+        if not provider_id:
+            raise RuntimeError("tool definition contribution provider is invalid")
+        value = client.invoke(
+            DEFINITION_CONTRIBUTION,
+            "list",
+            {"profile_id": registry.profile_id},
+            provider_instance_id=provider_id,
+        )
+        if not isinstance(value, Mapping):
+            raise RuntimeError("tool definition contribution is invalid")
+        contributed = value.get("definitions")
+        contributed_aliases = value.get("aliases")
+        if not isinstance(contributed, list) or not isinstance(
+            contributed_aliases, Mapping
+        ):
+            raise RuntimeError("tool definition contribution catalog is invalid")
+        for raw in contributed:
+            if not isinstance(raw, Mapping):
+                raise RuntimeError("contributed tool definition is invalid")
+            definition = _definition(raw)
+            tool_id = definition["tool_id"]
+            if tool_id in definitions or tool_id in aliases:
+                raise RuntimeError(f"tool definition contribution collides: {tool_id}")
+            definitions[tool_id] = definition
+        for raw_alias, raw_target in contributed_aliases.items():
+            alias = _identifier(raw_alias)
+            target = _identifier(raw_target)
+            if alias in definitions or alias in aliases:
+                raise RuntimeError(f"tool alias contribution collides: {alias}")
+            aliases[alias] = target
+        sources.append(
+            {
+                "provider_instance_id": provider_id,
+                "content_hash": str(provider.get("content_hash") or ""),
+            }
+        )
+    missing = sorted(
+        {target for target in aliases.values() if target not in definitions}
+    )
+    if missing:
+        raise RuntimeError("tool alias contribution target is missing")
+    return {
+        **snapshot,
+        "definitions": [definitions[key] for key in sorted(definitions)],
+        "aliases": dict(sorted(aliases.items())),
+        "contributions": sources,
+    }
+
+
+def _resolve_composed(
+    catalog: Mapping[str, Any],
+    tool_id: str,
+) -> dict[str, Any] | None:
+    """Resolve one exact definition or explicit alias from a composed catalog."""
+
+    requested = _identifier(tool_id)
+    aliases = catalog.get("aliases")
+    aliases = aliases if isinstance(aliases, Mapping) else {}
+    resolved = str(aliases.get(requested) or requested)
+    definitions = {
+        str(item.get("tool_id") or ""): item
+        for item in catalog.get("definitions") or []
+        if isinstance(item, Mapping)
+    }
+    definition = definitions.get(resolved)
+    if not isinstance(definition, Mapping):
+        return None
+    return {
+        "requested_tool_id": requested,
+        "resolved_tool_id": resolved,
+        "aliased": requested != resolved,
+        "definition": dict(definition),
+        "registry_revision": int(catalog.get("revision") or 0),
+        "contributions": list(catalog.get("contributions") or []),
+    }
 
 
 def create_manage_operation(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
