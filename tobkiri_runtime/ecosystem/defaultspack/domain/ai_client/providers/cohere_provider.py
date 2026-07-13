@@ -205,6 +205,30 @@ class CohereProvider(BaseProvider):
             "raw_extra": {"id": raw.get("id", ""), "model": model},
         }
 
+    def embed(self, model, input_text):
+        values = [input_text] if isinstance(input_text, str) else list(input_text or [])
+        inputs = [
+            {"content": [{"type": "text", "text": str(value)}]}
+            for value in values
+        ]
+        raw = self._request_json(
+            "POST",
+            "/v2/embed",
+            {
+                "model": model,
+                "inputs": inputs,
+                "input_type": "search_document",
+                "embedding_types": ["float"],
+            },
+        )
+        embeddings = raw.get("embeddings") if isinstance(raw.get("embeddings"), dict) else {}
+        vectors = embeddings.get("float") if isinstance(embeddings.get("float"), list) else []
+        usage = self._usage(raw)
+        return {
+            "embeddings": vectors,
+            "usage": {"input_tokens": usage["input_tokens"], "total_tokens": usage["total_tokens"]},
+        }
+
     def stream(self, model, messages, tools, params):
         body: Dict[str, Any] = {"model": model, "messages": self._chat_messages(messages), "stream": True}
         for key in ("temperature", "max_tokens", "p", "k", "seed", "stop_sequences", "response_format"):

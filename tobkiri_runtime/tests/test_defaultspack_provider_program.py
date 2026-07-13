@@ -346,6 +346,28 @@ def test_cohere_models_endpoint_paginates_and_uses_native_chat_adapter(monkeypat
     assert response["content"] == [{"type": "text", "text": "live response"}]
     assert response["usage"]["total_tokens"] == 5
 
+    def fake_embed_request(method, path, body=None):
+        captured.update({"method": method, "path": path, "body": body})
+        return {
+            "embeddings": {"float": [[0.1, 0.2]]},
+            "usage": {"tokens": {"input_tokens": 2}},
+        }
+
+    monkeypatch.setattr(provider, "_request_json", fake_embed_request)
+    embedding = provider.embed("embed-live-b", "search text")
+
+    assert captured == {
+        "method": "POST",
+        "path": "/v2/embed",
+        "body": {
+            "model": "embed-live-b",
+            "inputs": [{"content": [{"type": "text", "text": "search text"}]}],
+            "input_type": "search_document",
+            "embedding_types": ["float"],
+        },
+    }
+    assert embedding == {"embeddings": [[0.1, 0.2]], "usage": {"input_tokens": 2, "total_tokens": 2}}
+
 
 def test_native_provider_inventory_is_bound_to_the_saved_api_key_without_model_text_input(monkeypatch):
     from domain.ai_client.model_availability import ModelAvailabilityService
