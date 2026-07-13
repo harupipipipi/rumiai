@@ -60,6 +60,15 @@ class FrontendRegistry:
     _selectable_model_profiles_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
     _selectable_model_profiles_cache_ttl_seconds = 30.0
 
+    @classmethod
+    def invalidate_selectable_model_profiles(cls, pack_root: Path | None = None) -> None:
+        """Make provider-key changes visible without waiting for the cache TTL."""
+        with cls._selectable_model_profiles_lock:
+            if pack_root is None:
+                cls._selectable_model_profiles_cache.clear()
+            else:
+                cls._selectable_model_profiles_cache.pop(str(pack_root.resolve()), None)
+
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"

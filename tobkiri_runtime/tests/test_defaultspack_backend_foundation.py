@@ -188,6 +188,37 @@ def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
     assert all(profile["metadata"]["provider_model_key"] == profile["qualified_model_id"] for profile in gpt_4o_profiles)
 
 
+def test_catalog_and_profiles_include_live_models_from_an_active_provider():
+    from ecosystem.defaultspack.domain.ai_client.client import AIClient
+
+    class _LiveOpenRouter:
+        display_name = "OpenRouter"
+
+        def list_models(self):
+            return [
+                {
+                    "id": "openrouter/acme/all-model",
+                    "model_id": "acme/all-model",
+                    "display_name": "Acme All Model",
+                    "type": "chat",
+                    "capabilities": {"chat": True, "tool_calling": True},
+                    "metadata": {"source": "openrouter_models_api"},
+                }
+            ]
+
+    AIClient().register_provider("openrouter", _LiveOpenRouter())
+
+    providers = {provider["provider_id"]: provider for provider in list_provider_catalog()}
+    models = {model["qualified_model_id"]: model for model in list_model_catalog("openrouter")}
+    profiles = {profile["profile_id"]: profile for profile in list_profile_catalog()}
+
+    assert providers["openrouter"]["availability"]["active"] is True
+    assert "openrouter/acme/all-model" in models
+    assert models["openrouter/acme/all-model"]["metadata"]["source"] == "openrouter_models_api"
+    assert "openrouter/acme/all-model" in profiles
+    assert profiles["openrouter/acme/all-model"]["availability"]["active"] is True
+
+
 def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp_path):
     registry = ProviderRegistry(storage_dir=tmp_path / "providers")
     registry.register_profile(
