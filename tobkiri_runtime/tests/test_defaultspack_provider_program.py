@@ -774,6 +774,61 @@ def test_databricks_discovers_workspace_serving_endpoints_and_invokes_selected_e
     assert isinstance(detect_available_providers()["databricks-model-serving"], DatabricksModelServingProvider)
 
 
+def test_azure_openai_discovers_live_deployments_and_routes_chat_and_embeddings(monkeypatch):
+    import json
+
+    from domain.ai_client.providers.azure_openai_provider import AzureOpenAIProvider
+
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://resource.openai.azure.com")
+    seen = []
+
+    class Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append((request.method, request.full_url, request.headers.get("Api-key"), request.data))
+        if request.method == "GET":
+            return Response(
+                {
+                    "data": [
+                        {"id": "chat-deployment", "model": {"name": "gpt-live", "version": "1"}},
+                        {"id": "embedding-deployment", "model": {"name": "text-embedding-live", "version": "2"}},
+                    ]
+                }
+            )
+        if "/embeddings?" in request.full_url:
+            return Response({"data": [{"embedding": [0.1, 0.2]}], "usage": {"prompt_tokens": 2, "total_tokens": 2}})
+        return Response({"choices": [{"message": {"content": "azure reply"}, "finish_reason": "stop"}]})
+
+    monkeypatch.setattr("domain.ai_client.providers.azure_openai_provider.urllib.request.urlopen", fake_urlopen)
+    provider = AzureOpenAIProvider()
+    models = provider.list_models()
+    assert [model["model_id"] for model in models] == ["chat-deployment", "embedding-deployment"]
+    assert models[1]["type"] == "embedding"
+    answer = provider.complete("azure-openai/chat-deployment", [{"role": "user", "content": "Hi"}], [], {})
+    embeddings = provider.embed("azure-openai/embedding-deployment", "hello")
+    assert answer["content"][0]["text"] == "azure reply"
+    assert embeddings == {"embeddings": [[0.1, 0.2]], "usage": {"input_tokens": 2, "total_tokens": 2}}
+    assert seen[0][:3] == (
+        "GET",
+        "https://resource.openai.azure.com/openai/deployments?api-version=2024-10-21",
+        "azure-key",
+    )
+    assert "/deployments/chat-deployment/chat/completions?" in seen[1][1]
+    assert "/deployments/embedding-deployment/embeddings?" in seen[2][1]
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 

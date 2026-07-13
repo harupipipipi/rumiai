@@ -816,6 +816,22 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/api/2.0/serving-endpoints"},
         },
     )
+    manifests.setdefault(
+        "azure-openai",
+        {
+            "id": "azure-openai",
+            "display_name": "Azure OpenAI",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.azure_openai_provider:AzureOpenAIProvider",
+            "api_key_env": ["AZURE_OPENAI_API_KEY"],
+            "base_url_env": ["AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_BASE_URL"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/openai/deployments"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
