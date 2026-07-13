@@ -86,3 +86,35 @@ def test_loopback_openai_compatible_connection_discovers_models_without_storing_
     assert provider is not None
     assert provider._api_key == ""
     assert provider._credential_required is False
+
+
+def test_huggingface_inference_uses_its_live_models_endpoint_without_a_checked_in_model_list(monkeypatch):
+    from unittest.mock import patch
+
+    from domain.ai_client.client import AIClient
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    spec = OPENAI_COMPATIBLE_PROVIDER_SPECS["huggingface-inference"]
+    assert spec["default_base_url"] == "https://router.huggingface.co/v1"
+    assert spec["curated_models"] == []
+
+    monkeypatch.setenv("HF_TOKEN", "test-hf-token")
+    AIClient._instance = None
+    with patch.object(
+        OpenAICompatibleProvider,
+        "_fetch_remote_models",
+        return_value=[
+            {
+                "id": "deepseek-ai/DeepSeek-R1:fastest",
+                "model_id": "deepseek-ai/DeepSeek-R1:fastest",
+                "provider_id": "huggingface-inference",
+                "type": "chat",
+                "metadata": {"source": "remote_models_endpoint"},
+            }
+        ],
+    ), patch.object(OpenAICompatibleProvider, "_load_remote_model_cache", return_value=None):
+        models = AIClient().list_models(provider="huggingface-inference")
+
+    assert [model["model_id"] for model in models] == ["deepseek-ai/DeepSeek-R1:fastest"]
+    assert all(model["provider_id"] == "huggingface-inference" for model in models)

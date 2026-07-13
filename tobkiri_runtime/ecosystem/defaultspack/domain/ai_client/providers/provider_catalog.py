@@ -12,6 +12,19 @@ def _embedding(provider, model_id, name):
 
 _OPENAI_COMPATIBLE_PROVIDERS = [
     {
+        # Hugging Face documents this endpoint as OpenAI-compatible and
+        # exposes its complete, current chat inventory through GET /v1/models.
+        # Do not turn that inventory into a checked-in model JSON snapshot.
+        "provider_name": "huggingface-inference",
+        "display_name": "Hugging Face Inference Providers",
+        "env_vars": ("HF_TOKEN", "HUGGINGFACE_API_KEY"),
+        "base_url_env_vars": ("HUGGINGFACE_INFERENCE_BASE_URL",),
+        "default_base_url": "https://router.huggingface.co/v1",
+        "supports_embeddings": False,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
         "provider_name": "xai",
         "display_name": "xAI",
         "env_vars": ("XAI_API_KEY",),
