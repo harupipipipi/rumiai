@@ -31,6 +31,8 @@
   は旧 state fallback を開始せず、明示的な adapter/sunset 状態であることを記録
 - legacy Company settings route の merge／明示的 replace、subagent-team write guard、
   approval token binding と authority receipt の arguments binding を確認
+- legacy Company agents route の role/member atomic upsert/delete、legacy projection、
+  one approval token が複数 owner action に再利用されないことを確認
 - legacy Kanban board の export、one-shot import、同一 source hash の no-write
   dedupe、changed source hash の fail-closed、stale revision、rollback を確認
 - migration 前の legacy Kanban route は migration-required diagnostic と recovery

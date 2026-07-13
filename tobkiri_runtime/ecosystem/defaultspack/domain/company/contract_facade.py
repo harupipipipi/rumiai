@@ -55,6 +55,20 @@ class CompanyContractFacade:
             return self._get_settings(_company_id(self.input))
         if operation == "update_settings":
             return self._update_settings(_company_id(self.input))
+        if operation == "list_agents":
+            return self._list_agents(_company_id(self.input))
+        if operation == "get_agent":
+            return self._get_agent(
+                _company_id(self.input),
+                _required_id(self.input, "agent_id"),
+            )
+        if operation == "upsert_agent":
+            return self._upsert_agent(_company_id(self.input))
+        if operation == "delete_agent":
+            return self._delete_agent(
+                _company_id(self.input),
+                _required_id(self.input, "agent_id"),
+            )
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -167,7 +181,7 @@ class CompanyContractFacade:
         company = self._get(company_id)
         if company is None:
             return None
-        _reject_subagent_team_settings_write(company)
+        _reject_subagent_team_write(company)
         result = self._mutate(
             "company.update",
             {
@@ -180,6 +194,100 @@ class CompanyContractFacade:
         if not isinstance(value, Mapping):
             value = self._required(company_id)
         return dict(value.get("settings") or {})
+
+    def _list_agents(self, company_id: str) -> list[dict[str, Any]] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        return _legacy_agents(company)
+
+    def _get_agent(
+        self,
+        company_id: str,
+        agent_id: str,
+    ) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        return next(
+            (
+                agent
+                for agent in _legacy_agents(company)
+                if agent["agent_id"] == agent_id
+            ),
+            None,
+        )
+
+    def _upsert_agent(self, company_id: str) -> dict[str, Any] | None:
+        agent = _object(self.input.get("agent"), "agent")
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        _reject_subagent_team_write(_legacy_company(company))
+        agent_id = str(agent.get("agent_id") or agent.get("id") or "").strip()
+        if not agent_id:
+            agent_id = "agent-" + uuid.uuid4().hex
+        role_id = str(agent.get("role_key") or agent_id).strip()
+        display_name = str(
+            agent.get("display_name") or agent.get("agent_name") or agent_id
+        ).strip()
+        legacy_metadata = {
+            key: value
+            for key, value in agent.items()
+            if key
+            not in {
+                "id",
+                "agent_id",
+                "role_key",
+                "agent_name",
+                "display_name",
+                "model",
+                "agent_profile_id",
+                "aliases",
+                "enabled",
+                "status",
+                "metadata",
+            }
+        }
+        metadata = _object(agent.get("metadata"), "agent.metadata")
+        metadata["legacy_agent"] = {
+            **legacy_metadata,
+            "model": str(agent.get("model") or ""),
+            "status": str(agent.get("status") or "idle"),
+        }
+        role = {
+            "id": role_id,
+            "name": str(agent.get("agent_name") or display_name),
+            "work_type": str(agent.get("work_type") or "agent"),
+            "metadata": {"legacy_agent_role": role_id},
+        }
+        member = {
+            "id": agent_id,
+            "display_name": display_name,
+            "role_id": role_id,
+            "agent_profile_id": _profile_identifier(agent),
+            "mentions": _agent_mentions(agent),
+            "enabled": bool(agent.get("enabled", True)),
+            "metadata": metadata,
+        }
+        result = self._mutate(
+            "agent.upsert",
+            {"company_id": company_id, "role": role, "member": member},
+        )
+        value = result.get("agent")
+        role_value = result.get("role")
+        if not isinstance(value, Mapping) or not isinstance(role_value, Mapping):
+            return self._get_agent(company_id, agent_id)
+        return _legacy_agent(value, role_value)
+
+    def _delete_agent(self, company_id: str, agent_id: str) -> bool:
+        if self._get_agent(company_id, agent_id) is None:
+            return False
+        self._mutate(
+            "agent.delete",
+            {"company_id": company_id, "agent_id": agent_id},
+        )
+        return True
 
     def _required(self, company_id: str) -> dict[str, Any]:
         value = self._get(company_id)
@@ -213,6 +321,10 @@ class CompanyContractFacade:
 
     def _resource(self, name: str, payload: Mapping[str, Any]) -> Any:
         return _invoke(RESOURCE, name, {"profile_id": self.profile_id, **dict(payload)})
+
+    def _raw_company(self, company_id: str) -> dict[str, Any] | None:
+        value = self._resource("get", {"company_id": company_id})
+        return dict(value) if isinstance(value, Mapping) else None
 
 
 def _receipt(
@@ -286,25 +398,10 @@ def _legacy_company(value: Mapping[str, Any]) -> dict[str, Any]:
         else {}
     )
     roles = company.get("roles") if isinstance(company.get("roles"), Mapping) else {}
-    agents: dict[str, dict[str, Any]] = {}
-    for member_id, member in members.items():
-        if not isinstance(member, Mapping):
-            continue
-        role = roles.get(str(member.get("role_id") or ""))
-        role_data = dict(role) if isinstance(role, Mapping) else {}
-        agent_id = str(member.get("id") or member_id)
-        agents[agent_id] = {
-            "id": agent_id,
-            "agent_id": agent_id,
-            "role_key": str(member.get("role_id") or ""),
-            "agent_name": str(member.get("display_name") or agent_id),
-            "display_name": str(member.get("display_name") or agent_id),
-            "model": str(member.get("agent_profile_id") or ""),
-            "aliases": list(member.get("mentions") or []),
-            "enabled": bool(member.get("enabled", True)),
-            "work_type": str(role_data.get("work_type") or "agent"),
-            "metadata": dict(member.get("metadata") or {}),
-        }
+    agents = {
+        agent["agent_id"]: agent
+        for agent in _legacy_agents({"members": members, "roles": roles})
+    }
     return {
         "id": str(company.get("id") or ""),
         "name": str(company.get("name") or "Company"),
@@ -335,7 +432,76 @@ def _object(value: Any, name: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _reject_subagent_team_settings_write(company: Mapping[str, Any]) -> None:
+def _legacy_agents(company: Mapping[str, Any]) -> list[dict[str, Any]]:
+    members = company.get("members")
+    members = dict(members) if isinstance(members, Mapping) else {}
+    roles = company.get("roles")
+    roles = dict(roles) if isinstance(roles, Mapping) else {}
+    agents = []
+    for member_id, member in members.items():
+        if not isinstance(member, Mapping):
+            continue
+        role = roles.get(str(member.get("role_id") or ""))
+        role_data = dict(role) if isinstance(role, Mapping) else {}
+        agents.append(_legacy_agent(member, role_data, fallback_id=str(member_id)))
+    return sorted(agents, key=lambda agent: agent["agent_id"])
+
+
+def _legacy_agent(
+    member: Mapping[str, Any],
+    role: Mapping[str, Any],
+    *,
+    fallback_id: str = "",
+) -> dict[str, Any]:
+    agent_id = str(member.get("id") or fallback_id)
+    metadata = member.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    legacy = metadata.get("legacy_agent")
+    legacy = dict(legacy) if isinstance(legacy, Mapping) else {}
+    return {
+        "id": agent_id,
+        "agent_id": agent_id,
+        "role_key": str(member.get("role_id") or ""),
+        "agent_name": str(role.get("name") or member.get("display_name") or agent_id),
+        "display_name": str(member.get("display_name") or agent_id),
+        "model": str(legacy.get("model") or member.get("agent_profile_id") or ""),
+        "aliases": list(member.get("mentions") or []),
+        "enabled": bool(member.get("enabled", True)),
+        "status": str(legacy.get("status") or "idle"),
+        "work_type": str(role.get("work_type") or "agent"),
+        "metadata": metadata,
+        **{
+            key: value
+            for key, value in legacy.items()
+            if key not in {"model", "status"}
+        },
+    }
+
+
+def _profile_identifier(agent: Mapping[str, Any]) -> str:
+    candidate = str(agent.get("agent_profile_id") or "").strip()
+    if not candidate:
+        candidate = str(agent.get("model") or "").strip()
+    if candidate and candidate.replace("_", "a").replace("-", "a").isalnum():
+        return candidate[:255]
+    return "default"
+
+
+def _agent_mentions(agent: Mapping[str, Any]) -> list[str]:
+    aliases = agent.get("aliases")
+    aliases = aliases if isinstance(aliases, list) else []
+    agent_id = str(agent.get("agent_id") or agent.get("id") or "").strip()
+    return [agent_id, *[str(value).lstrip("@") for value in aliases]]
+
+
+def _required_id(input_data: Mapping[str, Any], key: str) -> str:
+    value = str(input_data.get(key) or "").strip()
+    if not value:
+        raise CompanyFacadeError("INVALID_INPUT", f"{key} is required")
+    return value
+
+
+def _reject_subagent_team_write(company: Mapping[str, Any]) -> None:
     metadata = company.get("metadata")
     metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
     settings = company.get("settings")

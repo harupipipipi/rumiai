@@ -91,6 +91,14 @@ replace never becomes an unreviewed merge. The existing subagent-team write
 guard is evaluated from the selected Company record before the owner action;
 the defaultspack settings store is no longer constructed by this route.
 
+The legacy agents alias now maps an agent to the selected owner's role/member
+records. `agent.upsert` and `agent.delete` are atomic state-owner actions, so
+one user approval binds one revision-based mutation instead of allowing a
+facade to consume the same token across independent role and member writes.
+Legacy model, status, and agent-specific fields are carried in member metadata
+for the compatibility projection; `CompanyAgentStore` is not constructed by
+the route.
+
 The Company compatibility projection keeps the historic organization shape for
 these finite CRUD aliases. It derives the legacy `agents` projection from the
 authoritative member/role records; it does not read or write the legacy Company
@@ -117,6 +125,7 @@ the old store remains an allowed fallback for the cut-over CRUD routes.
 | `rumi_kanban_surface_pack` | selected isolated read-only content | state/action ownership or receipt handling |
 | `/api/company` CRUD aliases | finite contract facade and legacy projection | `CompanyService` or `CompanyStore` construction, legacy state fallback |
 | Company settings alias | finite contract facade and selected-record policy guard | `CompanySettingsStore` construction or unbound replace semantics |
+| Company agents alias | atomic role/member compatibility action and projection | `CompanyAgentStore` construction or split writes under one approval |
 | Company status/runtime/dispatch and collection routes | temporary Wave 10 inventory pending selected-contract adapters | new primary implementation or a second Company writer |
 
 ## Release boundary

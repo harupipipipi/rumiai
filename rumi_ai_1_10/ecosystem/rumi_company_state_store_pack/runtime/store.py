@@ -155,6 +155,37 @@ class CompanyStateStore:
                 )[:255]
             company["updated_at_ms"] = now_ms
             return {"company": _copy(company)}
+        if name == "agent.upsert":
+            role = dict(arguments["role"])
+            role_id = _identifier(role.get("id"))
+            self._named_record(
+                company,
+                "roles",
+                "role.upsert",
+                {"record_id": role_id, "record": role},
+                now_ms,
+            )
+            member = dict(arguments["member"])
+            member_id = _identifier(member.get("id"))
+            result = self._member(
+                company,
+                "member.upsert",
+                {"record_id": member_id, "record": member},
+                now_ms,
+            )
+            return {
+                "agent": _copy(result["member"]),
+                "role": _copy(company["roles"][role_id]),
+            }
+        if name == "agent.delete":
+            member_id = _identifier(arguments["record_id"])
+            self._member(
+                company,
+                "member.delete",
+                {"record_id": member_id},
+                now_ms,
+            )
+            return {"deleted_agent_id": member_id}
         if name.startswith("role."):
             return self._named_record(company, "roles", name, arguments, now_ms)
         if name.startswith("member."):
@@ -438,6 +469,8 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         "company.create",
         "company.update",
         "company.delete",
+        "agent.upsert",
+        "agent.delete",
         "role.upsert",
         "role.delete",
         "member.upsert",
@@ -485,6 +518,11 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
             updates[key] = dict(_mapping(updates[key]))
         arguments["updates"] = updates
         arguments["replace_settings"] = bool(payload.get("replace_settings"))
+    elif name == "agent.upsert":
+        arguments["role"] = dict(_mapping(payload.get("role")))
+        arguments["member"] = dict(_mapping(payload.get("member")))
+    elif name == "agent.delete":
+        arguments["record_id"] = str(payload.get("agent_id") or "")
     elif name.endswith(".upsert"):
         record = dict(_mapping(payload.get("record")))
         arguments["record_id"] = str(record.get("id") or payload.get("record_id") or "")
