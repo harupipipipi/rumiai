@@ -6,6 +6,7 @@ import hmac
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -60,6 +61,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         remote_model_discovery_requires_auth: bool = True,
         remote_model_list_path: str | None = None,
         remote_model_cache_ttl_seconds: int | None = None,
+        remote_model_pagination: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
         default_provider_id = str(provider_id or getattr(self.__class__, "provider_name", "") or "openai_compatible")
@@ -83,6 +85,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             remote_model_discovery_requires_auth
         )
         self._remote_model_list_path = str(remote_model_list_path or "/models").strip() or "/models"
+        self._remote_model_pagination = dict(remote_model_pagination or {})
         try:
             self._remote_model_cache_ttl_seconds = max(60, int(remote_model_cache_ttl_seconds))
         except (TypeError, ValueError):
@@ -197,6 +200,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             ),
             remote_model_list_path=str(((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_path") or "/models"),
             remote_model_cache_ttl_seconds=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_cache_ttl_seconds", 21600),
+            remote_model_pagination=((manifest.get("config") or {}) if isinstance(manifest.get("config"), dict) else {}).get("model_list_pagination") or {},
         )
 
     @staticmethod
@@ -509,19 +513,69 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
     def _fetch_remote_models(self) -> List[Dict[str, Any]]:
         url = self._base_url.rstrip("/") + self._remote_model_list_path
-        req = urllib.request.Request(url, headers=self._headers(content_type=""), method="GET")
         timeout_seconds = max(2, min(20, int(os.environ.get("RUMI_DEFAULTSPACK_REMOTE_MODEL_DISCOVERY_TIMEOUT", "6") or "6")))
-        try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout_seconds) as resp:
-                raw_bytes = resp.read().decode("utf-8")
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
-            return []
-        try:
-            payload = json.loads(raw_bytes)
-        except (json.JSONDecodeError, ValueError):
-            return []
-        raw_models = payload.get("data") if isinstance(payload, dict) else []
+        raw_models: List[Dict[str, Any]] = []
+        cursor = ""
+        seen_cursors: set[str] = set()
+        # Providers with a public OpenAI-style endpoint commonly include the
+        # entire catalog in one response.  When they do paginate, preserve
+        # every account-visible page instead of silently exposing page one.
+        for _ in range(self._remote_model_max_pages()):
+            request_url = self._remote_model_page_url(url, cursor)
+            req = urllib.request.Request(request_url, headers=self._headers(content_type=""), method="GET")
+            try:
+                with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout_seconds) as resp:
+                    raw_bytes = resp.read().decode("utf-8")
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
+                break
+            try:
+                payload = json.loads(raw_bytes)
+            except (json.JSONDecodeError, ValueError):
+                break
+            page_models, next_cursor = self._remote_models_page(payload)
+            raw_models.extend(page_models)
+            if not next_cursor or next_cursor in seen_cursors:
+                break
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
         return self._normalize_remote_models(raw_models)
+
+    def _remote_model_max_pages(self) -> int:
+        try:
+            return max(1, min(100, int(self._remote_model_pagination.get("max_pages", 100))))
+        except (TypeError, ValueError):
+            return 100
+
+    def _remote_model_page_url(self, url: str, cursor: str) -> str:
+        if not cursor:
+            return url
+        parameter = str(self._remote_model_pagination.get("cursor_param") or "after").strip() or "after"
+        parsed = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        query.append((parameter, cursor))
+        return urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment)
+        )
+
+    def _remote_models_page(self, payload: Any) -> tuple[List[Dict[str, Any]], str]:
+        if not isinstance(payload, dict):
+            return [], ""
+        raw_models = payload.get("data")
+        if not isinstance(raw_models, list):
+            raw_models = payload.get("models")
+        models = [dict(model) for model in raw_models or [] if isinstance(model, dict)]
+        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        configured_field = str(self._remote_model_pagination.get("next_cursor_field") or "").strip()
+        candidates = [
+            payload.get(configured_field) if configured_field else None,
+            payload.get("next_cursor"),
+            payload.get("next"),
+            pagination.get(configured_field) if configured_field else None,
+            pagination.get("next_cursor"),
+            pagination.get("next"),
+        ]
+        next_cursor = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
+        return models, next_cursor
 
     def _normalize_remote_models(self, raw_models: Any) -> List[Dict[str, Any]]:
         if not isinstance(raw_models, list):

@@ -324,6 +324,28 @@ def test_openai_compatible_inventory_cache_is_connection_scoped_and_secret_free(
     assert "first-secret" not in next(tmp_path.glob("*.json")).read_text(encoding="utf-8")
 
 
+def test_openai_compatible_inventory_supports_cursor_pagination_without_model_json():
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        provider_id="paged-provider",
+        api_key="test-key",
+        base_url="https://api.example/v1",
+        remote_model_discovery=True,
+        remote_model_pagination={"cursor_param": "cursor", "next_cursor_field": "next"},
+    )
+
+    models, cursor = provider._remote_models_page(
+        {"data": [{"id": "visible-model"}], "next": "page-2"}
+    )
+
+    assert models == [{"id": "visible-model"}]
+    assert cursor == "page-2"
+    assert provider._remote_model_page_url("https://api.example/v1/models?limit=100", cursor) == (
+        "https://api.example/v1/models?limit=100&cursor=page-2"
+    )
+
+
 def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp_path):
     registry = ProviderRegistry(storage_dir=tmp_path / "providers")
     registry.register_profile(
