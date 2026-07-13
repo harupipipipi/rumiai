@@ -1,0 +1,1 @@
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/publish.py","sha256":"844fe7dcff7d5777e09e0c59cd46541d48e69885b3c98b0828ddf6a6b7943aec","role":"runtime"}]}
