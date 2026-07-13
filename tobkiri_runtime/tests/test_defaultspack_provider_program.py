@@ -430,3 +430,38 @@ def test_saved_litellm_connection_endpoint_overrides_the_builtin_default(monkeyp
     assert manifest["adapter"] == "openai_compatible"
     assert manifest["default_base_url"] == "https://gateway.example/v1"
     assert manifest["models"] == []
+
+
+def test_live_inventory_removes_stale_bundled_models_from_the_ui_catalog(monkeypatch):
+    import ecosystem.defaultspack.backend.ai_client.provider_catalog as catalog
+
+    class Client:
+        def list_providers(self):
+            return [{"provider_id": "openrouter"}]
+
+        def list_models(self, provider=None):
+            assert provider in {None, "openrouter"}
+            return [{
+                "id": "openrouter/account-visible-model",
+                "qualified_model_id": "openrouter/account-visible-model",
+                "provider_id": "openrouter",
+                "model_id": "account-visible-model",
+                "metadata": {"source": "openrouter_models_api"},
+            }]
+
+    monkeypatch.setattr(catalog, "_runtime_client", lambda: Client())
+    monkeypatch.setattr(
+        catalog,
+        "get_all_known_models",
+        lambda **_kwargs: [{
+            "id": "openrouter/stale-bundled-model",
+            "qualified_model_id": "openrouter/stale-bundled-model",
+            "provider_id": "openrouter",
+            "model_id": "stale-bundled-model",
+            "metadata": {"source": "openrouter_curated_overlay"},
+        }],
+    )
+
+    models = catalog.list_model_catalog("openrouter")
+
+    assert [model["model_id"] for model in models] == ["account-visible-model"]

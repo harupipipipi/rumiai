@@ -74,6 +74,26 @@ def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
     except Exception:
         runtime_models = []
 
+    # A successful live inventory is authoritative for that connection.  Do
+    # not append an old bundled overlay merely because it contains different
+    # ids: that makes removed/unavailable models reappear in the UI and defeats
+    # account-scoped discovery.
+    live_inventory_sources = {
+        "remote_models_endpoint",
+        "openrouter_models_api",
+        "vercel_gateway_models_api",
+        "native_models_endpoint",
+        "native_server_api",
+        "last_known_good_inventory",
+    }
+    providers_with_live_inventory = {
+        str(model.get("provider_id") or model.get("provider") or "").strip()
+        for model in runtime_models
+        if isinstance(model, dict)
+        and str((model.get("metadata") or {}).get("source") or "").strip().lower()
+        in live_inventory_sources
+    }
+
     merged: dict[str, Dict[str, Any]] = {}
     order: list[str] = []
     for source in (models, runtime_models):
@@ -89,6 +109,8 @@ def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
             if not qualified_id:
                 continue
             if provider and provider_id != provider:
+                continue
+            if source is models and provider_id in providers_with_live_inventory:
                 continue
             if qualified_id not in merged:
                 merged[qualified_id] = item
