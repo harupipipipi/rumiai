@@ -18,6 +18,13 @@ test("Search Home validates every destination immediately before navigation", ()
   assert.doesNotMatch(appSource, /window\.location\.assign\(rawDestination\)/);
 });
 
+test("explicit unsafe URL input is blocked before resolver, answer, or Google search", () => {
+  assert.match(appSource, /evaluateExplicitDestinationInput\(query\)/);
+  assert.match(appSource, /explicitDestination\?\.verdict === "block"/);
+  assert.match(appSource, /setInput\(""\)/);
+  assert.match(appSource, /input_policy_blocked: true/);
+});
+
 test("route shortcuts are not installed globally and sensitive route data is not wildcard-posted", () => {
   assert.doesNotMatch(appSource, /routeHotkeyActionFromKeyboardEvent/);
   assert.doesNotMatch(appSource, /routeNavigationForHotkey/);

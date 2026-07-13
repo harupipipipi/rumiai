@@ -24,6 +24,7 @@ import {
 } from "./routerTypes";
 import { NavigationReview } from "./NavigationReview";
 import { conversationHref, normalizeAnswerResponse, type AnswerResult } from "./answerState";
+import { evaluateExplicitDestinationInput } from "./destinationPolicy";
 
 const ROUTE_DECISION_STORAGE_KEY = "rumi-search-home-route-decision";
 const ANSWER_ROUTE_TYPES = new Set(["ASK_AI", "ASK_AI_WITH_SEARCH"]);
@@ -456,6 +457,25 @@ export default function App() {
       committedNavigationRef.current = false;
       setLoading(true);
       try {
+        const explicitDestination = evaluateExplicitDestinationInput(query);
+        if (explicitDestination?.verdict === "block") {
+          const blockedDecision: RouteDecision = {
+            route_type: "BLOCKED_DESTINATION_INPUT",
+            query: "Blocked URL input",
+            target_url: query,
+            target_candidates: [],
+            selected_index: -1,
+            fallback_url: query,
+            resolution_reason: `input_policy:${explicitDestination.reason}`,
+            used_ai_judge: false,
+            used_visual_judge: false,
+            metadata: { input_policy_blocked: true },
+          };
+          setInput("");
+          setDecision(blockedDecision);
+          setSelectedIndex(-1);
+          return;
+        }
         if (action === "answer") {
           await runAnswer(query);
           return;
