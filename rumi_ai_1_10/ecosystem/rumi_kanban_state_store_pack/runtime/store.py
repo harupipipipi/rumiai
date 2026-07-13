@@ -63,6 +63,28 @@ class KanbanStateStore:
         value = self._read()["boards"].get(_identifier(board_id))
         return _copy(value) if isinstance(value, Mapping) else None
 
+    def find_card(self, card_id: str) -> dict[str, Any] | None:
+        """Return one card and its board without exposing another store."""
+
+        target = _identifier(card_id)
+        for board_id, board in self._read()["boards"].items():
+            cards = board.get("cards") if isinstance(board, Mapping) else None
+            card = cards.get(target) if isinstance(cards, Mapping) else None
+            if isinstance(card, Mapping):
+                return {"board_id": board_id, "card": _copy(card)}
+        return None
+
+    def find_column(self, column_id: str) -> dict[str, Any] | None:
+        """Return one column and its board without exposing another store."""
+
+        target = _identifier(column_id)
+        for board_id, board in self._read()["boards"].items():
+            columns = board.get("columns") if isinstance(board, Mapping) else None
+            column = columns.get(target) if isinstance(columns, Mapping) else None
+            if isinstance(column, Mapping):
+                return {"board_id": board_id, "column": _copy(column)}
+        return None
+
     def apply(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Apply one receipt-bound, revision-checked Kanban state transition."""
 
@@ -199,6 +221,10 @@ def create_kanban_resource(client: Any) -> Callable[[str, Mapping[str, Any]], An
             return store.snapshot()
         if name == "get":
             return store.get(str(payload.get("board_id") or ""))
+        if name == "find_card":
+            return store.find_card(str(payload.get("card_id") or ""))
+        if name == "find_column":
+            return store.find_column(str(payload.get("column_id") or ""))
         raise ValueError(f"unknown Kanban resource operation: {name}")
 
     return operation

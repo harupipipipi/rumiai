@@ -1,1 +1,1 @@
-{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/store.py","sha256":"a2ed7371c215ae7d623a0e0ea6668b3fd1937aaa02109f9b51612f4983e07738","role":"runtime"}]}
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/store.py","sha256":"f81c93a661bf4a8f3cd8bef04fafe336992fea3877a20dd73b06b1d80efacf6a","role":"runtime"}]}

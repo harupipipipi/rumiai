@@ -1,0 +1,42 @@
+# [QA][pack-architecture][Wave 10][soon] PR #<番号> 実環境テスト
+
+このPRを実環境でテストしてください。
+
+起動テストを必ず行ってください。
+
+## Target
+
+- PR: 未作成（push/PR許可後に記入）
+- Wave: 10
+- Base: `soon`
+- Head: `codex/pack-architecture-program-soon`
+- Head SHA: PR作成時に記入
+- Related issue: #1158
+
+## Required validation
+
+- safe/core、personal desktop、coding、research、scheduler/connector、Operations
+  Company の各 profile が明示的な effective pack set だけで起動すること
+- critical global contract provider が一意で、無関係な installed-pack scan や
+  foreign pack-ID branch がないこと
+- defaultspack の旧 HTTP/function route が selected global contract を呼び、
+  primary feature store/runtime/UI を直接 import しないこと
+- legacy Kanban board の export、one-shot import、同一 source hash の no-write
+  dedupe、changed source hash の fail-closed、stale revision、rollback を確認
+- migration 前の legacy Kanban route は migration-required diagnostic と recovery
+  path を返し、空 board を静かに新規作成しないこと
+- migration 後の old Kanban route は global resource/action だけを通し、旧 SQLite
+  に read/write しないこと。二重 writer がないこと
+- old React Kanban view の撤去後、isolated Kanban route の profile scope、pack
+  削除時の route 消失、read-only RPC、approved action 境界を確認
+- startup/shutdown、restart persistence、upgrade/downgrade、clean-install、
+  macOS/Windows/Linux を記録すること
+
+## Evidence
+
+- OS、profile、effective pack set、selected provider、実行コマンド、redacted logs
+- migration source hash、rollback decision、旧/new route response、screenshots
+- 失敗時は recovery path と再現手順を Issue と対象 PR に記録
+
+テスト、lint、build、起動確認、実環境確認は実装担当のCodexでは実行していません。
+マージ前に独立した実環境QAが必要です。
