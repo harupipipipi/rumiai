@@ -1970,7 +1970,7 @@ def _replace_current_user_content_for_model(
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
     from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
-    from domain.kanban.service import append_kanban_system_prompt_note
+    from domain.kanban.prompt_note import append_kanban_system_prompt_note
 
     return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
