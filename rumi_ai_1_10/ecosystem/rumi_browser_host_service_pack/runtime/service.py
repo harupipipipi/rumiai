@@ -55,6 +55,7 @@ _HOST_FUNCTIONS: Final[dict[str, str]] = {
     "browser.navigate": "browser.open_url",
     "browser.cookies.import": "browser.cookies.import",
     "browser.cookies.delete": "browser.cookies.delete",
+    "browser.download.collect": "browser.download.collect",
 }
 
 

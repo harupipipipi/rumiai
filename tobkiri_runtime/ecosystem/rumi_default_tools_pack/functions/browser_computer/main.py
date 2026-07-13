@@ -17,6 +17,10 @@ def run(context, args):
     ):
         payload["persistent"] = False
     payload = _payload_with_context_defaults(action, payload, context)
+    if action == "browser.download.collect" and isinstance(context, dict):
+        workspace = str(context.get("conversation_workspace_dir") or "").strip()
+        if workspace:
+            payload["artifact_root"] = str(Path(workspace) / "tools" / "computer")
     return run_host_contract_action(
         action,
         payload,

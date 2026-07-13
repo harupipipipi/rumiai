@@ -12,6 +12,7 @@ import importlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from core_runtime.authority import get_authority_service
@@ -209,10 +210,12 @@ def _dispatch_prepared_viewer_broker(
             "conversation_id": intent.conversation_id,
         }
         try:
+            artifact_root_value = str(args.get("artifact_root") or "").strip()
             result = prepared.client.run_computer(
                 delegated_function_id,
                 args,
                 context,
+                Path(artifact_root_value) if artifact_root_value else None,
             )
         except Exception as exc:
             return {

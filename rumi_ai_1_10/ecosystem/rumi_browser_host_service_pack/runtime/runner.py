@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import stat
 import tempfile
 import time
 import urllib.parse
@@ -35,6 +37,7 @@ class BrowserHostRunner:
         payload: Mapping[str, Any] | None,
         *,
         viewer_host_approved: bool,
+        artifact_root: Path | None = None,
     ) -> dict[str, Any]:
         """Run one allowlisted action after Viewer token validation."""
 
@@ -88,6 +91,8 @@ class BrowserHostRunner:
             return self._select_tab(state, args)
         if normalized == "browser.downloads.list":
             return self._downloads(state)
+        if normalized == "browser.download.collect":
+            return self._collect_download(args, artifact_root)
         return {
             "action": normalized,
             "is_error": True,
@@ -280,7 +285,70 @@ class BrowserHostRunner:
         return {"action": "browser.select_tab", "active_tab_id": tab_id}
 
     def _downloads(self, state: dict[str, Any]) -> dict[str, Any]:
-        return {"action": "browser.downloads.list", "downloads": list(state["downloads"])}
+        managed = self.root / "downloads"
+        downloads = []
+        if managed.is_symlink():
+            raise PermissionError("managed browser download directory cannot be a symlink")
+        if managed.is_dir():
+            for candidate in sorted(managed.iterdir(), key=lambda item: item.name):
+                if candidate.is_symlink() or not candidate.is_file():
+                    continue
+                downloads.append(
+                    {
+                        "download_id": candidate.name,
+                        "name": candidate.name,
+                        "size": candidate.stat().st_size,
+                    }
+                )
+        return {"action": "browser.downloads.list", "downloads": downloads}
+
+    def _collect_download(
+        self,
+        payload: Mapping[str, Any],
+        artifact_root: Path | None,
+    ) -> dict[str, Any]:
+        if artifact_root is None:
+            raise ValueError("a validated conversation artifact root is required")
+        download_id = str(payload.get("download_id") or "").strip()
+        if not download_id or Path(download_id).name != download_id:
+            raise ValueError("download_id must be one managed filename")
+        source = self.root / "downloads" / download_id
+        if source.parent.is_symlink():
+            raise PermissionError("managed browser download directory cannot be a symlink")
+        if source.is_symlink() or not source.is_file():
+            raise FileNotFoundError("managed browser download is unavailable")
+        destination_root = Path(artifact_root)
+        destination_root.mkdir(parents=True, exist_ok=True)
+        destination = destination_root / download_id
+        temporary = destination_root / f".{download_id}.{uuid.uuid4().hex}.tmp"
+        source_fd = -1
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            source_fd = os.open(source, flags)
+            source_stat = os.fstat(source_fd)
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise PermissionError("managed download is not a regular file")
+            with os.fdopen(source_fd, "rb", closefd=True) as source_handle:
+                source_fd = -1
+                with temporary.open("xb") as destination_handle:
+                    os.chmod(temporary, 0o600)
+                    shutil.copyfileobj(source_handle, destination_handle, 1024 * 1024)
+                    destination_handle.flush()
+                    os.fsync(destination_handle.fileno())
+            os.replace(temporary, destination)
+        finally:
+            if source_fd >= 0:
+                os.close(source_fd)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "action": "browser.download.collect",
+            "download_id": download_id,
+            "path": str(destination),
+            "size": destination.stat().st_size,
+        }
 
     def _profile(
         self, state: dict[str, Any], payload: Mapping[str, Any]
@@ -343,6 +411,7 @@ def run_browser_host_action(
     payload: Mapping[str, Any] | None,
     *,
     viewer_host_approved: bool,
+    artifact_root: Path | None = None,
 ) -> dict[str, Any]:
     """Run one Viewer-authorized browser action."""
 
@@ -350,6 +419,7 @@ def run_browser_host_action(
         action,
         payload,
         viewer_host_approved=viewer_host_approved,
+        artifact_root=artifact_root,
     )
 
 

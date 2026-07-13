@@ -66,9 +66,9 @@ capability executor can route them through Authority.
 The Viewer helper routes `browser.*` functions to the browser pack runner rather
 than importing `BrowserComputerController`. Browser profile, cookie, session,
 and tab metadata is written atomically by that runner under its own namespace.
-Navigation accepts HTTP(S) only. Browser download collection remains
-`unavailable` until a workspace-bound artifact transfer runner is selected; it
-does not fall back to an arbitrary Downloads directory.
+Navigation accepts HTTP(S) only. Download listing reads only the pack-managed
+download directory. Collection requires a Viewer-validated conversation artifact
+root and one managed filename; arbitrary Downloads paths and symlinks are denied.
 
 The large pre-Wave-8 computer/browser implementation remains only as a sunset
 source compatibility surface and is no longer the canonical function entrypoint.
@@ -108,7 +108,7 @@ must revoke outstanding tokens and receipts first.
 | workspace/file/shell/terminal/Git/patch/IDE/sandbox | platform-neutral Python with explicit process/filesystem policy | same | same | missing executable/runtime is typed `unavailable`; no host downgrade |
 | Viewer host broker | enabled with local token/audit connection | enabled with local token/audit connection | broker intentionally disabled in the current Viewer | contract remains installable but host action fails closed as broker unavailable |
 | desktop native host | Accessibility/CGEvent/visible drivers selected behind `ComputerHost` | UIA/PostMessage/visible drivers selected behind `ComputerHost` | X11/visible drivers only when locally available | no eligible driver returns an error; no simulated success |
-| browser runner | atomic local metadata plus system HTTP(S) browser handoff | same | same when a desktop browser handler exists | failed handoff is an error; download collection remains unavailable without a workspace transfer runner |
+| browser runner | atomic local metadata plus system HTTP(S) browser handoff | same | same when a desktop browser handler exists | failed handoff is an error; downloads are limited to the pack-managed directory and validated artifact root |
 | clipboard runner | `pbpaste`/`pbcopy` fixed argv | PowerShell read/`clip.exe` write fixed argv | Wayland/X11 command selected only when installed | missing command returns unavailable; no shell string execution |
 | media device capture/output | Viewer HostIntent permission model | Viewer HostIntent permission model | current Viewer broker unavailable | approved operation without a platform runner returns an audited error |
 

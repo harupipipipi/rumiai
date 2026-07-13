@@ -28,10 +28,12 @@ def main() -> int:
                 run_browser_host_action,
             )
 
+            artifact_root = _validated_artifact_root(request.get("artifact_root"))
             result = run_browser_host_action(
                 action,
                 payload,
                 viewer_host_approved=viewer_host_approved,
+                artifact_root=artifact_root,
             )
         elif action.startswith("computer.clipboard."):
             from ecosystem.rumi_clipboard_host_service_pack.runtime.runner import (
