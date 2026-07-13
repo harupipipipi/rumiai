@@ -95,6 +95,14 @@ class CompanyContractFacade:
             return self._delete_task(_company_id(self.input), _required_id(self.input, "task_id"))
         if operation == "dispatch_task":
             return self._dispatch_task(_company_id(self.input), _required_id(self.input, "task_id"))
+        if operation == "list_routes":
+            return self._list_records(_company_id(self.input), "routes")
+        if operation == "upsert_route":
+            return self._upsert_named(_company_id(self.input), "route")
+        if operation == "delete_route":
+            return self._delete_named(_company_id(self.input), "route", _required_id(self.input, "route_id"))
+        if operation == "append_inbound":
+            return self._append_inbound(_company_id(self.input))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -499,6 +507,48 @@ class CompanyContractFacade:
     def _raw_company(self, company_id: str) -> dict[str, Any] | None:
         value = self._resource("get", {"company_id": company_id})
         return dict(value) if isinstance(value, Mapping) else None
+
+    def _list_records(
+        self,
+        company_id: str,
+        key: str,
+    ) -> list[dict[str, Any]] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        records = company.get(key)
+        records = dict(records) if isinstance(records, Mapping) else {}
+        return [
+            dict(value)
+            for _record_id, value in sorted(records.items())
+            if isinstance(value, Mapping)
+        ]
+
+    def _upsert_named(self, company_id: str, kind: str) -> dict[str, Any] | None:
+        record = _object(self.input.get(kind), kind)
+        if not record:
+            record = {key: value for key, value in self.input.items() if key not in {"company_id", "action", "approval_token", "_headers"}}
+        record_id = str(record.get("id") or record.get(f"{kind}_id") or f"{kind}-" + uuid.uuid4().hex)
+        if self._raw_company(company_id) is None:
+            return None
+        result = self._mutate(f"{kind}.upsert", {"company_id": company_id, "record": {"id": record_id, **record}})
+        value = result.get(kind)
+        return dict(value) if isinstance(value, Mapping) else None
+
+    def _delete_named(self, company_id: str, kind: str, record_id: str) -> bool:
+        company = self._raw_company(company_id)
+        records = company.get(kind + "s") if isinstance(company, Mapping) else None
+        if not isinstance(records, Mapping) or record_id not in records:
+            return False
+        self._mutate(f"{kind}.delete", {"company_id": company_id, "record_id": record_id})
+        return True
+
+    def _append_inbound(self, company_id: str) -> dict[str, Any] | None:
+        if self._raw_company(company_id) is None:
+            return None
+        record = {"id": "inbound-" + uuid.uuid4().hex, "type": "inbound", "actor_id": str(self.input.get("sender_id") or "external"), "channel_id": str(self.input.get("channel_id") or ""), "text": str(self.input.get("content") or ""), "metadata": _object(self.input.get("metadata"), "metadata")}
+        result = self._mutate("inbound.append", {"company_id": company_id, "record": record})
+        return dict(result.get("inbound") or {})
 
 
 def _receipt(
