@@ -432,6 +432,19 @@ def test_external_provider_catalog_ignores_pack_model_manifests(monkeypatch):
     assert providers._load_models_for_provider({"provider_id": "openrouter", "entrypoint": "ignored"}) == []
 
 
+def test_every_external_provider_starts_without_a_checked_in_model_inventory():
+    from domain.ai_client import providers
+
+    catalog = providers.get_provider_catalog()
+    stale = {
+        entry["provider_id"]: providers._load_models_for_provider(entry)
+        for entry in catalog
+        if entry["provider_id"] not in {"rumi", "stub"}
+    }
+
+    assert {provider_id: models for provider_id, models in stale.items() if models} == {}
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider
