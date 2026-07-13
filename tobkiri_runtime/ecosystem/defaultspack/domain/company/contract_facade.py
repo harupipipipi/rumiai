@@ -51,6 +51,10 @@ class CompanyContractFacade:
             return self._update(_company_id(self.input))
         if operation == "delete":
             return self._delete(_company_id(self.input))
+        if operation == "get_settings":
+            return self._get_settings(_company_id(self.input))
+        if operation == "update_settings":
+            return self._update_settings(_company_id(self.input))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -151,6 +155,31 @@ class CompanyContractFacade:
             return False
         self._mutate("company.delete", {"company_id": company_id})
         return True
+
+    def _get_settings(self, company_id: str) -> dict[str, Any] | None:
+        company = self._get(company_id)
+        if company is None:
+            return None
+        return dict(company.get("settings") or {})
+
+    def _update_settings(self, company_id: str) -> dict[str, Any] | None:
+        settings = _object(self.input.get("settings"), "settings")
+        company = self._get(company_id)
+        if company is None:
+            return None
+        _reject_subagent_team_settings_write(company)
+        result = self._mutate(
+            "company.update",
+            {
+                "company_id": company_id,
+                "updates": {"settings": settings},
+                "replace_settings": bool(self.input.get("replace", False)),
+            },
+        )
+        value = result.get("company")
+        if not isinstance(value, Mapping):
+            value = self._required(company_id)
+        return dict(value.get("settings") or {})
 
     def _required(self, company_id: str) -> dict[str, Any]:
         value = self._get(company_id)
@@ -304,6 +333,31 @@ def _object(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise CompanyFacadeError("INVALID_INPUT", f"{name} must be a dict")
     return dict(value)
+
+
+def _reject_subagent_team_settings_write(company: Mapping[str, Any]) -> None:
+    metadata = company.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    settings = company.get("settings")
+    settings = dict(settings) if isinstance(settings, Mapping) else {}
+    nested = settings.get("subagent_team")
+    nested = dict(nested) if isinstance(nested, Mapping) else {}
+    if (
+        bool(metadata.get("subagent_team"))
+        or bool(metadata.get("subagent_team_workspace"))
+        or metadata.get("surface") == "subagent_team_workspace"
+        or metadata.get("workspace_kind") == "subagent_team"
+        or metadata.get("frontend_surface") == "subagent_team_workspace"
+        or nested.get("guard_owner") == "subagent_team_workspace"
+        or nested.get("surface") == "subagent_team_workspace"
+        or nested.get("workspace_kind") == "subagent_team"
+        or nested.get("frontend_surface") == "subagent_team_workspace"
+    ):
+        raise CompanyFacadeError(
+            "SUBAGENT_TEAM_POLICY_REQUIRED",
+            "use /api/subagent-team for subagent team writes",
+            403,
+        )
 
 
 def _approval_token(input_data: Mapping[str, Any]) -> str:

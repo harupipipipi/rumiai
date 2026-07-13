@@ -134,10 +134,14 @@ class CompanyStateStore:
             if "status" in updates:
                 company["status"] = str(updates["status"])
             if "settings" in updates:
-                company["settings"] = {
-                    **company["settings"],
-                    **_copy(updates["settings"]),
-                }
+                next_settings = _copy(updates["settings"])
+                if arguments.get("replace_settings"):
+                    company["settings"] = next_settings
+                else:
+                    company["settings"] = {
+                        **company["settings"],
+                        **next_settings,
+                    }
             if "description" in updates:
                 company["description"] = str(updates["description"])[:4_000]
             if "metadata" in updates:
@@ -480,6 +484,7 @@ def _arguments(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         for key in {"settings", "metadata"} & set(updates):
             updates[key] = dict(_mapping(updates[key]))
         arguments["updates"] = updates
+        arguments["replace_settings"] = bool(payload.get("replace_settings"))
     elif name.endswith(".upsert"):
         record = dict(_mapping(payload.get("record")))
         arguments["record_id"] = str(record.get("id") or payload.get("record_id") or "")

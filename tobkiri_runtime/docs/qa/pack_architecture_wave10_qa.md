@@ -29,6 +29,8 @@
   profile-scoped state owner にだけ保持されること。member/role 由来の legacy
   agent projection を確認し、未移行の Company runtime／dispatch／collection route
   は旧 state fallback を開始せず、明示的な adapter/sunset 状態であることを記録
+- legacy Company settings route の merge／明示的 replace、subagent-team write guard、
+  approval token binding と authority receipt の arguments binding を確認
 - legacy Kanban board の export、one-shot import、同一 source hash の no-write
   dedupe、changed source hash の fail-closed、stale revision、rollback を確認
 - migration 前の legacy Kanban route は migration-required diagnostic と recovery

@@ -85,6 +85,12 @@ locally bound approval token for an external route call. An internal
 tool-server approval context still goes through the host authority bridge, but
 does not ask a second time for the already approved route operation.
 
+The legacy Company settings alias now follows that same facade. Its explicit
+`replace` flag is included in the owner action and receipt-bound arguments, so
+replace never becomes an unreviewed merge. The existing subagent-team write
+guard is evaluated from the selected Company record before the owner action;
+the defaultspack settings store is no longer constructed by this route.
+
 The Company compatibility projection keeps the historic organization shape for
 these finite CRUD aliases. It derives the legacy `agents` projection from the
 authoritative member/role records; it does not read or write the legacy Company
@@ -110,6 +116,7 @@ the old store remains an allowed fallback for the cut-over CRUD routes.
 | `tool_task_board*` | explicit deprecated tool diagnostics | SQLite/JSON state ownership or agent/session dispatch |
 | `rumi_kanban_surface_pack` | selected isolated read-only content | state/action ownership or receipt handling |
 | `/api/company` CRUD aliases | finite contract facade and legacy projection | `CompanyService` or `CompanyStore` construction, legacy state fallback |
+| Company settings alias | finite contract facade and selected-record policy guard | `CompanySettingsStore` construction or unbound replace semantics |
 | Company status/runtime/dispatch and collection routes | temporary Wave 10 inventory pending selected-contract adapters | new primary implementation or a second Company writer |
 
 ## Release boundary

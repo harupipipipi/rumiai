@@ -6,13 +6,13 @@
     {"id":"rumi.action.company.state.v1","version":"1.0.0","provider_instance_id":"company-state.action","cardinality":"one","security":"critical","failure":"fail_closed","lifecycle":{"introduced":"1.0.0","deprecated":false,"data_owner":"rumi_company_state_store_pack"},"schemas":{"input":{"type":"object"},"output":{"type":"object"}},"isolation":"in_process","required_capabilities":["company.state.manage"]}
   ],"requires":[{"id":"rumi.service.host.authorize.v1","version":">=1.0.0,<2.0.0","cardinality":"one","failure":"fail_closed"}]},
   "entrypoints":[
-    {"id":"company-state-resource","contract_id":"rumi.resource.company.v1","loader":"python","module":"ecosystem.rumi_company_state_store_pack.runtime.store","symbol":"create_company_resource","artifact_hash":"sha256:4fcdecb2a1fd604d5f42aaaa63089235654541644e61a9f35d8e13459f82a42a"},
-    {"id":"company-state-action","contract_id":"rumi.action.company.state.v1","loader":"python","module":"ecosystem.rumi_company_state_store_pack.runtime.store","symbol":"create_company_action","artifact_hash":"sha256:4fcdecb2a1fd604d5f42aaaa63089235654541644e61a9f35d8e13459f82a42a"}
+    {"id":"company-state-resource","contract_id":"rumi.resource.company.v1","loader":"python","module":"ecosystem.rumi_company_state_store_pack.runtime.store","symbol":"create_company_resource","artifact_hash":"sha256:ecf4607d7f21996563150cd4148a9af3da03067395c9d97e49d13f9f9c33e6d7"},
+    {"id":"company-state-action","contract_id":"rumi.action.company.state.v1","loader":"python","module":"ecosystem.rumi_company_state_store_pack.runtime.store","symbol":"create_company_action","artifact_hash":"sha256:ecf4607d7f21996563150cd4148a9af3da03067395c9d97e49d13f9f9c33e6d7"}
   ],
   "resources":[],
   "storage":[{"namespace":"rumi.company.state","schema_version":"1.0.0","authoritative":true,"retention":"profile lifetime with explicit Company deletion","export_import":true}],
   "permissions":[{"capability":"company.state.read","access":"read","approval_required":false},{"capability":"company.state.manage","access":"control","approval_required":true},{"capability":"host.authority.consume","access":"control","approval_required":false}],
-  "provenance":{"content_hash":"sha256:4fcdecb2a1fd604d5f42aaaa63089235654541644e61a9f35d8e13459f82a42a","build_identity":"rumi-company-state-store-pack:1.0.0","trust_class":"local","signature":null},
+  "provenance":{"content_hash":"sha256:ecf4607d7f21996563150cd4148a9af3da03067395c9d97e49d13f9f9c33e6d7","build_identity":"rumi-company-state-store-pack:1.0.0","trust_class":"local","signature":null},
   "migration":{"from":["defaultspack.domain.company.store","defaultspack.domain.company.runtime_store","defaultspack.domain.company.task_store","defaultspack.domain.company.settings_store","rumi_operations_company_pack.user_data.shared.operations_company"],"compatibility_aliases":[],"compatibility_projection":"one_shot_snapshot_import","removal_wave":10,"sunset_at":"2027-12-31","rollback":"Stop Company coordination, retain the immutable source hash, and select one prior owner without dual writes."},
   "extensions":{"rumi.company_state.boundary":{"coordinator":false,"agent_runtime":false,"connectors":false,"scheduler":false,"ui":false,"revision_bound":true,"task_transitions":true,"timeline_dedupe":true}}
 }
