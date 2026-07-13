@@ -71,6 +71,18 @@ class TurnRuntime:
             turn = self._turns.get(_identifier(turn_id))
             return _copy(turn) if turn is not None else None
 
+    def list(self, *, conversation_id: str | None = None) -> list[dict[str, Any]]:
+        """List bounded turn snapshots, optionally for one conversation."""
+        with self._lock:
+            values = [
+                _copy(turn)
+                for turn in self._turns.values()
+                if conversation_id is None
+                or turn.get("conversation_id") == conversation_id
+            ]
+        values.sort(key=lambda turn: int(turn.get("updated_at") or 0), reverse=True)
+        return values
+
     def transition(
         self,
         turn_id: str,
@@ -113,11 +125,57 @@ class TurnRuntime:
             if turn["status"] in _TERMINAL:
                 raise TurnConflict("terminal turn cannot be steered")
             item = {"id": str(uuid.uuid4()), "value": _copy(guidance)}
+            item["status"] = "queued"
             turn["guidance"].append(item)
             turn["revision"] += 1
             turn["updated_at"] = _now_ms()
             self._event(turn, "turn.steered", {"guidance_id": item["id"]})
             return _copy(turn)
+
+    def consume_guidance(
+        self, turn_id: str, *, expected_revision: int
+    ) -> dict[str, Any]:
+        """Atomically mark all queued guidance consumed and return those items."""
+        with self._lock:
+            turn = self._required(turn_id)
+            self._assert_revision(turn, expected_revision)
+            queued = [
+                item for item in turn["guidance"] if item.get("status") == "queued"
+            ]
+            for item in queued:
+                item["status"] = "consumed"
+                item["consumed_at"] = _now_ms()
+            if queued:
+                turn["revision"] += 1
+                turn["updated_at"] = _now_ms()
+                self._event(
+                    turn,
+                    "turn.guidance_consumed",
+                    {"guidance_ids": [item["id"] for item in queued]},
+                )
+            return {"turn": _copy(turn), "items": _copy(queued)}
+
+    def cancel_guidance(
+        self, turn_id: str, guidance_id: str, *, expected_revision: int
+    ) -> dict[str, Any]:
+        """Cancel one queued guidance item at an exact turn revision."""
+        with self._lock:
+            turn = self._required(turn_id)
+            self._assert_revision(turn, expected_revision)
+            item = next(
+                (value for value in turn["guidance"] if value["id"] == guidance_id),
+                None,
+            )
+            if item is None:
+                raise KeyError("turn guidance is unknown")
+            if item.get("status") != "queued":
+                raise TurnConflict("only queued guidance can be cancelled")
+            item["status"] = "cancelled"
+            item["cancelled_at"] = _now_ms()
+            turn["revision"] += 1
+            turn["updated_at"] = _now_ms()
+            self._event(turn, "turn.guidance_cancelled", {"guidance_id": guidance_id})
+            return {"turn": _copy(turn), "item": _copy(item)}
 
     def handoff(
         self,
@@ -184,9 +242,16 @@ def create_turn_resource(client: Any) -> Callable[[str, Mapping[str, Any]], Any]
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
-        if name != "get":
-            raise ValueError(f"unknown turn resource operation: {name}")
-        return _runtime(payload).get(str(payload.get("turn_id") or ""))
+        if name == "get":
+            return _runtime(payload).get(str(payload.get("turn_id") or ""))
+        if name == "list":
+            conversation_id = payload.get("conversation_id")
+            return {
+                "turns": _runtime(payload).list(
+                    conversation_id=str(conversation_id) if conversation_id else None
+                )
+            }
+        raise ValueError(f"unknown turn resource operation: {name}")
 
     return operation
 
@@ -218,6 +283,17 @@ def create_turn_action(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
             return runtime.handoff(
                 turn_id,
                 _mapping(payload.get("target")),
+                expected_revision=expected,
+            )
+        if name == "consume_guidance":
+            return runtime.consume_guidance(
+                turn_id,
+                expected_revision=expected,
+            )
+        if name == "cancel_guidance":
+            return runtime.cancel_guidance(
+                turn_id,
+                str(payload.get("guidance_id") or ""),
                 expected_revision=expected,
             )
         raise ValueError(f"unknown turn action: {name}")
