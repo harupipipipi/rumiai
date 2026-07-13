@@ -1,0 +1,1 @@
+{"schema_version":"rumi.artifact-manifest.v1","artifacts":[{"path":"runtime/bridge.py","sha256":"2762a42e090f478f9c7fc1cdb41c3e06a84d21c3157cd96c0ab8313286c9f9ea","role":"runtime"}]}
