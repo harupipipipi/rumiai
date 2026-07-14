@@ -1,0 +1,17 @@
+{
+  "pack_id": "rumi_ai_pipeline_pack",
+  "pack_identity": "rumi:ecosystem/rumi_ai_pipeline_pack",
+  "display_name": "Rumi AI Pipeline Pack",
+  "version": "1.0.0",
+  "description": "Deterministic request preparation and replay-safe failover policy.",
+  "dependencies": {},
+  "connectivity": {"requires": [], "provides": ["rumi.service.ai.request.prepare.v1", "rumi.service.ai.failover.decide.v1"]},
+  "required_secrets": [],
+  "required_capabilities": ["ai.request.prepare", "ai.failover.decide"],
+  "required_network": {"allowed_domains": [], "allowed_ports": []},
+  "host_execution": true,
+  "resources": [],
+  "provenance": {"content_hash": "sha256:d6dd88530a12991bc3794a4b918b321dd66e52bad3f41511780d3e0ae47322f7", "build_identity": "rumi-ai-pipeline-pack:1.0.0", "trust_class": "local", "signature": null},
+  "metadata": {"authoritative_owner": true, "owner_surfaces": ["ai_request_normalization", "ai_failover_policy"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"network": false, "raw_credentials": false, "tool_replay": false, "unbound_retry": false}}
+}
+

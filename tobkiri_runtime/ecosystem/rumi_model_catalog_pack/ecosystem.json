@@ -15,14 +15,14 @@
   "host_execution": true,
   "resources": ["catalog/providers", "extensions/llm/providers"],
   "provenance": {
-    "content_hash": "sha256:7cfe6ec701dc689fc0f117f0a6702f96d2564df45c9280b9bc32e2f058dab606",
+    "content_hash": "sha256:88d96e4fd84af79a636730cdb5633895e61348f7369572cb21462901fa753fcc",
     "build_identity": "rumi-model-catalog-pack:2.0.0",
     "trust_class": "local",
     "signature": null
   },
   "metadata": {
     "authoritative_owner": true,
-    "catalog_revision": "sha256:7cfe6ec701dc689fc0f117f0a6702f96d2564df45c9280b9bc32e2f058dab606",
+    "catalog_revision": "sha256:88d96e4fd84af79a636730cdb5633895e61348f7369572cb21462901fa753fcc",
     "owner_surfaces": ["provider_descriptors", "model_descriptors"],
     "integrity": {"artifact_manifest": "artifact-manifest.json"},
     "security": {

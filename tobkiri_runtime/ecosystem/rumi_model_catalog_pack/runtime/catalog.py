@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 CATALOG_REVISION = (
-    "sha256:7cfe6ec701dc689fc0f117f0a6702f96d2564df45c9280b9bc32e2f058dab606"
+    "sha256:88d96e4fd84af79a636730cdb5633895e61348f7369572cb21462901fa753fcc"
 )
 _ROOT = Path(__file__).resolve().parents[1] / "catalog" / "providers"
 _EXTENSION_ROOT = (

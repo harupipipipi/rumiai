@@ -1,0 +1,14 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {"id": "rumi.tool_remote_executor", "version": "1.0.0", "kind": "service", "display_name": "Rumi Tool Remote Executor", "description": "Generic selected remote-service adapter executor."},
+  "contracts": {
+    "provides": [{"id": "rumi.service.tool.execute.v1", "version": "1.0.0", "provider_instance_id": "tool-executor.remote", "routing_keys": ["remote"], "cardinality": "many", "security": "restricted", "failure": "fail_closed", "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "remote-adapter"}, "schemas": {"input": {"type": "object"}, "output": {"type": "object"}}, "isolation": "in_process", "required_capabilities": ["tool.execute"]}],
+    "requires": [{"id": "rumi.service.tool.remote.operation.v1", "version": "^1.0.0", "cardinality": "many", "optional": false, "failure": "fail_closed", "required_capabilities": ["tool.remote.operation"]}]
+  },
+  "entrypoints": [{"id": "tool-remote-execute", "contract_id": "rumi.service.tool.execute.v1", "loader": "python", "module": "ecosystem.rumi_tool_remote_executor_pack.runtime.executor", "symbol": "create_execute_operation", "artifact_hash": "sha256:9a5fadde4a45e9592787a355fb9a1171ba43a4f1927406257ae4b1f213ec7bc3"}],
+  "resources": [], "storage": [], "permissions": [{"capability": "tool.execute", "access": "execute", "approval_required": false}],
+  "provenance": {"content_hash": "sha256:9a5fadde4a45e9592787a355fb9a1171ba43a4f1927406257ae4b1f213ec7bc3", "build_identity": "rumi-tool-remote-executor-pack:1.0.0", "trust_class": "local", "signature": null},
+  "migration": {"from": ["defaultspack.domain.tool.executor.remote"], "compatibility_aliases": [], "compatibility_projection": "none", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove this executor; remote services remain available without tool projection."},
+  "extensions": {"rumi.tool_executor.boundary": {"execution_kind": "remote", "credential_owner": false, "network_policy_owner": false, "provider_selection": "manifest_selected_exact"}}
+}
+

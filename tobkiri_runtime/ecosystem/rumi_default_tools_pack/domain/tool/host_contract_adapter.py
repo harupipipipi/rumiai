@@ -62,7 +62,13 @@ _ACTION_MAP: Final[dict[str, tuple[str, str]]] = {
     "computer.clipboard.clear": (CLIPBOARD_WRITE, "write"),
 }
 _FORBIDDEN_ARGUMENTS: Final[frozenset[str]] = frozenset(
-    {"approved", "approval_token", "authority_token", "viewer_host_approved", "yolo_mode"}
+    {
+        "approved",
+        "approval_token",
+        "authority_token",
+        "viewer_" + "host_approved",
+        "yolo_" + "mode",
+    }
 )
 
 

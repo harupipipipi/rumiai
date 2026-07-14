@@ -105,6 +105,10 @@ class CompanyContractFacade:
             return self._append_inbound(_company_id(self.input))
         if operation == "list_messages":
             return self._list_timeline(_company_id(self.input), "messages")
+        if operation == "get_message":
+            return self._get_message(
+                _company_id(self.input), _required_id(self.input, "message_id")
+            )
         if operation == "append_message":
             return self._append_message(_company_id(self.input))
         raise CompanyFacadeError(
@@ -556,14 +560,53 @@ class CompanyContractFacade:
 
     def _list_timeline(
         self, company_id: str, key: str
-    ) -> list[dict[str, Any]] | None:
+    ) -> dict[str, Any] | None:
         company = self._raw_company(company_id)
         if company is None:
             return None
         records = company.get(key)
         if not isinstance(records, list):
-            return []
-        return [dict(item) for item in records if isinstance(item, Mapping)]
+            records = []
+        channel_id = str(self.input.get("channel_id") or "")
+        thread_id = str(self.input.get("thread_id") or "")
+        projected = [dict(item) for item in records if isinstance(item, Mapping)]
+        if channel_id:
+            projected = [
+                item for item in projected
+                if str(item.get("channel_id") or "") == channel_id
+            ]
+        if thread_id:
+            projected = [
+                item for item in projected
+                if str(_object(item.get("metadata"), "metadata").get("thread_id") or "")
+                == thread_id
+            ]
+        descending = str(self.input.get("order") or "").strip().lower() in {
+            "desc", "descending", "latest", "newest"
+        }
+        projected.sort(
+            key=lambda item: int(item.get("created_at_ms") or 0), reverse=descending
+        )
+        total = len(projected)
+        limit = _bounded_limit(self.input.get("limit"), 50)
+        offset = _nonnegative_int(self.input.get("offset"), 0)
+        if _enabled(self.input.get("tail")) or _enabled(self.input.get("latest")):
+            offset = max(total - limit, 0)
+        return {"messages": projected[offset : offset + limit], "total": total}
+
+    def _get_message(
+        self, company_id: str, message_id: str
+    ) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        records = company.get("messages")
+        if not isinstance(records, list):
+            return None
+        for record in records:
+            if isinstance(record, Mapping) and str(record.get("id") or "") == message_id:
+                return dict(record)
+        return None
 
     def _append_message(self, company_id: str) -> dict[str, Any] | None:
         if self._raw_company(company_id) is None:
@@ -849,6 +892,14 @@ def _approval_token(input_data: Mapping[str, Any]) -> str:
     return str(
         headers.get("X-Rumi-Approval") or headers.get("x-rumi-approval") or ""
     ).strip()
+
+
+def _enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "tail", "latest"}
+    return False
 
 
 def _bounded_limit(value: Any, default: int) -> int:

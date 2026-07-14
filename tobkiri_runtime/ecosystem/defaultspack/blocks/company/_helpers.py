@@ -40,6 +40,12 @@ def _int_param(value: Any, default: int) -> int:
 
 def subagent_team_write_denied(company_id: str):
     company = CompanyStore().get_company(company_id)
+    return subagent_team_write_denied_for_company(company)
+
+
+def subagent_team_write_denied_for_company(company: Any):
+    """Apply the subagent-team write policy to a resolved Company record."""
+
     metadata = company.get("metadata") if isinstance(company, dict) and isinstance(company.get("metadata"), dict) else {}
     settings = company.get("settings") if isinstance(company, dict) and isinstance(company.get("settings"), dict) else {}
     nested = settings.get("subagent_team") if isinstance(settings.get("subagent_team"), dict) else {}

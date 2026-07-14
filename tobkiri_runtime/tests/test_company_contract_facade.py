@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def test_company_facade_filters_and_pages_messages(monkeypatch) -> None:
+    """Message compatibility reads keep their legacy filter and paging behavior."""
+
+    import domain.company.contract_facade as contract_facade
+
+    monkeypatch.setattr(contract_facade, "_profile_id", lambda: "test")
+    CompanyContractFacade = contract_facade.CompanyContractFacade
+
+    facade = CompanyContractFacade(
+        {
+            "company_id": "acme",
+            "channel_id": "engineering",
+            "thread_id": "thread-1",
+            "order": "desc",
+            "limit": 1,
+        },
+        {},
+    )
+    monkeypatch.setattr(
+        facade,
+        "_raw_company",
+        lambda _company_id: {
+            "messages": [
+                {
+                    "id": "message-1",
+                    "channel_id": "engineering",
+                    "created_at_ms": 1,
+                    "metadata": {"thread_id": "thread-1"},
+                },
+                {
+                    "id": "message-2",
+                    "channel_id": "engineering",
+                    "created_at_ms": 2,
+                    "metadata": {"thread_id": "thread-1"},
+                },
+                {
+                    "id": "message-other",
+                    "channel_id": "general",
+                    "created_at_ms": 3,
+                    "metadata": {"thread_id": "thread-1"},
+                },
+            ]
+        },
+    )
+
+    assert facade.run("list_messages") == {
+        "messages": [
+            {
+                "id": "message-2",
+                "channel_id": "engineering",
+                "created_at_ms": 2,
+                "metadata": {"thread_id": "thread-1"},
+            }
+        ],
+        "total": 2,
+    }
+
+
+def test_company_messages_block_uses_contract_facade(monkeypatch) -> None:
+    """The legacy message block must not reopen local Company stores."""
+
+    from blocks.company import messages
+
+    calls: list[str] = []
+
+    class FakeFacade:
+        def __init__(self, input_data, context) -> None:
+            self.input_data = input_data
+
+        def run(self, operation: str):
+            calls.append(operation)
+            if operation == "get":
+                return {"id": "acme", "metadata": {}, "settings": {}}
+            if operation == "append_message":
+                return {"id": "message-1", "text": "hello"}
+            raise AssertionError(operation)
+
+    monkeypatch.setattr(messages, "CompanyContractFacade", FakeFacade)
+
+    result = messages.run(
+        {"company_id": "acme", "action": "create", "content": "hello"}, {}
+    )
+
+    assert result == {"status": "ok", "data": {"id": "message-1", "text": "hello"}}
+    assert calls == ["get", "append_message"]
