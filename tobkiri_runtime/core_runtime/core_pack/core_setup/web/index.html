@@ -641,7 +641,7 @@
         input.setAttribute("aria-label", "Include " + (pack.display_name || pack.pack_id || "pack"));
         const riskClass = pack.risk_level === "high" ? "danger" : "";
         const allOkText = pack.supports_all_ok
-          ? "Supports selective all OK grants"
+          ? "Supports selective all OK grants. For safety, all OK permissions are granted only to setup packs that explicitly support all OK."
           : "Installs without all OK grants";
         const header = document.createElement("header");
         const packDetails = document.createElement("div");
