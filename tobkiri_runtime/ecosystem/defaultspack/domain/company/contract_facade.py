@@ -103,6 +103,10 @@ class CompanyContractFacade:
             return self._delete_named(_company_id(self.input), "route", _required_id(self.input, "route_id"))
         if operation == "append_inbound":
             return self._append_inbound(_company_id(self.input))
+        if operation == "list_messages":
+            return self._list_timeline(_company_id(self.input), "messages")
+        if operation == "append_message":
+            return self._append_message(_company_id(self.input))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -549,6 +553,38 @@ class CompanyContractFacade:
         record = {"id": "inbound-" + uuid.uuid4().hex, "type": "inbound", "actor_id": str(self.input.get("sender_id") or "external"), "channel_id": str(self.input.get("channel_id") or ""), "text": str(self.input.get("content") or ""), "metadata": _object(self.input.get("metadata"), "metadata")}
         result = self._mutate("inbound.append", {"company_id": company_id, "record": record})
         return dict(result.get("inbound") or {})
+
+    def _list_timeline(
+        self, company_id: str, key: str
+    ) -> list[dict[str, Any]] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        records = company.get(key)
+        if not isinstance(records, list):
+            return []
+        return [dict(item) for item in records if isinstance(item, Mapping)]
+
+    def _append_message(self, company_id: str) -> dict[str, Any] | None:
+        if self._raw_company(company_id) is None:
+            return None
+        metadata = _object(self.input.get("metadata"), "metadata")
+        metadata["thread_id"] = str(self.input.get("thread_id") or "")
+        metadata["target_agent_ids"] = list(
+            self.input.get("target_agent_ids") or []
+        )
+        record = {
+            "id": "message-" + uuid.uuid4().hex,
+            "type": "message",
+            "actor_id": str(self.input.get("sender_id") or "user"),
+            "channel_id": str(self.input.get("channel_id") or "ops-company"),
+            "text": str(self.input.get("content") or ""),
+            "metadata": metadata,
+        }
+        result = self._mutate(
+            "message.append", {"company_id": company_id, "record": record}
+        )
+        return dict(result.get("message") or {})
 
 
 def _receipt(
