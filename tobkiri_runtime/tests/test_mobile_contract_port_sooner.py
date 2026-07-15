@@ -91,6 +91,38 @@ def test_mobile_contract_port_registers_minimal_pairing_and_chat_routes():
     assert len(registry_patterns) == len(manifest)
 
 
+def test_mobile_device_identity_reaches_function_routes_only_when_principal_bound(monkeypatch):
+    from domain.function_runtime import bridge
+    from transport.http import DefaultsHttpServer
+
+    captured = {}
+
+    def fake_invoke_function(function_name, args, context, **kwargs):
+        captured["context"] = dict(context)
+        return {"status": "ok", "data": {"ok": True}}
+
+    monkeypatch.setattr(bridge, "invoke_function", fake_invoke_function)
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    payload = {
+        "_authenticated_device_id": "device-a",
+        "_authenticated_principal": {
+            "auth_mode": "device_bearer",
+            "device_id": "device-a",
+            "profile_id": "default",
+            "principal_id": "profile:default__surface:mobile__device:device-a",
+            "scopes": ["credentials.request"],
+        },
+    }
+
+    assert server._invoke_function_route("mobile_credential_list", payload, {})["status"] == "ok"
+    assert captured["context"]["_authenticated_device_id"] == "device-a"
+    assert captured["context"]["_authenticated_scopes"] == ["credentials.request"]
+
+    payload["_authenticated_device_id"] = "device-b"
+    assert server._invoke_function_route("mobile_credential_list", payload, {})["status"] == "ok"
+    assert "_authenticated_device_id" not in captured["context"]
+
+
 def test_mobile_manifest_route_handler_smoke(monkeypatch):
     from ecosystem.defaultspack.domain.mobile.contract import mobile_route_manifest
 

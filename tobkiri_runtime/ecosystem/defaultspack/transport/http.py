@@ -2012,6 +2012,18 @@ def _apply_authenticated_principal_context(context, payload):
         context["authority_principal_id"] = principal_id
         if not bool(principal_payload.get("core_role")):
             context["principal_id"] = principal_id
+    # Only the API handler can add these reserved fields to request payloads.
+    # Preserve a device identity for mobile function routes, but bind it to the
+    # authenticated principal rather than accepting a caller-supplied id.
+    authenticated_device_id = str(payload.get("_authenticated_device_id") or "").strip()
+    principal_device_id = str(principal_payload.get("device_id") or "").strip()
+    if (
+        principal_payload.get("auth_mode") == "device_bearer"
+        and authenticated_device_id
+        and authenticated_device_id == principal_device_id
+    ):
+        context["_authenticated_device_id"] = authenticated_device_id
+        context["_authenticated_scopes"] = list(principal_payload.get("scopes") or [])
 
 
 def _function_principal_from_context(context, default="defaultspack"):
