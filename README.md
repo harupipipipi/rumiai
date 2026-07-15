@@ -14,8 +14,8 @@ Get Tobkiri running in 5 minutes:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/harupipipipi/rumiai.git
-cd rumiai
+git clone https://github.com/harupipipipi/tobkiri.git
+cd tobkiri
 
 # 2. Set up Python environment
 python3 -m venv .venv
@@ -68,7 +68,7 @@ After starting, open http://localhost:8765/panel/ in your browser to access the 
 ### Prerequisites
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 20.19.x または 22.12+（Node 22 推奨）
 - npm
 - uv (`tobkiri_launcher` を触る場合)
 - Rust / Cargo (`tobkiri_launcher` を触る場合)
@@ -91,7 +91,7 @@ python -m pip install -r tobkiri_runtime\requirements-dev.txt
 python -m pip install -e .\tobkiri_runtime
 
 cd tobkiri_launcher\frontend
-npm install
+npm ci
 npm run tauri -- info
 cd ..\..
 ```
@@ -101,8 +101,8 @@ If `py` is not available, use `python -m venv .venv` instead. If PowerShell bloc
 macOS / Linux:
 
 ```bash
-git clone https://github.com/harupipipipi/rumiai.git
-cd rumiai
+git clone https://github.com/harupipipipi/tobkiri.git
+cd tobkiri
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -112,7 +112,7 @@ python -m pip install -r tobkiri_runtime/requirements-dev.txt
 python -m pip install -e ./tobkiri_runtime
 
 cd tobkiri_launcher/frontend
-npm install
+npm ci
 npm run tauri -- info
 cd ../..
 ```
