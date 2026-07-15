@@ -1,4 +1,5 @@
 from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+from domain.ai_client.providers.portkey_ai_gateway_provider import PortkeyAIGatewayProvider
 from domain.ai_client.providers.vercel_ai_gateway_provider import VercelAIGatewayProvider
 
 
@@ -386,3 +387,6 @@ for _spec in _OPENAI_COMPATIBLE_PROVIDERS:
 # Vercel has public inventory and gateway-specific request semantics, so it
 # must not silently fall back to the generic OpenAI-compatible adapter.
 OPENAI_COMPATIBLE_PROVIDER_CLASSES["vercel-ai-gateway"] = VercelAIGatewayProvider
+# Portkey's Models API and inference surface are OpenAI-compatible, but it
+# authenticates with x-portkey-api-key rather than Authorization: Bearer.
+OPENAI_COMPATIBLE_PROVIDER_CLASSES["portkey-ai-gateway"] = PortkeyAIGatewayProvider

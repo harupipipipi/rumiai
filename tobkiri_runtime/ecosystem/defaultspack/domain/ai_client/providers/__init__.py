@@ -893,6 +893,26 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
+    manifests.setdefault(
+        "portkey-ai-gateway",
+        {
+            "id": "portkey-ai-gateway",
+            "display_name": "Portkey AI Gateway",
+            "adapter": "openai_compatible",
+            "api_key_env": ["PORTKEY_API_KEY"],
+            "base_url_env": ["PORTKEY_BASE_URL"],
+            "default_base_url": "https://api.portkey.ai/v1",
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {
+                "model_sync": "remote_merge",
+                "model_list_path": "/models",
+                "inventory_strategy": "workspace_model_catalog_api",
+            },
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

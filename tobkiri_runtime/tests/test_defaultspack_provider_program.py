@@ -254,6 +254,47 @@ def test_qianfan_uses_its_authenticated_models_api_without_a_snapshot(monkeypatc
     assert models[0]["capabilities"]["embeddings"] is True
 
 
+def test_portkey_uses_workspace_models_api_and_its_required_auth_header(monkeypatch):
+    from domain.ai_client.providers import _instantiate_manifest_provider, _provider_manifest_map
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("PORTKEY_API_KEY", "portkey-key")
+    manifest = _provider_manifest_map()["portkey-ai-gateway"]
+    provider = _instantiate_manifest_provider(manifest)
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"object":"list","data":[{"id":"@openai-production/gpt-live","slug":"gpt-live"}]}'
+
+    seen = {}
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["portkey_key"] = request.headers.get("X-portkey-api-key")
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    models = provider.list_models()
+
+    assert manifest["models"] == []
+    assert manifest["supports_invoke"] is True
+    assert seen == {
+        "url": "https://api.portkey.ai/v1/models",
+        "portkey_key": "portkey-key",
+        "authorization": None,
+    }
+    assert [model["model_id"] for model in models] == ["@openai-production/gpt-live"]
+    assert models[0]["metadata"]["source"] == "remote_models_endpoint"
+
+
 def test_openai_compatible_inventory_accepts_common_catalog_envelopes_and_same_origin_next_links(monkeypatch):
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 
