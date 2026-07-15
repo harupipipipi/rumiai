@@ -11,6 +11,8 @@ test("notification center keeps filter, search, navigation, mark-all, and toast 
   assert.match(source, /window\.location\.assign/);
   assert.match(source, /onClick=\{markAllRead\}/);
   assert.match(source, /layerClassName\.toast/);
+  assert.match(source, /mx-3 mt-3 flex/);
+  assert.doesNotMatch(source, /absolute right-3 top-/);
   assert.match(source, /listAgentNotifications/);
   assert.match(source, /30_000/);
   assert.doesNotMatch(source, /rumi-pending-chat-requests/);

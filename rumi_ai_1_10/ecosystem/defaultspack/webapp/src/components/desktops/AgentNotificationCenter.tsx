@@ -288,28 +288,6 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
       )}
       aria-label="Agent notification center"
     >
-      {toastItem && (
-        <button
-          type="button"
-          onClick={() => openItem(toastItem)}
-          // Keep the toast below the control header so it cannot intercept the
-          // notification actions (especially "既読化") while remaining clickable.
-          className={cn(layerClassName.toast, "absolute right-3 top-14 w-[min(340px,calc(100%-24px))] rounded-2xl border border-zinc-700/90 bg-zinc-950/95 p-3 text-left shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur transition hover:border-zinc-500")}
-        >
-          <div className="flex items-start gap-3">
-            <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", statusTone(toastItem.status))}>
-              <StatusIcon status={toastItem.status} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">通知</span>
-              <span className="mt-1 block truncate text-sm font-semibold text-zinc-100">{toastItem.title}</span>
-              <span className="mt-0.5 block truncate text-xs text-zinc-400">{toastItem.summary}</span>
-            </span>
-            <ExternalLink size={14} className="mt-1 shrink-0 text-zinc-500" />
-          </div>
-        </button>
-      )}
-
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 bg-[#121316] px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-700/80 bg-zinc-950 text-zinc-100">
@@ -365,6 +343,26 @@ export function AgentNotificationCenter({ className }: AgentNotificationCenterPr
           </button>
         </div>
       </div>
+
+      {toastItem && (
+        <button
+          type="button"
+          onClick={() => openItem(toastItem)}
+          // Keep the toast in normal flow below the controls so it cannot
+          // intercept notification actions while remaining clickable.
+          className={cn(layerClassName.toast, "mx-3 mt-3 flex w-[calc(100%-24px)] items-start gap-3 rounded-2xl border border-zinc-700/90 bg-zinc-950/95 p-3 text-left shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur transition hover:border-zinc-500")}
+        >
+          <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", statusTone(toastItem.status))}>
+            <StatusIcon status={toastItem.status} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">通知</span>
+            <span className="mt-1 block truncate text-sm font-semibold text-zinc-100">{toastItem.title}</span>
+            <span className="mt-0.5 block truncate text-xs text-zinc-400">{toastItem.summary}</span>
+          </span>
+          <ExternalLink size={14} className="mt-1 shrink-0 text-zinc-500" />
+        </button>
+      )}
 
       <div className="flex items-center gap-1.5 overflow-x-auto border-b border-zinc-800/70 px-4 py-2">
         {filterOptions.map((option) => (
