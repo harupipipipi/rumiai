@@ -436,6 +436,30 @@ def test_ai21_derives_current_models_from_its_official_machine_readable_document
     assert models[0]["metadata"]["source"] == "ai21_official_model_document"
 
 
+def test_bfl_derives_all_model_endpoints_from_its_official_openapi_pages(monkeypatch):
+    from domain.ai_client.providers.black_forest_labs_provider import BlackForestLabsProvider
+
+    monkeypatch.setenv("BFL_API_KEY", "bfl-key")
+    BlackForestLabsProvider._CACHE.clear()
+    pages = {
+        BlackForestLabsProvider.DOC_INDEX_URL: b"- [One](https://docs.bfl.ml/api-reference/models/one.md)\n- [Two](https://docs.bfl.ml/api-reference/models/two.md)\n",
+        "https://docs.bfl.ml/api-reference/models/one.md": b"# FLUX One\n````yaml https://api.bfl.ai/openapi.json post /v1/flux-one\n",
+        "https://docs.bfl.ml/api-reference/models/two.md": b"# FLUX Two\n````yaml https://api.bfl.ai/openapi.json post /v1/flux-two\n",
+    }
+    class Response:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return self.body
+    def fake_urlopen(request, **_kwargs):
+        url = request if isinstance(request, str) else request.full_url
+        return Response(pages[url])
+    monkeypatch.setattr("domain.ai_client.providers.black_forest_labs_provider.urllib.request.urlopen", fake_urlopen)
+    models = BlackForestLabsProvider().list_models()
+    assert [model["model_id"] for model in models] == ["flux-one", "flux-two"]
+    assert all(model["metadata"]["source"] == "bfl_official_openapi_catalog" for model in models)
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

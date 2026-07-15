@@ -18,6 +18,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "avian": ["AVIAN_API_KEY"],
     "azure-openai": ["AZURE_OPENAI_API_KEY"],
     "baidu-qianfan": ["QIANFAN_API_KEY"],
+    "black-forest-labs": ["BFL_API_KEY"],
     "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
     "cerebras": ["CEREBRAS_API_KEY"],
     "cohere": ["COHERE_API_KEY"],
