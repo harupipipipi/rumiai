@@ -46,9 +46,12 @@ credential scoped to poll and result delivery. Access credentials expire after
 15 minutes and are rotated with a 30-day refresh credential. Poll and result
 requests send the access credential only in the `Authorization` header; pairing
 and refresh material is never included in those bodies. Disconnect first asks
-the server to revoke the device and removes local material only after that is
-confirmed. If Rumi is offline, the UI reports `revoke_pending` and lets the user
-retry. Legacy stored pairing tokens are removed and require explicit re-pairing.
+the server to revoke the device and removes session-only material only after that
+is confirmed. Credentials are held only in Chromium's trusted-context session
+storage, never in persistent extension storage; closing the browser requires
+explicit re-pairing. If Rumi is offline, the UI reports `revoke_pending` and
+lets the user retry. Legacy stored pairing tokens and credentials are removed
+during upgrade.
 
 `poll` request body:
 

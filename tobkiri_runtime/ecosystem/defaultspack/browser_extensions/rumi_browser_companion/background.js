@@ -29,6 +29,8 @@ const SEARCH_HOME_TRUSTED_ORIGINS = Object.freeze(
 );
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await lockSessionCredentialAccess();
+  await clearLegacyPersistedCredential();
   const settings = await ensureSettings();
   await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
@@ -37,6 +39,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await lockSessionCredentialAccess();
+  await clearLegacyPersistedCredential();
   const settings = await ensureSettings();
   await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
@@ -409,8 +413,18 @@ async function postCommandResults(settings, client, results) {
 }
 
 async function getDeviceCredential() {
-  const stored = await chrome.storage.local.get(DEVICE_CREDENTIAL_KEY);
+  const stored = await chrome.storage.session.get(DEVICE_CREDENTIAL_KEY);
   return stored[DEVICE_CREDENTIAL_KEY] || null;
+}
+
+async function lockSessionCredentialAccess() {
+  await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+}
+
+async function clearLegacyPersistedCredential() {
+  // Device credentials used to be persisted in chrome.storage.local.  They
+  // are now session-only, so remove any retained credential during upgrade.
+  await chrome.storage.local.remove(DEVICE_CREDENTIAL_KEY);
 }
 
 function publicCredentialStatus(credential) {
@@ -429,7 +443,7 @@ async function pairDevice(serverUrl, pairingCode) {
   const envelope = await safeJson(response);
   if (!response.ok || envelope.status === "error") throw new Error(`Pairing failed (${response.status})`);
   const credential = unwrapBridgePayload(envelope).credential;
-  await chrome.storage.local.set({ [DEVICE_CREDENTIAL_KEY]: credential });
+  await chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: credential });
   return setStatus({ ok: true, state: "connected", serverUrl, credential: publicCredentialStatus(credential) });
 }
 
@@ -441,11 +455,11 @@ async function refreshDeviceCredential(serverUrl, credential, identity) {
   });
   const envelope = await safeJson(response);
   if (!response.ok || envelope.status === "error") {
-    await chrome.storage.local.remove(DEVICE_CREDENTIAL_KEY);
+    await chrome.storage.session.remove(DEVICE_CREDENTIAL_KEY);
     throw new Error(`Credential refresh failed (${response.status}); re-pair required`);
   }
   const rotated = { ...credential, ...unwrapBridgePayload(envelope).credential };
-  await chrome.storage.local.set({ [DEVICE_CREDENTIAL_KEY]: rotated });
+  await chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: rotated });
   return rotated;
 }
 
@@ -461,7 +475,7 @@ async function disconnectDevice() {
       body: JSON.stringify({ credential_id: credential.credential_id, refresh_token: credential.refresh_token, client_id: identity.client_id, installation_id: identity.installation_id })
     });
     if (!response.ok) throw new Error(`Server revocation failed (${response.status})`);
-    await chrome.storage.local.remove(DEVICE_CREDENTIAL_KEY);
+    await chrome.storage.session.remove(DEVICE_CREDENTIAL_KEY);
     return setStatus({ ok: true, state: "disconnected" });
   } catch (_error) {
     return setStatus({ ok: false, state: "revoke_pending", message: "Server revocation could not be confirmed. Retry while Rumi is online." });

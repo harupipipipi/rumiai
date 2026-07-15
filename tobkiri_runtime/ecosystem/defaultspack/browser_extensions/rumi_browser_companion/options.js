@@ -34,7 +34,7 @@ async function loadSettings() {
     ...(stored[STORAGE_KEY] || {})
   };
   form.serverUrl.value = settings.serverUrl;
-  form.pairingToken.value = "";
+  form.pairingCode.value = "";
   form.clientLabel.value = settings.clientLabel;
   form.profileLabel.value = settings.profileLabel;
   form.pollIntervalMinutes.value = settings.pollIntervalMinutes;
@@ -51,10 +51,10 @@ async function saveSettings() {
     pollIntervalMinutes: Math.max(1, Number(form.pollIntervalMinutes.value) || 1)
   };
   await chrome.storage.local.set({ [STORAGE_KEY]: settings });
-  const pairingCode = String(form.pairingToken.value || "").trim();
+  const pairingCode = String(form.pairingCode.value || "").trim();
   if (pairingCode) {
     const result = await chrome.runtime.sendMessage({ type: "rumi:pair-device", serverUrl: settings.serverUrl, pairingCode });
-    form.pairingToken.value = "";
+    form.pairingCode.value = "";
     renderStatus(result);
   } else {
     setStatus("Settings saved. Enter a one-time code to pair.", true);

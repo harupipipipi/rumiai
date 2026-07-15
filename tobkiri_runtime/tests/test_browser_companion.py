@@ -489,6 +489,12 @@ def test_browser_companion_extension_migrates_pairing_token_to_device_credential
     assert "readLocalSettingsWithSyncMigration" in background
     assert "delete merged.pairingToken" in background
     assert "DEVICE_CREDENTIAL_KEY" in background
+    assert "chrome.storage.session.get(DEVICE_CREDENTIAL_KEY)" in background
+    assert "chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: credential })" in background
+    assert "chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: rotated })" in background
+    assert 'chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })' in background
+    assert "clearLegacyPersistedCredential" in background
+    assert "chrome.storage.local.set({ [DEVICE_CREDENTIAL_KEY]" not in background
     assert "BRIDGE_EXCHANGE_PATH" in background
     assert "BRIDGE_REFRESH_PATH" in background
     assert "BRIDGE_REVOKE_PATH" in background
@@ -501,6 +507,7 @@ def test_browser_companion_extension_migrates_pairing_token_to_device_credential
     assert 'type: "rumi:disconnect-device"' in options
     assert "profileLabel" in options
     assert 'name="profileLabel"' in options_html
+    assert 'name="pairingCode"' in options_html
     assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
 
 
