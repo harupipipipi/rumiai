@@ -3,8 +3,11 @@
 
 ## Canonical implementation
 
-For this repository, the canonical defaultspack implementation is
+For Tobkiri, the canonical defaultspack implementation is
 `rumi_ai_1_10/ecosystem/defaultspack/`.
+
+`rumi_ai_1_10/` is an intentional compatibility directory name on this branch;
+new public-facing documentation and product references use **Tobkiri**.
 
 The older `ecosystem/defaults/` package and the separate
 `harupipipipi/rumiai_defaults` repository are treated as compatibility or
@@ -25,7 +28,7 @@ defaultspack is local-first by default:
 - Cloudflare, Supabase, login, account creation, and user management are out of
   scope for defaultspack local operation protection.
 
-Rumi AI / Tobkiri runtime の標準パックです。
+Tobkiri runtime の標準パックです。
 
 runtime 本体はドメイン知識を持たない汎用カーネルです。defaultspack は ecosystem に「AI サービスとして動作するための全ての仕組み」を提供します。チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング支援、マルチモーダル処理、フロントエンド通信は、defaultspack の handler と domain コードで動作します。
 

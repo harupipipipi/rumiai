@@ -1,7 +1,10 @@
 
-# Rumi AI Runtime — Operations Guide
+# Tobkiri Runtime — Operations Guide
 
 運用者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、Pack 開発は [pack-development.md](pack-development.md) を参照してください。
+
+> 互換性のため、このブランチ内の runtime ディレクトリ名は `rumi_ai_1_10/`、
+> CLI は `rumi_ai` のままです。これは内部互換名であり、公開製品名は Tobkiri です。
 
 ---
 
@@ -48,8 +51,8 @@
 ### インストール
 
 ```bash
-git clone https://github.com/harupipipipi/rumiai.git
-cd rumiai/rumi_ai_1_10
+git clone https://github.com/harupipipipi/tobkiri.git
+cd tobkiri/rumi_ai_1_10
 
 # セットアップ（CLI）
 python bootstrap.py --cli init
@@ -133,6 +136,18 @@ python app.py --permissive
 
 既存の自動化で `RUMI_SECURITY_MODE=permissive` を使う場合も、同じ環境変数と lockfile が
 必要です。production で permissive を有効化しないでください。
+
+### Windows PowerShell
+
+PowerShell では次を実行します。
+
+```powershell
+$env:RUMI_ENVIRONMENT = "development"
+if (-not $env:RUMI_USER_DATA) { $env:RUMI_USER_DATA = Join-Path $PWD "user_data" }
+New-Item -ItemType Directory -Force -Path $env:RUMI_USER_DATA | Out-Null
+New-Item -ItemType File -Force -Path (Join-Path $env:RUMI_USER_DATA "permissive.lock") | Out-Null
+python app.py --permissive
+```
 
 ---
 
@@ -1224,7 +1239,7 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 ## 環境変数リファレンス
 
-Rumi AI OS の動作を制御する環境変数の一覧です。
+Tobkiri runtime の動作を制御する環境変数の一覧です。
 
 | 変数名 | デフォルト | 説明 |
 |--------|-----------|------|
