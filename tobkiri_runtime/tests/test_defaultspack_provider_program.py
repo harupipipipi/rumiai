@@ -1069,8 +1069,8 @@ def test_azure_ai_foundry_uses_saved_project_connection_for_live_deployments(mon
         "https://resource.services.ai.azure.com/api/projects/team-project/deployments?api-version=v1",
         "foundry-key",
     )
-    assert "/deployments/chat-prod/chat/completions?api-version=2024-10-21" in seen[1][1]
-    assert "/deployments/embed-prod/embeddings?api-version=2024-10-21" in seen[2][1]
+    assert seen[1][1] == "https://resource.services.ai.azure.com/openai/deployments/chat-prod/chat/completions?api-version=2024-10-21"
+    assert seen[2][1] == "https://resource.services.ai.azure.com/openai/deployments/embed-prod/embeddings?api-version=2024-10-21"
 
 
 def test_aws_bedrock_lists_the_live_regional_inventory_and_uses_converse(monkeypatch):

@@ -174,9 +174,14 @@ class AzureAIFoundryProvider(BaseProvider):
 
     def _inference_url(self, deployment: str, suffix: str) -> str:
         encoded = urllib.parse.quote(deployment, safe="")
-        return self._project_url(f"/openai/deployments/{encoded}/{suffix}").replace(
-            urllib.parse.urlencode({"api-version": self._api_version}),
-            urllib.parse.urlencode({"api-version": self._inference_api_version}),
+        # Deployment discovery is scoped to ``/api/projects/<project>`` but
+        # Foundry's OpenAI inference route lives at the AI-service resource
+        # root.  Keeping those surfaces distinct avoids sending a valid
+        # project-list request to an invalid inference URL.
+        project_marker = "/api/projects/"
+        resource_base_url = self._base_url.split(project_marker, 1)[0].rstrip("/")
+        return resource_base_url + f"/openai/deployments/{encoded}/{suffix}?" + urllib.parse.urlencode(
+            {"api-version": self._inference_api_version}
         )
 
     def complete(self, model, messages, tools, params):
