@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 import uuid
 from typing import Any, Mapping
 
@@ -111,6 +113,10 @@ class CompanyContractFacade:
             )
         if operation == "append_message":
             return self._append_message(_company_id(self.input))
+        if operation == "status":
+            return self._status()
+        if operation == "bootstrap":
+            return self._bootstrap()
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -260,8 +266,10 @@ class CompanyContractFacade:
             None,
         )
 
-    def _upsert_agent(self, company_id: str) -> dict[str, Any] | None:
-        agent = _object(self.input.get("agent"), "agent")
+    def _upsert_agent(
+        self, company_id: str, supplied_agent: Mapping[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        agent = _object(supplied_agent or self.input.get("agent"), "agent")
         company = self._raw_company(company_id)
         if company is None:
             return None
@@ -629,6 +637,94 @@ class CompanyContractFacade:
         )
         return dict(result.get("message") or {})
 
+    def _status(self) -> dict[str, Any]:
+        """Project Company state into the legacy status response without SQLite."""
+
+        conversation_id = str(self.input.get("conversation_id") or "").strip()
+        if conversation_id:
+            company = self._company_for_conversation(conversation_id)
+            if company is None and _enabled(self.input.get("bootstrap")):
+                company = self._bootstrap_company(conversation_id)
+            company_id = (
+                str(company.get("id") or "")
+                if isinstance(company, Mapping)
+                else _conversation_company_id(conversation_id)
+            )
+        else:
+            company_id = str(self.input.get("company_id") or "operations-company")
+            company = self._raw_company(company_id)
+            if company is None and _enabled(self.input.get("bootstrap")):
+                company = self._bootstrap_company("")
+        return {
+            "bootstrapped": company is not None,
+            "company_id": company_id,
+            "conversation_id": conversation_id,
+            "company": _legacy_company(company) if isinstance(company, Mapping) else None,
+            "runtime": _state_runtime_counts(company),
+            "reporting": {"blocker_signals": _state_blocker_summary(company)},
+        }
+
+    def _bootstrap(self) -> dict[str, Any]:
+        """Create the selected Company state record and default member projection."""
+
+        conversation_id = str(self.input.get("conversation_id") or "").strip()
+        company = self._bootstrap_company(conversation_id)
+        return {"bootstrapped": True, "company": _legacy_company(company)}
+
+    def _company_for_conversation(self, conversation_id: str) -> Mapping[str, Any] | None:
+        snapshot = self._resource("list", {})
+        companies = snapshot.get("companies") if isinstance(snapshot, Mapping) else []
+        for company in companies if isinstance(companies, list) else []:
+            if not isinstance(company, Mapping):
+                continue
+            metadata = company.get("metadata")
+            if (
+                str(company.get("conversation_group_id") or "")
+                == "company:" + _conversation_company_id(conversation_id)
+                or isinstance(metadata, Mapping)
+                and str(metadata.get("conversation_id") or "") == conversation_id
+            ):
+                return company
+        return None
+
+    def _bootstrap_company(self, conversation_id: str) -> dict[str, Any]:
+        from domain.company.models import (
+            DEFAULT_COMPANY_DESCRIPTION,
+            DEFAULT_COMPANY_ID,
+            DEFAULT_COMPANY_NAME,
+            DEFAULT_SETTINGS,
+            default_agents,
+        )
+
+        company_id = _conversation_company_id(conversation_id) if conversation_id else DEFAULT_COMPANY_ID
+        existing = self._raw_company(company_id)
+        if isinstance(existing, Mapping):
+            return dict(existing)
+        metadata = _object(self.input.get("metadata"), "metadata")
+        metadata = {
+            "profile_id": "defaultspack.operations_company",
+            **({"conversation_id": conversation_id, "source": "chat"} if conversation_id else {}),
+            **metadata,
+        }
+        result = self._mutate(
+            "company.create",
+            {
+                "company_id": company_id,
+                "name": str(metadata.get("name") or ("Executive Team" if conversation_id else DEFAULT_COMPANY_NAME)),
+                "description": str(metadata.get("description") or ("Employee group delegated from the current chat." if conversation_id else DEFAULT_COMPANY_DESCRIPTION)),
+                "settings": dict(DEFAULT_SETTINGS),
+                "metadata": metadata,
+                "conversation_group_id": "company:" + company_id,
+            },
+        )
+        company = result.get("company")
+        if not isinstance(company, Mapping):
+            raise CompanyFacadeError("COMPANY_OWNER_UNAVAILABLE", "Company creation returned invalid data", 503)
+        for agent in default_agents():
+            self._upsert_agent(company_id, agent)
+        value = self._raw_company(company_id)
+        return dict(value) if isinstance(value, Mapping) else dict(company)
+
 
 def _receipt(
     input_data: Mapping[str, Any],
@@ -900,6 +996,42 @@ def _enabled(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on", "tail", "latest"}
     return False
+
+
+def _conversation_company_id(conversation_id: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_-]+", "-", conversation_id).strip("-").lower()
+    digest = hashlib.sha1(conversation_id.encode("utf-8")).hexdigest()[:10]
+    return "chat-team-" + (clean[:40].strip("-") or digest) + "-" + digest
+
+
+def _state_runtime_counts(company: Mapping[str, Any] | None) -> dict[str, int]:
+    if not isinstance(company, Mapping):
+        return {}
+    return {
+        "messages": len(company.get("messages") or []),
+        "tasks": len(company.get("tasks") or {}),
+        "threads": 0,
+        "runs": 0,
+        "inbox": 0,
+        "summaries": 0,
+    }
+
+
+def _state_blocker_summary(company: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(company, Mapping):
+        return {"blocker_count": 0, "latest_signal": None, "signals": []}
+    tasks = company.get("tasks")
+    blocked = [
+        dict(task)
+        for task in tasks.values()
+        if isinstance(task, Mapping) and task.get("status") == "blocked"
+    ] if isinstance(tasks, Mapping) else []
+    blocked.sort(key=lambda task: int(task.get("updated_at_ms") or 0), reverse=True)
+    return {
+        "blocker_count": len(blocked),
+        "latest_signal": blocked[0] if blocked else None,
+        "signals": blocked[:20],
+    }
 
 
 def _bounded_limit(value: Any, default: int) -> int:

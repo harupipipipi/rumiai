@@ -95,3 +95,45 @@ def test_company_messages_block_uses_contract_facade(monkeypatch) -> None:
 
     assert result == {"status": "ok", "data": {"id": "message-1", "text": "hello"}}
     assert calls == ["get", "append_message"]
+
+
+def test_company_status_projects_selected_state_without_runtime_store(
+    monkeypatch,
+) -> None:
+    """Status derives its counts from the selected Company state record."""
+
+    import domain.company.contract_facade as contract_facade
+
+    monkeypatch.setattr(contract_facade, "_profile_id", lambda: "test")
+    facade = contract_facade.CompanyContractFacade(
+        {"company_id": "acme"}, {}
+    )
+    monkeypatch.setattr(
+        facade,
+        "_raw_company",
+        lambda _company_id: {
+            "id": "acme",
+            "name": "Acme",
+            "members": {},
+            "roles": {},
+            "channels": {},
+            "messages": [{"id": "message-1"}],
+            "tasks": {
+                "blocked": {"id": "blocked", "status": "blocked", "updated_at_ms": 2},
+                "queued": {"id": "queued", "status": "queued", "updated_at_ms": 1},
+            },
+            "inbound": [],
+        },
+    )
+
+    status = facade.run("status")
+
+    assert status["runtime"] == {
+        "messages": 1,
+        "tasks": 2,
+        "threads": 0,
+        "runs": 0,
+        "inbox": 0,
+        "summaries": 0,
+    }
+    assert status["reporting"]["blocker_signals"]["blocker_count"] == 1
