@@ -693,7 +693,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
         ).strip()
         if not model_id:
             return None
-        qualified_model_id = model_id if model_id.startswith(f"{self.provider_id}/") else f"{self.provider_id}/{model_id}"
+        provider_prefix = f"{self.provider_id}/"
+        # Some gateways already qualify ids in their /models response.  The
+        # public model id is the provider-local portion; retaining the prefix
+        # here would make invocation send it twice.
+        if model_id.startswith(provider_prefix):
+            model_id = model_id[len(provider_prefix):]
+        qualified_model_id = f"{self.provider_id}/{model_id}"
         model_type = self._remote_model_type(model_id, raw)
         capability_map = self._remote_model_capabilities(model_id, model_type, raw)
         if raw.get("supports_image_in"):

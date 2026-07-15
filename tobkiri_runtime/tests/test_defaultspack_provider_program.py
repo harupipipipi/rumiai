@@ -865,7 +865,7 @@ def test_every_openai_compatible_program_provider_uses_its_live_models_endpoint(
             return False
 
         def read(self):
-            return b'{"data":[{"id":"account-visible-model"}]}'
+            return b'{"data":[{"id":"account-visible-model"}],"models":[{"key":"account-visible-model","type":"llm"}]}'
 
     seen = []
 
@@ -894,6 +894,54 @@ def test_every_openai_compatible_program_provider_uses_its_live_models_endpoint(
     # explicit rather than silently falling back to a bundled model list.
     assert custom_discovery_ids == ["ai21"]
     assert len(seen) == len(direct_endpoint_ids)
+
+
+def test_every_python_entrypoint_program_provider_uses_its_live_models_endpoint(monkeypatch):
+    """Gateway and local bespoke adapters may not regress to fixed allowlists."""
+    from domain.ai_client import providers
+    from domain.ai_client.provider_program import provider_program_manifests
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    manifests = providers._provider_manifest_map()
+    entrypoint_ids = sorted(
+        provider_id
+        for provider_id in provider_program_manifests()
+        if str(manifests[provider_id].get("adapter") or "") == "python_entrypoint"
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":[{"id":"account-visible-model"}],"models":[{"key":"account-visible-model","type":"llm"}]}'
+
+    seen = []
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append(request.full_url)
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_save_remote_model_cache", lambda *_args, **_kwargs: None)
+
+    for provider_id in entrypoint_ids:
+        provider = providers._instantiate_manifest_provider(manifests[provider_id])
+        assert provider is not None, provider_id
+        assert not getattr(provider, "KNOWN_MODELS", []), provider_id
+        if hasattr(provider, "_api_key"):
+            provider._api_key = f"{provider_id}-token"
+        models = provider.list_models()
+        assert [model["model_id"] for model in models] == ["account-visible-model"], provider_id
+
+    # Zen has a native list endpoint; the remaining entrypoints share the
+    # compatible adapter's connection-scoped cache.  No fixed catalog may
+    # satisfy this assertion, regardless of whether a fresh cache was needed.
+    assert seen
 
 
 def test_saved_connection_fetches_the_account_visible_models_for_every_connection_backed_placeholder(monkeypatch):
