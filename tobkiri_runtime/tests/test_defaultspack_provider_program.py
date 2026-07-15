@@ -295,6 +295,63 @@ def test_portkey_uses_workspace_models_api_and_its_required_auth_header(monkeypa
     assert models[0]["metadata"]["source"] == "remote_models_endpoint"
 
 
+def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
+    import json
+
+    from domain.ai_client.providers.fal_ai_provider import FalAIProvider
+
+    monkeypatch.setenv("FAL_KEY", "fal-key")
+    FalAIProvider._INVENTORY_CACHE.clear()
+    provider = FalAIProvider()
+    requested = []
+    responses = {
+        "https://api.fal.ai/v1/models": {
+            "models": [{"endpoint_id": "fal-ai/flux/live", "metadata": {"display_name": "Live Flux", "category": "text-to-image"}}],
+            "next_cursor": "second-page",
+        },
+        "https://api.fal.ai/v1/models?cursor=second-page": {
+            "models": [{"endpoint_id": "fal-ai/voice/live", "metadata": {"category": "text-to-speech"}}],
+            "next_cursor": None,
+        },
+        "https://queue.fal.run/fal-ai/flux/live": {
+            "request_id": "request-1",
+            "status_url": "https://queue.fal.run/fal-ai/flux/live/requests/request-1/status",
+            "response_url": "https://queue.fal.run/fal-ai/flux/live/requests/request-1/response",
+        },
+        "https://queue.fal.run/fal-ai/flux/live/requests/request-1/status": {"status": "COMPLETED"},
+        "https://queue.fal.run/fal-ai/flux/live/requests/request-1/response": {"images": [{"url": "https://fal.media/live.png"}]},
+    }
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        requested.append((request.full_url, request.get_method(), request.headers.get("Authorization"), request.data))
+        return Response(responses[request.full_url])
+
+    monkeypatch.setattr("domain.ai_client.providers.fal_ai_provider.urllib.request.urlopen", fake_urlopen)
+    models = provider.list_models()
+    image = provider.image_gen("fal-ai/fal-ai/flux/live", "a live model", {})
+
+    assert [model["model_id"] for model in models] == ["fal-ai/flux/live", "fal-ai/voice/live"]
+    assert [model["type"] for model in models] == ["image_gen", "tts"]
+    assert image["images"] == ["https://fal.media/live.png"]
+    assert requested[0][:3] == ("https://api.fal.ai/v1/models", "GET", "Key fal-key")
+    assert requested[1][:3] == ("https://api.fal.ai/v1/models?cursor=second-page", "GET", "Key fal-key")
+    assert requested[2][:3] == ("https://queue.fal.run/fal-ai/flux/live", "POST", "Key fal-key")
+    assert json.loads(requested[2][3]) == {"prompt": "a live model"}
+
+
 def test_openai_compatible_inventory_accepts_common_catalog_envelopes_and_same_origin_next_links(monkeypatch):
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 

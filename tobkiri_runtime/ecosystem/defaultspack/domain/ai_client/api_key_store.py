@@ -26,6 +26,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "databricks-model-serving": ["DATABRICKS_TOKEN"],
     "elevenlabs": ["ELEVENLABS_API_KEY"],
     "fireworks": ["FIREWORKS_API_KEY"],
+    "fal-ai": ["FAL_KEY", "FAL_AI_API_KEY"],
     "friendli": ["FRIENDLI_API_KEY"],
     "github-models": ["GITHUB_TOKEN", "GH_TOKEN"],
     "glm": ["GLM_API_KEY"],

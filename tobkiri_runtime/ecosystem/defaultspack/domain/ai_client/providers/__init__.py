@@ -913,6 +913,26 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
+    manifests.setdefault(
+        "fal-ai",
+        {
+            "id": "fal-ai",
+            "display_name": "fal.ai",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.fal_ai_provider:FalAIProvider",
+            "api_key_env": ["FAL_KEY", "FAL_AI_API_KEY"],
+            "base_url_env": ["FAL_API_BASE_URL"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {
+                "model_sync": "remote_merge",
+                "model_list_path": "/v1/models",
+                "inventory_strategy": "paginated_models_api_and_queue",
+            },
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
