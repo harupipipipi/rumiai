@@ -102,9 +102,10 @@ the route.
 The legacy channels alias now reads and mutates only the selected Company's
 channel records through the facade. It no longer synchronizes Mimo state,
 opens the legacy Company/runtime stores, or synthesizes runtime channels in a
-state route. Runtime message counts and observability are deliberately left to
-the pending Company runtime adapter, so this compatibility route has one data
-owner and no hidden write-on-read behavior.
+state route. Runtime message counts and observability are deliberately omitted
+from this alias while the legacy runtime collections return their explicit
+sunset diagnostic, so the route has one data owner and no hidden write-on-read
+behavior.
 
 The Company compatibility projection keeps the historic organization shape for
 these finite CRUD aliases. It derives the legacy `agents` projection from the
@@ -114,12 +115,12 @@ store. Updates for collection-specific old fields fail closed with
 channel, or task facade is cut over. This prevents the base CRUD aliases from
 silently starting a second Company writer.
 
-Company status, runtime reporting, dispatch, inbound, messages, threads, and
-the collection-specific legacy routes have not yet completed their adapter
-cutover. They remain Wave 10 inventory and must be converted to selected
-Company state/coordinator/agent-adapter contracts or explicit sunset shims
-before Wave 10 is declared complete. They must not be treated as evidence that
-the old store remains an allowed fallback for the cut-over CRUD routes.
+Company status, bootstrap, mention resolution, inbound, messages, and task
+dispatch use selected Company state/coordinator contracts. The former
+runtime-store collection routes (runs, inbox, threads, and summaries) are
+explicit Wave 10 sunset shims: they return
+`COMPANY_RUNTIME_ROUTE_SUNSET` until a selected Company runtime contract is
+introduced. They never reopen the old SQLite owner.
 
 ## Remaining defaultspack inventory
 
@@ -134,7 +135,7 @@ the old store remains an allowed fallback for the cut-over CRUD routes.
 | Company settings alias | finite contract facade and selected-record policy guard | `CompanySettingsStore` construction or unbound replace semantics |
 | Company agents alias | atomic role/member compatibility action and projection | `CompanyAgentStore` construction or split writes under one approval |
 | Company channels alias | finite selected-state record facade | Mimo sync, `CompanyStore`/runtime-store reads, or synthesized state |
-| Company status/runtime/dispatch and collection routes | temporary Wave 10 inventory pending selected-contract adapters | new primary implementation or a second Company writer |
+| Company runtime collection routes | explicit `COMPANY_RUNTIME_ROUTE_SUNSET` shim | direct Company runtime-store access or a second writer |
 
 ## Release boundary
 
@@ -148,5 +149,6 @@ Focused runtime, migration, and cross-platform validation are specified in
 `docs/qa/pack_architecture_wave10_qa.md`. This document is a plan and static
 ownership record, not execution evidence.
 
-テスト、lint、build、起動確認、実環境確認は実装担当のCodexでは実行していません。
+Focused pytest and terminal integrity checks have been run locally. Lint,
+build, startup, and real-environment verification still require independent QA.
 マージ前に独立した実環境QAが必要です。

@@ -192,3 +192,15 @@ def test_company_facade_resolves_mentions_from_selected_members(monkeypatch) -> 
         "resolved_agent_ids": ["project_manager"],
         "unresolved": ["missing"],
     }
+
+
+def test_company_runtime_collections_are_explicit_sunset_shims() -> None:
+    """Wave 10 removes runtime-store fallback rather than retaining a writer."""
+
+    from blocks.company import inbox, runs, summary, threads
+
+    for module in (inbox, runs, summary, threads):
+        assert module.run({}, {})["error"]["code"] == "COMPANY_RUNTIME_ROUTE_SUNSET"
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "CompanyRuntimeStore" not in source
+        assert "CompanyStore" not in source
