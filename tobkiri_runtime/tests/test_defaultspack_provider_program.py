@@ -844,7 +844,7 @@ def test_every_connection_required_program_provider_can_use_a_saved_live_endpoin
     assert all(configured[provider_id]["config"]["custom_openai_compatible"] for provider_id in connection_required_ids)
 
 
-def test_saved_connection_fetches_the_account_visible_models_for_each_connection_placeholder(monkeypatch):
+def test_saved_connection_fetches_the_account_visible_models_for_every_connection_backed_placeholder(monkeypatch):
     """A saved connection, not a checked-in list, is the inventory source.
 
     These providers do not have a universal public model inventory.  Once a
@@ -856,10 +856,10 @@ def test_saved_connection_fetches_the_account_visible_models_for_each_connection
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 
     raw_manifests = providers._provider_manifest_map()
-    connection_required_ids = sorted(
+    connection_backed_ids = sorted(
         provider_id
         for provider_id in provider_program_manifests()
-        if str(raw_manifests[provider_id].get("adapter") or "") == "connection_required"
+        if str(raw_manifests[provider_id].get("adapter") or "") in {"connection_required", "catalog_only"}
     )
     connections = [
         {
@@ -871,7 +871,7 @@ def test_saved_connection_fetches_the_account_visible_models_for_each_connection
             "base_url": f"https://{provider_id}.example/v1",
             "credential_mode": "api_key",
         }
-        for provider_id in connection_required_ids
+        for provider_id in connection_backed_ids
     ]
 
     class Response:
@@ -902,7 +902,7 @@ def test_saved_connection_fetches_the_account_visible_models_for_each_connection
     monkeypatch.setattr(OpenAICompatibleProvider, "_save_remote_model_cache", lambda *_args, **_kwargs: None)
 
     configured = providers._provider_manifest_map()
-    for provider_id in connection_required_ids:
+    for provider_id in connection_backed_ids:
         provider = providers._instantiate_manifest_provider(configured[provider_id])
         assert provider is not None
         models = provider.list_models()
@@ -910,7 +910,7 @@ def test_saved_connection_fetches_the_account_visible_models_for_each_connection
 
     assert seen == [
         (f"https://{provider_id}.example/v1/models", f"Bearer {provider_id}-token")
-        for provider_id in connection_required_ids
+        for provider_id in connection_backed_ids
     ]
 
 
