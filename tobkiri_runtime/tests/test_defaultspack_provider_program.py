@@ -460,6 +460,20 @@ def test_bfl_derives_all_model_endpoints_from_its_official_openapi_pages(monkeyp
     assert all(model["metadata"]["source"] == "bfl_official_openapi_catalog" for model in models)
 
 
+def test_voyage_derives_embedding_models_from_its_official_current_model_table(monkeypatch):
+    from domain.ai_client.providers.voyage_ai_provider import VoyageAIProvider
+    monkeypatch.setenv("VOYAGE_API_KEY", "voyage-key")
+    VoyageAIProvider._CACHE.clear()
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return b"<h2>Model Choices</h2><code class='rdmd-code'>voyage-live-4</code><code>voyage-code-live</code>Need help deciding"
+    monkeypatch.setattr("domain.ai_client.providers.voyage_ai_provider.urllib.request.urlopen", lambda *_args, **_kwargs: Response())
+    models = VoyageAIProvider().list_models()
+    assert [model["model_id"] for model in models] == ["voyage-live-4", "voyage-code-live"]
+    assert all(model["type"] == "embedding" for model in models)
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

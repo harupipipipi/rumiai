@@ -971,6 +971,10 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
         "black-forest-labs",
         {"id": "black-forest-labs", "display_name": "Black Forest Labs", "adapter": "native", "entrypoint": "domain.ai_client.providers.black_forest_labs_provider:BlackForestLabsProvider", "api_key_env": ["BFL_API_KEY"], "base_url_env": ["BFL_BASE_URL"], "credential_required": True, "catalog_only": False, "supports_invoke": True, "models": [], "config": {"model_sync": "remote_merge", "inventory_strategy": "official_openapi_document_catalog"}},
     )
+    manifests.setdefault(
+        "voyage-ai",
+        {"id":"voyage-ai","display_name":"Voyage AI","adapter":"native","entrypoint":"domain.ai_client.providers.voyage_ai_provider:VoyageAIProvider","api_key_env":["VOYAGE_API_KEY"],"base_url_env":["VOYAGE_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","inventory_strategy":"official_model_document"}},
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

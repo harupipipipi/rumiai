@@ -66,6 +66,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "tencent-hunyuan": ["HUNYUAN_API_KEY", "TENCENT_HUNYUAN_API_KEY"],
     "upstage": ["UPSTAGE_API_KEY"],
     "vercel-ai-gateway": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],
+    "voyage-ai": ["VOYAGE_API_KEY"],
     "vllm": ["VLLM_API_KEY"],
     "xai": ["XAI_API_KEY"],
     "xiaomi-token-plan-ams": [
