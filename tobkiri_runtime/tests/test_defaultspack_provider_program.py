@@ -486,7 +486,7 @@ def test_named_openai_compatible_connection_activates_a_program_placeholder(monk
     provider = providers._instantiate_manifest_provider(manifest)
 
     assert manifest["adapter"] == "openai_compatible"
-    assert manifest["models"] == []
+    assert manifest.get("models", []) == []
     assert manifest["config"]["custom_openai_compatible"] is True
     assert provider.provider_id == "ai21"
     assert provider._api_key == "project-token"
@@ -1173,6 +1173,35 @@ def test_stability_ai_uses_the_account_engines_api_without_a_model_snapshot(monk
         ("GET", "https://api.stability.ai/v1/engines/list", "Bearer stability-key"),
         ("POST", "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image", "Bearer stability-key"),
     ]
+
+
+def test_xiaomi_mimo_global_uses_its_official_openai_endpoint_and_live_models(monkeypatch):
+    from domain.ai_client import providers
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-key")
+    manifest = providers._provider_manifest_map()["xiaomi-mimo-global"]
+    provider = providers._instantiate_manifest_provider(manifest)
+    monkeypatch.setattr(
+        OpenAICompatibleProvider,
+        "_fetch_remote_models",
+        lambda self: [{
+            "id": "mimo-v2.5-pro-ultraspeed",
+            "name": "MiMo V2.5 Pro UltraSpeed",
+            "input_modalities": ["text", "image", "audio", "video"],
+            "output_modalities": ["text"],
+        }],
+    )
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+
+    models = provider.list_models()
+
+    assert manifest["adapter"] == "openai_compatible"
+    assert manifest["models"] == []
+    assert manifest["default_base_url"] == "https://api.xiaomimimo.com/v1"
+    assert provider._base_url == "https://api.xiaomimimo.com/v1"
+    assert [model["model_id"] for model in models] == ["mimo-v2.5-pro-ultraspeed"]
+    assert models[0]["metadata"]["source"] == "remote_models_endpoint"
 
 
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):

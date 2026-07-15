@@ -72,6 +72,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
         "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
         "MIMO_API_KEY",
     ],
+    "xiaomi-mimo-global": ["XIAOMI_MIMO_GLOBAL_API_KEY", "MIMO_API_KEY"],
 }
 
 _NAMED_API_PREFIX = "RUMIAPI"
