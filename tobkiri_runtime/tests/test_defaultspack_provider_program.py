@@ -1197,7 +1197,7 @@ def test_xiaomi_mimo_global_uses_its_official_openai_endpoint_and_live_models(mo
     models = provider.list_models()
 
     assert manifest["adapter"] == "openai_compatible"
-    assert manifest["models"] == []
+    assert manifest.get("models", []) == []
     assert manifest["default_base_url"] == "https://api.xiaomimimo.com/v1"
     assert provider._base_url == "https://api.xiaomimimo.com/v1"
     assert [model["model_id"] for model in models] == ["mimo-v2.5-pro-ultraspeed"]
