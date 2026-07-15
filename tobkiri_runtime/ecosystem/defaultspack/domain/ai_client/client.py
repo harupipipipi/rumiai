@@ -1531,6 +1531,7 @@ class AIClient:
             "openai_models_endpoint",
             "vercel_gateway_models_api",
             "vercel_ai_gateway_models_api",
+            "azure_ai_foundry_project_deployments",
                 "native_server_api",
                 "native_models_endpoint",
                 "last_known_good_inventory",

@@ -114,6 +114,25 @@ def test_loopback_openai_compatible_connection_discovers_models_without_storing_
     assert provider._credential_required is False
 
 
+def test_program_provider_without_legacy_env_key_saves_a_canonical_default_connection(tmp_path):
+    from domain.ai_client.api_key_store import provider_has_api_key, provider_named_api_keys, set_provider_api_key
+
+    saved = set_provider_api_key(
+        "azure-ai-foundry",
+        "foundry-secret",
+        base_url="https://resource.services.ai.azure.com/api/projects/demo",
+        pack_root=tmp_path,
+    )
+
+    assert saved["success"] is True
+    assert saved["key"] == "RUMIAPI_AZURE_AI_FOUNDRY_DEFAULT"
+    assert provider_has_api_key("azure-ai-foundry", pack_root=tmp_path) is True
+    connections = provider_named_api_keys("azure-ai-foundry", pack_root=tmp_path)
+    assert [(item["provider_id"], item["api_id"]) for item in connections] == [
+        ("azure-ai-foundry", "default"),
+    ]
+
+
 def test_huggingface_inference_uses_its_live_models_endpoint_without_a_checked_in_model_list(monkeypatch):
     from unittest.mock import patch
 
@@ -985,6 +1004,73 @@ def test_azure_openai_discovers_live_deployments_and_routes_chat_and_embeddings(
     )
     assert "/deployments/chat-deployment/chat/completions?" in seen[1][1]
     assert "/deployments/embedding-deployment/embeddings?" in seen[2][1]
+
+
+def test_azure_ai_foundry_uses_saved_project_connection_for_live_deployments(monkeypatch):
+    from domain.ai_client.providers.azure_ai_foundry_provider import AzureAIFoundryProvider
+
+    AzureAIFoundryProvider._MODEL_INVENTORY_CACHE.clear()
+    connection = {
+        "provider_id": "azure-ai-foundry",
+        "api_id": "team-project",
+        "configured": True,
+        "base_url": "https://resource.services.ai.azure.com/api/projects/team-project",
+    }
+    monkeypatch.setattr(
+        "domain.ai_client.providers.azure_ai_foundry_provider.provider_named_api_keys",
+        lambda *_args, **_kwargs: [connection],
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.providers.azure_ai_foundry_provider.read_provider_api_key",
+        lambda *_args, **_kwargs: "foundry-key",
+    )
+    seen = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            import json
+
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append((request.get_method(), request.full_url, request.headers.get("Api-key")))
+        if request.get_method() == "GET":
+            return Response({
+                "value": [
+                    {"name": "chat-prod", "properties": {"model": {"name": "gpt-live", "version": "1"}}},
+                    {"name": "embed-prod", "model": {"name": "text-embedding-live"}},
+                ]
+            })
+        if "/embeddings?" in request.full_url:
+            return Response({"data": [{"embedding": [0.1]}], "usage": {"prompt_tokens": 1, "total_tokens": 1}})
+        return Response({"choices": [{"message": {"content": "foundry reply"}, "finish_reason": "stop"}]})
+
+    monkeypatch.setattr("domain.ai_client.providers.azure_ai_foundry_provider.urllib.request.urlopen", fake_urlopen)
+    provider = AzureAIFoundryProvider()
+    models = provider.list_models()
+    answer = provider.complete("azure-ai-foundry/chat-prod", [{"role": "user", "content": "Hi"}], [], {})
+    embeddings = provider.embed("azure-ai-foundry/embed-prod", "hello")
+
+    assert [model["model_id"] for model in models] == ["chat-prod", "embed-prod"]
+    assert [model["type"] for model in models] == ["chat", "embedding"]
+    assert answer["content"][0]["text"] == "foundry reply"
+    assert embeddings == {"embeddings": [[0.1]], "usage": {"input_tokens": 1, "total_tokens": 1}}
+    assert seen[0] == (
+        "GET",
+        "https://resource.services.ai.azure.com/api/projects/team-project/deployments?api-version=v1",
+        "foundry-key",
+    )
+    assert "/deployments/chat-prod/chat/completions?api-version=2024-10-21" in seen[1][1]
+    assert "/deployments/embed-prod/embeddings?api-version=2024-10-21" in seen[2][1]
 
 
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):

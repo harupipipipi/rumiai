@@ -353,9 +353,26 @@ def _provider_from_named_key(key: str) -> str:
     if not key.startswith(prefix):
         return ""
     remainder = key[len(prefix):]
-    provider_slug = remainder.split("_", 1)[0].lower()
-    provider_map = {_slug(provider_id, max_length=18).lower(): provider_id for provider_id in PROVIDER_SECRET_KEYS}
-    return provider_map.get(provider_slug, provider_slug)
+    # Provider ids contain separators (for example ``azure-ai-foundry``).
+    # Splitting on the first underscore silently turned a saved
+    # ``RUMIAPI_AZURE_AI_FOUNDRY_MAIN`` credential into provider ``azure``.
+    # Resolve the longest canonical provider slug instead.  The program list
+    # is deliberately included because it contains providers without a legacy
+    # environment-variable secret name.
+    provider_ids = set(PROVIDER_SECRET_KEYS) | set(provider_program_manifests())
+    candidates = sorted(
+        (
+            (_slug(provider_id, max_length=18).upper(), provider_id)
+            for provider_id in provider_ids
+        ),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    upper_remainder = remainder.upper()
+    for provider_slug, provider_id in candidates:
+        if upper_remainder == provider_slug or upper_remainder.startswith(provider_slug + "_"):
+            return provider_id
+    return remainder.split("_", 1)[0].lower()
 
 
 def _api_id_from_named_key(key: str, provider_id: str) -> str:
@@ -449,12 +466,20 @@ def set_provider_api_key(
     kind: str | None = None,
     credential_mode: str | None = None,
 ) -> dict[str, Any]:
-    named = bool(api_id or name)
-    key = named_provider_secret_key(provider_id, api_id=api_id, name=name) if named else provider_secret_key(provider_id)
+    normalized_provider = str(provider_id or "").strip()
+    # Program providers without a legacy ENV variable still need a durable
+    # default connection.  Store it as an explicit named connection rather
+    # than rejecting the provider as "unsupported".
+    program_provider = normalized_provider in provider_program_manifests()
+    named = bool(api_id or name) or (program_provider and not provider_secret_key(normalized_provider))
+    key = (
+        named_provider_secret_key(normalized_provider, api_id=api_id or "DEFAULT", name=name)
+        if named
+        else provider_secret_key(normalized_provider)
+    )
     if not key:
         return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
-    normalized_provider = str(provider_id or "").strip()
-    is_builtin = normalized_provider in PROVIDER_SECRET_KEYS
+    is_builtin = normalized_provider in PROVIDER_SECRET_KEYS or program_provider
     resolved_kind = _normalize_kind(kind) if kind is not None else None
     if resolved_kind is None:
         # Reuse the previously stored kind if any, otherwise default by provider type.
