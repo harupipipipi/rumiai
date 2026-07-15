@@ -1,5 +1,9 @@
 # Rumi AI
 
+> **移行案内**: このリポジトリは Tobkiri への名称・構成移行中です。最新の開発内容と
+> 現行構成は [`soon`](https://github.com/harupipipipi/rumiai/tree/soon) を参照してください。
+> `master` は公開・安定入口です。
+
 Rumi AI is a modular AI runtime and tooling workspace.
 
 The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
@@ -36,7 +40,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 ### Prerequisites
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 20.19.x または 22.12+（Node 22 推奨）
 - npm
 - uv (`rumi_viewer` を触る場合)
 - Rust / Cargo (`rumi_viewer` を触る場合)
@@ -56,7 +60,7 @@ pip install -r rumi_ai_1_10/requirements-dev.txt
 pip install -e ./rumi_ai_1_10
 
 cd rumi_viewer/frontend
-npm install
+npm ci
 cd ../..
 ```
 
