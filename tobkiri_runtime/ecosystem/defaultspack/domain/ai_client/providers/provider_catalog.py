@@ -1,5 +1,6 @@
 from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 from domain.ai_client.providers.assemblyai_provider import AssemblyAIProvider
+from domain.ai_client.providers.ai21_provider import AI21Provider
 from domain.ai_client.providers.portkey_ai_gateway_provider import PortkeyAIGatewayProvider
 from domain.ai_client.providers.vercel_ai_gateway_provider import VercelAIGatewayProvider
 
@@ -420,3 +421,4 @@ OPENAI_COMPATIBLE_PROVIDER_CLASSES["portkey-ai-gateway"] = PortkeyAIGatewayProvi
 # AssemblyAI is OpenAI-compatible but its API key is sent as the raw
 # Authorization header value, rather than Bearer <token>.
 OPENAI_COMPATIBLE_PROVIDER_CLASSES["assemblyai"] = AssemblyAIProvider
+OPENAI_COMPATIBLE_PROVIDER_CLASSES["ai21"] = AI21Provider

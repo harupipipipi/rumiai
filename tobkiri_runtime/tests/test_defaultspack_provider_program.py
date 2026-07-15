@@ -414,6 +414,28 @@ def test_ibm_watsonx_uses_live_foundation_model_specs(monkeypatch):
     assert models[1]["type"] == "embedding"
 
 
+def test_ai21_derives_current_models_from_its_official_machine_readable_document(monkeypatch):
+    from domain.ai_client.providers.ai21_provider import AI21Provider
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = AI21Provider(api_key="ai21-key")
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self):
+            return b"## Model Details\n| API Endpoint |\n| `jamba-live` |\n## API Versioning\n* `jamba-live` currently points to `jamba-live-2026`\n## Model Deprecation\n| `jamba-old` |"
+    seen = {}
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        return Response()
+    monkeypatch.setattr("domain.ai_client.providers.ai21_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    models = provider.list_models()
+    assert seen["url"] == AI21Provider.MODEL_DOCUMENT_URL
+    assert [model["model_id"] for model in models] == ["jamba-live", "jamba-live-2026"]
+    assert models[0]["metadata"]["source"] == "ai21_official_model_document"
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

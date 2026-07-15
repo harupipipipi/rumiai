@@ -963,6 +963,10 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/ml/v1/foundation_model_specs", "inventory_strategy": "foundation_model_specs_api"},
         },
     )
+    manifests.setdefault(
+        "ai21",
+        {"id": "ai21", "display_name": "AI21 Labs", "adapter": "openai_compatible", "api_key_env": ["AI21_API_KEY"], "base_url_env": ["AI21_BASE_URL"], "default_base_url": "https://api.ai21.com/studio/v1", "credential_required": True, "catalog_only": False, "supports_invoke": True, "models": [], "config": {"model_sync": "remote_merge", "inventory_strategy": "official_model_document"}},
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
