@@ -933,6 +933,26 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
+    manifests.setdefault(
+        "assemblyai",
+        {
+            "id": "assemblyai",
+            "display_name": "AssemblyAI",
+            "adapter": "openai_compatible",
+            "api_key_env": ["ASSEMBLYAI_API_KEY"],
+            "base_url_env": ["ASSEMBLYAI_LLM_GATEWAY_BASE_URL"],
+            "default_base_url": "https://llm-gateway.assemblyai.com/v1",
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {
+                "model_sync": "remote_merge",
+                "model_list_path": "/models",
+                "inventory_strategy": "llm_gateway_models_api",
+            },
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

@@ -13,6 +13,7 @@ from .provider_program import provider_program_manifests
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
+    "assemblyai": ["ASSEMBLYAI_API_KEY"],
     "avian": ["AVIAN_API_KEY"],
     "azure-openai": ["AZURE_OPENAI_API_KEY"],
     "baidu-qianfan": ["QIANFAN_API_KEY"],

@@ -295,6 +295,47 @@ def test_portkey_uses_workspace_models_api_and_its_required_auth_header(monkeypa
     assert models[0]["metadata"]["source"] == "remote_models_endpoint"
 
 
+def test_assemblyai_uses_its_live_gateway_models_without_bearer_rewriting(monkeypatch):
+    from domain.ai_client.providers import _instantiate_manifest_provider, _provider_manifest_map
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "assembly-key")
+    manifest = _provider_manifest_map()["assemblyai"]
+    provider = _instantiate_manifest_provider(manifest)
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":[{"id":"claude-live","name":"Claude Live","context_length":200000,"supported_parameters":["tools","tool_choice","response_format","stream"],"top_provider":{"max_completion_tokens":64000}}]}'
+
+    seen = {}
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    models = provider.list_models()
+
+    assert manifest["models"] == []
+    assert seen == {
+        "url": "https://llm-gateway.assemblyai.com/v1/models",
+        "authorization": "assembly-key",
+    }
+    assert [model["model_id"] for model in models] == ["claude-live"]
+    assert models[0]["context_window"] == 200000
+    assert models[0]["capabilities"]["tool_calling"] is True
+    assert models[0]["capabilities"]["structured_output"] is True
+    assert models[0]["metadata"]["source"] == "assemblyai_llm_gateway_models_api"
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 
