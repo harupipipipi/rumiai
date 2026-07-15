@@ -122,6 +122,20 @@ Future<Map<String, dynamic>> makeTokenEnvelope({
 }
 
 void main() {
+  test('pairing payload accepts iOS smart quotes from manual paste', () {
+    final payload = MobilePairingPayload.parse(
+      '{\u201ckind\u201d:\u201crumi_mobile_pair_v1\u201d,'
+      '\u201cpairing_id\u201d:\u201cpair-123\u201d,'
+      '\u201cbase_urls\u201d:[\u201chttps://pc.example.test\u201d],'
+      '\u201ccode\u201d:\u201c123456\u201d,'
+      '\u201cpickup_secret\u201d:\u201cpickup-secret\u201d,'
+      '\u201cexpires_at\u201d:4102444800000}',
+    );
+
+    expect(payload.pairingId, 'pair-123');
+    expect(payload.baseUrl, 'https://pc.example.test');
+  });
+
   test(
       'identity persists Ed25519 and X25519 private keys only in secure storage',
       () async {

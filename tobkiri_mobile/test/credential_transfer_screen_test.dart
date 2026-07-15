@@ -32,5 +32,10 @@ void main() {
     expect(find.text('Request pairing'), findsOneWidget);
     expect(find.textContaining('credentials.request'), findsOneWidget);
     expect(find.textContaining('device-token'), findsNothing);
+
+    final pairingField = tester.widget<TextField>(find.byType(TextField));
+    expect(pairingField.autocorrect, isFalse);
+    expect(pairingField.enableSuggestions, isFalse);
+    expect(pairingField.smartQuotesType, SmartQuotesType.disabled);
   });
 }

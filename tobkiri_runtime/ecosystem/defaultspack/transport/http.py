@@ -2012,6 +2012,17 @@ def _apply_authenticated_principal_context(context, payload):
         context["authority_principal_id"] = principal_id
         if not bool(principal_payload.get("core_role")):
             context["principal_id"] = principal_id
+    # The core HTTP auth gate has already verified device bearer tokens before
+    # constructing this principal. Carry that verified identity into fallback
+    # blocks; never use similarly named request fields supplied by a client.
+    if str(principal_payload.get("auth_mode") or "") == "device_bearer":
+        device_id = str(principal_payload.get("device_id") or "").strip()
+        scopes = principal_payload.get("scopes")
+        if device_id and isinstance(scopes, (list, tuple)):
+            context["_authenticated_device_id"] = device_id
+            context["_authenticated_scopes"] = [
+                str(scope).strip() for scope in scopes if str(scope).strip()
+            ]
 
 
 def _function_principal_from_context(context, default="defaultspack"):

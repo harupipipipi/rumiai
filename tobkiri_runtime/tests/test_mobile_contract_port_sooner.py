@@ -247,3 +247,26 @@ def test_device_token_auth_is_limited_by_mobile_route_scope(tmp_path, monkeypatc
 
     gate = DummyGate()
     assert not gate._check_bearer_auth("POST", "/api/mobile/v1/conversations")
+
+
+def test_fallback_transport_uses_verified_device_principal_not_request_fields():
+    from transport.http import _apply_authenticated_principal_context
+
+    context = {}
+    _apply_authenticated_principal_context(
+        context,
+        {
+            "_authenticated_device_id": "client-supplied-device",
+            "_authenticated_scopes": ["client-supplied.scope"],
+            "_authenticated_principal": {
+                "auth_mode": "device_bearer",
+                "device_id": "verified-mobile-device",
+                "profile_id": "default",
+                "principal_id": "device:verified-mobile-device",
+                "scopes": ["credentials.request"],
+            },
+        },
+    )
+
+    assert context["_authenticated_device_id"] == "verified-mobile-device"
+    assert context["_authenticated_scopes"] == ["credentials.request"]

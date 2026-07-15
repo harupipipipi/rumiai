@@ -288,6 +288,7 @@ class _CredentialTransferScreenState extends State<CredentialTransferScreen> {
                 maxLines: 6,
                 autocorrect: false,
                 enableSuggestions: false,
+                smartQuotesType: SmartQuotesType.disabled,
                 decoration: const InputDecoration(
                   labelText: 'Pairing payload',
                   border: OutlineInputBorder(),

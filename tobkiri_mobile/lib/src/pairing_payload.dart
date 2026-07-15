@@ -17,7 +17,13 @@ class MobilePairingPayload {
   bool get isExpired => DateTime.now().millisecondsSinceEpoch >= expiresAt;
 
   static MobilePairingPayload parse(String raw) {
-    final trimmed = raw.trim();
+    // iOS may turn straight quotes into smart quotes when a QR payload is
+    // manually pasted or typed. Normalize only the JSON delimiters before
+    // decoding so the same public, credential-free payload remains usable.
+    final trimmed = raw
+        .trim()
+        .replaceAll('\u201c', '"')
+        .replaceAll('\u201d', '"');
     if (trimmed.startsWith('rumi_api:') || trimmed.startsWith('rumi_api://')) {
       throw const FormatException(
         'legacy credential-bearing QR is not supported',
