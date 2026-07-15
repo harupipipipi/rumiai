@@ -127,6 +127,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         manifest: Dict[str, Any],
         *,
         model_manifests: Optional[List[Dict[str, Any]]] = None,
+        allow_declared_models: bool = True,
     ) -> "OpenAICompatibleProvider":
         provider_id = str(manifest.get("id", "")).strip() or "openai_compatible"
         known_models: List[Dict[str, Any]] = cls.list_curated_models()
@@ -161,7 +162,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         known_models = list(known_model_map.values())
         if not known_models:
             known_models = list(manifest.get("models", []))
-        if not known_models and manifest.get("default_model"):
+        if allow_declared_models and not known_models and manifest.get("default_model"):
             default_model = str(manifest.get("default_model")).strip()
             defaults = {"chat": True}
             for use_case, candidate in (manifest.get("default_model_for", {}) or {}).items():

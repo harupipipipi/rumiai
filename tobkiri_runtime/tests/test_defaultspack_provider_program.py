@@ -844,6 +844,58 @@ def test_every_connection_required_program_provider_can_use_a_saved_live_endpoin
     assert all(configured[provider_id]["config"]["custom_openai_compatible"] for provider_id in connection_required_ids)
 
 
+def test_every_openai_compatible_program_provider_uses_its_live_models_endpoint(monkeypatch):
+    """Every compatible provider must expose what its connected endpoint serves."""
+    from domain.ai_client import providers
+    from domain.ai_client.provider_program import provider_program_manifests
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    manifests = providers._provider_manifest_map()
+    compatible_ids = sorted(
+        provider_id
+        for provider_id in provider_program_manifests()
+        if str(manifests[provider_id].get("adapter") or "") == "openai_compatible"
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":[{"id":"account-visible-model"}]}'
+
+    seen = []
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append(request.full_url)
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_save_remote_model_cache", lambda *_args, **_kwargs: None)
+
+    direct_endpoint_ids = []
+    custom_discovery_ids = []
+    for provider_id in compatible_ids:
+        provider = providers._instantiate_manifest_provider(manifests[provider_id])
+        assert provider is not None, provider_id
+        if type(provider)._fetch_remote_models is not OpenAICompatibleProvider._fetch_remote_models:
+            custom_discovery_ids.append(provider_id)
+            continue
+        direct_endpoint_ids.append(provider_id)
+        provider._api_key = f"{provider_id}-token"
+        models = provider.list_models()
+        assert [model["model_id"] for model in models] == ["account-visible-model"], provider_id
+
+    # A provider with a vendor-specific live catalog is valid too; it must be
+    # explicit rather than silently falling back to a bundled model list.
+    assert custom_discovery_ids == ["ai21"]
+    assert len(seen) == len(direct_endpoint_ids)
+
+
 def test_saved_connection_fetches_the_account_visible_models_for_every_connection_backed_placeholder(monkeypatch):
     """A saved connection, not a checked-in list, is the inventory source.
 

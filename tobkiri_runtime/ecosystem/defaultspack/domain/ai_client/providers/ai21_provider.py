@@ -16,8 +16,15 @@ class AI21Provider(OpenAICompatibleProvider):
     MODEL_DOCUMENT_URL = "https://docs.ai21.com/docs/jamba-foundation-models.md"
 
     @classmethod
-    def from_manifest(cls, manifest: Dict[str, Any], *, model_manifests: List[Dict[str, Any]] | None = None) -> "AI21Provider":
+    def from_manifest(
+        cls,
+        manifest: Dict[str, Any],
+        *,
+        model_manifests: List[Dict[str, Any]] | None = None,
+        allow_declared_models: bool = True,
+    ) -> "AI21Provider":
         del model_manifests
+        del allow_declared_models
         return cls(api_key_env=manifest.get("api_key_env") or "AI21_API_KEY", base_url_env=manifest.get("base_url_env") or "AI21_BASE_URL", default_base_url=str(manifest.get("default_base_url") or cls.DEFAULT_BASE_URL))
 
     def __init__(self, api_key: str = "", base_url: str = "", *, api_key_env: Any = "AI21_API_KEY", base_url_env: Any = "AI21_BASE_URL", default_base_url: str = DEFAULT_BASE_URL):

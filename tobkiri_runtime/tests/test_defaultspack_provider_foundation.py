@@ -34,12 +34,29 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
             list_model_catalog,
         )
 
-        models = list_model_catalog(provider="openai")
+        class Client:
+            def list_models(self, provider=None):
+                assert provider == "openai"
+                return [{
+                    "id": "openai/account-visible-model",
+                    "qualified_model_id": "openai/account-visible-model",
+                    "provider_id": "openai",
+                    "model_id": "account-visible-model",
+                    "display_name": "Account Visible Model",
+                    "type": "chat",
+                    "metadata": {"source": "remote_models_endpoint"},
+                }]
+
+        with patch(
+            "ecosystem.defaultspack.backend.ai_client.provider_catalog._runtime_client",
+            return_value=Client(),
+        ):
+            models = list_model_catalog(provider="openai")
         self.assertTrue(models)
-        sample = next(model for model in models if model["model_id"] == "gpt-4o")
-        self.assertEqual(sample["canonical_model_id"], "gpt-4o")
-        self.assertEqual(sample["same_model_across_providers_key"], "gpt-4o")
-        self.assertEqual(sample["qualified_model_id"], "openai/gpt-4o")
+        sample = next(model for model in models if model["model_id"] == "account-visible-model")
+        self.assertEqual(sample["canonical_model_id"], "account-visible-model")
+        self.assertEqual(sample["same_model_across_providers_key"], "account-visible-model")
+        self.assertEqual(sample["qualified_model_id"], "openai/account-visible-model")
 
     def test_detect_available_providers_registers_openai_compatible_gateways(self):
         from ecosystem.defaultspack.domain.ai_client.providers import (

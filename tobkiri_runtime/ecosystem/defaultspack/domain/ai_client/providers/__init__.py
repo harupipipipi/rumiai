@@ -685,17 +685,23 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     for provider_id, manifest in provider_manifests_from_components().items():
         manifests.setdefault(provider_id, dict(manifest))
     # The compatibility registry is an executable provider definition, not just
-    # a documentation table.  Promote every one of its entries to a manifest so
-    # an API key enables the provider and its complete /models inventory.
+    # a documentation table.  It supersedes legacy extension manifests that
+    # still carry default-model or fixed-allowlist snapshots, so an API key
+    # always enables the connected endpoint's complete /models inventory.
     for provider_id, spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
-        manifests.setdefault(provider_id, _openai_compatible_spec_manifest(spec))
+        manifests[provider_id] = _openai_compatible_spec_manifest(spec)
     for provider_id, manifest in local_openai_runtime_manifests().items():
-        manifests.setdefault(provider_id, manifest)
+        # Local runtime endpoints report the exact models currently loaded by
+        # that server.  Do not let an older extension manifest replace this
+        # keyless live-discovery contract with a static catalog.
+        manifests[provider_id] = manifest
     # Native providers whose invocation protocol is not OpenAI-compatible can
     # still expose their complete account inventory from an official Models
     # endpoint.  Register the executable adapter before the program's honest
     # connection placeholder is applied.
-    manifests.setdefault(
+    # Native runtime definitions must take precedence over extension manifests
+    # that predate live inventory support and can still carry fixed defaults.
+    manifests.__setitem__(
         "anthropic",
         {
             "id": "anthropic",
@@ -710,7 +716,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "google",
         {
             "id": "google",
@@ -725,7 +731,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1beta/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "cohere",
         {
             "id": "cohere",
@@ -740,7 +746,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "replicate",
         {
             "id": "replicate",
@@ -755,7 +761,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "elevenlabs",
         {
             "id": "elevenlabs",
@@ -770,7 +776,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "cloudflare-workers-ai",
         {
             "id": "cloudflare-workers-ai",
@@ -785,7 +791,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/models/search"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "deepgram",
         {
             "id": "deepgram",
@@ -800,7 +806,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/v1/models"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "databricks-model-serving",
         {
             "id": "databricks-model-serving",
@@ -816,7 +822,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/api/2.0/serving-endpoints"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "azure-openai",
         {
             "id": "azure-openai",
@@ -832,7 +838,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/openai/deployments"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "azure-ai-foundry",
         {
             "id": "azure-ai-foundry",
@@ -852,7 +858,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "aws-bedrock",
         {
             "id": "aws-bedrock",
@@ -873,7 +879,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "stability-ai",
         {
             "id": "stability-ai",
@@ -893,7 +899,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "portkey-ai-gateway",
         {
             "id": "portkey-ai-gateway",
@@ -913,7 +919,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "fal-ai",
         {
             "id": "fal-ai",
@@ -933,7 +939,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "assemblyai",
         {
             "id": "assemblyai",
@@ -953,7 +959,7 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "ibm-watsonx",
         {
             "id": "ibm-watsonx", "display_name": "IBM watsonx.ai", "adapter": "native",
@@ -963,23 +969,23 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             "config": {"model_sync": "remote_merge", "model_list_path": "/ml/v1/foundation_model_specs", "inventory_strategy": "foundation_model_specs_api"},
         },
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "ai21",
         {"id": "ai21", "display_name": "AI21 Labs", "adapter": "openai_compatible", "api_key_env": ["AI21_API_KEY"], "base_url_env": ["AI21_BASE_URL"], "default_base_url": "https://api.ai21.com/studio/v1", "credential_required": True, "catalog_only": False, "supports_invoke": True, "models": [], "config": {"model_sync": "remote_merge", "inventory_strategy": "official_model_document"}},
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "black-forest-labs",
         {"id": "black-forest-labs", "display_name": "Black Forest Labs", "adapter": "native", "entrypoint": "domain.ai_client.providers.black_forest_labs_provider:BlackForestLabsProvider", "api_key_env": ["BFL_API_KEY"], "base_url_env": ["BFL_BASE_URL"], "credential_required": True, "catalog_only": False, "supports_invoke": True, "models": [], "config": {"model_sync": "remote_merge", "inventory_strategy": "official_openapi_document_catalog"}},
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "voyage-ai",
         {"id":"voyage-ai","display_name":"Voyage AI","adapter":"native","entrypoint":"domain.ai_client.providers.voyage_ai_provider:VoyageAIProvider","api_key_env":["VOYAGE_API_KEY"],"base_url_env":["VOYAGE_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","inventory_strategy":"official_model_document"}},
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "genspark",
         {"id":"genspark","display_name":"Genspark","adapter":"native","entrypoint":"domain.ai_client.providers.genspark_provider:GensparkProvider","api_key_env":["GENSPARK_API_KEY"],"base_url_env":["GENSPARK_LLM_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","model_list_path":"/models","inventory_strategy":"account_models_endpoint"}},
     )
-    manifests.setdefault(
+    manifests.__setitem__(
         "google-vertex-ai",
         {"id":"google-vertex-ai","display_name":"Google Vertex AI","adapter":"native","entrypoint":"domain.ai_client.providers.google_vertex_ai_provider:GoogleVertexAIProvider","api_key_env":["VERTEX_AI_ACCESS_TOKEN","GOOGLE_VERTEX_AI_ACCESS_TOKEN"],"base_url_env":["VERTEX_AI_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","model_list_path":"/endpoints","inventory_strategy":"project_deployment_control_plane"}},
     )
@@ -1797,9 +1803,15 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
             provider_id,
             OpenAICompatibleProvider,
         )
+        program_provider = provider_id in provider_program_manifests()
         return provider_cls.from_manifest(
             manifest,
-            model_manifests=_load_model_manifests(provider_id),
+            # The provider program forbids static inventory snapshots: its
+            # authenticated /models response is the sole runtime source.
+            # Independently installed custom extensions may still explicitly
+            # opt into their own declared model manifests.
+            model_manifests=[] if program_provider else _load_model_manifests(provider_id),
+            allow_declared_models=not program_provider,
         )
     if entrypoint:
         provider_cls = _import_provider_entrypoint(entrypoint)
