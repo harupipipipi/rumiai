@@ -1182,17 +1182,31 @@ def test_xiaomi_mimo_global_uses_its_official_openai_endpoint_and_live_models(mo
     monkeypatch.setenv("MIMO_API_KEY", "mimo-key")
     manifest = providers._provider_manifest_map()["xiaomi-mimo-global"]
     provider = providers._instantiate_manifest_provider(manifest)
-    monkeypatch.setattr(
-        OpenAICompatibleProvider,
-        "_fetch_remote_models",
-        lambda self: [{
-            "id": "mimo-v2.5-pro-ultraspeed",
-            "name": "MiMo V2.5 Pro UltraSpeed",
-            "input_modalities": ["text", "image", "audio", "video"],
-            "output_modalities": ["text"],
-        }],
-    )
     monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return (
+                b'{"data":[{"id":"mimo-v2.5-pro-ultraspeed",'
+                b'"name":"MiMo V2.5 Pro UltraSpeed",'
+                b'"input_modalities":["text","image","audio","video"],'
+                b'"output_modalities":["text"]}]}'
+            )
+
+    seen = {}
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
 
     models = provider.list_models()
 
@@ -1202,6 +1216,10 @@ def test_xiaomi_mimo_global_uses_its_official_openai_endpoint_and_live_models(mo
     assert provider._base_url == "https://api.xiaomimimo.com/v1"
     assert [model["model_id"] for model in models] == ["mimo-v2.5-pro-ultraspeed"]
     assert models[0]["metadata"]["source"] == "remote_models_endpoint"
+    assert seen == {
+        "url": "https://api.xiaomimimo.com/v1/models",
+        "authorization": "Bearer mimo-key",
+    }
 
 
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
