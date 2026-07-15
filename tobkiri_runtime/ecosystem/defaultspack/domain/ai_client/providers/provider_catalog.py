@@ -354,6 +354,32 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "remote_model_discovery": True,
         "curated_models": [],
     },
+    {
+        # LongCat exposes inference through /openai/v1 but keeps its live
+        # account model inventory at the root /v1/models endpoint.
+        "provider_name": "longcat",
+        "display_name": "LongCat",
+        "env_vars": ("LONGCAT_API_KEY",),
+        "base_url_env_vars": ("LONGCAT_BASE_URL",),
+        "default_base_url": "https://api.longcat.chat/openai/v1",
+        "remote_model_base_url": "https://api.longcat.chat",
+        "remote_model_list_path": "/v1/models",
+        "supports_embeddings": False,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
+    {
+        # Tencent Hunyuan's authenticated OpenAI-compatible Models API
+        # returns the exact models and statuses available to the key.
+        "provider_name": "tencent-hunyuan",
+        "display_name": "Tencent Hunyuan",
+        "env_vars": ("HUNYUAN_API_KEY", "TENCENT_HUNYUAN_API_KEY"),
+        "base_url_env_vars": ("HUNYUAN_BASE_URL", "TENCENT_HUNYUAN_BASE_URL"),
+        "default_base_url": "https://api.hunyuan.cloud.tencent.com/v1",
+        "supports_embeddings": True,
+        "remote_model_discovery": True,
+        "curated_models": [],
+    },
 ]
 
 

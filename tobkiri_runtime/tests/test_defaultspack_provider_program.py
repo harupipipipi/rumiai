@@ -336,6 +336,47 @@ def test_assemblyai_uses_its_live_gateway_models_without_bearer_rewriting(monkey
     assert models[0]["metadata"]["source"] == "assemblyai_llm_gateway_models_api"
 
 
+def test_longcat_and_tencent_hunyuan_use_live_openai_compatible_models_apis(monkeypatch):
+    from domain.ai_client.providers import _openai_compatible_spec_manifest
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.ai_client.providers.provider_catalog import OPENAI_COMPATIBLE_PROVIDER_SPECS
+
+    expected = {
+        "longcat": ("https://api.longcat.chat/v1/models", "LONGCAT_API_KEY"),
+        "tencent-hunyuan": ("https://api.hunyuan.cloud.tencent.com/v1/models", "HUNYUAN_API_KEY"),
+    }
+    seen = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":[{"id":"live-model","owned_by":"account"}]}'
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append((request.full_url, request.headers.get("Authorization")))
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    for provider_id, (url, env_name) in expected.items():
+        monkeypatch.setenv(env_name, provider_id + "-key")
+        spec = OPENAI_COMPATIBLE_PROVIDER_SPECS[provider_id]
+        provider = OpenAICompatibleProvider.from_manifest(_openai_compatible_spec_manifest(spec))
+        models = provider.list_models()
+        assert spec["curated_models"] == []
+        assert [model["model_id"] for model in models] == ["live-model"]
+        assert provider._remote_model_list_path in {"/models", "/v1/models"}
+    assert seen == [
+        ("https://api.longcat.chat/v1/models", "Bearer longcat-key"),
+        ("https://api.hunyuan.cloud.tencent.com/v1/models", "Bearer tencent-hunyuan-key"),
+    ]
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

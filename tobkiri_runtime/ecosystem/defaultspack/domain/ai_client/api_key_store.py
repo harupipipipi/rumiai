@@ -60,6 +60,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "siliconflow": ["SILICONFLOW_API_KEY"],
     "stability-ai": ["STABILITY_API_KEY"],
     "together": ["TOGETHER_API_KEY"],
+    "tencent-hunyuan": ["HUNYUAN_API_KEY", "TENCENT_HUNYUAN_API_KEY"],
     "upstage": ["UPSTAGE_API_KEY"],
     "vercel-ai-gateway": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],
     "vllm": ["VLLM_API_KEY"],
