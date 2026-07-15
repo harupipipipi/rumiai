@@ -377,6 +377,43 @@ def test_longcat_and_tencent_hunyuan_use_live_openai_compatible_models_apis(monk
     ]
 
 
+def test_ibm_watsonx_uses_live_foundation_model_specs(monkeypatch):
+    import json
+
+    from domain.ai_client.providers.ibm_watsonx_provider import IBMWatsonxProvider
+
+    monkeypatch.setenv("WATSONX_API_KEY", "ibm-key")
+    monkeypatch.setenv("WATSONX_ACCESS_TOKEN", "ibm-access-token")
+    monkeypatch.setenv("WATSONX_BASE_URL", "https://us-south.ml.cloud.ibm.com")
+    IBMWatsonxProvider._CACHE.clear()
+    seen = {}
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self):
+            return json.dumps({"resources": [
+                {"model_id": "ibm/granite-live", "label": "Granite Live", "tasks": ["generation"], "model_limits": {"max_sequence_length": 32768}},
+                {"model_id": "ibm/embed-live", "label": "Embed Live", "tasks": ["embeddings"]},
+            ]}).encode()
+
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+
+    monkeypatch.setattr("domain.ai_client.providers.ibm_watsonx_provider.urllib.request.urlopen", fake_urlopen)
+    models = IBMWatsonxProvider().list_models()
+
+    assert seen == {
+        "url": "https://us-south.ml.cloud.ibm.com/ml/v1/foundation_model_specs?version=2024-05-31&tech_preview=true",
+        "authorization": "Bearer ibm-access-token",
+    }
+    assert [model["model_id"] for model in models] == ["ibm/granite-live", "ibm/embed-live"]
+    assert models[0]["context_window"] == 32768
+    assert models[1]["type"] == "embedding"
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

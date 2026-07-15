@@ -33,6 +33,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "glm": ["GLM_API_KEY"],
     "groq": ["GROQ_API_KEY"],
     "hyperbolic": ["HYPERBOLIC_API_KEY"],
+    "ibm-watsonx": ["WATSONX_API_KEY", "IBM_WATSONX_API_KEY"],
     "huggingface-inference": ["HF_TOKEN", "HUGGINGFACE_API_KEY"],
     "inference-net": ["INFERENCE_NET_API_KEY", "INFERENCENET_API_KEY"],
     "jina-ai": ["JINA_API_KEY"],

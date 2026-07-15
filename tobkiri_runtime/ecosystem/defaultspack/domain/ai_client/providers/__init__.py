@@ -953,6 +953,16 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
+    manifests.setdefault(
+        "ibm-watsonx",
+        {
+            "id": "ibm-watsonx", "display_name": "IBM watsonx.ai", "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.ibm_watsonx_provider:IBMWatsonxProvider",
+            "api_key_env": ["WATSONX_API_KEY", "IBM_WATSONX_API_KEY"], "base_url_env": ["WATSONX_BASE_URL"],
+            "credential_required": True, "catalog_only": False, "supports_invoke": True, "models": [],
+            "config": {"model_sync": "remote_merge", "model_list_path": "/ml/v1/foundation_model_specs", "inventory_strategy": "foundation_model_specs_api"},
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.
