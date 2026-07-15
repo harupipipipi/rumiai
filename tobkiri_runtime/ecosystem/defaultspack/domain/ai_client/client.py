@@ -1533,6 +1533,7 @@ class AIClient:
             "vercel_ai_gateway_models_api",
             "azure_ai_foundry_project_deployments",
             "aws_bedrock_list_foundation_models",
+            "stability_ai_engines_api",
                 "native_server_api",
                 "native_models_endpoint",
                 "last_known_good_inventory",

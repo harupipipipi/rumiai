@@ -55,6 +55,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "replicate": ["REPLICATE_API_TOKEN"],
     "sambanova": ["SAMBANOVA_API_KEY"],
     "siliconflow": ["SILICONFLOW_API_KEY"],
+    "stability-ai": ["STABILITY_API_KEY"],
     "together": ["TOGETHER_API_KEY"],
     "upstage": ["UPSTAGE_API_KEY"],
     "vercel-ai-gateway": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],

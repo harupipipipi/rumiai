@@ -1126,6 +1126,55 @@ def test_aws_bedrock_lists_the_live_regional_inventory_and_uses_converse(monkeyp
     assert all(item[3] == "session-test" for item in seen)
 
 
+def test_stability_ai_uses_the_account_engines_api_without_a_model_snapshot(monkeypatch):
+    from domain.ai_client.providers.stability_ai_provider import StabilityAIProvider
+
+    StabilityAIProvider._MODEL_INVENTORY_CACHE.clear()
+    monkeypatch.setattr(
+        "domain.ai_client.providers.stability_ai_provider.provider_named_api_keys",
+        lambda *_args, **_kwargs: [{"provider_id": "stability-ai", "api_id": "main", "configured": True}],
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.providers.stability_ai_provider.read_provider_api_key",
+        lambda *_args, **_kwargs: "stability-key",
+    )
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            import json
+
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        calls.append((request.get_method(), request.full_url, request.headers.get("Authorization")))
+        if request.get_method() == "GET":
+            return Response([{"id": "stable-diffusion-xl-1024-v1-0", "name": "SDXL", "type": "PICTURE"}])
+        return Response({"artifacts": [{"base64": "image-bytes"}]})
+
+    monkeypatch.setattr("domain.ai_client.providers.stability_ai_provider.urllib.request.urlopen", fake_urlopen)
+    provider = StabilityAIProvider()
+    models = provider.list_models()
+    generated = provider.image_gen("stability-ai/stable-diffusion-xl-1024-v1-0", "Lighthouse", {})
+
+    assert [model["model_id"] for model in models] == ["stable-diffusion-xl-1024-v1-0"]
+    assert models[0]["type"] == "image_gen"
+    assert generated["images"] == ["data:image/png;base64,image-bytes"]
+    assert calls == [
+        ("GET", "https://api.stability.ai/v1/engines/list", "Bearer stability-key"),
+        ("POST", "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image", "Bearer stability-key"),
+    ]
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 
