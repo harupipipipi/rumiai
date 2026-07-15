@@ -979,6 +979,10 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
         "genspark",
         {"id":"genspark","display_name":"Genspark","adapter":"native","entrypoint":"domain.ai_client.providers.genspark_provider:GensparkProvider","api_key_env":["GENSPARK_API_KEY"],"base_url_env":["GENSPARK_LLM_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","model_list_path":"/models","inventory_strategy":"account_models_endpoint"}},
     )
+    manifests.setdefault(
+        "google-vertex-ai",
+        {"id":"google-vertex-ai","display_name":"Google Vertex AI","adapter":"native","entrypoint":"domain.ai_client.providers.google_vertex_ai_provider:GoogleVertexAIProvider","api_key_env":["VERTEX_AI_ACCESS_TOKEN","GOOGLE_VERTEX_AI_ACCESS_TOKEN"],"base_url_env":["VERTEX_AI_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","model_list_path":"/endpoints","inventory_strategy":"project_deployment_control_plane"}},
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

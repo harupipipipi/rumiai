@@ -495,6 +495,25 @@ def test_genspark_exposes_its_account_models_endpoint_without_a_static_catalog(m
     assert [model["model_id"] for model in models] == ["account-live-model"]
 
 
+def test_google_vertex_uses_project_deployments_as_the_live_inventory(monkeypatch):
+    import json
+    from domain.ai_client.providers.google_vertex_ai_provider import GoogleVertexAIProvider
+    monkeypatch.setenv("VERTEX_AI_ACCESS_TOKEN", "vertex-token")
+    monkeypatch.setenv("VERTEX_AI_BASE_URL", "https://us-central1-aiplatform.googleapis.com/v1/projects/demo/locations/us-central1")
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return json.dumps({"endpoints":[{"name":"projects/demo/locations/us-central1/endpoints/endpoint-1","deployedModels":[{"id":"deployment-1","displayName":"Project Model","model":"projects/demo/locations/us-central1/models/model-1"}]}]}).encode()
+    seen={}
+    def fake_urlopen(request, **_kwargs):
+        seen["url"]=request.full_url; seen["authorization"]=request.headers.get("Authorization"); return Response()
+    monkeypatch.setattr("domain.ai_client.providers.google_vertex_ai_provider.urllib.request.urlopen",fake_urlopen)
+    models=GoogleVertexAIProvider().list_models()
+    assert seen=={"url":"https://us-central1-aiplatform.googleapis.com/v1/projects/demo/locations/us-central1/endpoints","authorization":"Bearer vertex-token"}
+    assert [model["model_id"] for model in models]==["endpoint-1/deployment-1"]
+    assert models[0]["metadata"]["source"]=="vertex_endpoint_deployments_api"
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

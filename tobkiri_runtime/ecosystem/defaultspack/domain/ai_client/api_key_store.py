@@ -40,6 +40,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "inference-net": ["INFERENCE_NET_API_KEY", "INFERENCENET_API_KEY"],
     "jina-ai": ["JINA_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+    "google-vertex-ai": ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_VERTEX_AI_ACCESS_TOKEN"],
     "gitlawb-opengateway": ["GITLAWB_OPENGATEWAY_API_KEY"],
     "genspark": ["GENSPARK_API_KEY"],
     "llama_cpp": ["LLAMACPP_API_KEY"],
