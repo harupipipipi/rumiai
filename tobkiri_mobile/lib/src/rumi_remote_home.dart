@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'authority_approval_screen.dart';
 import 'models.dart';
+import 'credential_transfer_screen.dart';
 import 'rumi_api_client.dart';
 import 'secure_settings_store.dart';
 
@@ -290,6 +291,17 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
                 : () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => const AuthorityApprovalScreen(),
+                      ),
+                    ),
+          ),
+          IconButton(
+            tooltip: 'Credential transfers',
+            icon: const Icon(Icons.phonelink_lock_outlined),
+            onPressed: _busy
+                ? null
+                : () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const CredentialTransferScreen(),
                       ),
                     ),
           ),
