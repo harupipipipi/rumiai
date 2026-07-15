@@ -137,3 +137,58 @@ def test_company_status_projects_selected_state_without_runtime_store(
         "summaries": 0,
     }
     assert status["reporting"]["blocker_signals"]["blocker_count"] == 1
+
+
+def test_company_facade_resolves_mentions_from_selected_members(monkeypatch) -> None:
+    """Mention aliases are resolved from the selected Company member projection."""
+
+    import domain.company.contract_facade as contract_facade
+
+    monkeypatch.setattr(contract_facade, "_profile_id", lambda: "test")
+    facade = contract_facade.CompanyContractFacade(
+        {"company_id": "acme", "content": "@pm and @missing"}, {}
+    )
+    monkeypatch.setattr(
+        facade,
+        "_raw_company",
+        lambda _company_id: {
+            "members": {
+                "project_manager": {
+                    "id": "project_manager",
+                    "role_id": "project_manager",
+                    "display_name": "Project Manager",
+                    "mentions": ["project_manager"],
+                    "enabled": True,
+                    "metadata": {},
+                }
+            },
+            "roles": {
+                "project_manager": {
+                    "id": "project_manager",
+                    "name": "Project Manager",
+                    "work_type": "agent",
+                }
+            },
+        },
+    )
+
+    assert facade.run("resolve_mentions") == {
+        "mentions": ["pm", "missing"],
+        "resolved_agents": [
+            {
+                "id": "project_manager",
+                "agent_id": "project_manager",
+                "role_key": "project_manager",
+                "agent_name": "Project Manager",
+                "display_name": "Project Manager",
+                "model": "",
+                "aliases": ["project_manager"],
+                "enabled": True,
+                "status": "idle",
+                "work_type": "agent",
+                "metadata": {},
+            }
+        ],
+        "resolved_agent_ids": ["project_manager"],
+        "unresolved": ["missing"],
+    }

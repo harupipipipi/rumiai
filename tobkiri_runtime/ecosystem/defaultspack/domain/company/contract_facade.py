@@ -117,6 +117,10 @@ class CompanyContractFacade:
             return self._status()
         if operation == "bootstrap":
             return self._bootstrap()
+        if operation == "resolve_mentions":
+            return self._resolve_mentions(_company_id(self.input))
+        if operation == "mention":
+            return self._mention(_company_id(self.input))
         raise CompanyFacadeError(
             "INVALID_INPUT",
             f"unsupported company compatibility operation: {operation}",
@@ -671,6 +675,77 @@ class CompanyContractFacade:
         company = self._bootstrap_company(conversation_id)
         return {"bootstrapped": True, "company": _legacy_company(company)}
 
+    def _resolve_mentions(self, company_id: str) -> dict[str, Any] | None:
+        company = self._raw_company(company_id)
+        if company is None:
+            return None
+        content = str(self.input.get("content") or self.input.get("message") or "")
+        mentions = _mention_values(content)
+        agents = _legacy_agents(company)
+        resolved: list[dict[str, Any]] = []
+        unresolved: list[str] = []
+        seen: set[str] = set()
+        for mention in mentions:
+            if mention in {"team", "channel"}:
+                continue
+            target = _MENTION_ALIASES.get(mention, mention)
+            candidates = agents if target == "all" else [
+                agent for agent in agents if target in _agent_mention_keys(agent)
+            ]
+            if not candidates:
+                unresolved.append(mention)
+                continue
+            for agent in candidates:
+                agent_id = str(agent.get("agent_id") or "")
+                if agent_id and agent_id not in seen:
+                    seen.add(agent_id)
+                    resolved.append(agent)
+        return {
+            "mentions": mentions,
+            "resolved_agents": resolved,
+            "resolved_agent_ids": [agent["agent_id"] for agent in resolved],
+            "unresolved": unresolved,
+        }
+
+    def _mention(self, company_id: str) -> dict[str, Any] | None:
+        resolution = self._resolve_mentions(company_id)
+        if resolution is None:
+            return None
+        targets = list(resolution["resolved_agent_ids"])
+        self.input["target_agent_ids"] = targets
+        message = self._append_message(company_id)
+        if message is None:
+            return None
+        tasks: list[dict[str, Any]] = []
+        content = str(self.input.get("content") or self.input.get("message") or "")
+        for agent_id in targets:
+            task_id = "mention-" + hashlib.sha256(
+                f"{company_id}\0{message['id']}\0{agent_id}".encode("utf-8")
+            ).hexdigest()[:40]
+            result = self._mutate(
+                "task.upsert",
+                {
+                    "company_id": company_id,
+                    "record": {
+                        "id": task_id,
+                        "title": content[:120] or "Mentioned Company task",
+                        "description": content,
+                        "status": "queued",
+                        "assignee_member_id": agent_id,
+                        "channel_id": str(message.get("channel_id") or ""),
+                        "idempotency_key": task_id,
+                        "metadata": {
+                            "source": "company_mention",
+                            "message_id": str(message.get("id") or ""),
+                        },
+                    },
+                },
+            )
+            task = result.get("task")
+            if isinstance(task, Mapping):
+                tasks.append(_legacy_task(task))
+        return {"message": message, "tasks": tasks, **resolution}
+
     def _company_for_conversation(self, conversation_id: str) -> Mapping[str, Any] | None:
         snapshot = self._resource("list", {})
         companies = snapshot.get("companies") if isinstance(snapshot, Mapping) else []
@@ -1032,6 +1107,38 @@ def _state_blocker_summary(company: Mapping[str, Any] | None) -> dict[str, Any]:
         "latest_signal": blocked[0] if blocked else None,
         "signals": blocked[:20],
     }
+
+
+def _mention_values(content: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for value in re.findall(r"(?<![A-Za-z0-9_])@([A-Za-z0-9_.:-]{1,100})", content):
+        normalized = value.casefold()
+        if normalized not in seen:
+            seen.add(normalized)
+            values.append(normalized)
+    return values
+
+
+def _agent_mention_keys(agent: Mapping[str, Any]) -> set[str]:
+    metadata = agent.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    aliases = agent.get("aliases")
+    aliases = aliases if isinstance(aliases, list) else []
+    keys = {
+        str(agent.get("agent_id") or "").casefold(),
+        str(agent.get("id") or "").casefold(),
+        str(agent.get("role_key") or "").casefold(),
+        str(metadata.get("short_id") or "").casefold(),
+    }
+    keys.update(str(alias).lstrip("@").casefold() for alias in aliases)
+    return keys
+
+
+_MENTION_ALIASES = {
+    "pm": "project_manager",
+    "ops_manager": "operations_manager",
+}
 
 
 def _bounded_limit(value: Any, default: int) -> int:
