@@ -1,0 +1,58 @@
+name: Frontend UI/UX regression guard
+
+on:
+  pull_request:
+    paths:
+      - "tobkiri_launcher/frontend/**"
+      - "tobkiri_runtime/ecosystem/defaultspack/webapp/**"
+      - "tobkiri_runtime/ecosystem/search_home_pack/webapp/**"
+      - "tobkiri_runtime/ecosystem/tobkiri_mobile/**"
+      - "tobkiri_runtime/ecosystem/defaultspack/browser_extensions/**"
+      - "tobkiri_runtime/core_runtime/**"
+      - "scripts/quality/audit_frontend_uiux.py"
+      - "scripts/quality/test_audit_frontend_uiux.py"
+      - "scripts/quality/frontend_uiux_*.json"
+      - ".github/workflows/frontend-uiux-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit-test the audit guard
+        working-directory: scripts/quality
+        run: python -m unittest -v test_audit_frontend_uiux.py
+
+      - name: Audit changed frontend lines
+        if: github.event_name == 'pull_request'
+        run: >-
+          python scripts/quality/audit_frontend_uiux.py
+          --diff-from "origin/${{ github.base_ref }}"
+          --fail-on error
+          --json-output frontend-uiux-audit-report.json
+
+      - name: Produce full repository report
+        if: github.event_name == 'workflow_dispatch'
+        run: >-
+          python scripts/quality/audit_frontend_uiux.py
+          --fail-on none
+          --json-output frontend-uiux-audit-report.json
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-uiux-audit-report
+          path: frontend-uiux-audit-report.json
+          if-no-files-found: warn

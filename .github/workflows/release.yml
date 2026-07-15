@@ -12,9 +12,6 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  UV_VERSION: "0.11.14"
-
 jobs:
   build:
     strategy:
@@ -68,7 +65,7 @@ jobs:
           shared-key: release-${{ matrix.target }}
           workspaces: |
             pack-shell -> target
-            rumi_viewer/src-tauri -> target
+            tobkiri_launcher/src-tauri -> target
 
       - name: Install Tauri CLI
         shell: bash
@@ -83,54 +80,46 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
-            rumi_viewer/frontend/package-lock.json
-            rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
+            tobkiri_launcher/frontend/package-lock.json
+            tobkiri_runtime/ecosystem/defaultspack/webapp/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm ci
 
       - name: Install defaultspack frontend dependencies
-        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
         run: npm ci
 
       - name: Run frontend release checks
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: |
           npm test
           npm run lint
           npm run audit
 
       - name: Build panel frontend
-        working-directory: rumi_viewer/frontend
+        working-directory: tobkiri_launcher/frontend
         run: npm run build
-
       - name: Build defaultspack frontend
-        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
         run: npm run build
-
-      - name: Build pack-shell runtime
-        working-directory: pack-shell
-        run: cargo build --locked --release --target ${{ matrix.target }}
-
-      - name: Prepare bundled Rumi runtime
-        run: python .github/scripts/prepare_tauri_resources.py --target ${{ matrix.target }} --uv-version ${{ env.UV_VERSION }} --require-runtime-tools
 
       - name: Run Rust release smoke tests
-        working-directory: rumi_viewer/src-tauri
+        working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
 
       - name: Build with cargo tauri
-        working-directory: rumi_viewer
+        working-directory: tobkiri_launcher
         run: cargo tauri build --target ${{ matrix.target }} --ci
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
           draft: false
           generate_release_notes: true

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tobkiri-runtime"
+version = "1.10.0"
+description = "Tobkiri runtime package"
+requires-python = ">=3.10"
+dependencies = [
+  "cryptography>=42.0.0",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "uv==0.11.14",
+  "pytest>=7.0",
+  "pytest-asyncio>=0.23.0",
+  "ruff>=0.6.0",
+  "mypy>=1.11.0",
+]
+computer-windows = [
+  "Pillow>=10.0",
+  "pywinauto>=0.6.8",
+]
+browser-cdp = [
+  "websocket-client>=1.8.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["app"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core_runtime*", "backend_core*", "rumi_setup*", "tobkiri*", "rumi_ai*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+files = ["core_runtime", "app.py"]

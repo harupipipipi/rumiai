@@ -1,0 +1,1081 @@
+@import "tailwindcss";
+@import "./ui/layers/layers.css";
+@import "./ui/motion/luxeMotion.css";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --font-display: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+body {
+  background-color: #09090b; /* zinc-950 */
+  color: #fafafa; /* zinc-50 */
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Scroll ownership contract:
+   - document/body keep a vertical fallback so missed pane scroll handling does
+     not clip content on short/mobile/keyboard-resized viewports.
+   - .rumi-app-shell fills at least the dynamic viewport without globally
+     clipping overflow.
+   - top-level panes own internal scroll with min-h-0 + overflow-auto/y-auto. */
+.rumi-app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* ----------------------------------
+   Luxe ambient layer
+   A subtle, theme-respecting backdrop that adds depth without competing with content.
+   Honors prefers-reduced-motion and collapses to a flat surface when disabled.
+   ---------------------------------- */
+.rumi-ambient {
+  position: relative;
+  isolation: isolate;
+}
+
+.rumi-ambient::before,
+.rumi-ambient::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.rumi-ambient::before {
+  background:
+    radial-gradient(60% 80% at 8% 0%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(50% 70% at 100% 12%, rgba(16, 185, 129, 0.10), transparent 60%);
+  opacity: 0.85;
+}
+
+.rumi-ambient::after {
+  background:
+    radial-gradient(40% 50% at 50% 100%, rgba(244, 244, 245, 0.05), transparent 60%);
+  opacity: 0.6;
+}
+
+.rumi-ambient-luxe {
+  border: 1px solid rgba(244, 244, 245, 0.06);
+  background:
+    linear-gradient(180deg, rgba(24, 24, 27, 0.78) 0%, rgba(9, 9, 11, 0.86) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 56px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.rumi-ambient-luxe:hover {
+  border-color: rgba(244, 244, 245, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 24px 72px rgba(0, 0, 0, 0.42);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rumi-ambient::before {
+    transition: opacity 480ms cubic-bezier(0.2, 0.82, 0.2, 1);
+  }
+  .rumi-ambient-luxe {
+    transition:
+      border-color 220ms ease,
+      box-shadow 260ms ease;
+  }
+}
+
+/* ----------------------------------
+   Luxe surface primitives
+   Restrained ring + sheen for hero/featured surfaces.
+   ---------------------------------- */
+.rumi-luxe-surface {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid rgba(244, 244, 245, 0.08);
+  background:
+    linear-gradient(180deg, rgba(24, 24, 27, 0.72) 0%, rgba(9, 9, 11, 0.82) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.rumi-luxe-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(244, 244, 245, 0.10) 50%,
+    transparent 100%
+  );
+}
+
+.rumi-luxe-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(244, 244, 245, 0.86);
+  background: rgba(244, 244, 245, 0.06);
+  border: 1px solid rgba(244, 244, 245, 0.10);
+}
+
+.ambient-mini-button {
+  display: inline-flex;
+  min-width: 0;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(63, 63, 70, 0.9);
+  background: rgba(24, 24, 27, 0.72);
+  padding: 0 0.5rem;
+  color: rgba(212, 212, 216, 0.95);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.ambient-mini-button:hover {
+  border-color: rgba(113, 113, 122, 0.95);
+  background: rgba(39, 39, 42, 0.86);
+  color: rgba(244, 244, 245, 1);
+}
+
+.ambient-mini-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rumi-luxe-pill-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* ----------------------------------
+   Luxe interaction states
+   Reusable, additive focus + hover treatments that compose with existing layouts.
+   ---------------------------------- */
+.rumi-luxe-tap {
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.82, 0.2, 1),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.rumi-luxe-tap:hover {
+  transform: translateY(-1px);
+}
+
+.rumi-luxe-tap:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.rumi-focus-ring:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgba(244, 244, 245, 0.18),
+    0 0 0 3px color-mix(in srgb, rgb(99, 102, 241) 38%, transparent);
+  border-radius: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rumi-luxe-tap,
+  .rumi-ambient::before,
+  .rumi-ambient-luxe {
+    transition: none !important;
+  }
+}
+
+.rumi-new-chat-stage {
+  animation: rumi-stage-enter 520ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-new-chat-stage.is-launching {
+  pointer-events: none;
+}
+
+.rumi-new-chat-stage.is-launching .rumi-wordmark {
+  animation: rumi-wordmark-send 360ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-new-chat-stage.is-launching .rumi-composer-new {
+  animation: rumi-composer-send 360ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-wordmark {
+  font-family: var(--font-display);
+  letter-spacing: 0;
+  font-optical-sizing: auto;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 24px 70px rgba(0, 0, 0, 0.55);
+  animation: rumi-wordmark-enter 680ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+}
+
+.rumi-greeting {
+  font-family: var(--font-display);
+  font-feature-settings: "palt";
+  text-wrap: balance;
+}
+
+.rumi-wordmark::selection {
+  background: rgba(244, 244, 245, 0.18);
+}
+
+.rumi-greeting {
+  animation: rumi-greeting-enter 520ms 40ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+  letter-spacing: 0.01em;
+  text-shadow: 0 14px 42px rgba(0, 0, 0, 0.4);
+}
+
+.rumi-history-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 260ms cubic-bezier(0.2, 0.82, 0.2, 1),
+    opacity 200ms ease;
+}
+
+.rumi-history-collapse.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.rumi-history-collapse-inner {
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  transform-origin: 50% 0;
+  transition: transform 260ms cubic-bezier(0.2, 0.82, 0.2, 1);
+}
+
+.rumi-history-collapse.is-collapsed .rumi-history-collapse-inner {
+  transform: translateY(-6px);
+}
+
+.rumi-composer-shell {
+  container-type: inline-size;
+  width: min(620px, calc(100% - 48px));
+  max-width: 620px;
+}
+
+.rumi-composer-shell-new {
+  width: min(620px, calc(100% - 48px));
+  max-width: 620px;
+}
+
+.rumi-composer-frame {
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease;
+}
+
+.rumi-composer-new {
+  animation: rumi-composer-enter 620ms 90ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+}
+
+.rumi-composer-main-panel {
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease;
+}
+
+.rumi-composer-model-dock {
+  filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.32));
+}
+
+.rumi-composer-dock-control {
+  overflow: visible;
+}
+
+.rumi-composer-control-surface {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 10px 30px rgba(0, 0, 0, 0.18);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
+}
+
+.rumi-composer-new:focus-within .rumi-composer-main-panel {
+  border-color: rgba(244, 244, 245, 0.72);
+  background-color: #222224;
+  box-shadow:
+    0 32px 110px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(244, 244, 245, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+@container (max-width: 460px) {
+  .rumi-composer-main-panel {
+    min-height: 46px;
+  }
+
+  .rumi-composer-input-new {
+    min-height: 20px;
+    padding-inline: 0;
+    padding-top: 0;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .rumi-composer-actions {
+    padding-inline: 1rem;
+    padding-bottom: 0.875rem;
+  }
+
+  .rumi-composer-model-dock {
+    display: none;
+  }
+}
+
+.rumi-send-button {
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.rumi-send-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(255, 255, 255, 0.08);
+}
+
+.rumi-send-button:not(:disabled):active {
+  transform: translateY(0) scale(0.96);
+}
+
+.rumi-message-row {
+  animation: rumi-message-enter 280ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-message-row,
+.rumi-message-bubble,
+.rumi-message-content {
+  min-width: 0;
+  max-width: 100%;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.rumi-message-row,
+.rumi-message-bubble {
+  overflow-x: visible;
+}
+
+.rumi-message-content {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.rumi-message-row .markdown-body,
+.rumi-message-row .markdown-body *,
+.rumi-message-row p,
+.rumi-message-row li,
+.rumi-message-row pre,
+.rumi-message-row code {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.rumi-message-row ::selection,
+.rumi-composer-textarea::selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
+}
+
+.rumi-message-row ::-moz-selection,
+.rumi-composer-textarea::-moz-selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
+}
+
+.rumi-message-actions,
+.rumi-message-actions * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rumi-tool-activity,
+.rumi-tool-activity * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rumi-tool-activity {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.rumi-log-card {
+  max-width: 100%;
+  overflow: auto hidden;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(180deg, rgba(39, 39, 42, 0.72), rgba(24, 24, 27, 0.62)),
+    rgba(24, 24, 27, 0.82);
+  color: #d4d4d8;
+}
+
+.rumi-log-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem 0.5rem;
+}
+
+.rumi-log-card-kicker {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f4f4f5;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rumi-log-card-meta {
+  flex: none;
+  border-radius: 999px;
+  background: rgba(82, 82, 91, 0.45);
+  padding: 0.1875rem 0.5rem;
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+}
+
+.rumi-log-card-body {
+  max-height: min(22rem, 46vh);
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: 0.625rem 0.875rem;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.rumi-log-card-footer {
+  padding: 0.5rem 0.875rem 0.75rem;
+  color: #71717a;
+  font-size: 0.6875rem;
+}
+
+.rumi-composer-textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.rumi-composer-fake-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.12em;
+  margin-inline: 0;
+  border-radius: 999px;
+  background: #f4f4f5;
+  vertical-align: -0.16em;
+  animation: rumi-composer-caret-blink 1.05s steps(2, start) infinite;
+}
+
+.rumi-copy-icon-pop {
+  animation: rumi-copy-icon-pop 720ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-activity-loading {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 12px 34px rgba(0, 0, 0, 0.2);
+}
+
+.rumi-loading-bars {
+  position: relative;
+  display: block;
+  width: 1.75rem;
+  height: 0.125rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(113, 113, 122, 0.3);
+}
+
+.rumi-loading-bars span {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  display: block;
+  width: 0.75rem;
+  border-radius: 999px;
+  background: rgba(212, 212, 216, 0.86);
+  animation: rumi-loading-bar 1.25s ease-in-out infinite;
+}
+
+.rumi-tool-activity summary::-webkit-details-marker {
+  display: none;
+}
+
+.rumi-tool-caret {
+  transition: transform 160ms ease;
+}
+
+.rumi-tool-activity[open] > summary .rumi-tool-caret {
+  transform: rotate(180deg);
+}
+
+.rumi-tool-activity-group[open] > summary .rumi-tool-caret {
+  transform: rotate(90deg);
+}
+
+.rumi-tool-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.rumi-workspace-main {
+  --rumi-activity-preview-width: clamp(220px, 34%, 380px);
+}
+
+.rumi-workspace-main.has-activity-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(0, var(--rumi-activity-preview-width));
+  overflow: hidden;
+}
+
+.rumi-chat-pane {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rumi-workspace-main.has-activity-preview .rumi-chat-pane {
+  width: 100%;
+  overflow: hidden;
+}
+
+.rumi-activity-preview-pane {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.rumi-activity-preview-resize-handle {
+  width: 6px;
+  min-width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 1px solid rgba(39, 39, 42, 0.35);
+  border-right: 1px solid rgba(39, 39, 42, 0.35);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.rumi-activity-preview-resize-handle:hover,
+.rumi-activity-preview-resize-handle:active {
+  background: rgba(63, 63, 70, 0.55);
+  border-color: rgba(113, 113, 122, 0.65);
+}
+
+.rumi-activity-preview-pane > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.rumi-image-preview-backdrop {
+  animation: rumi-preview-backdrop-enter 180ms ease-out both;
+}
+
+.rumi-image-preview-shell {
+  animation: rumi-preview-shell-enter 260ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-image-preview-media {
+  animation: rumi-preview-media-enter 320ms 50ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-calendar-popover {
+  pointer-events: none;
+  transform-origin: 18px 18px;
+  animation: rumi-calendar-popover-enter 180ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-calendar-popover button,
+.rumi-calendar-popover input,
+.rumi-calendar-popover textarea,
+.rumi-calendar-popover label,
+.rumi-calendar-popover [role="listbox"],
+.rumi-calendar-popover [role="option"] {
+  pointer-events: auto;
+}
+
+.rumi-history-rail {
+  animation: none;
+}
+
+@keyframes rumi-stage-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rumi-wordmark-enter {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rumi-greeting-enter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes rumi-composer-enter {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+.rumi-structured-panel-enter {
+  animation: rumi-structured-panel-enter 220ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+  transform-origin: bottom left;
+}
+
+@keyframes rumi-structured-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rumi-wordmark-send {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(-18px) scale(0.99);
+  }
+}
+
+@keyframes rumi-composer-send {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.92;
+  }
+}
+
+@keyframes rumi-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rumi-copy-icon-pop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(1px) scale(0.75) rotate(-10deg);
+  }
+  38% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.24) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes rumi-composer-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes rumi-loading-bar {
+  0% {
+    opacity: 0.25;
+    transform: translateX(-0.8rem);
+  }
+  35%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+    transform: translateX(1.85rem);
+  }
+}
+
+@keyframes rumi-preview-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rumi-preview-shell-enter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rumi-preview-media-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rumi-calendar-popover-enter {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    scale: 0.965;
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    scale: 1;
+  }
+}
+
+.rumi-provider-select-popover {
+  animation: rumi-provider-select-enter 160ms ease-out both;
+  transform-origin: left bottom;
+}
+
+@keyframes rumi-provider-select-enter {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(8px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .rumi-greeting {
+    white-space: normal;
+  }
+
+  .rumi-composer-shell,
+  .rumi-composer-shell-new {
+    width: min(100%, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 1180px) {
+  .rumi-workspace-main {
+    --rumi-activity-preview-width: clamp(180px, 32%, 300px);
+  }
+}
+
+@media (max-width: 900px) {
+  .rumi-workspace-main.has-activity-preview {
+    display: flex;
+  }
+
+  .rumi-activity-preview-resize-handle {
+    display: none;
+  }
+
+  .rumi-activity-preview-pane {
+    display: none;
+  }
+}
+
+@keyframes rumi-rail-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rumi-new-chat-stage,
+  .rumi-wordmark,
+  .rumi-greeting,
+  .rumi-composer-new,
+  .rumi-message-row,
+  .rumi-history-rail,
+  .rumi-image-preview-backdrop,
+  .rumi-image-preview-shell,
+  .rumi-image-preview-media,
+  .rumi-calendar-popover,
+  .rumi-provider-select-popover,
+  .rumi-loading-bars span {
+    animation: none;
+  }
+
+  .rumi-composer-frame,
+  .rumi-send-button,
+  .rumi-luxe-tap,
+  .rumi-ambient-luxe,
+  .rumi-ambient::before {
+    transition: none;
+  }
+}
+
+/* Custom scrollbar for a pro-tool look */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a; /* zinc-800 */
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46; /* zinc-700 */
+}
+
+.markdown-body p {
+  margin-bottom: 0.75em;
+  line-height: 1.6;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body pre {
+  max-width: 100%;
+  max-height: min(26rem, 52vh);
+  overflow-x: auto;
+  overflow-y: auto;
+  background:
+    linear-gradient(180deg, rgba(39, 39, 42, 0.86), rgba(24, 24, 27, 0.92)),
+    #18181b !important; /* zinc-900 */
+  border-radius: 0.75rem;
+  padding: 0.875rem;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #d4d4d8;
+}
+.markdown-body code {
+  display: inline;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  background-color: rgba(63, 63, 70, 0.7);
+  padding: 0.08rem 0.32rem;
+  border-radius: 0.32rem;
+  font-size: 0.875em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.markdown-body pre code {
+  display: block;
+  background-color: transparent;
+  padding: 0;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.markdown-body,
+.markdown-body * {
+  min-width: 0;
+  max-width: 100%;
+}
+.markdown-body :where(p, li, blockquote, dd, dt, summary, span, strong, em, a) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.markdown-body :where(table, thead, tbody, tr, th, td) {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.markdown-body table {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
+  margin: 0.75rem 0 1rem;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 0.75rem;
+  background: rgba(24, 24, 27, 0.64);
+}
+.markdown-body th,
+.markdown-body td {
+  padding: 0.55rem 0.7rem;
+  vertical-align: top;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+.markdown-body th {
+  background: rgba(39, 39, 42, 0.9);
+  color: #f4f4f5;
+  font-weight: 650;
+}
+.markdown-body td {
+  color: #d4d4d8;
+}
+.markdown-body tbody tr:nth-child(even) td {
+  background: rgba(39, 39, 42, 0.32);
+}
+
+/* Minimal shell: remove visual frames while preserving content and layout. */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+#root *,
+#root *::before,
+#root *::after {
+  border-width: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+#root :is(input, textarea, select, button):focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+#root :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid rgb(56 189 248 / 85%) !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
+}
+
+.rumi-tool-activity-timeline {
+  position: relative;
+}
+
+.rumi-tool-activity-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: 0.95rem;
+  width: 1px;
+  background: rgba(113, 113, 122, 0.22);
+  pointer-events: none;
+}
+
+.rumi-tool-activity-timeline > * {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rumi-tool-activity .animate-pulse {
+    animation: none;
+  }
+}
