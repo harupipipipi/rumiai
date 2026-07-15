@@ -844,6 +844,76 @@ def test_every_connection_required_program_provider_can_use_a_saved_live_endpoin
     assert all(configured[provider_id]["config"]["custom_openai_compatible"] for provider_id in connection_required_ids)
 
 
+def test_saved_connection_fetches_the_account_visible_models_for_each_connection_placeholder(monkeypatch):
+    """A saved connection, not a checked-in list, is the inventory source.
+
+    These providers do not have a universal public model inventory.  Once a
+    user supplies an OpenAI-compatible gateway URL and credential, the saved
+    endpoint must be the one queried for both discovery and later invocation.
+    """
+    from domain.ai_client import providers
+    from domain.ai_client.provider_program import provider_program_manifests
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    raw_manifests = providers._provider_manifest_map()
+    connection_required_ids = sorted(
+        provider_id
+        for provider_id in provider_program_manifests()
+        if str(raw_manifests[provider_id].get("adapter") or "") == "connection_required"
+    )
+    connections = [
+        {
+            "provider_id": provider_id,
+            "api_id": "main",
+            "name": "main",
+            "configured": True,
+            "kind": "llm",
+            "base_url": f"https://{provider_id}.example/v1",
+            "credential_mode": "api_key",
+        }
+        for provider_id in connection_required_ids
+    ]
+
+    class Response:
+        def __init__(self, provider_id):
+            self._provider_id = provider_id
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return ('{"data":[{"id":"' + self._provider_id + '-visible-model"}]}').encode("utf-8")
+
+    seen = []
+
+    def fake_urlopen(request, **_kwargs):
+        provider_id = request.full_url.removeprefix("https://").split(".example/", 1)[0]
+        seen.append((request.full_url, request.headers.get("Authorization")))
+        return Response(provider_id)
+
+    monkeypatch.setattr(providers, "list_custom_providers", lambda: [])
+    monkeypatch.setattr(providers, "provider_named_api_keys", lambda *_args, **_kwargs: connections)
+    monkeypatch.setattr(providers, "read_provider_api_key", lambda provider_id, *_args: f"{provider_id}-token")
+    monkeypatch.setattr("domain.ai_client.providers.openai_compatible_provider.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_load_remote_model_cache", lambda _self: None)
+    monkeypatch.setattr(OpenAICompatibleProvider, "_save_remote_model_cache", lambda *_args, **_kwargs: None)
+
+    configured = providers._provider_manifest_map()
+    for provider_id in connection_required_ids:
+        provider = providers._instantiate_manifest_provider(configured[provider_id])
+        assert provider is not None
+        models = provider.list_models()
+        assert [model["model_id"] for model in models] == [f"{provider_id}-visible-model"]
+
+    assert seen == [
+        (f"https://{provider_id}.example/v1/models", f"Bearer {provider_id}-token")
+        for provider_id in connection_required_ids
+    ]
+
+
 def test_anthropic_models_endpoint_paginates_and_replaces_its_static_fallback(monkeypatch):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.anthropic_provider import AnthropicProvider
