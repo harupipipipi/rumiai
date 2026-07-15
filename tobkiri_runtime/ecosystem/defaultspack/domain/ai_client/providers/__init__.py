@@ -975,6 +975,10 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
         "voyage-ai",
         {"id":"voyage-ai","display_name":"Voyage AI","adapter":"native","entrypoint":"domain.ai_client.providers.voyage_ai_provider:VoyageAIProvider","api_key_env":["VOYAGE_API_KEY"],"base_url_env":["VOYAGE_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","inventory_strategy":"official_model_document"}},
     )
+    manifests.setdefault(
+        "genspark",
+        {"id":"genspark","display_name":"Genspark","adapter":"native","entrypoint":"domain.ai_client.providers.genspark_provider:GensparkProvider","api_key_env":["GENSPARK_API_KEY"],"base_url_env":["GENSPARK_LLM_BASE_URL"],"credential_required":True,"catalog_only":False,"supports_invoke":True,"models":[],"config":{"model_sync":"remote_merge","model_list_path":"/models","inventory_strategy":"account_models_endpoint"}},
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

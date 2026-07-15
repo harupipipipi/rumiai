@@ -474,6 +474,27 @@ def test_voyage_derives_embedding_models_from_its_official_current_model_table(m
     assert all(model["type"] == "embedding" for model in models)
 
 
+def test_genspark_exposes_its_account_models_endpoint_without_a_static_catalog(monkeypatch):
+    from domain.ai_client.providers import _instantiate_manifest_provider, _provider_manifest_map
+    from domain.ai_client.providers import genspark_provider
+    monkeypatch.setenv("GENSPARK_API_KEY", "genspark-key")
+    manifest = _provider_manifest_map()["genspark"]
+    provider = _instantiate_manifest_provider(manifest)
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return b'{"data":[{"id":"account-live-model"}]}'
+    seen = {}
+    def fake_urlopen(request, **_kwargs):
+        seen["url"] = request.full_url; seen["authorization"] = request.headers.get("Authorization")
+        return Response()
+    monkeypatch.setattr(genspark_provider.urllib.request, "urlopen", fake_urlopen)
+    models = provider.list_models()
+    assert manifest["models"] == []
+    assert seen == {"url": "https://www.genspark.ai/api/llm_proxy/v1/models", "authorization": "Bearer genspark-key"}
+    assert [model["model_id"] for model in models] == ["account-live-model"]
+
+
 def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypatch):
     import json
 

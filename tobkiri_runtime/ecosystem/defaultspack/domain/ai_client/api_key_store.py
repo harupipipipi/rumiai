@@ -41,6 +41,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "jina-ai": ["JINA_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
     "gitlawb-opengateway": ["GITLAWB_OPENGATEWAY_API_KEY"],
+    "genspark": ["GENSPARK_API_KEY"],
     "llama_cpp": ["LLAMACPP_API_KEY"],
     "litellm-proxy": ["LITELLM_API_KEY"],
     "lmstudio": ["LMSTUDIO_API_KEY"],
