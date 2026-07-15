@@ -852,6 +852,27 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
             },
         },
     )
+    manifests.setdefault(
+        "aws-bedrock",
+        {
+            "id": "aws-bedrock",
+            "display_name": "Amazon Bedrock",
+            "adapter": "native",
+            "entrypoint": "domain.ai_client.providers.aws_bedrock_provider:AwsBedrockProvider",
+            "api_key_env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+            "base_url_env": ["AWS_REGION", "AWS_DEFAULT_REGION"],
+            "credential_required": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "models": [],
+            "config": {
+                "model_sync": "remote_merge",
+                "model_list_path": "/foundation-models",
+                "inventory_strategy": "regional_control_plane",
+                "api_family": "bedrock_converse",
+            },
+        },
+    )
     # The provider program supplies identity and inventory strategy for every
     # required provider, but never a hand-maintained model list.  Dedicated
     # component manifests above remain authoritative when present.

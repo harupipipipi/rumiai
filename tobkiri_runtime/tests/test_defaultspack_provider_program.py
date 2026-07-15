@@ -1073,6 +1073,59 @@ def test_azure_ai_foundry_uses_saved_project_connection_for_live_deployments(mon
     assert "/deployments/embed-prod/embeddings?api-version=2024-10-21" in seen[2][1]
 
 
+def test_aws_bedrock_lists_the_live_regional_inventory_and_uses_converse(monkeypatch):
+    from domain.ai_client.providers.aws_bedrock_provider import AwsBedrockProvider
+
+    AwsBedrockProvider._MODEL_INVENTORY_CACHE.clear()
+    monkeypatch.setattr(
+        "domain.ai_client.providers.aws_bedrock_provider.provider_named_api_keys",
+        lambda *_args, **_kwargs: [{"provider_id": "aws-bedrock", "api_id": "prod", "configured": True, "base_url": "us-west-2"}],
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.providers.aws_bedrock_provider.read_provider_api_key",
+        lambda *_args, **_kwargs: "AKIATEST:secret-test:session-test",
+    )
+    seen = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            import json
+
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, **_kwargs):
+        seen.append((request.get_method(), request.full_url, request.headers.get("Authorization"), request.headers.get("X-amz-security-token")))
+        if request.get_method() == "GET":
+            return Response({"modelSummaries": [
+                {"modelId": "amazon.nova-pro-v1:0", "modelName": "Nova Pro", "inputModalities": ["TEXT", "IMAGE"], "outputModalities": ["TEXT"], "responseStreamingSupported": True},
+                {"modelId": "amazon.titan-embed-text-v2:0", "modelName": "Titan Embed", "inputModalities": ["TEXT"], "outputModalities": ["EMBEDDING"]},
+            ]})
+        return Response({"output": {"message": {"content": [{"text": "bedrock reply"}]}}, "stopReason": "end_turn", "usage": {"inputTokens": 2, "outputTokens": 3, "totalTokens": 5}})
+
+    monkeypatch.setattr("domain.ai_client.providers.aws_bedrock_provider.urllib.request.urlopen", fake_urlopen)
+    provider = AwsBedrockProvider()
+    models = provider.list_models()
+    answer = provider.complete("aws-bedrock/amazon.nova-pro-v1:0", [{"role": "user", "content": "Hi"}], [], {"temperature": 0.2})
+
+    assert [model["model_id"] for model in models] == ["amazon.nova-pro-v1:0", "amazon.titan-embed-text-v2:0"]
+    assert [model["type"] for model in models] == ["chat", "embedding"]
+    assert answer["content"] == [{"type": "text", "text": "bedrock reply"}]
+    assert answer["usage"]["total_tokens"] == 5
+    assert seen[0][0:2] == ("GET", "https://bedrock.us-west-2.amazonaws.com/foundation-models")
+    assert seen[1][0:2] == ("POST", "https://bedrock-runtime.us-west-2.amazonaws.com/model/amazon.nova-pro-v1%3A0/converse")
+    assert all(str(item[2]).startswith("AWS4-HMAC-SHA256 Credential=AKIATEST/") for item in seen)
+    assert all(item[3] == "session-test" for item in seen)
+
+
 def test_replicate_uses_paginated_live_models_and_runs_the_latest_live_version(monkeypatch):
     from domain.ai_client.providers.replicate_provider import ReplicateProvider
 
