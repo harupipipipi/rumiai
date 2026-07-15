@@ -536,8 +536,9 @@
         ], "error");
         return;
       }
-      const refreshed = await load({ preserveStatus: true, redirect: false });
-      if (!refreshed) return;
+      // Installing the selected packs completes initial setup.  Setup APIs are
+      // deliberately no longer available without authentication at that point,
+      // so do not immediately issue an unauthenticated refresh request here.
       setInstallProgress("success");
       const migrationCount = Object.keys(data.migrations || {}).length;
       setStatus("Setup packs installed", { setup_pack_ids: selected, result: data }, [
@@ -641,7 +642,7 @@
         input.setAttribute("aria-label", "Include " + (pack.display_name || pack.pack_id || "pack"));
         const riskClass = pack.risk_level === "high" ? "danger" : "";
         const allOkText = pack.supports_all_ok
-          ? "Supports selective all OK grants"
+          ? "Supports selective all OK grants. For safety, all OK permissions are granted only to setup packs that explicitly support all OK."
           : "Installs without all OK grants";
         const header = document.createElement("header");
         const packDetails = document.createElement("div");

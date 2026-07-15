@@ -1,6 +1,7 @@
 {
-  "name": "run_migration",
+  "function_id": "run_migration",
   "description": "Run defaultspack-owned migration for legacy defaults and user data.",
+  "requires": [],
   "entrypoint": "main.py:run",
   "tags": ["defaultspack", "migration"],
   "vocab_aliases": ["defaultspack.run_migration"]
