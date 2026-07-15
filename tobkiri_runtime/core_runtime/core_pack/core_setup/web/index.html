@@ -536,8 +536,9 @@
         ], "error");
         return;
       }
-      const refreshed = await load({ preserveStatus: true, redirect: false });
-      if (!refreshed) return;
+      // Installing the selected packs completes initial setup.  Setup APIs are
+      // deliberately no longer available without authentication at that point,
+      // so do not immediately issue an unauthenticated refresh request here.
       setInstallProgress("success");
       const migrationCount = Object.keys(data.migrations || {}).length;
       setStatus("Setup packs installed", { setup_pack_ids: selected, result: data }, [
