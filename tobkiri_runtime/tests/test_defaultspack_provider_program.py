@@ -959,7 +959,10 @@ def test_saved_connection_fetches_the_account_visible_models_for_every_connectio
     connection_backed_ids = sorted(
         provider_id
         for provider_id in provider_program_manifests()
-        if str(raw_manifests[provider_id].get("adapter") or "") in {"connection_required", "catalog_only"}
+        if (
+            str(raw_manifests[provider_id].get("adapter") or "") in {"connection_required", "catalog_only"}
+            or provider_id == "openai_compatible"
+        )
     )
     connections = [
         {
