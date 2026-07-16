@@ -1,4 +1,5 @@
 from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+from domain.ai_client.providers.vercel_ai_gateway_provider import VercelAIGatewayProvider
 
 
 def _chat(provider, model_id, name):
@@ -288,3 +289,7 @@ for _spec in _OPENAI_COMPATIBLE_PROVIDERS:
     OPENAI_COMPATIBLE_PROVIDER_SPECS[_spec["provider_name"]] = dict(_spec)
     OPENAI_COMPATIBLE_PROVIDER_CLASSES[_spec["provider_name"]] = _provider_cls
     globals()[_class_name] = _provider_cls
+
+# Vercel has public inventory and gateway-specific request semantics, so it
+# must not silently fall back to the generic OpenAI-compatible adapter.
+OPENAI_COMPATIBLE_PROVIDER_CLASSES["vercel-ai-gateway"] = VercelAIGatewayProvider

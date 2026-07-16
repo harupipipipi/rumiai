@@ -4446,7 +4446,15 @@ export function SettingsModalRenderer({
                         {t(locale, "settings.noFields")}
                       </div>
                     )}
-                    {!normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                    {!normalizedSearch && settingsSections.length === 0 && (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                        {localizedCopy(
+                          "Loading built-in settings and provider information…",
+                          "組み込み設定とProvider情報を読み込んでいます…",
+                        )}
+                      </div>
+                    )}
+                    {!normalizedSearch && settingsSections.length > 0 && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
                         {localizedCopy(
                           "Pack or provider contributions for this section will appear here after registry validation.",

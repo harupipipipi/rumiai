@@ -3140,6 +3140,16 @@ function ChatApp() {
   useEffect(() => {
     if (!isSettingsOpen) return;
     let cancelled = false;
+    // The bootstrap response deliberately omits dynamic provider metadata.  Fetch
+    // the full registry when Settings opens so built-in Provider/API controls do
+    // not look like empty extension slots while the shell is still settling.
+    void api.uiSettings({ full: true })
+      .then((settings) => {
+        if (cancelled) return;
+        setSettingsSections(settings.sections);
+        setSettingsValues(withCalendarSettingsValues(settings.values));
+      })
+      .catch((settingsError) => console.error(settingsError));
     void fetchDesktopSystemInfo()
       .then((info) => {
         if (!cancelled) setDesktopSystemInfo(info);
