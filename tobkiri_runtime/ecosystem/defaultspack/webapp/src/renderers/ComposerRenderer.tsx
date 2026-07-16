@@ -87,6 +87,7 @@ import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge"
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { StructuredComposerPanel } from "../components/StructuredComposerPanel";
+import { StatusSurfaceHost } from "./status/StatusSurfaceHost";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import {
@@ -2639,6 +2640,7 @@ export function ComposerRenderer({
   steerBusy = false,
   steerQueuedCount = 0,
   steerPreviewItems = [],
+  statusSurfaces = [],
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
@@ -2661,6 +2663,7 @@ export function ComposerRenderer({
   onSubmit,
   onStopGenerating,
   onSteerSubmit,
+  onStatusSurfaceAction,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -4517,6 +4520,18 @@ export function ComposerRenderer({
                 </button>
               )}
             </div>
+          )}
+
+          {!isNewConversation && statusSurfaces.length > 0 && (
+            <StatusSurfaceHost
+              surfaces={statusSurfaces}
+              slot="above_composer"
+              modelOptions={modelProfiles.map((profile) => ({
+                value: profile.profile_id,
+                label: profile.display_name || profile.profile_id,
+              }))}
+              onAction={onStatusSurfaceAction}
+            />
           )}
 
           {!isNewConversation && visibleSteerPreviewItems.length > 0 && (

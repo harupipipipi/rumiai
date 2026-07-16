@@ -1,6 +1,7 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, PromptUsageSummary, SettingsSection, SidebarAction, SidebarItem, TemplateComposerInput, ToolLogEntry, ToolTarget, UICatalog } from "../lib/api";
+import type { ResolvedStatusSurface, StatusSurfaceActionRequest } from "../lib/statusSurfaces";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
@@ -216,6 +217,7 @@ export type ComposerRendererProps = {
   steerBusy?: boolean;
   steerQueuedCount?: number;
   steerPreviewItems?: ConversationSteerItem[];
+  statusSurfaces?: ResolvedStatusSurface[];
   suppressPopovers?: boolean;
   onOpenModelManager?: () => void;
   onOpenToolSettings?: () => void;
@@ -238,6 +240,7 @@ export type ComposerRendererProps = {
   onSubmit: (event: FormEvent) => void;
   onStopGenerating?: () => void;
   onSteerSubmit?: (prompt: string) => void;
+  onStatusSurfaceAction?: (request: StatusSurfaceActionRequest) => Promise<unknown> | unknown;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
