@@ -26,6 +26,11 @@ _ROUTE_MAP = [
     ("POST", "/api/agent/{id}/approve", "blocks.agent.approve_step"),
     ("POST", "/api/agent/{id}/reject", "blocks.agent.reject_step"),
     ("POST", "/api/agent/{id}/cancel", "blocks.agent.cancel_execution"),
+    (
+        "POST",
+        "/api/agent/{id}/completion-gate/resume",
+        "blocks.agent.resume_completion_gate",
+    ),
     ("GET", "/api/agent/{id}/status", "blocks.agent.get_status"),
     ("GET", "/api/health", None),
     ("GET", "/api/context", None),
@@ -40,6 +45,7 @@ _ID_INJECT_MAP = {
     "/api/agent/{id}/approve": ("execution_id", "id"),
     "/api/agent/{id}/reject": ("execution_id", "id"),
     "/api/agent/{id}/cancel": ("execution_id", "id"),
+    "/api/agent/{id}/completion-gate/resume": ("execution_id", "id"),
     "/api/agent/{id}/status": ("execution_id", "id"),
 }
 

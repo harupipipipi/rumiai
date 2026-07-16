@@ -18,7 +18,14 @@ def run(input_data, context):
         context["runtime_profile_key"] = input_data["runtime_profile_key"]
     if isinstance(input_data.get("capability_profile"), dict):
         context["capability_profile"] = input_data["capability_profile"]
-    for key in ("required_capabilities", "attachments", "target", "delivery"):
+    for key in (
+        "required_capabilities",
+        "attachments",
+        "target",
+        "delivery",
+        "completion_gates",
+        "completion_gate_policy",
+    ):
         if key in input_data and input_data.get(key) not in (None, "", []):
             context[key] = input_data.get(key)
     if isinstance(input_data.get("params"), dict):

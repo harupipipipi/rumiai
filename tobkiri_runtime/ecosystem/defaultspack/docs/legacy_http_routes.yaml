@@ -694,6 +694,13 @@ legacy_routes:
   owner: agent
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/agent/{id}/completion-gate/resume
+  legacy_block_module: blocks.agent.resume_completion_gate
+  replacement_function_id: ''
+  owner: agent
+  reason: durable completion-gate recovery route
+  remove_after: v2.4
 - method: GET
   pattern: /api/agent/company/manifest
   legacy_block_module: ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest

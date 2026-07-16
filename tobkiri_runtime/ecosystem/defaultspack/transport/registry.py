@@ -1109,6 +1109,12 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         path_inject={"id": "execution_id"},
     ),
     HttpRouteSpec(
+        "POST",
+        "/api/agent/{id}/completion-gate/resume",
+        block_module="blocks.agent.resume_completion_gate",
+        path_inject={"id": "execution_id"},
+    ),
+    HttpRouteSpec(
         "GET",
         "/api/agent/company/manifest",
         block_module="ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest",
