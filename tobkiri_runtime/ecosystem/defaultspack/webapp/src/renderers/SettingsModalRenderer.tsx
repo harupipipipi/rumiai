@@ -37,6 +37,7 @@ import {
   type SettingsFieldRendererProps,
 } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import { defaultFrontendComponentRegistry } from "./components/builtinFrontendComponents";
 
 const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
   ...builtinSettingsFieldRendererEntries,
@@ -3676,6 +3677,7 @@ export function SettingsModalRenderer({
       )}
       <SettingsFieldRendererHost
         registry={settingsModalFieldRendererRegistry}
+        frontendComponentRegistry={defaultFrontendComponentRegistry}
         componentBindings={catalog?.component_bindings ?? []}
         fallbackRenderer={SettingsFieldFallback}
         sectionId={field.sourceSectionId}

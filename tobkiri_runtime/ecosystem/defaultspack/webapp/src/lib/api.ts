@@ -1951,6 +1951,17 @@ export type UICatalog = {
   component_bindings?: Array<{
     part_id: string;
     component: string;
+    component_id?: string;
+    api_version?: string;
+    slot?: string;
+    props?: Record<string, unknown>;
+    data?: Record<string, unknown>;
+    actions?: Record<string, { actionId: string; payload?: Record<string, unknown> }>;
+    data_source_ids?: string[];
+    fallback_component_id?: string;
+    template_id?: string;
+    source_pack_id?: string;
+    trust_level?: string;
     requires?: string[];
     optional?: string[];
   }>;
