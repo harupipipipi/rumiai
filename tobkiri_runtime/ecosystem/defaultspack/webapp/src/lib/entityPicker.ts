@@ -1,0 +1,437 @@
+import type { TemplateCatalogMetadataItem, UICatalog } from "./api";
+
+export const ENTITY_PICKER_API_VERSION = "rumi.entity_picker.v1";
+
+export type EntityPickerSelectionMode = "single" | "multi";
+export type EntityPickerPresentation = "popup" | "palette" | "inline" | "settings" | "status_surface";
+export type EntityPickerValueScope = "draft" | "conversation" | "run" | "settings" | "workspace" | "global";
+
+export type EntityPickerDiagnostic = {
+  code: string;
+  message: string;
+  pickerId: string;
+  path?: string;
+  templateId?: string;
+  sourcePackId?: string;
+  trustLevel?: string;
+};
+
+export type EntityPickerItem = {
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  group?: string;
+  badges: string[];
+  disabled: boolean;
+  disabledReason?: string;
+  favorite: boolean;
+  recent: boolean;
+  fixed?: boolean;
+  create?: boolean;
+};
+
+export type ResolvedEntityPicker = {
+  id: string;
+  apiVersion: typeof ENTITY_PICKER_API_VERSION;
+  label: string;
+  description?: string;
+  triggerCommand?: string;
+  presentation: EntityPickerPresentation;
+  selectionMode: EntityPickerSelectionMode;
+  valueScope: EntityPickerValueScope;
+  searchable: boolean;
+  placeholder: string;
+  dataSourceId: string;
+  remote: boolean;
+  loadActionId?: string;
+  selectActionId?: string;
+  createActionId?: string;
+  sourceRevision?: string;
+  nextCursor?: string;
+  items: EntityPickerItem[];
+  selectedIds: string[];
+  itemPaths: EntityPickerItemPaths;
+  maxItems: number;
+  templateId?: string;
+  sourcePackId?: string;
+  trustLevel?: string;
+  diagnostics: EntityPickerDiagnostic[];
+  unsupported: boolean;
+};
+
+export type EntityPickerItemPaths = {
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  group?: string;
+  badges?: string;
+  disabled?: string;
+  disabledReason?: string;
+  favorite?: string;
+  recent?: string;
+};
+
+export type EntityPickerSelectionRequest = {
+  pickerId: string;
+  selectedIds: string[];
+  actionId?: string;
+  valueScope: EntityPickerValueScope;
+  dataSourceId: string;
+  sourceRevision?: string;
+  query?: string;
+};
+
+export type EntityPickerPageRequest = {
+  pickerId: string;
+  actionId?: string;
+  query: string;
+  cursor?: string;
+  dataSourceId: string;
+  sourceRevision?: string;
+};
+
+export type EntityPickerPage = {
+  items: EntityPickerItem[];
+  nextCursor?: string;
+  sourceRevision?: string;
+};
+
+type JsonRecord = Record<string, unknown>;
+
+const VALID_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const VALID_COMMAND = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+const PATH_SEGMENT = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+const BLOCKED_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+const PRESENTATIONS = new Set<EntityPickerPresentation>(["popup", "palette", "inline", "settings", "status_surface"]);
+const SCOPES = new Set<EntityPickerValueScope>(["draft", "conversation", "run", "settings", "workspace", "global"]);
+const MAX_TEXT = 500;
+
+function record(value: unknown): JsonRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
+}
+
+function text(value: unknown, max = MAX_TEXT): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const normalized = String(value).trim();
+  return normalized ? normalized.slice(0, max) : undefined;
+}
+
+function safeId(value: unknown): string | undefined {
+  const valueText = text(value, 128);
+  return valueText && VALID_ID.test(valueText) ? valueText : undefined;
+}
+
+function safePath(value: unknown): string | undefined {
+  const valueText = text(value, 256);
+  if (!valueText) return undefined;
+  const parts = valueText.split(".");
+  return parts.length <= 12 && parts.every((part) => PATH_SEGMENT.test(part) && !BLOCKED_SEGMENTS.has(part))
+    ? valueText
+    : undefined;
+}
+
+function bool(value: unknown): boolean {
+  return value === true || value === 1 || value === "true";
+}
+
+function integer(value: unknown, fallback: number, max: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+export function readEntityPickerPath(source: unknown, path: string | undefined): unknown {
+  const normalizedPath = safePath(path);
+  if (!normalizedPath) return undefined;
+  let current: unknown = source;
+  for (const segment of normalizedPath.split(".")) {
+    const currentRecord = record(current);
+    if (!currentRecord || !Object.prototype.hasOwnProperty.call(currentRecord, segment)) return undefined;
+    current = currentRecord[segment];
+  }
+  return current;
+}
+
+function stringList(value: unknown, limit = 20): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.slice(0, limit).map((item) => text(item, 120)).filter((item): item is string => Boolean(item)))];
+}
+
+function identity(item: TemplateCatalogMetadataItem, ...keys: string[]): string[] {
+  return keys.map((key) => safeId(item[key])).filter((item): item is string => Boolean(item));
+}
+
+function executableActionIds(catalog: UICatalog | null | undefined): Set<string> {
+  const result = new Set<string>();
+  for (const command of catalog?.commands ?? []) {
+    if (!record(command.execution)) continue;
+    identity(command, "id", "name", "command_id").forEach((id) => result.add(id));
+  }
+  for (const action of catalog?.actions ?? []) {
+    const nested = record(action.command);
+    if (!record(action.execution) && !record(nested?.execution)) continue;
+    identity(action, "action_id", "id", "command_id", "name").forEach((id) => result.add(id));
+    if (nested) identity(nested, "action_id", "id", "command_id", "name").forEach((id) => result.add(id));
+  }
+  return result;
+}
+
+function sourceMap(catalog: UICatalog | null | undefined): Map<string, TemplateCatalogMetadataItem> {
+  const result = new Map<string, TemplateCatalogMetadataItem>();
+  for (const source of catalog?.data_sources ?? []) {
+    for (const id of identity(source, "data_source", "source", "id")) {
+      if (!result.has(id)) result.set(id, source);
+    }
+  }
+  return result;
+}
+
+function provenance(raw: TemplateCatalogMetadataItem) {
+  return {
+    templateId: text(raw.template_id, 160),
+    sourcePackId: text(raw.source_pack_id ?? record(raw.origin)?.pack_id, 160),
+    trustLevel: text(raw.trust_level, 40),
+  };
+}
+
+function diagnostic(raw: TemplateCatalogMetadataItem, pickerId: string, code: string, message: string, path?: string): EntityPickerDiagnostic {
+  return { pickerId, code, message, ...(path ? { path } : {}), ...provenance(raw) };
+}
+
+function payload(raw: TemplateCatalogMetadataItem): JsonRecord {
+  return record(raw.picker) ?? raw;
+}
+
+function itemPaths(config: JsonRecord, diagnostics: EntityPickerDiagnostic[], raw: TemplateCatalogMetadataItem, pickerId: string): EntityPickerItemPaths {
+  const required = {
+    id: config.id_path ?? "id",
+    label: config.label_path ?? "label",
+  };
+  const optional: Record<string, unknown> = {
+    description: config.description_path,
+    icon: config.icon_path,
+    group: config.group_by_path ?? config.group_path,
+    badges: config.badges_path,
+    disabled: config.disabled_path,
+    disabledReason: config.disabled_reason_path,
+    favorite: config.favorite_path,
+    recent: config.recent_path,
+  };
+  const result: EntityPickerItemPaths = { id: "id", label: "label" };
+  for (const [key, value] of Object.entries({ ...required, ...optional })) {
+    if (value === undefined) continue;
+    const normalized = safePath(value);
+    if (!normalized) {
+      diagnostics.push(diagnostic(raw, pickerId, "entity_picker.invalid_path", `invalid item path: ${key}`, `${key}_path`));
+      continue;
+    }
+    (result as unknown as JsonRecord)[key] = normalized;
+  }
+  return result;
+}
+
+function normalizeOneItem(candidate: unknown, paths: EntityPickerItemPaths): EntityPickerItem | null {
+  const item = record(candidate);
+  if (!item) return null;
+  const id = safeId(readEntityPickerPath(item, paths.id));
+  const label = text(readEntityPickerPath(item, paths.label), 200);
+  if (!id || !label) return null;
+  return {
+    id,
+    label,
+    description: text(readEntityPickerPath(item, paths.description)),
+    icon: safeId(readEntityPickerPath(item, paths.icon)),
+    group: text(readEntityPickerPath(item, paths.group), 120),
+    badges: stringList(readEntityPickerPath(item, paths.badges), 8),
+    disabled: bool(readEntityPickerPath(item, paths.disabled)),
+    disabledReason: text(readEntityPickerPath(item, paths.disabledReason), 240),
+    favorite: bool(readEntityPickerPath(item, paths.favorite)),
+    recent: bool(readEntityPickerPath(item, paths.recent)),
+  };
+}
+
+export function normalizeEntityPickerItems(
+  picker: Pick<ResolvedEntityPicker, "itemPaths" | "maxItems">,
+  rawItems: unknown,
+): EntityPickerItem[] {
+  if (!Array.isArray(rawItems)) return [];
+  const seen = new Set<string>();
+  return rawItems.slice(0, picker.maxItems).flatMap((candidate) => {
+    const item = normalizeOneItem(candidate, picker.itemPaths);
+    if (!item || seen.has(item.id)) return [];
+    seen.add(item.id);
+    return [item];
+  });
+}
+
+function fixedItems(config: JsonRecord): EntityPickerItem[] {
+  const raw = Array.isArray(config.fixed_entries) ? config.fixed_entries : [];
+  return raw.slice(0, 20).flatMap((candidate) => {
+    const item = typeof candidate === "string" ? { id: candidate, label: candidate } : record(candidate);
+    if (!item) return [];
+    const id = safeId(item.id ?? item.value);
+    const label = text(item.label ?? id, 200);
+    if (!id || !label) return [];
+    return [{ id, label, description: text(item.description), badges: [], disabled: bool(item.disabled), disabledReason: text(item.disabled_reason, 240), favorite: false, recent: false, fixed: true }];
+  });
+}
+
+function createItem(config: JsonRecord): EntityPickerItem | null {
+  const create = record(config.create_item);
+  if (!create) return null;
+  return {
+    id: "__create__",
+    label: text(create.label, 200) ?? "Create new",
+    description: text(create.description),
+    icon: safeId(create.icon),
+    badges: [],
+    disabled: false,
+    favorite: false,
+    recent: false,
+    fixed: true,
+    create: true,
+  };
+}
+
+function sourceItems(source: TemplateCatalogMetadataItem | undefined): unknown {
+  if (!source) return [];
+  const snapshot = record(source.snapshot) ?? record(source.data) ?? record(source.value) ?? source;
+  return snapshot.items ?? snapshot.results ?? [];
+}
+
+function unsupportedPicker(raw: TemplateCatalogMetadataItem, id: string, diagnostics: EntityPickerDiagnostic[]): ResolvedEntityPicker {
+  return {
+    id,
+    apiVersion: ENTITY_PICKER_API_VERSION,
+    label: "Unsupported entity picker",
+    description: diagnostics[0]?.message,
+    presentation: "popup",
+    selectionMode: "single",
+    valueScope: "draft",
+    searchable: false,
+    placeholder: "Unavailable",
+    dataSourceId: "unsupported",
+    remote: false,
+    items: [],
+    selectedIds: [],
+    itemPaths: { id: "id", label: "label" },
+    maxItems: 100,
+    ...provenance(raw),
+    diagnostics,
+    unsupported: true,
+  };
+}
+
+function resolveOne(raw: TemplateCatalogMetadataItem, sources: Map<string, TemplateCatalogMetadataItem>, actions: Set<string>): ResolvedEntityPicker {
+  const config = payload(raw);
+  const id = safeId(config.picker_id ?? config.id ?? raw.id) ?? `invalid_${text(raw.piece_id, 60) ?? "picker"}`;
+  const diagnostics: EntityPickerDiagnostic[] = [];
+  const version = text(config.api_version, 80) ?? ENTITY_PICKER_API_VERSION;
+  if (version !== ENTITY_PICKER_API_VERSION) diagnostics.push(diagnostic(raw, id, "entity_picker.incompatible_version", `unsupported API version: ${version}`, "api_version"));
+  if (!safeId(config.picker_id ?? config.id ?? raw.id)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_id", "picker ID must be an opaque ID", "id"));
+  const dataSourceId = safeId(config.data_source);
+  if (!dataSourceId) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_data_source", "data_source must be an opaque registered ID", "data_source"));
+  const source = dataSourceId ? sources.get(dataSourceId) : undefined;
+  if (dataSourceId && !source) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_data_source", `unregistered data source: ${dataSourceId}`, "data_source"));
+  const paths = itemPaths(config, diagnostics, raw, id);
+  const scopeText = text(config.value_scope, 40) as EntityPickerValueScope | undefined;
+  const valueScope = scopeText && SCOPES.has(scopeText) ? scopeText : "draft";
+  if (scopeText && !SCOPES.has(scopeText)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_scope", `unsupported value scope: ${scopeText}`, "value_scope"));
+  const selectActionId = safeId(config.on_select_action_id);
+  if (valueScope !== "draft" && (!selectActionId || !actions.has(selectActionId))) {
+    diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "persistent selection requires a registered executable action", "on_select_action_id"));
+  } else if (selectActionId && !actions.has(selectActionId)) {
+    diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", `unregistered select action: ${selectActionId}`, "on_select_action_id"));
+  }
+  const create = record(config.create_item);
+  const createActionId = safeId(create?.action_id);
+  if (create && (!createActionId || !actions.has(createActionId))) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "create item requires a registered executable action", "create_item.action_id"));
+  const loadActionId = safeId(config.load_action_id ?? source?.load_action_id);
+  const remote = bool(config.remote) || bool(source?.remote);
+  if (loadActionId && !actions.has(loadActionId)) {
+    diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "load action must be registered", "load_action_id"));
+  }
+  const trigger = text(config.trigger_command, 48)?.replace(/^\/+/, "").toLowerCase();
+  if (trigger && !VALID_COMMAND.test(trigger)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_trigger", "trigger command is invalid", "trigger_command"));
+  if (diagnostics.length) return unsupportedPicker(raw, id, diagnostics);
+
+  const maxItems = integer(config.max_items ?? source?.max_items, 200, 500);
+  const partial: ResolvedEntityPicker = {
+    id,
+    apiVersion: ENTITY_PICKER_API_VERSION,
+    label: text(config.label ?? config.title, 200) ?? id,
+    description: text(config.description),
+    triggerCommand: trigger,
+    presentation: PRESENTATIONS.has(config.presentation as EntityPickerPresentation) ? config.presentation as EntityPickerPresentation : "popup",
+    selectionMode: config.selection_mode === "multi" ? "multi" : "single",
+    valueScope,
+    searchable: config.searchable !== false,
+    placeholder: text(config.placeholder, 200) ?? "Search items",
+    dataSourceId: dataSourceId!,
+    remote,
+    loadActionId,
+    selectActionId,
+    createActionId,
+    sourceRevision: text(source?.revision ?? record(source?.snapshot)?.revision, 160),
+    nextCursor: text(source?.next_cursor ?? record(source?.snapshot)?.next_cursor, 200),
+    items: [],
+    selectedIds: stringList(config.selected_ids, 100).filter((item) => VALID_ID.test(item)),
+    itemPaths: paths,
+    maxItems,
+    ...provenance(raw),
+    diagnostics: [],
+    unsupported: false,
+  };
+  const normalized = normalizeEntityPickerItems(partial, sourceItems(source));
+  const createEntry = createItem(config);
+  const combined = [...(createEntry ? [createEntry] : []), ...fixedItems(config), ...normalized];
+  const seen = new Set<string>();
+  partial.items = combined.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+  return partial;
+}
+
+export function resolveEntityPickers(catalog: UICatalog | null | undefined): ResolvedEntityPicker[] {
+  const sources = sourceMap(catalog);
+  const actions = executableActionIds(catalog);
+  const seen = new Set<string>();
+  return (catalog?.entity_pickers ?? [])
+    .filter((item) => item.enabled !== false)
+    .map((item) => resolveOne(item, sources, actions))
+    .filter((picker) => {
+      if (seen.has(picker.id)) return false;
+      seen.add(picker.id);
+      return true;
+    });
+}
+
+export function entityPickerForCommand(
+  pickers: ResolvedEntityPicker[],
+  command: { id: string; name: string; aliases?: string[] },
+): ResolvedEntityPicker | undefined {
+  const names = new Set(
+    [command.id, command.name, ...(command.aliases ?? [])]
+      .map((value) => String(value ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return pickers.find((picker) => picker.triggerCommand && names.has(picker.triggerCommand));
+}
+
+export function filterEntityPickerItems(items: EntityPickerItem[], query: string): EntityPickerItem[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const filtered = normalized
+    ? items.filter((item) => [item.label, item.description, item.group, ...item.badges].filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized))
+    : items;
+  return [...filtered].sort((left, right) => (
+    Number(Boolean(right.create)) - Number(Boolean(left.create))
+    || Number(right.favorite) - Number(left.favorite)
+    || Number(right.recent) - Number(left.recent)
+    || (left.group ?? "").localeCompare(right.group ?? "")
+    || left.label.localeCompare(right.label)
+    || left.id.localeCompare(right.id)
+  ));
+}

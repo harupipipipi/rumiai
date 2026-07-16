@@ -42,6 +42,7 @@ CATALOG_KEYS = (
     "commands",
     "composer_inputs",
     "composer_widgets",
+    "entity_pickers",
     "ai_inputs",
     "tool_policies",
     "shell_regions",
@@ -148,6 +149,7 @@ def project_resolved_templates(
         "commands",
         "composer_inputs",
         "composer_widgets",
+        "entity_pickers",
         "ai_inputs",
         "tool_policies",
         "shell_regions",
@@ -229,6 +231,12 @@ def _project_piece(catalog: dict[str, Any], template: RumiTemplate, piece: Templ
         catalog["composer_inputs"].append(_composer_input(template, piece))
     elif kind == "composer_widget":
         catalog["composer_widgets"].append(_metadata_item(template, piece, default_id=piece.id))
+    elif kind == "entity_picker":
+        picker = _entity_picker(template, piece)
+        catalog["entity_pickers"].append(picker)
+        command = _entity_picker_command(picker)
+        if command is not None:
+            catalog["commands"].append(command)
     elif kind == "ai_input":
         catalog["ai_inputs"].append(_ai_input(template, piece))
     elif kind == "tool_policy":
@@ -271,6 +279,40 @@ def _field_renderer(template: RumiTemplate, piece: TemplatePiece) -> dict[str, A
         field_types = [field_type] if field_type else []
     item["field_types"] = [str(value) for value in field_types if str(value or "").strip()]
     return item
+
+
+def _entity_picker(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
+    data = _piece_payload(piece, "picker")
+    item = _metadata_item_from_data(template, piece, data, default_id=piece.id)
+    item.setdefault("picker_id", item.get("id") or piece.id)
+    item.setdefault("api_version", "rumi.entity_picker.v1")
+    return item
+
+
+def _entity_picker_command(picker: dict[str, Any]) -> dict[str, Any] | None:
+    trigger = str(picker.get("trigger_command") or "").strip().lstrip("/")
+    if not trigger:
+        return None
+    return {
+        "id": trigger,
+        "name": trigger,
+        "label": picker.get("label") or picker.get("title") or trigger,
+        "description": picker.get("description") or "Open a registered entity picker.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "low",
+        "modes": ["chat", "coding", "agent"],
+        "args": [{"name": "query", "type": "string", "required": False, "greedy": True}],
+        "execution": {"type": "frontend", "action": "open_entity_picker"},
+        "source": "template_entity_picker",
+        "picker_id": picker.get("picker_id") or picker.get("id"),
+        "template_id": picker.get("template_id"),
+        "piece_id": picker.get("piece_id"),
+        "projected_id": f"{picker.get('projected_id')}:command",
+        "origin": deepcopy(picker.get("origin") or {}),
+        "trust_level": picker.get("trust_level"),
+        "_source": picker.get("_source"),
+    }
 
 
 def _component_binding(template: RumiTemplate, piece: TemplatePiece) -> dict[str, Any]:
