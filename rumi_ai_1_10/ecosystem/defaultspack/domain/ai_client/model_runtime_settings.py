@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from domain.frontend_settings import frontend_settings_path
 from domain.ai_client.api_key_store import (
     provider_api_metadata,
     provider_has_api_key,
@@ -38,7 +39,7 @@ class ModelRuntimeSettingsService:
 
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
-        self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._settings_path = frontend_settings_path(self._pack_root)
 
     def get_settings(self) -> dict[str, Any]:
         return self.refresh_models_settings(self._read_all().get("models", {}))

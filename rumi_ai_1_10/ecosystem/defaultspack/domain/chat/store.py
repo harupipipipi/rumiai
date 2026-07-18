@@ -14,6 +14,7 @@ from pathlib import Path
 
 from domain.ai_client.inline_reasoning import split_inline_reasoning
 from domain.chat.icon_matcher import match_icon
+from domain.frontend_settings import frontend_settings_path
 
 DEFAULT_CHAT_MODEL = "stub/default"
 _SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./:-]+|[\u3040-\u30ff\u3400-\u9fff]+")
@@ -22,7 +23,7 @@ _SEARCH_JA_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 
 def _default_conversation_model(settings_path=None):
     try:
-        path = settings_path or Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+        path = settings_path or frontend_settings_path(Path(__file__).resolve().parents[2])
         settings = json.loads(Path(path).read_text(encoding="utf-8"))
         preferred_model = settings.get("models", {}).get("preferred_model")
         if isinstance(preferred_model, str) and preferred_model.strip():

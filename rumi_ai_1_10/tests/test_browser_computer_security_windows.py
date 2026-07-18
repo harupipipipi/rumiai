@@ -164,6 +164,23 @@ def test_edge_haze_stop_failure_does_not_fail_browser_open_url(tmp_path, monkeyp
     assert "No space left on device" in result["edge_haze"]["stop_error"]
 
 
+def test_edge_haze_can_be_disabled_for_debug_smoke(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+
+    monkeypatch.setenv("RUMI_EDGE_HAZE_DISABLED", "1")
+    monkeypatch.setattr(controller, "_consume_approval", lambda *args, **kwargs: True)
+    monkeypatch.setattr(controller, "_open_url_result", lambda *args, **kwargs: {"opened": True})
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://example.test", "target_app": "atlas"},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert result["edge_haze"]["disabled"] is True
+
+
 def test_darwin_targeted_open_url_reports_open_command_failure(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
@@ -234,6 +251,42 @@ def test_darwin_targeted_open_url_reports_unavailable_after_open_success(tmp_pat
     assert "did not become available" in result["reason"]
     assert commands[0] == ["open", "-b", "com.openai.atlas", "https://example.test"]
     assert commands[1] == ["open", "-a", "ChatGPT Atlas", "https://example.test"]
+
+
+def test_darwin_targeted_open_url_debug_foreground_accepts_atlas_command_success(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    commands = []
+
+    monkeypatch.setenv("RUMI_COMPUTER_USE_DEBUG_FOREGROUND", "1")
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(controller, "_active_window_for_app", lambda app_name: None)
+    monkeypatch.setattr(controller, "_running_apps", lambda: [])
+    monkeypatch.setattr(
+        controller,
+        "_activate_app_name",
+        lambda app_name: (_ for _ in ()).throw(AssertionError("debug foreground open should not block on activation")),
+    )
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://example.test", "app": "ChatGPT Atlas", "persistent": False},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert result["target_app"] == "ChatGPT Atlas"
+    assert result["command_accepted"] is True
+    assert result["window_verified"] is False
+    assert result["launch_command"] == ["open", "-b", "com.openai.atlas", "https://example.test"]
+    assert commands == [["open", "-b", "com.openai.atlas", "https://example.test"]]
 
 
 def test_darwin_targeted_open_url_requires_usable_window_not_just_process(tmp_path, monkeypatch):

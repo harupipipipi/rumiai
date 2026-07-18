@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.ai_client.model_pack_router import select_model_pack
 from domain.ai_client.model_pack import ModelPack
 from domain.ai_client.model_pack_store import ModelPackStore
+from domain.frontend_settings import frontend_settings_path
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
 from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.authority_gate import provider_requires_authority
@@ -340,7 +341,7 @@ class AIClient:
         return provider, model_name
 
     def _settings_path(self):
-        return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+        return frontend_settings_path(Path(__file__).resolve().parents[2])
 
     def _api_routes(self):
         data = self._settings_data()

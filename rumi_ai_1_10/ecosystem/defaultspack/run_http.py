@@ -11,5 +11,6 @@ sys.path.insert(0, str(defaultspack_root.parent.parent))
 from transport.http import start_http_server
 
 if __name__ == "__main__":
-    print("Starting defaultspack HTTP server in standalone mode on port 8766...")
+    port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
+    print(f"Starting defaultspack HTTP server in standalone mode on port {port}...")
     start_http_server(None)
