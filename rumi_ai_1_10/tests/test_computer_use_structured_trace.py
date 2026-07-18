@@ -24,7 +24,7 @@ def test_trace_writer_uses_fixed_allowlist_and_drops_content(monkeypatch, tmp_pa
         "approval_token": "never-log-approval-token",
         "window_title": "never-log-window-title",
         "clipboard": "never-log-clipboard",
-        "environment": {"CEREBRAS_API_KEY": "never-log-key"},
+        "environment": {"PROVIDER_API_KEY": "never-log-key"},
         "raw_result": {"value": "never-log-value"},
     }
     with computer_action_trace("computer.type", run_id="run-1", action_id="host-audit-1"):

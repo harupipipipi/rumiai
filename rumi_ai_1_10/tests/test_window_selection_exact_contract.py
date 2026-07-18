@@ -17,6 +17,9 @@ from ecosystem.rumi_default_tools_pack.domain.computer.trace import (
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
 
+pytestmark = pytest.mark.contract
+
+
 def _window(**overrides):
     value = {
         "app": "ChatGPT Atlas",

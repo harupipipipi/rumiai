@@ -790,6 +790,8 @@ def test_native_type_completion_self_test(tmp_path: Path) -> None:
             "direct_replacement": True,
             "explicit_target_rebind": True,
             "explicit_target_rebind_failure_rejected": True,
+            "exact_target_focus_drift_no_dispatch": True,
+            "exact_target_moved_window_no_dispatch": True,
             "semantic_selector_validated": True,
             "exact_window_geometry_validated": True,
             "semantic_staged_discovery_validated": True,
@@ -1030,6 +1032,42 @@ def test_native_source_direct_ax_insertion_is_strict_and_fallback_is_ordered() -
     assert "ensureResolvedTextInputTargetIsFrontmost" in type_body
     assert "activate: activateExactTextInputTarget" in type_body
     assert "resolvedTargetPid: explicitTargetPid" in type_body
+
+
+def test_native_dispatch_actions_revalidate_exact_window_before_input() -> None:
+    source = SWIFT_HOST_SOURCE.read_text(encoding="utf-8")
+
+    def body(start: str, end: str) -> str:
+        return source[source.index(start):source.index(end, source.index(start))]
+
+    move = body("func move(args:", "func click(args:")
+    click = body("func click(args:", "func drag(args:")
+    drag = body("func drag(args:", "struct FocusedTextInputState")
+    semantic_ocr = body("func semanticOCRFallback(", "func semanticAction(")
+    semantic_action = body("func semanticAction(", "func postMouse(")
+    typing = body("func typeText(args:", "func typingCompletionSelfTest()")
+    key = body("func key(args:", "func scroll(args:")
+    scroll = body("func scroll(args:", "func clipboardRead()")
+
+    assert move.index("enforceExactTargetBeforeDispatch") < move.index("CGWarpMouseCursorPosition")
+    assert click.index("enforceExactTargetBeforeDispatch") < click.index("CGWarpMouseCursorPosition")
+    assert drag.index("enforceExactTargetBeforeDispatch") < drag.index("CGWarpMouseCursorPosition")
+    assert 'action: "computer.move", requireFocusedWindow: true' in move
+    assert click.count("enforceExactTargetBeforeDispatch") == 3
+    assert click.count("requireFocusedWindow: true") == 3
+    assert drag.count("enforceExactTargetBeforeDispatch") == 4
+    assert drag.count("requireFocusedWindow: true") == 4
+    assert semantic_action.index("enforceExactTargetBeforeDispatch") < semantic_action.index("let elementId")
+    assert semantic_ocr.count("enforceExactTargetBeforeDispatch") == 3
+    assert semantic_ocr.count("requireFocusedWindow: true") == 3
+    assert semantic_ocr.index("enforceExactTargetBeforeDispatch") < semantic_ocr.index("CGWarpMouseCursorPosition")
+    assert semantic_ocr.rindex("enforceExactTargetBeforeDispatch") < semantic_ocr.index("postMouse(.leftMouseUp")
+    assert 'action: "computer.type", requireFocusedWindow: true' in typing
+    assert "exactTarget: exactTarget" in typing
+    assert key.index("enforceExactTargetBeforeDispatch") < key.index("down.postToPid")
+    assert "down.post(tap: .cghidEventTap)" not in key
+    assert scroll.index("enforceExactTargetBeforeDispatch") < scroll.index("event.postToPid")
+    assert 'fail("EXACT_TARGET_ENFORCEMENT_UNAVAILABLE"' in source
 
 
 def test_native_source_navigation_order_fallback_is_narrow_complete_and_nonretrying() -> None:

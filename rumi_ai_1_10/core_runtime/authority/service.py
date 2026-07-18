@@ -1102,14 +1102,20 @@ class AuthorityService:
         return bool(target_profile and target_profile == expected_profile)
 
     @staticmethod
+    def _actor_has_core_role(actor_principal: Any) -> bool:
+        if isinstance(actor_principal, dict):
+            return bool(actor_principal.get("core_role"))
+        return bool(getattr(actor_principal, "core_role", False))
+
+    @staticmethod
     def _actor_profile_id(actor_principal: Any) -> str:
         if actor_principal is None:
             return ""
         if isinstance(actor_principal, dict):
-            if bool(actor_principal.get("core_role")):
+            if AuthorityService._actor_has_core_role(actor_principal):
                 return ""
             return str(actor_principal.get("profile_id") or "").strip()
-        if bool(getattr(actor_principal, "core_role", False)):
+        if AuthorityService._actor_has_core_role(actor_principal):
             return ""
         return str(getattr(actor_principal, "profile_id", "") or "").strip()
 
@@ -1196,7 +1202,7 @@ class AuthorityService:
             return {"grants": {}, "count": 0}
         principal_id = str(principal_id or "").strip()
         actor_profile_id = self._actor_profile_id(actor_principal)
-        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+        if actor_principal is not None and not self._actor_has_core_role(actor_principal):
             profile_prefix = f"profile:{actor_profile_id}"
             if not actor_profile_id:
                 return {"success": False, "error": "Forbidden", "status_code": 403}
@@ -1230,7 +1236,7 @@ class AuthorityService:
         if not principal_id or not permission_id:
             return {"success": False, "error": "principal_id and permission_id are required", "status_code": 400}
         actor_profile_id = self._actor_profile_id(actor_principal)
-        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+        if actor_principal is not None and not self._actor_has_core_role(actor_principal):
             if not actor_profile_id:
                 return {"success": False, "error": "Forbidden", "status_code": 403}
             profile_prefix = f"profile:{actor_profile_id}"
@@ -1249,7 +1255,7 @@ class AuthorityService:
         return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": revoked}
 
     def events(self, limit: int = 200, *, actor_principal: Any = None) -> dict[str, Any]:
-        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+        if actor_principal is not None and not self._actor_has_core_role(actor_principal):
             return {"success": False, "error": "Forbidden", "status_code": 403}
         return {"_sse": True, "events": self._request_store.list_events(limit)}
 

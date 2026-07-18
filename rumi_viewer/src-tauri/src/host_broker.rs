@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use log::{error, warn};
@@ -747,6 +750,20 @@ fn execute_approved_host_intent(
     if let Err(error) = validate_host_intent_approval_token(shared, &intent) {
         return host_intent_approval_error_response(shared, &intent, audit_id, error);
     }
+    if write_execution_started_audit(
+        &shared.config,
+        host_intent_audit_entry(
+            audit_id.clone(),
+            &intent,
+            true,
+            false,
+            Some("approved_execution_started".to_string()),
+        ),
+    )
+    .is_err()
+    {
+        return host_intent_audit_unavailable_response(&intent, audit_id);
+    }
 
     let result = match intent.operation.as_str() {
         "host.permission.status" => {
@@ -1329,6 +1346,40 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
         );
     }
 
+    if approval_token_present
+        && target_sensitive_high_risk_function(&function_id, &helper_args)
+        && !self_contained_exact_target_binding(&helper_args)
+    {
+        return serialize_run_response(
+            &shared.config,
+            HostAuditEntry {
+                audit_id: audit_id.clone(),
+                ts: now_epoch_seconds(),
+                function_id: function_id.clone(),
+                profile_id: request.profile_id.clone(),
+                pack_id: request.pack_id.clone(),
+                conversation_id: request.conversation_id.clone(),
+                allowed: false,
+                result_ok: false,
+                approval_token_present: Some(true),
+                approval_result: Some("exact_target_required".to_string()),
+                args_summary: summarize_args(&helper_args),
+            },
+            HostBrokerComputerRunResponse {
+                ok: false,
+                function_id,
+                result: None,
+                diagnostics: None,
+                error: Some(HostBrokerError {
+                    code: "APPROVAL_EXACT_TARGET_REQUIRED".to_string(),
+                    message: "The approved computer action requires a self-contained exact target binding."
+                        .to_string(),
+                }),
+                audit_id,
+            },
+        );
+    }
+
     let mut viewer_host_approved = false;
     if high_risk_function(&function_id) || approval_token_present {
         let validation = validate_approval_token(
@@ -1372,6 +1423,28 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
             );
         }
         viewer_host_approved = true;
+    }
+
+    if high_risk_function(&function_id)
+        && write_execution_started_audit(
+            &shared.config,
+            HostAuditEntry {
+                audit_id: audit_id.clone(),
+                ts: now_epoch_seconds(),
+                function_id: function_id.clone(),
+                profile_id: request.profile_id.clone(),
+                pack_id: request.pack_id.clone(),
+                conversation_id: request.conversation_id.clone(),
+                allowed: true,
+                result_ok: false,
+                approval_token_present: Some(true),
+                approval_result: Some("approved_execution_started".to_string()),
+                args_summary: summarize_args(&helper_args),
+            },
+        )
+        .is_err()
+    {
+        return computer_audit_unavailable_response(function_id, audit_id);
     }
 
     let helper_result = run_computer_helper(
@@ -1504,6 +1577,49 @@ fn serialize_run_response(
         warn!("Failed to write Viewer host broker audit log: {error}");
     }
     serde_json::to_value(response).unwrap_or_else(|_| {
+        json!({"ok": false, "error": {"code": "SERIALIZATION_FAILED", "message": "Could not serialize broker response"}})
+    })
+}
+
+fn write_execution_started_audit(config: &AppConfig, audit: HostAuditEntry) -> Result<()> {
+    write_audit_log(&config.host_broker_audit_log_path(), &audit)
+}
+
+fn computer_audit_unavailable_response(function_id: String, audit_id: String) -> Value {
+    serde_json::to_value(HostBrokerComputerRunResponse {
+        ok: false,
+        function_id,
+        result: None,
+        diagnostics: None,
+        error: Some(HostBrokerError {
+            code: "HOST_AUDIT_UNAVAILABLE".to_string(),
+            message: "The Viewer host audit is unavailable; the computer action was not executed."
+                .to_string(),
+        }),
+        audit_id,
+    })
+    .unwrap_or_else(|_| {
+        json!({"ok": false, "error": {"code": "SERIALIZATION_FAILED", "message": "Could not serialize broker response"}})
+    })
+}
+
+fn host_intent_audit_unavailable_response(
+    intent: &NormalizedHostIntent,
+    audit_id: String,
+) -> Value {
+    serde_json::to_value(HostBrokerIntentResponse {
+        ok: false,
+        operation: intent.operation.clone(),
+        stream_id: None,
+        result: None,
+        error: Some(HostBrokerError {
+            code: "HOST_AUDIT_UNAVAILABLE".to_string(),
+            message: "The Viewer host audit is unavailable; the host operation was not executed."
+                .to_string(),
+        }),
+        audit_id,
+    })
+    .unwrap_or_else(|_| {
         json!({"ok": false, "error": {"code": "SERIALIZATION_FAILED", "message": "Could not serialize broker response"}})
     })
 }
@@ -1666,6 +1782,135 @@ fn high_risk_function(function_id: &str) -> bool {
     )
 }
 
+fn target_sensitive_high_risk_function(function_id: &str, args: &Value) -> bool {
+    match function_id {
+        "computer.type"
+        | "computer.key"
+        | "computer.scroll"
+        | "computer.click_text"
+        | "computer.semantic_action"
+        | "computer.pid_event" => true,
+        "computer.screenshot" | "computer.ocr" | "computer.ax_tree" => {
+            !explicit_desktop_target(args) || has_window_constraint(args)
+        }
+        "computer.move" | "computer.click" | "computer.drag" => true,
+        _ => false,
+    }
+}
+
+fn explicit_desktop_target(args: &Value) -> bool {
+    matches!(
+        args.get("target")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "primary_display" | "all_displays" | "screen" | "display" | "desktop"
+    )
+}
+
+fn has_window_constraint(args: &Value) -> bool {
+    const WINDOW_CONSTRAINT_KEYS: &[&str] = &[
+        "app",
+        "application",
+        "bundle_id",
+        "name",
+        "process",
+        "target_app",
+        "title",
+        "window_title",
+        "title_contains",
+        "pid",
+        "target_pid",
+        "process_id",
+        "window_id",
+        "target_window_id",
+        "id",
+        "hwnd",
+        "x",
+        "y",
+        "width",
+        "height",
+        "window_x",
+        "window_y",
+        "window_width",
+        "window_height",
+        "window_bounds",
+        "bounds",
+        "geometry",
+    ];
+
+    let has_constraint = |source: &Value| {
+        WINDOW_CONSTRAINT_KEYS.iter().any(|key| {
+            source
+                .get(*key)
+                .is_some_and(window_constraint_value_present)
+        })
+    };
+
+    has_constraint(args)
+        || args
+            .get("window")
+            .is_some_and(|window| window.is_object() || window_constraint_value_present(window))
+}
+
+fn window_constraint_value_present(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.trim().is_empty(),
+        _ => true,
+    }
+}
+
+fn self_contained_exact_target_binding(args: &Value) -> bool {
+    let nested = args.get("window").filter(|value| value.is_object());
+    let source = nested.unwrap_or(args);
+    let owner_present = nonempty_string(source, "app")
+        || nonempty_string(source, "application")
+        || nonempty_string(source, "bundle_id");
+    let process_present = positive_integral_json(source.get("pid"));
+    let window_present = positive_integral_json(source.get("window_id"))
+        || positive_integral_json(source.get("hwnd"));
+    let geometry_present = if nested.is_some() {
+        integral_json(source.get("x"))
+            && integral_json(source.get("y"))
+            && positive_integral_json(source.get("width"))
+            && positive_integral_json(source.get("height"))
+    } else {
+        (integral_json(source.get("window_x"))
+            && integral_json(source.get("window_y"))
+            && positive_integral_json(source.get("window_width"))
+            && positive_integral_json(source.get("window_height")))
+            || (integral_json(source.get("x"))
+                && integral_json(source.get("y"))
+                && positive_integral_json(source.get("width"))
+                && positive_integral_json(source.get("height")))
+    };
+    owner_present && process_present && window_present && geometry_present
+}
+
+fn nonempty_string(value: &Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|item| !item.is_empty())
+}
+
+fn integral_json(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Number(number)) => number.as_i64().is_some() || number.as_u64().is_some(),
+        Some(Value::String(text)) => text.parse::<i64>().is_ok(),
+        _ => false,
+    }
+}
+
+fn positive_integral_json(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Number(number)) => number.as_u64().is_some_and(|item| item > 0),
+        Some(Value::String(text)) => text.parse::<u64>().is_ok_and(|item| item > 0),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ApprovalValidationError {
     code: String,
@@ -1761,6 +2006,17 @@ fn validate_approval_token(
         ));
     }
 
+    check_and_consume_approval_jti(shared, &payload.jti, payload.expires_at, now, consume)?;
+    Ok(())
+}
+
+fn check_and_consume_approval_jti(
+    shared: &HostBrokerShared,
+    jti: &str,
+    expires_at: u64,
+    now: u64,
+    consume: bool,
+) -> std::result::Result<(), ApprovalValidationError> {
     let mut used = shared.used_approval_tokens.lock().map_err(|_| {
         approval_error(
             "APPROVAL_TOKEN_INVALID",
@@ -1768,17 +2024,99 @@ fn validate_approval_token(
             "token_state_error",
         )
     })?;
-    used.retain(|_, expires_at| *expires_at >= now);
-    if used.contains_key(&payload.jti) {
+    used.retain(|_, item_expires_at| *item_expires_at >= now);
+
+    let directory = shared.config.host_broker_approval_replay_dir();
+    ensure_owner_only_directory(&directory).map_err(|_| approval_token_state_error())?;
+    prune_expired_approval_markers(&directory, now).map_err(|_| approval_token_state_error())?;
+    let marker_path = directory.join(hex_sha256(jti.as_bytes()));
+    if used.contains_key(jti) || marker_path.exists() {
         return Err(approval_error(
             "APPROVAL_TOKEN_USED",
             "approval token has already been used",
             "token_used",
         ));
     }
-    if consume {
-        used.insert(payload.jti, payload.expires_at);
+    if !consume {
+        return Ok(());
     }
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut marker = match options.open(&marker_path) {
+        Ok(marker) => marker,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(approval_error(
+                "APPROVAL_TOKEN_USED",
+                "approval token has already been used",
+                "token_used",
+            ));
+        }
+        Err(_) => return Err(approval_token_state_error()),
+    };
+    #[cfg(unix)]
+    fs::set_permissions(&marker_path, fs::Permissions::from_mode(0o600))
+        .map_err(|_| approval_token_state_error())?;
+    marker
+        .write_all(expires_at.to_string().as_bytes())
+        .and_then(|_| marker.sync_all())
+        .map_err(|_| approval_token_state_error())?;
+    sync_directory(&directory).map_err(|_| approval_token_state_error())?;
+    used.insert(jti.to_string(), expires_at);
+    Ok(())
+}
+
+fn approval_token_state_error() -> ApprovalValidationError {
+    approval_error(
+        "APPROVAL_TOKEN_INVALID",
+        "approval token state is unavailable",
+        "token_state_error",
+    )
+}
+
+fn ensure_owner_only_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).context("failed to create approval replay directory")?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .context("failed to restrict approval replay directory")?;
+    Ok(())
+}
+
+fn prune_expired_approval_markers(path: &Path, now: u64) -> Result<()> {
+    for entry in fs::read_dir(path).context("failed to read approval replay directory")? {
+        let entry = entry.context("failed to read approval replay marker")?;
+        let file_type = entry
+            .file_type()
+            .context("failed to inspect approval replay marker")?;
+        if !file_type.is_file() || file_type.is_symlink() {
+            continue;
+        }
+        let value = match fs::read_to_string(entry.path()) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let expires_at = match value.trim().parse::<u64>() {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if expires_at < now {
+            fs::remove_file(entry.path()).context("failed to prune approval replay marker")?;
+        }
+    }
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        fs::File::open(path)
+            .and_then(|directory| directory.sync_all())
+            .context("failed to durably sync approval replay directory")?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -1854,7 +2192,7 @@ fn approval_runtime_secret_path(
 ) -> std::result::Result<PathBuf, ApprovalValidationError> {
     approval_runtime_secret_path_for_values(
         config,
-        crate::debug_defaultspack_approval_secret_path_from_env(),
+        None,
         std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH")
             .ok()
             .map(PathBuf::from),
@@ -2099,7 +2437,9 @@ fn run_computer_helper(
 }
 
 fn trusted_helper_chat_store_path(value: Option<&std::ffi::OsStr>) -> Option<std::ffi::OsString> {
-    value.filter(|path| !path.is_empty()).map(std::ffi::OsStr::to_os_string)
+    value
+        .filter(|path| !path.is_empty())
+        .map(std::ffi::OsStr::to_os_string)
 }
 
 fn wait_for_helper_status(
@@ -2251,8 +2591,12 @@ mod tests {
         .unwrap();
         assert_eq!(request.function_id, "computer.screenshot");
         assert_eq!(
-            trusted_helper_chat_store_path(Some(std::ffi::OsStr::new("/viewer-owned/chat/conversations.json"))),
-            Some(std::ffi::OsString::from("/viewer-owned/chat/conversations.json"))
+            trusted_helper_chat_store_path(Some(std::ffi::OsStr::new(
+                "/viewer-owned/chat/conversations.json"
+            ))),
+            Some(std::ffi::OsString::from(
+                "/viewer-owned/chat/conversations.json"
+            ))
         );
     }
 
@@ -2648,6 +2992,414 @@ mod tests {
     }
 
     #[test]
+    fn approval_token_replay_is_rejected_across_broker_restart() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let first = test_shared(config.clone());
+        let args = json!({"target": "desktop"});
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-restart-replay",
+                "operation": "computer.screenshot",
+                "function_id": "computer.screenshot",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+
+        validate_approval_token(
+            &first,
+            &token,
+            "computer.screenshot",
+            "computer.screenshot",
+            &args,
+            &args,
+            "defaultspack",
+            "conv-1",
+            true,
+        )
+        .expect("first broker should consume the token");
+
+        let restarted = test_shared(config);
+        let error = validate_approval_token(
+            &restarted,
+            &token,
+            "computer.screenshot",
+            "computer.screenshot",
+            &args,
+            &args,
+            "defaultspack",
+            "conv-1",
+            true,
+        )
+        .expect_err("restarted broker must retain one-shot consumption");
+        assert_eq!(error.code, "APPROVAL_TOKEN_USED");
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approval_replay_markers_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config.clone());
+        check_and_consume_approval_jti(
+            &shared,
+            "tok-owner-only",
+            now_epoch_seconds() + 60,
+            now_epoch_seconds(),
+            true,
+        )
+        .expect("marker should be persisted");
+
+        let directory = config.host_broker_approval_replay_dir();
+        assert_eq!(
+            fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let marker = fs::read_dir(directory)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(
+            fs::metadata(marker).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn target_sensitive_replay_requires_self_contained_exact_binding() {
+        assert!(target_sensitive_high_risk_function(
+            "computer.type",
+            &json!({"text": "redacted"})
+        ));
+        assert!(!self_contained_exact_target_binding(&json!({
+            "text": "redacted",
+            "app": "Example",
+            "window_id": 7
+        })));
+        assert!(self_contained_exact_target_binding(&json!({
+            "text": "redacted",
+            "window": {
+                "app": "Example",
+                "pid": 42,
+                "window_id": 7,
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600
+            }
+        })));
+        let desktop = json!({"target": "desktop"});
+        let partial_top_level_constraints = [
+            json!({"target": "desktop", "app": "Example"}),
+            json!({"target": "desktop", "title": "Private document"}),
+            json!({"target": "desktop", "pid": 42}),
+            json!({"target": "desktop", "window_id": 7}),
+            json!({"target": "desktop", "x": 10}),
+        ];
+        let partial_nested_constraint = json!({
+            "target": "desktop",
+            "window": {"title": "Private document"}
+        });
+        let complete_nested_binding = json!({
+            "target": "desktop",
+            "window": {
+                "app": "Example",
+                "pid": 42,
+                "window_id": 7,
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600
+            }
+        });
+        for function_id in ["computer.screenshot", "computer.ocr", "computer.ax_tree"] {
+            assert!(!target_sensitive_high_risk_function(function_id, &desktop));
+            for args in &partial_top_level_constraints {
+                assert!(target_sensitive_high_risk_function(function_id, args));
+            }
+            assert!(target_sensitive_high_risk_function(
+                function_id,
+                &partial_nested_constraint
+            ));
+            assert!(target_sensitive_high_risk_function(
+                function_id,
+                &complete_nested_binding
+            ));
+        }
+        assert!(!self_contained_exact_target_binding(
+            &partial_nested_constraint
+        ));
+        assert!(self_contained_exact_target_binding(
+            &complete_nested_binding
+        ));
+        assert!(self_contained_exact_target_binding(&json!({
+            "target": "desktop",
+            "app": "Example",
+            "pid": 42,
+            "window_id": 7,
+            "x": 10,
+            "y": 20,
+            "width": 800,
+            "height": 600
+        })));
+        assert!(target_sensitive_high_risk_function(
+            "computer.click",
+            &json!({"x": 100, "y": 200, "physical": false})
+        ));
+    }
+
+    #[test]
+    fn target_sensitive_replay_with_missing_binding_never_launches_helper() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"text": "redacted"});
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-missing-target",
+                "operation": "computer.type",
+                "function_id": "computer.type",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+        let response = execute_computer_run(
+            &shared,
+            HostBrokerComputerRunRequest {
+                function_id: "computer.type".to_string(),
+                profile_id: None,
+                pack_id: Some("defaultspack".to_string()),
+                conversation_id: Some("conv-1".to_string()),
+                approval_token: Some(token),
+                artifact_root: None,
+                args,
+            },
+        );
+
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("APPROVAL_EXACT_TARGET_REQUIRED")
+        );
+        assert!(shared.used_approval_tokens.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn desktop_read_actions_reject_partial_window_bindings_before_helper_launch() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({
+            "target": "desktop",
+            "window": {"title": "Private document"}
+        });
+
+        for (index, function_id) in ["computer.screenshot", "computer.ocr", "computer.ax_tree"]
+            .iter()
+            .enumerate()
+        {
+            let token = signed_test_approval_token(
+                "secret",
+                json!({
+                    "version": APPROVAL_TOKEN_VERSION,
+                    "jti": format!("tok-partial-desktop-window-{index}"),
+                    "operation": function_id,
+                    "function_id": function_id,
+                    "args_hash": hash_arguments_value(&args),
+                    "pack_id": "defaultspack",
+                    "conversation_id": "conv-1",
+                    "expires_at": now_epoch_seconds() + 60,
+                }),
+            );
+            let response = execute_computer_run(
+                &shared,
+                HostBrokerComputerRunRequest {
+                    function_id: (*function_id).to_string(),
+                    profile_id: None,
+                    pack_id: Some("defaultspack".to_string()),
+                    conversation_id: Some("conv-1".to_string()),
+                    approval_token: Some(token),
+                    artifact_root: None,
+                    args: args.clone(),
+                },
+            );
+
+            assert_eq!(
+                response.pointer("/error/code").and_then(Value::as_str),
+                Some("APPROVAL_EXACT_TARGET_REQUIRED"),
+                "{function_id} must reject a partial window binding"
+            );
+        }
+
+        assert!(shared.used_approval_tokens.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn desktop_read_action_with_complete_window_binding_reaches_audit_guard() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        fs::create_dir_all(config.host_broker_audit_log_path()).unwrap();
+        let shared = test_shared(config);
+        let args = json!({
+            "target": "desktop",
+            "window": {
+                "app": "Example",
+                "pid": 42,
+                "window_id": 7,
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600
+            }
+        });
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-complete-desktop-window",
+                "operation": "computer.screenshot",
+                "function_id": "computer.screenshot",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+        let response = execute_computer_run(
+            &shared,
+            HostBrokerComputerRunRequest {
+                function_id: "computer.screenshot".to_string(),
+                profile_id: None,
+                pack_id: Some("defaultspack".to_string()),
+                conversation_id: Some("conv-1".to_string()),
+                approval_token: Some(token),
+                artifact_root: None,
+                args,
+            },
+        );
+
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_AUDIT_UNAVAILABLE")
+        );
+        assert!(shared
+            .used_approval_tokens
+            .lock()
+            .unwrap()
+            .contains_key("tok-complete-desktop-window"));
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn target_sensitive_replay_rejects_exact_binding_change() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let approved_args = json!({
+            "text": "redacted",
+            "window": {
+                "app": "Example",
+                "pid": 42,
+                "window_id": 7,
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600
+            }
+        });
+        let changed_args = json!({
+            "text": "redacted",
+            "window": {
+                "app": "Example",
+                "pid": 42,
+                "window_id": 8,
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600
+            }
+        });
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-target-change",
+                "operation": "computer.type",
+                "function_id": "computer.type",
+                "args_hash": hash_arguments_value(&approved_args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+
+        let error = validate_approval_token(
+            &shared,
+            &token,
+            "computer.type",
+            "computer.type",
+            &changed_args,
+            &changed_args,
+            "defaultspack",
+            "conv-1",
+            true,
+        )
+        .expect_err("changed exact target must not replay");
+        assert_eq!(error.code, "APPROVAL_ARGUMENTS_CHANGED");
+        assert!(shared.used_approval_tokens.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn computer_run_does_not_launch_helper_when_audit_start_write_fails() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        fs::create_dir_all(config.host_broker_audit_log_path()).unwrap();
+        let shared = test_shared(config);
+        let args = json!({"target": "desktop"});
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-audit-failure",
+                "operation": "computer.screenshot",
+                "function_id": "computer.screenshot",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+        let response = execute_computer_run(
+            &shared,
+            HostBrokerComputerRunRequest {
+                function_id: "computer.screenshot".to_string(),
+                profile_id: None,
+                pack_id: Some("defaultspack".to_string()),
+                conversation_id: Some("conv-1".to_string()),
+                approval_token: Some(token),
+                artifact_root: None,
+                args,
+            },
+        );
+
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_AUDIT_UNAVAILABLE")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn broker_normalizes_backspace_alias_before_whitelist() {
         let (function_id, args) =
             normalize_computer_request("computer.backspace", &json!({"count": 2}));
@@ -2772,6 +3524,48 @@ mod tests {
         assert_eq!(
             response.pointer("/error/code").and_then(Value::as_str),
             Some("HOST_OPERATION_UNKNOWN")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_intent_does_not_run_when_audit_start_write_fails() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        fs::create_dir_all(config.host_broker_audit_log_path()).unwrap();
+        let shared = test_shared(config);
+        let args = json!({"permission_id": "accessibility"});
+        let stream = json!({});
+        let token = signed_host_intent_operation_token(
+            "secret",
+            "tok-host-audit-failure",
+            "host.permission.open_settings",
+            "host.permission.open_settings",
+            "defaultspack",
+            "conv-1",
+            &args,
+            &stream,
+        );
+        let response = execute_host_intent(
+            &shared,
+            HostBrokerIntentRequest {
+                intent_type: "host_intent".to_string(),
+                operation: "host.permission.open_settings".to_string(),
+                args,
+                stream,
+                reason: Some("open settings".to_string()),
+                caller: Some(HostBrokerIntentCaller {
+                    pack_id: Some("defaultspack".to_string()),
+                    function_id: Some("settings".to_string()),
+                }),
+                conversation_id: Some("conv-1".to_string()),
+                host_function_id: Some("host.permission.open_settings".to_string()),
+                approval_token: Some(token),
+            },
+        );
+
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_AUDIT_UNAVAILABLE")
         );
         let _ = fs::remove_dir_all(temp_dir);
     }

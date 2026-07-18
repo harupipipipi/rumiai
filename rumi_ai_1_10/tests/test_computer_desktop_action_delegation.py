@@ -100,6 +100,7 @@ def test_type_tries_background_safe_seat_before_focus(controller, monkeypatch):
             can_parallel_user_work=True,
             requires_foreground=False,
             uses_physical_input=False,
+            data={"completion_verified": True},
         )
     )
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
@@ -124,6 +125,63 @@ def test_type_tries_background_safe_seat_before_focus(controller, monkeypatch):
     assert outcome["executed"] is True
     assert outcome["background"] is True
     assert outcome["driver"] == "mac_accessibility"
+    svc.background_action.assert_called_once()
+
+
+def test_unverified_background_type_is_terminal_and_never_replayed_foreground(controller, monkeypatch):
+    svc = MagicMock()
+    svc.background_action.return_value = asdict(
+        ActionResult(
+            action="type_text",
+            driver="mac_accessibility",
+            executed=True,
+            confidence="high",
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+        )
+    )
+    svc.doctor.return_value = {
+        "platform": "darwin",
+        "driver_chain_order": [],
+        "available_drivers": [],
+        "unavailable_drivers": [],
+    }
+    controller._computer_seat = svc
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "app": "Vivaldi",
+                "title": "Google",
+                "x": 0,
+                "y": 0,
+                "width": 800,
+                "height": 600,
+                "pid": 123,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        controller,
+        "_focus_action_target",
+        lambda payload: (_ for _ in ()).throw(
+            AssertionError("unverified background typing must not be replayed in foreground")
+        ),
+    )
+
+    outcome = controller.run(
+        "computer.type",
+        {"app": "Vivaldi", "text": "hello", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["is_error"] is True
+    assert outcome["input_dispatched"] is True
+    assert outcome["completion_verified"] is False
+    assert outcome["error_code"] == "TYPE_COMPLETION_NOT_VERIFIED"
     svc.background_action.assert_called_once()
 
 

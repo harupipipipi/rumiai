@@ -16,7 +16,7 @@ def _ensure_import_path() -> None:
 
 _ensure_import_path()
 
-from core_runtime.host_broker.computer_delivery import (
+from core_runtime.host_broker.computer_delivery import (  # noqa: E402
     SAFE_TYPE_PREDISPATCH_ERROR_CODES,
     SAFE_WINDOW_SELECTION_ERROR_CODES,
     safe_ax_candidate_facts,

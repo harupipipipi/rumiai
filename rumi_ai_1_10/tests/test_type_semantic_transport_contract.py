@@ -7,6 +7,9 @@ import pytest
 from core_runtime.host_broker.computer_delivery import SAFE_TYPE_PREDISPATCH_ERROR_CODES
 
 
+pytestmark = pytest.mark.contract
+
+
 def _probe_result(*, ready: bool, stage: str, code: str = "") -> dict[str, object]:
     diagnostics = {
         "probe_completed": True,

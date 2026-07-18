@@ -12,9 +12,9 @@ from dataclasses import asdict
 from time import monotonic as _trace_monotonic
 from typing import Any
 
-from .audit import AuditLogger
+from .audit import AuditLogger, result_audit_facts, target_audit_facts
 from .models import ActionResult, ComputerTarget, ObserveResult
-from .permissions import requires_approval, risk_level
+from .permissions import requires_approval
 from .registry import DriverRegistry
 from .trace import emit_computer_trace, result_trace_facts
 
@@ -41,6 +41,26 @@ class ComputerSeatService:
         self._registry = registry
         self._audit = audit_logger or AuditLogger()
         self._platform = sys.platform
+
+    def _record_diagnostic_audit(
+        self,
+        *,
+        action: str,
+        driver: str,
+        target: ComputerTarget,
+        approval_required: bool = False,
+        result: ActionResult | None = None,
+    ) -> None:
+        """Write only bounded diagnostic facts; the broker audit is authoritative."""
+        facts = target_audit_facts(target)
+        if result is not None:
+            facts.update(result_audit_facts(result))
+        self._audit.record(
+            action=action,
+            driver=driver,
+            approval_required=approval_required,
+            **facts,
+        )
 
     def observe(self, target: ComputerTarget | dict[str, Any]) -> dict[str, Any]:
         """Observe the target – returns screenshot + AX tree + capabilities.
@@ -101,11 +121,10 @@ class ComputerSeatService:
         merged.recommended_next_actions = self._recommended_next_actions(merged_caps)
 
         for name in drivers_used:
-            self._audit.record(
+            self._record_diagnostic_audit(
                 action="observe",
                 driver=name,
-                target_app=target.app or "",
-                target_pid=target.pid,
+                target=target,
             )
 
         return asdict(merged)
@@ -177,13 +196,12 @@ class ComputerSeatService:
                 errors.append(f"{driver.name}: result was not PID/background safe")
                 continue
             result.is_fallback = bool(errors)
-            self._audit.record(
+            self._record_diagnostic_audit(
                 action=f"pid_event.{normalized_action}",
                 driver=driver.name,
-                target_app=target.app or "",
-                target_pid=target.pid,
+                target=target,
                 approval_required=requires_approval("computer.pid_event"),
-                result=asdict(result),
+                result=result,
             )
             return asdict(result)
 
@@ -306,13 +324,12 @@ class ComputerSeatService:
                     },
                     notes=["The native semantic probe returned an unsafe result."],
                 )
-        self._audit.record(
+        self._record_diagnostic_audit(
             action="computer.probe_text_control",
             driver=result.driver,
-            target_app=target.app or "",
-            target_pid=target.pid,
+            target=target,
             approval_required=requires_approval("computer.probe_text_control"),
-            result=asdict(result),
+            result=result,
         )
         emit_computer_trace(
             "seat.result",
@@ -562,13 +579,12 @@ class ComputerSeatService:
                         result.data.setdefault("verification_required", "screenshot")
                         result.data.setdefault("completion_verified", False)
                         result.is_fallback = is_fallback
-                        self._audit.record(
+                        self._record_diagnostic_audit(
                             action=action,
                             driver=driver.name,
-                            target_app=target.app or "",
-                            target_pid=target.pid,
+                            target=target,
                             approval_required=requires_approval(action),
-                            result=asdict(result),
+                            result=result,
                         )
                         emit_computer_trace(
                             "seat.result",
@@ -589,13 +605,12 @@ class ComputerSeatService:
                         result.data.setdefault("completion_verified", False)
                         result.data.setdefault("input_dispatched", True)
                         result.is_fallback = is_fallback
-                        self._audit.record(
+                        self._record_diagnostic_audit(
                             action=action,
                             driver=driver.name,
-                            target_app=target.app or "",
-                            target_pid=target.pid,
+                            target=target,
                             approval_required=requires_approval(action),
-                            result=asdict(result),
+                            result=result,
                         )
                         emit_computer_trace(
                             "seat.result",
@@ -613,14 +628,12 @@ class ComputerSeatService:
                         is_fallback = True
                         continue
                     result.is_fallback = is_fallback
-                    self._audit.record(
+                    self._record_diagnostic_audit(
                         action=action,
                         driver=driver.name,
-                        target_app=target.app or "",
-                        target_pid=target.pid,
-                        intent=payload.get("intent", ""),
+                        target=target,
                         approval_required=requires_approval(action),
-                        result=asdict(result),
+                        result=result,
                     )
                     emit_computer_trace(
                         "seat.result",
@@ -634,13 +647,12 @@ class ComputerSeatService:
                     # Never replay it through another driver when completion is
                     # uncertain, because doing so can duplicate a partial input.
                     result.is_fallback = is_fallback
-                    self._audit.record(
+                    self._record_diagnostic_audit(
                         action=action,
                         driver=driver.name,
-                        target_app=target.app or "",
-                        target_pid=target.pid,
+                        target=target,
                         approval_required=requires_approval(action),
-                        result=asdict(result),
+                        result=result,
                     )
                     emit_computer_trace(
                         "seat.result",
@@ -677,13 +689,12 @@ class ComputerSeatService:
             notes=errors or ["No available driver for this action"],
         )
         self._attach_ax_candidate_diagnostics(failure, ax_candidate)
-        self._audit.record(
+        self._record_diagnostic_audit(
             action=action,
             driver="none",
-            target_app=target.app or "",
-            target_pid=target.pid,
+            target=target,
             approval_required=requires_approval(action),
-            result=asdict(failure),
+            result=failure,
         )
         emit_computer_trace(
             "seat.result",
@@ -788,13 +799,12 @@ class ComputerSeatService:
             uses_physical_input=False,
             notes=notes,
         )
-        self._audit.record(
+        self._record_diagnostic_audit(
             action=f"pid_event.{action}",
             driver="none",
-            target_app=target.app or "",
-            target_pid=target.pid,
+            target=target,
             approval_required=requires_approval("computer.pid_event"),
-            result=asdict(failure),
+            result=failure,
         )
         return asdict(failure)
 

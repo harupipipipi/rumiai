@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -38,6 +40,15 @@ pub fn now_epoch_seconds() -> u64 {
 }
 
 pub fn write_audit_log(path: &Path, entry: &HostAuditEntry) -> Result<()> {
+    // A directory fsync is needed for the audit log's directory entry to
+    // survive a crash. Track any directory created here so the directory
+    // entries that make up a new host_broker tree are durable too.
+    #[cfg(unix)]
+    let newly_created_directories = if let Some(parent) = path.parent() {
+        missing_directory_ancestors(parent)?
+    } else {
+        Vec::new()
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
             format!(
@@ -63,7 +74,60 @@ pub fn write_audit_log(path: &Path, entry: &HostAuditEntry) -> Result<()> {
     let line =
         serde_json::to_string(entry).context("failed to serialize host broker audit entry")?;
     writeln!(file, "{line}").context("failed to append host broker audit log")?;
+    file.sync_all()
+        .context("failed to durably sync host broker audit log")?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        sync_audit_directory(parent)?;
+        for directory in newly_created_directories {
+            if let Some(creation_parent) = directory.parent() {
+                sync_audit_directory(creation_parent)?;
+            }
+        }
+    }
     Ok(())
+}
+
+#[cfg(unix)]
+fn missing_directory_ancestors(path: &Path) -> Result<Vec<PathBuf>> {
+    let mut missing = Vec::new();
+    let mut current = Some(path);
+    while let Some(directory) = current {
+        match fs::metadata(directory) {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(directory.to_path_buf());
+                current = directory.parent();
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to inspect host broker audit dir at {}",
+                        directory.display()
+                    )
+                });
+            }
+        }
+    }
+    Ok(missing)
+}
+
+#[cfg(unix)]
+fn sync_audit_directory(path: &Path) -> Result<()> {
+    fs::File::open(path)
+        .with_context(|| {
+            format!(
+                "failed to open host broker audit directory for sync at {}",
+                path.display()
+            )
+        })?
+        .sync_all()
+        .with_context(|| {
+            format!(
+                "failed to durably sync host broker audit directory at {}",
+                path.display()
+            )
+        })
 }
 
 pub fn summarize_args(value: &Value) -> Value {
@@ -106,8 +170,8 @@ fn summarize_value(value: &Value, depth: usize, target_binding: bool) -> Value {
         Value::String(text) => {
             if looks_sensitive_text(text) {
                 Value::String("[redacted]".to_string())
-            } else if text.len() > 160 {
-                Value::String(format!("{}...", &text[..160]))
+            } else if text.chars().count() > 160 {
+                Value::String(format!("{}...", text.chars().take(160).collect::<String>()))
             } else {
                 Value::String(text.clone())
             }
@@ -233,11 +297,36 @@ mod tests {
         }));
         assert_eq!(summary.pointer("/x"), Some(&json!(17)));
         assert_eq!(summary.pointer("/y"), Some(&json!(29)));
-        for key in ["app", "pid", "window_id", "x", "y", "width", "height", "title", "path", "token"] {
-            assert_eq!(summary.pointer(&format!("/window/{key}")), Some(&json!("[redacted]")));
+        for key in [
+            "app",
+            "pid",
+            "window_id",
+            "x",
+            "y",
+            "width",
+            "height",
+            "title",
+            "path",
+            "token",
+        ] {
+            assert_eq!(
+                summary.pointer(&format!("/window/{key}")),
+                Some(&json!("[redacted]"))
+            );
         }
         let serialized = serde_json::to_string(&summary).unwrap();
-        for secret in ["CANARY_PRIVATE_APP", "91234", "56789", "101", "202", "1303", "704", "CANARY_PRIVATE_TITLE", "/CANARY/private.png", "CANARY_PRIVATE_TOKEN"] {
+        for secret in [
+            "CANARY_PRIVATE_APP",
+            "91234",
+            "56789",
+            "101",
+            "202",
+            "1303",
+            "704",
+            "CANARY_PRIVATE_TITLE",
+            "/CANARY/private.png",
+            "CANARY_PRIVATE_TOKEN",
+        ] {
             assert!(!serialized.contains(secret), "leaked {secret}");
         }
     }
@@ -278,6 +367,47 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn audit_log_syncs_a_fresh_directory_tree() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rumi-host-audit-fresh-{}-{unique}",
+            std::process::id()
+        ));
+        let path = directory
+            .join("nested")
+            .join("host_broker")
+            .join("audit.jsonl");
+        assert!(!path.parent().unwrap().exists());
+
+        write_audit_log(
+            &path,
+            &HostAuditEntry {
+                audit_id: "host-audit-fresh-directory-test".to_string(),
+                ts: 1,
+                function_id: "computer.screenshot".to_string(),
+                profile_id: None,
+                pack_id: None,
+                conversation_id: None,
+                allowed: true,
+                result_ok: false,
+                approval_token_present: Some(true),
+                approval_result: Some("approved_execution_started".to_string()),
+                args_summary: json!({"target": "desktop"}),
+            },
+        )
+        .expect("audit log and its directory entries should be durably written");
+
+        assert!(path.is_file());
+        assert!(path.parent().unwrap().is_dir());
+        assert!(directory.join("nested").is_dir());
         fs::remove_dir_all(directory).ok();
     }
 }

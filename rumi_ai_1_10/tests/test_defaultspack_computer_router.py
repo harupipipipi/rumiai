@@ -49,6 +49,18 @@ def _computer_router_module():
     return computer_router
 
 
+def _exact_viewer_window() -> dict[str, object]:
+    return {
+        "app": "ChatGPT Atlas",
+        "pid": 101,
+        "window_id": 202,
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 800,
+    }
+
+
 def test_run_computer_action_wraps_controller_approval_with_request_id(monkeypatch) -> None:
     from domain.safety import approval
 
@@ -734,7 +746,7 @@ def test_viewer_broker_screenshot_result_recommends_type_and_key(monkeypatch) ->
 
     result = computer_router.run_computer_action(
         "computer.screenshot",
-        {"app": "ChatGPT Atlas"},
+        {"app": "ChatGPT Atlas", "window": _exact_viewer_window()},
         {"conversation_id": "conv_1"},
         tool_name="browser_computer",
         yolo_mode=True,
@@ -783,7 +795,12 @@ def test_viewer_router_preserves_posted_unverified_delivery_and_ax_readiness(mon
 
     result = computer_router.run_computer_action(
         "computer.type",
-        {"app": "ChatGPT Atlas", "fallback": "background", "text": "youtube"},
+        {
+            "app": "ChatGPT Atlas",
+            "fallback": "background",
+            "text": "youtube",
+            "window": _exact_viewer_window(),
+        },
         {"conversation_id": "conv_1"},
         tool_name="browser_computer",
         yolo_mode=True,

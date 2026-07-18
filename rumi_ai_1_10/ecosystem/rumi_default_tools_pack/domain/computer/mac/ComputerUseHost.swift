@@ -834,31 +834,77 @@ func windowInventorySnapshot(args: [String: Any]) -> WindowInventorySnapshot {
     )
 }
 
-func matchingWindow(args: [String: Any]) -> [String: Any]? {
-    let explicitId = intValue(args["window_id"] ?? args["id"] ?? args["window"])
-    let pid = intValue(args["pid"])
-    let appNeedle = stringValue(args["app"] ?? args["application"] ?? args["name"]).lowercased()
-    let titleNeedle = stringValue(args["title"] ?? args["title_contains"]).lowercased()
-    for window in windowRecords() {
-        if explicitId > 0 && intValue(window["window_id"]) == explicitId {
-            return window
+func windowConstraintSources(args: [String: Any]) -> [[String: Any]] {
+    var sources = [args]
+    if let window = args["window"] as? [String: Any] {
+        sources.append(window)
+    }
+    return sources
+}
+
+func windowConstraintIsSupplied(_ value: Any?) -> Bool {
+    guard let value else {
+        return false
+    }
+    if value is NSNull {
+        return false
+    }
+    return !stringValue(value).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+func screenshotHasWindowConstraint(args: [String: Any]) -> Bool {
+    for source in windowConstraintSources(args: args) {
+        if windowConstraintIsSupplied(source["window_id"] ?? source["id"])
+            || (!(source["window"] is [String: Any]) && windowConstraintIsSupplied(source["window"]))
+            || windowConstraintIsSupplied(source["pid"])
+            || windowConstraintIsSupplied(source["app"] ?? source["application"] ?? source["process"] ?? source["name"])
+            || windowConstraintIsSupplied(source["title"] ?? source["window_title"] ?? source["title_contains"])
+        {
+            return true
         }
     }
-    for window in windowRecords() {
-        if pid > 0 && intValue(window["pid"]) != pid {
-            continue
+    return false
+}
+
+func windowMatchesConstraints(_ window: [String: Any], args: [String: Any]) -> Bool {
+    for source in windowConstraintSources(args: args) {
+        let explicitIdValue = source["window_id"] ?? source["id"] ?? (
+            source["window"] is [String: Any] ? nil : source["window"]
+        )
+        if windowConstraintIsSupplied(explicitIdValue) {
+            let explicitId = intValue(explicitIdValue)
+            guard explicitId > 0, intValue(window["window_id"]) == explicitId else {
+                return false
+            }
         }
-        if !appNeedle.isEmpty && !stringValue(window["app"]).lowercased().contains(appNeedle) {
-            continue
+        if windowConstraintIsSupplied(source["pid"]) {
+            let pid = intValue(source["pid"])
+            guard pid > 0, intValue(window["pid"]) == pid else {
+                return false
+            }
         }
+        let appNeedle = stringValue(
+            source["app"] ?? source["application"] ?? source["process"] ?? source["name"]
+        ).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let owner = stringValue(window["app"]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !appNeedle.isEmpty && owner != appNeedle {
+            return false
+        }
+        let titleNeedle = stringValue(
+            source["title"] ?? source["window_title"] ?? source["title_contains"]
+        ).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !titleNeedle.isEmpty && !stringValue(window["title"]).lowercased().contains(titleNeedle) {
-            continue
-        }
-        if pid > 0 || !appNeedle.isEmpty || !titleNeedle.isEmpty {
-            return window
+            return false
         }
     }
-    return nil
+    return true
+}
+
+func matchingWindow(args: [String: Any]) -> [String: Any]? {
+    guard screenshotHasWindowConstraint(args: args) else {
+        return nil
+    }
+    return windowRecords().first { windowMatchesConstraints($0, args: args) }
 }
 
 func temporaryPngPath() -> String {
@@ -873,6 +919,10 @@ func screenshotPayload(args: [String: Any]) -> (payload: [String: Any]?, code: S
     if let window = matchingWindow(args: args) {
         command.append(contentsOf: ["-l", stringValue(window["window_id"])])
         target = window
+    } else if screenshotHasWindowConstraint(args: args) {
+        // A supplied owner, title, PID, or window ID is a binding request, not
+        // a best-effort hint. Do not fall back to a display or rectangle.
+        return (nil, "SCREENSHOT_TARGET_UNAVAILABLE", "The requested screenshot target is unavailable.")
     } else {
         let x = intValue(args["x"])
         let y = intValue(args["y"])
@@ -2439,9 +2489,18 @@ func semanticOCRFallback(args: [String: Any], actionName: String, reason: String
             "match": match.item
         ])
     }
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: actionName, requireFocusedWindow: true, points: [point]
+    )
     CGWarpMouseCursorPosition(point)
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: actionName, requireFocusedWindow: true, points: [point]
+    )
     postMouse(.leftMouseDown, point: point, button: .left)
     usleep(35_000)
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: actionName, requireFocusedWindow: true, points: [point]
+    )
     postMouse(.leftMouseUp, point: point, button: .left)
     ok([
         "action": actionName,
@@ -2461,6 +2520,9 @@ func semanticOCRFallback(args: [String: Any], actionName: String, reason: String
 }
 
 func semanticAction(args: [String: Any], actionName: String = "computer.semantic_action") -> Never {
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: actionName, requireFocusedWindow: true
+    )
     let elementId = stringValue(args["element_id"] ?? args["id"])
     if !elementId.isEmpty && !AXIsProcessTrusted() {
         fail("ACCESSIBILITY_NOT_TRUSTED", "macOS Accessibility permission is required to press AX elements.", [
@@ -2550,6 +2612,183 @@ func postMouse(_ type: CGEventType, point: CGPoint, button: CGMouseButton) {
     event?.post(tap: .cghidEventTap)
 }
 
+struct ExactDispatchTarget {
+    let pid: pid_t
+    let windowId: Int
+    let frame: CGRect
+    let app: String
+    let bundleId: String
+}
+
+struct ExactDispatchObservation {
+    let queryCompleted: Bool
+    let recordCount: Int
+    let pid: pid_t
+    let windowId: Int
+    let frame: CGRect
+    let owner: String
+    let layer: Int
+    let onScreen: Bool
+    let frontmostPid: pid_t
+    let focusedWindowMatches: Bool?
+}
+
+func exactInteger(_ value: Any?) -> Int? {
+    if let value = value as? Int { return value }
+    if let value = value as? NSNumber {
+        let double = value.doubleValue
+        guard double.isFinite, double.rounded() == double else { return nil }
+        return value.intValue
+    }
+    if let value = value as? String {
+        return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    return nil
+}
+
+func exactDispatchTarget(args: [String: Any]) -> ExactDispatchTarget? {
+    let nested = args["window"] as? [String: Any]
+    let source = nested ?? args
+    let pid = exactInteger(source["pid"]) ?? 0
+    let windowId = exactInteger(source["window_id"] ?? source["hwnd"]) ?? 0
+    let x = exactInteger(source[nested == nil ? "window_x" : "x"])
+    let y = exactInteger(source[nested == nil ? "window_y" : "y"])
+    let width = exactInteger(source[nested == nil ? "window_width" : "width"]) ?? 0
+    let height = exactInteger(source[nested == nil ? "window_height" : "height"]) ?? 0
+    let app = stringValue(source["app"] ?? source["application"])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let bundleId = stringValue(source["bundle_id"])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard pid > 0, windowId > 0, let x, let y, width > 0, height > 0,
+          !app.isEmpty || !bundleId.isEmpty
+    else { return nil }
+    return ExactDispatchTarget(
+        pid: pid_t(pid), windowId: windowId,
+        frame: CGRect(x: x, y: y, width: width, height: height),
+        app: app, bundleId: bundleId
+    )
+}
+
+func rectExactlyMatches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+    lhs.origin.x == rhs.origin.x && lhs.origin.y == rhs.origin.y
+        && lhs.size.width == rhs.size.width && lhs.size.height == rhs.size.height
+}
+
+func exactDispatchObservation(target: ExactDispatchTarget, requireFocusedWindow: Bool) -> ExactDispatchObservation {
+    let raw = CGWindowListCopyWindowInfo(
+        [.optionIncludingWindow, .excludeDesktopElements], CGWindowID(target.windowId)
+    ) as? [[String: Any]]
+    let matches = (raw ?? []).filter {
+        intValue($0[kCGWindowNumber as String]) == target.windowId
+    }
+    guard matches.count == 1, let record = matches.first,
+          let bounds = record[kCGWindowBounds as String] as? [String: Any]
+    else {
+        return ExactDispatchObservation(
+            queryCompleted: raw != nil, recordCount: matches.count, pid: 0, windowId: 0,
+            frame: .null, owner: "", layer: -1, onScreen: false,
+            frontmostPid: frontmostPid(), focusedWindowMatches: requireFocusedWindow ? false : nil
+        )
+    }
+    let livePid = pid_t(intValue(record[kCGWindowOwnerPID as String]))
+    let liveFrame = CGRect(
+        x: doubleValue(bounds["X"]), y: doubleValue(bounds["Y"]),
+        width: doubleValue(bounds["Width"]), height: doubleValue(bounds["Height"])
+    )
+    var focusedMatches: Bool? = nil
+    if requireFocusedWindow {
+        focusedMatches = false
+        if AXIsProcessTrusted(), livePid == target.pid {
+            let appElement = AXUIElementCreateApplication(target.pid)
+            let windows = exactAXWindows(appElement)
+            let frameMatches = windows.completed ? windows.windows.filter {
+                let frame = axFrame($0)
+                return rectNearlyMatches(
+                    CGRect(
+                        x: doubleValue(frame["x"]), y: doubleValue(frame["y"]),
+                        width: doubleValue(frame["width"]), height: doubleValue(frame["height"])
+                    ),
+                    liveFrame
+                )
+            } : []
+            if frameMatches.count == 1,
+               let focusedValue = axAttribute(appElement, kAXFocusedWindowAttribute as CFString),
+               let focused = asAXUIElement(focusedValue) {
+                focusedMatches = CFEqual(frameMatches[0], focused)
+            }
+        }
+    }
+    return ExactDispatchObservation(
+        queryCompleted: raw != nil, recordCount: matches.count, pid: livePid,
+        windowId: intValue(record[kCGWindowNumber as String]), frame: liveFrame,
+        owner: stringValue(record[kCGWindowOwnerName as String]),
+        layer: intValue(record[kCGWindowLayer as String]),
+        onScreen: boolValue(record[kCGWindowIsOnscreen as String]),
+        frontmostPid: frontmostPid(), focusedWindowMatches: focusedMatches
+    )
+}
+
+func exactTargetEnforcementAllows(
+    target: ExactDispatchTarget,
+    observation: ExactDispatchObservation,
+    requireFocusedWindow: Bool,
+    points: [CGPoint]
+) -> Bool {
+    guard observation.queryCompleted, observation.recordCount == 1,
+          observation.pid == target.pid, observation.windowId == target.windowId,
+          observation.layer == 0, observation.onScreen,
+          rectExactlyMatches(observation.frame, target.frame),
+          observation.frontmostPid == target.pid
+    else { return false }
+    if !target.app.isEmpty && observation.owner.caseInsensitiveCompare(target.app) != .orderedSame {
+        return false
+    }
+    if !target.bundleId.isEmpty {
+        guard NSRunningApplication(processIdentifier: target.pid)?.bundleIdentifier == target.bundleId else {
+            return false
+        }
+    }
+    if requireFocusedWindow && observation.focusedWindowMatches != true { return false }
+    return points.allSatisfy { target.frame.contains($0) }
+}
+
+func dispatchIfExactTargetAllowed(
+    target: ExactDispatchTarget,
+    observation: ExactDispatchObservation,
+    requireFocusedWindow: Bool,
+    points: [CGPoint] = [],
+    dispatch: () -> Void
+) -> Bool {
+    guard exactTargetEnforcementAllows(
+        target: target, observation: observation,
+        requireFocusedWindow: requireFocusedWindow, points: points
+    ) else { return false }
+    dispatch()
+    return true
+}
+
+func enforceExactTargetBeforeDispatch(
+    args: [String: Any], action: String, requireFocusedWindow: Bool, points: [CGPoint] = []
+) -> ExactDispatchTarget {
+    guard let target = exactDispatchTarget(args: args) else {
+        fail("EXACT_TARGET_ENFORCEMENT_UNAVAILABLE", "The exact nested window binding is unavailable immediately before dispatch.", [
+            "action": action, "platform": "Darwin", "executed": false,
+            "input_dispatched": false, "driver": "mac_swift_host"
+        ])
+    }
+    let observation = exactDispatchObservation(target: target, requireFocusedWindow: requireFocusedWindow)
+    guard exactTargetEnforcementAllows(
+        target: target, observation: observation,
+        requireFocusedWindow: requireFocusedWindow, points: points
+    ) else {
+        fail("EXACT_TARGET_ENFORCEMENT_UNAVAILABLE", "The live foreground window no longer matches the approved exact target.", [
+            "action": action, "platform": "Darwin", "executed": false,
+            "input_dispatched": false, "driver": "mac_swift_host"
+        ])
+    }
+    return target
+}
+
 func mouseButton(_ raw: String) -> (CGMouseButton, CGEventType, CGEventType, CGEventType) {
     switch raw.lowercased() {
     case "right":
@@ -2563,6 +2802,9 @@ func mouseButton(_ raw: String) -> (CGMouseButton, CGEventType, CGEventType, CGE
 
 func move(args: [String: Any]) -> Never {
     let point = CGPoint(x: intValue(args["x"]), y: intValue(args["y"]))
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.move", requireFocusedWindow: true, points: [point]
+    )
     CGWarpMouseCursorPosition(point)
     CGAssociateMouseAndMouseCursorPosition(boolean_t(1))
     ok(["action": "computer.move", "platform": "Darwin", "executed": true, "x": Int(point.x), "y": Int(point.y), "driver": "mac_swift_host"])
@@ -2571,9 +2813,18 @@ func move(args: [String: Any]) -> Never {
 func click(args: [String: Any]) -> Never {
     let point = CGPoint(x: intValue(args["x"]), y: intValue(args["y"]))
     let buttonSpec = mouseButton(stringValue(args["button"]).isEmpty ? "left" : stringValue(args["button"]))
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.click", requireFocusedWindow: true, points: [point]
+    )
     CGWarpMouseCursorPosition(point)
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.click", requireFocusedWindow: true, points: [point]
+    )
     postMouse(buttonSpec.1, point: point, button: buttonSpec.0)
     usleep(35_000)
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.click", requireFocusedWindow: true, points: [point]
+    )
     postMouse(buttonSpec.2, point: point, button: buttonSpec.0)
     ok(["action": "computer.click", "platform": "Darwin", "executed": true, "x": Int(point.x), "y": Int(point.y), "driver": "mac_swift_host"])
 }
@@ -2582,15 +2833,27 @@ func drag(args: [String: Any]) -> Never {
     let start = CGPoint(x: intValue(args["x1"] ?? args["from_x"]), y: intValue(args["y1"] ?? args["from_y"]))
     let end = CGPoint(x: intValue(args["x2"] ?? args["to_x"]), y: intValue(args["y2"] ?? args["to_y"]))
     let buttonSpec = mouseButton(stringValue(args["button"]).isEmpty ? "left" : stringValue(args["button"]))
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.drag", requireFocusedWindow: true, points: [start, end]
+    )
     CGWarpMouseCursorPosition(start)
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.drag", requireFocusedWindow: true, points: [start]
+    )
     postMouse(buttonSpec.1, point: start, button: buttonSpec.0)
     let steps = 16
     for index in 1...steps {
         let t = CGFloat(index) / CGFloat(steps)
         let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        _ = enforceExactTargetBeforeDispatch(
+            args: args, action: "computer.drag", requireFocusedWindow: true, points: [point]
+        )
         postMouse(buttonSpec.3, point: point, button: buttonSpec.0)
         usleep(10_000)
     }
+    _ = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.drag", requireFocusedWindow: true, points: [end]
+    )
     postMouse(buttonSpec.2, point: end, button: buttonSpec.0)
     ok(["action": "computer.drag", "platform": "Darwin", "executed": true, "driver": "mac_swift_host"])
 }
@@ -5852,7 +6115,18 @@ func deliverPacedText(
     )
 }
 
-func focusedTextTargetStability(pid: pid_t, element: AXUIElement) -> TextInputTargetStability {
+func focusedTextTargetStability(
+    pid: pid_t, element: AXUIElement, exactTarget: ExactDispatchTarget? = nil
+) -> TextInputTargetStability {
+    if let exactTarget {
+        let observation = exactDispatchObservation(target: exactTarget, requireFocusedWindow: true)
+        guard exactTargetEnforcementAllows(
+            target: exactTarget, observation: observation,
+            requireFocusedWindow: true, points: []
+        ) else {
+            return TextInputTargetStability(targetPidStable: false, focusedElementStable: false)
+        }
+    }
     let pidStable = frontmostPid() == pid
     guard pidStable else {
         return TextInputTargetStability(targetPidStable: false, focusedElementStable: false)
@@ -5866,7 +6140,16 @@ func focusedTextTargetStability(pid: pid_t, element: AXUIElement) -> TextInputTa
     return TextInputTargetStability(targetPidStable: true, focusedElementStable: CFEqual(element, focusedElement))
 }
 
-func focusedTextValue(pid: pid_t, element: AXUIElement) -> String? {
+func focusedTextValue(
+    pid: pid_t, element: AXUIElement, exactTarget: ExactDispatchTarget? = nil
+) -> String? {
+    if let exactTarget {
+        let observation = exactDispatchObservation(target: exactTarget, requireFocusedWindow: true)
+        guard exactTargetEnforcementAllows(
+            target: exactTarget, observation: observation,
+            requireFocusedWindow: true, points: []
+        ) else { return nil }
+    }
     guard frontmostPid() == pid else {
         return nil
     }
@@ -5886,6 +6169,9 @@ func typeText(args: [String: Any]) -> Never {
     guard !text.isEmpty else {
         fail("TEXT_REQUIRED", "computer.type requires non-empty text.")
     }
+    let exactTarget = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.type", requireFocusedWindow: true
+    )
     let explicitTargetPid = resolvedExplicitTextInputTargetPid(args: args)
     if hasExplicitTextInputTarget(args: args) {
         guard let explicitTargetPid,
@@ -5950,7 +6236,9 @@ func typeText(args: [String: Any]) -> Never {
             "driver": "mac_swift_host"
         ])
     }
-    let verifiedValue = { focusedTextValue(pid: initialState.pid, element: initialState.element) }
+    let verifiedValue = {
+        focusedTextValue(pid: initialState.pid, element: initialState.element, exactTarget: exactTarget)
+    }
     let direct = directTextInsertion(
         expectation: expectation,
         initialValue: initialState.value,
@@ -5993,7 +6281,9 @@ func typeText(args: [String: Any]) -> Never {
             "driver": "mac_swift_host"
         ])
     case .unverified(let strategy, let observedValue):
-        let stability = focusedTextTargetStability(pid: initialState.pid, element: initialState.element)
+        let stability = focusedTextTargetStability(
+            pid: initialState.pid, element: initialState.element, exactTarget: exactTarget
+        )
         let zeroMutation = stability.isStable && observedValue == initialState.value
         guard zeroMutation else {
             fail("TYPE_COMPLETION_NOT_VERIFIED", "Direct native text insertion partially mutated the field or its target drifted; fallback was rejected.", [
@@ -6025,7 +6315,11 @@ func typeText(args: [String: Any]) -> Never {
         initialValue: initialState.value,
         selectedRange: initialState.selectedRange,
         post: { pid, unit in postUnicodeUnit(unit, targetPid: pid) },
-        targetStability: { focusedTextTargetStability(pid: initialState.pid, element: initialState.element) },
+        targetStability: {
+            focusedTextTargetStability(
+                pid: initialState.pid, element: initialState.element, exactTarget: exactTarget
+            )
+        },
         value: verifiedValue
     )
     guard delivery.completionVerified else {
@@ -7848,6 +8142,45 @@ func typingCompletionSelfTest() -> Never {
     else {
         fail("SELF_TEST_FAILED", "Semantic fixed-edge exposure diagnostics validation failed.")
     }
+    let dispatchTarget = ExactDispatchTarget(
+        pid: 4321, windowId: 8765,
+        frame: CGRect(x: 100, y: 50, width: 800, height: 600),
+        app: "Target App", bundleId: ""
+    )
+    let stableDispatchObservation = ExactDispatchObservation(
+        queryCompleted: true, recordCount: 1, pid: 4321, windowId: 8765,
+        frame: dispatchTarget.frame, owner: "Target App", layer: 0, onScreen: true,
+        frontmostPid: 4321, focusedWindowMatches: true
+    )
+    let focusDriftObservation = ExactDispatchObservation(
+        queryCompleted: true, recordCount: 1, pid: 4321, windowId: 8765,
+        frame: dispatchTarget.frame, owner: "Target App", layer: 0, onScreen: true,
+        frontmostPid: 9999, focusedWindowMatches: false
+    )
+    let movedWindowObservation = ExactDispatchObservation(
+        queryCompleted: true, recordCount: 1, pid: 4321, windowId: 8765,
+        frame: CGRect(x: 101, y: 50, width: 800, height: 600),
+        owner: "Target App", layer: 0, onScreen: true,
+        frontmostPid: 4321, focusedWindowMatches: true
+    )
+    var simulatedDispatchCount = 0
+    let focusDriftDispatched = dispatchIfExactTargetAllowed(
+        target: dispatchTarget, observation: focusDriftObservation,
+        requireFocusedWindow: true
+    ) { simulatedDispatchCount += 1 }
+    let movedWindowDispatched = dispatchIfExactTargetAllowed(
+        target: dispatchTarget, observation: movedWindowObservation,
+        requireFocusedWindow: false, points: [CGPoint(x: 200, y: 200)]
+    ) { simulatedDispatchCount += 1 }
+    let validDispatch = dispatchIfExactTargetAllowed(
+        target: dispatchTarget, observation: stableDispatchObservation,
+        requireFocusedWindow: true
+    ) { simulatedDispatchCount += 1 }
+    guard !focusDriftDispatched, !movedWindowDispatched, validDispatch,
+          simulatedDispatchCount == 1
+    else {
+        fail("SELF_TEST_FAILED", "Exact-target pre-dispatch enforcement failed closed incorrectly.")
+    }
     ok([
         "self_test": true,
         "typing_completion": true,
@@ -7872,6 +8205,8 @@ func typingCompletionSelfTest() -> Never {
         "visibility_topology_diagnostics_validated": true,
         "target_drift_rejected": true,
         "pid_drift_rejected": true,
+        "exact_target_focus_drift_no_dispatch": true,
+        "exact_target_moved_window_no_dispatch": true,
         "paced_units": completed.dispatchedUnitCount,
         "partial_rejected": true
     ])
@@ -7938,14 +8273,21 @@ func key(args: [String: Any]) -> Never {
         fail("UNSUPPORTED_KEY", "Unsupported key: \(keyName)")
     }
     let eventFlags = flags(parts)
-    if let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true) {
-        down.flags = eventFlags
-        down.post(tap: .cghidEventTap)
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+    else {
+        fail("EXACT_TARGET_ENFORCEMENT_UNAVAILABLE", "The key event pair could not be created without partial dispatch.", [
+            "action": "computer.key", "platform": "Darwin", "executed": false,
+            "input_dispatched": false, "driver": "mac_swift_host"
+        ])
     }
-    if let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) {
-        up.flags = eventFlags
-        up.post(tap: .cghidEventTap)
-    }
+    let target = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.key", requireFocusedWindow: true
+    )
+    down.flags = eventFlags
+    up.flags = eventFlags
+    down.postToPid(target.pid)
+    up.postToPid(target.pid)
     ok(["action": "computer.key", "platform": "Darwin", "executed": true, "key": keyName, "modifiers": parts, "driver": "mac_swift_host"])
 }
 
@@ -7954,8 +8296,21 @@ func scroll(args: [String: Any]) -> Never {
     let amount = max(1, intValue(args["amount"] ?? args["clicks"], default: 3))
     let dy = direction == "up" ? amount : (direction == "down" ? -amount : 0)
     let dx = direction == "left" ? amount : (direction == "right" ? -amount : 0)
-    let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
-    event?.post(tap: .cghidEventTap)
+    guard let cursor = CGEvent(source: nil)?.location,
+          let event = CGEvent(
+              scrollWheelEvent2Source: nil, units: .line, wheelCount: 2,
+              wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0
+          )
+    else {
+        fail("EXACT_TARGET_ENFORCEMENT_UNAVAILABLE", "The live cursor or scroll event is unavailable before dispatch.", [
+            "action": "computer.scroll", "platform": "Darwin", "executed": false,
+            "input_dispatched": false, "driver": "mac_swift_host"
+        ])
+    }
+    let target = enforceExactTargetBeforeDispatch(
+        args: args, action: "computer.scroll", requireFocusedWindow: true, points: [cursor]
+    )
+    event.postToPid(target.pid)
     ok(["action": "computer.scroll", "platform": "Darwin", "executed": true, "direction": direction, "amount": amount, "driver": "mac_swift_host"])
 }
 

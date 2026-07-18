@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+
+pytestmark = pytest.mark.contract
+
 
 def _posted_key_result() -> dict[str, object]:
     return {

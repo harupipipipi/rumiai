@@ -889,12 +889,62 @@ class BrowserComputerController:
         approval_payload = self._safe_payload(payload)
         if not (yolo_mode or self._consume_approval(payload, "computer.screenshot", approval_payload)):
             return self._approval_required("computer.screenshot", approval_payload)
-        self._artifact_root.mkdir(parents=True, exist_ok=True)
-        path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         target_binding_source = self._screenshot_target_binding_source(payload)
         target_required = target_binding_source != "none"
+        expected_target = self._screenshot_preflight_target(payload) if target_required else None
+        if target_required and expected_target is None:
+            # Resolve explicit targets before allocating an artifact or invoking
+            # any capture backend. A miss must never become a display capture.
+            return self._screenshot_failure(
+                "SCREENSHOT_TARGET_UNAVAILABLE",
+                failure_stage="target_resolution",
+                screenshot_supported=platform.system() in {"Darwin", "Windows", "Linux"},
+                target_resolved=False,
+                capture_attempted=False,
+                capture_driver="none",
+                target_binding_source=target_binding_source,
+            )
+        capture_payload = payload
+        if expected_target is not None and self._has_explicit_window_filter(payload):
+            # Bind the native operation to the inventory record that passed
+            # preflight. This prevents a caller-provided geometry or stale
+            # direct window mapping from selecting a different capture region.
+            capture_payload = dict(payload)
+            for key in (
+                "app",
+                "application",
+                "name",
+                "process",
+                "title",
+                "window_title",
+                "title_contains",
+                "pid",
+                "window_id",
+                "id",
+                "hwnd",
+                "x",
+                "y",
+                "width",
+                "height",
+            ):
+                capture_payload.pop(key, None)
+            for key in ("app", "title", "pid", "window_id", "hwnd", "x", "y", "width", "height"):
+                if expected_target.get(key) is not None:
+                    capture_payload[key] = expected_target[key]
+            capture_payload["window"] = dict(expected_target)
+            if str(capture_payload.get("target") or capture_payload.get("capture_target") or "").strip().lower() in {
+                "primary_display",
+                "all_displays",
+                "screen",
+                "display",
+                "desktop",
+            }:
+                capture_payload.pop("target", None)
+                capture_payload.pop("capture_target", None)
+        self._artifact_root.mkdir(parents=True, exist_ok=True)
+        path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         try:
-            capture = self._capture_or_reuse_screenshot(path, payload)
+            capture = self._capture_or_reuse_screenshot(path, capture_payload)
         except Exception:
             return self._screenshot_failure(
                 "SCREENSHOT_CAPTURE_FAILED",
@@ -910,7 +960,11 @@ class BrowserComputerController:
             target_binding_source = "persisted_selection"
             target_required = True
         capture_driver = self._screenshot_capture_driver(system, capture, payload)
-        target_resolved = not target_required or isinstance(capture.get("target_window"), dict)
+        target_resolved = not target_required or self._screenshot_returned_target_matches_binding(
+            capture.get("target_window"),
+            payload,
+            expected_target=expected_target,
+        )
         if not capture.get("supported", True):
             target_unavailable = capture.get("target_filter") is not None or (target_required and not target_resolved)
             platform_supported = system in {"Darwin", "Windows", "Linux"}
@@ -1063,7 +1117,7 @@ class BrowserComputerController:
         target = str(payload.get("target") or payload.get("capture_target") or "").strip().lower()
         if isinstance(payload.get("window"), dict):
             return "explicit_window"
-        if any(payload.get(key) not in (None, "") for key in ("pid", "window_id", "hwnd")):
+        if any(payload.get(key) not in (None, "") for key in ("pid", "window_id", "id", "hwnd")):
             return "explicit_identifiers"
         if any(str(payload.get(key) or "").strip() for key in ("app", "application", "title", "window_title", "title_contains")):
             return "enumerated_match"
@@ -1072,6 +1126,94 @@ class BrowserComputerController:
         if target in {"selected_window", "window", "app"} or not target:
             return "persisted_selection" if target else "none"
         return "none"
+
+    def _screenshot_preflight_target(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve an explicit screenshot target from observed inventory only."""
+        if self._has_explicit_window_filter(payload):
+            return self._matching_observed_screenshot_window(payload)
+        return self._capture_target(payload)
+
+    def _matching_observed_screenshot_window(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        filters = self._window_filter(payload)
+        candidates: list[dict[str, Any]] = []
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if (
+                window
+                and self._is_usable_target_window(window)
+                and self._window_matches_screenshot_binding(window, payload)
+            ):
+                candidates.append(window)
+        return self._best_window_candidate(
+            candidates,
+            app=filters.get("app", "").lower(),
+            title=filters.get("title", "").lower(),
+        )
+
+    @classmethod
+    def _window_matches_screenshot_binding(cls, window: dict[str, Any], payload: dict[str, Any]) -> bool:
+        """Require every supplied screenshot window constraint to match one record."""
+        supplied_window = payload.get("window")
+        nested_payload = supplied_window if isinstance(supplied_window, dict) else {}
+        for source in (payload, nested_payload):
+            for key, parser in (("pid", cls._optional_int), ("window_id", cls._window_id_int), ("id", cls._window_id_int), ("hwnd", cls._window_id_int)):
+                if source.get(key) not in (None, "") and not parser(source.get(key)):
+                    return False
+            requested_owner = str(
+                source.get("app") or source.get("application") or source.get("process") or ""
+            ).strip()
+            if requested_owner and not cls._screenshot_owner_matches(
+                requested_owner, str(window.get("app") or window.get("process") or "")
+            ):
+                return False
+        if not cls._window_matches_explicit_filter(window, payload):
+            return False
+        if not isinstance(supplied_window, dict):
+            return True
+        nested_payload = {
+            "app": supplied_window.get("app") or supplied_window.get("application") or supplied_window.get("process"),
+            "title": supplied_window.get("title") or supplied_window.get("window_title") or supplied_window.get("title_contains"),
+            "pid": supplied_window.get("pid"),
+            "window_id": supplied_window.get("window_id") if supplied_window.get("window_id") not in (None, "") else supplied_window.get("id"),
+            "hwnd": supplied_window.get("hwnd"),
+        }
+        return cls._window_matches_explicit_filter(window, nested_payload)
+
+    @classmethod
+    def _screenshot_owner_matches(cls, requested_owner: str, observed_owner: str) -> bool:
+        """Match owners by exact normalized identity or a closed alias token."""
+        requested = cls._app_alias_tokens(requested_owner)
+        observed = cls._app_alias_tokens(observed_owner)
+        return bool(requested and observed and requested.intersection(observed))
+
+    def _screenshot_returned_target_matches_binding(
+        self,
+        returned_target: Any,
+        payload: dict[str, Any],
+        *,
+        expected_target: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(returned_target, dict):
+            return False
+        if self._has_explicit_window_filter(payload) and not self._window_matches_screenshot_binding(returned_target, payload):
+            return False
+        if not isinstance(expected_target, dict):
+            return True
+        # An observed target binds the capture to the same owner/window when
+        # those closed identity facts are available. Missing returned facts do
+        # not certify a successful explicit target capture.
+        identity_fields = (
+            ("window_id", self._window_id_int, ("window_id", "id")),
+            ("pid", self._optional_int, ("pid",)),
+            ("hwnd", self._window_id_int, ("hwnd",)),
+        )
+        for expected_key, parser, returned_keys in identity_fields:
+            expected_value = parser(expected_target.get(expected_key))
+            if expected_value:
+                returned_value = next((parser(returned_target.get(key)) for key in returned_keys if parser(returned_target.get(key))), 0)
+                if returned_value != expected_value:
+                    return False
+        return True
 
     @staticmethod
     def _screenshot_capture_driver(system: str, capture: dict[str, Any] | None, payload: dict[str, Any]) -> str:
@@ -4155,7 +4297,9 @@ class BrowserComputerController:
         wanted_pid = cls._optional_int(payload.get("pid"))
         if wanted_pid is not None and int(window.get("pid") or 0) != wanted_pid:
             return False
-        wanted_window_id = cls._window_id_int(payload.get("window_id"))
+        wanted_window_id = cls._window_id_int(
+            payload.get("window_id") if payload.get("window_id") not in (None, "") else payload.get("id")
+        )
         if wanted_window_id:
             window_id = cls._window_id_int(window.get("window_id"))
             frame_ids = window.get("frame_window_ids") if isinstance(window.get("frame_window_ids"), list) else []
@@ -4252,6 +4396,10 @@ class BrowserComputerController:
             "attached_image",
         }
         if use_latest:
+            # An explicit target cannot reuse an earlier screenshot because the
+            # stored image may belong to a different window or owner.
+            if self._has_explicit_window_filter(payload):
+                return self._capture_screenshot(path, payload)
             state = self._computer_state()
             last, source_role = self._screenshot_reuse_source(state, source_name, crop_payload=bool(crop_payload))
             source_path = Path(str(last.get("path") or ""))
@@ -4499,14 +4647,7 @@ class BrowserComputerController:
     def _capture_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         system = platform.system()
         target = self._capture_target(payload)
-        explicit_desktop = str(payload.get("target") or payload.get("capture_target") or "").strip().lower() in {
-            "primary_display",
-            "all_displays",
-            "screen",
-            "display",
-            "desktop",
-        }
-        if target is None and self._has_window_filter(payload) and not explicit_desktop:
+        if target is None and self._has_window_filter(payload):
             return {
                 "platform": system,
                 "supported": False,
@@ -4517,6 +4658,15 @@ class BrowserComputerController:
             swift_capture = self._darwin_swift_screenshot(path, payload, target)
             if swift_capture is not None:
                 return swift_capture
+            if self._has_explicit_window_filter(payload):
+                # The Swift helper rechecks the window's current owner and all
+                # supplied constraints immediately before capture. Its legacy
+                # screencapture fallback cannot provide that binding proof.
+                return {
+                    "platform": system,
+                    "supported": False,
+                    "target_filter": self._window_filter(payload),
+                }
             if target:
                 capture_rect = self._normalize_rect(target.get("capture_rect"))
                 if capture_rect:
@@ -4626,7 +4776,15 @@ class BrowserComputerController:
                     if target.get(key) is not None:
                         args.setdefault(key, target.get(key))
             result = host.run("computer.screenshot", args)
-            if result.get("is_error") or not path.exists():
+            if result.get("is_error"):
+                if result.get("error_code") == "SCREENSHOT_TARGET_UNAVAILABLE":
+                    return {
+                        "platform": "Darwin",
+                        "supported": False,
+                        "target_filter": self._window_filter(payload),
+                    }
+                return None
+            if not path.exists():
                 return None
             action_coordinate_system = self._action_coordinate_system(
                 "Darwin",
@@ -4691,7 +4849,7 @@ class BrowserComputerController:
             return True
         if isinstance(payload.get("window"), dict):
             return True
-        for key in ("pid", "window_id", "hwnd"):
+        for key in ("pid", "window_id", "id", "hwnd"):
             if payload.get(key) not in (None, ""):
                 return True
         return False

@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 
 
+pytestmark = pytest.mark.contract
+
+
 def _controller(root: Path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
         BrowserComputerController,
@@ -112,6 +115,212 @@ def test_controller_target_resolution_failure_is_content_free(tmp_path, monkeypa
     assert result["capture_driver"] == "none"
     assert result["target_binding_source"] == "enumerated_match"
     assert "CANARY" not in json.dumps(result)
+
+
+def test_explicit_screenshot_window_miss_creates_no_capture_or_artifact(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    controller = _controller(root)
+    capture_calls = 0
+
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "window_id": 100,
+                "pid": 200,
+                "app": "Observed App",
+                "title": "Observed Window",
+                "x": 0,
+                "y": 0,
+                "width": 800,
+                "height": 600,
+            }
+        ],
+    )
+
+    def capture(path, payload):
+        nonlocal capture_calls
+        capture_calls += 1
+        path.write_bytes(b"unexpected")
+        return {"platform": "Darwin", "target_window": None}
+
+    monkeypatch.setattr(controller, "_capture_or_reuse_screenshot", capture)
+
+    result = controller.run(
+        "computer.screenshot",
+        {"window_id": 999, "app": "Expected App"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
+    assert result["capture_driver"] == "none"
+    assert capture_calls == 0
+    assert not root.exists()
+
+
+def test_explicit_screenshot_owner_mismatch_creates_no_capture_or_artifact(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    controller = _controller(root)
+    capture_calls = 0
+
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "window_id": 100,
+                "pid": 200,
+                "app": "Expected Owner Extended",
+                "title": "Expected Window",
+                "x": 0,
+                "y": 0,
+                "width": 800,
+                "height": 600,
+            }
+        ],
+    )
+
+    def capture(path, payload):
+        nonlocal capture_calls
+        capture_calls += 1
+        path.write_bytes(b"unexpected")
+        return {"platform": "Darwin", "target_window": None}
+
+    monkeypatch.setattr(controller, "_capture_or_reuse_screenshot", capture)
+
+    result = controller.run(
+        "computer.screenshot",
+        {"window_id": 100, "app": "Expected Owner", "title": "Expected Window"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
+    assert result["capture_driver"] == "none"
+    assert capture_calls == 0
+    assert not root.exists()
+
+
+def test_explicit_screenshot_rebinds_alias_to_observed_exact_owner(tmp_path, monkeypatch):
+    controller = _controller(tmp_path / "artifacts")
+    observed = {
+        "window_id": 100,
+        "pid": 200,
+        "app": "ChatGPT Atlas",
+        "title": "Expected Window",
+        "x": 10,
+        "y": 20,
+        "width": 800,
+        "height": 600,
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(controller, "_list_windows", lambda: [observed])
+
+    def capture(path, payload):
+        captured.update(payload)
+        return {"platform": "Darwin", "target_window": {**observed, "app": "Different Owner"}}
+
+    monkeypatch.setattr(controller, "_capture_or_reuse_screenshot", capture)
+
+    result = controller.run(
+        "computer.screenshot",
+        {"app": "Atlas", "title": "Expected Window", "x": 999, "y": 999},
+        yolo_mode=True,
+    )
+
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert captured["app"] == "ChatGPT Atlas"
+    assert captured["title"] == "Expected Window"
+    assert captured["pid"] == 200
+    assert captured["window_id"] == 100
+    assert captured["x"] == 10
+    assert captured["y"] == 20
+    assert isinstance(captured["window"], dict)
+    assert captured["window"]["app"] == "ChatGPT Atlas"
+    assert captured["window"]["window_id"] == 100
+    assert captured["window"]["pid"] == 200
+    assert captured["window"]["x"] == 10
+    assert captured["window"]["y"] == 20
+    assert "application" not in captured
+    assert "title_contains" not in captured
+
+
+def test_controller_does_not_certify_mismatched_returned_screenshot_binding(tmp_path, monkeypatch):
+    controller = _controller(tmp_path / "artifacts")
+    expected = {
+        "window_id": 100,
+        "pid": 200,
+        "app": "Expected Owner",
+        "title": "Expected Window",
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600,
+    }
+    monkeypatch.setattr(controller, "_list_windows", lambda: [expected])
+    monkeypatch.setattr(
+        controller,
+        "_capture_or_reuse_screenshot",
+        lambda path, payload: {
+            "platform": "Darwin",
+            "target_window": {**expected, "app": "Different Owner"},
+        },
+    )
+
+    result = controller.run(
+        "computer.screenshot",
+        {"window_id": 100, "app": "Expected Owner", "title": "Expected Window"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
+    assert result["capture_driver"] == "none"
+
+
+def test_darwin_explicit_target_does_not_fallback_when_swift_binding_is_unavailable(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    path = tmp_path / "unexpected.png"
+    controller = _controller(tmp_path / "artifacts")
+    target = {
+        "window_id": 100,
+        "pid": 200,
+        "app": "Expected Owner",
+        "title": "Expected Window",
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600,
+    }
+    capture_calls = 0
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(controller, "_capture_target", lambda payload: target)
+    monkeypatch.setattr(controller, "_darwin_swift_screenshot", lambda *args: None)
+
+    def capture(*args, **kwargs):
+        nonlocal capture_calls
+        capture_calls += 1
+        raise AssertionError("legacy capture must not run")
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", capture)
+
+    result = controller._capture_screenshot(path, {"window": target})
+
+    assert result["supported"] is False
+    assert result["target_filter"] == {"app": "", "title": ""}
+    assert capture_calls == 0
+    assert not path.exists()
 
 
 def test_controller_model_copy_exception_is_fixed_content_free_failure(tmp_path, monkeypatch):
