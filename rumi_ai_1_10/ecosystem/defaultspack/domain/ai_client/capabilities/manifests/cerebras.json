@@ -5,6 +5,8 @@
     "supports_stream": true,
     "accepts_content_blocks": [
       "text",
+      "image",
+      "image_url",
       "tool_call",
       "tool_result"
     ],
@@ -12,11 +14,12 @@
     "supports_parallel_tool_call_shape": true,
     "tool_choice_modes": [
       "auto",
-      "none"
+      "none",
+      "required"
     ],
     "schema_support": {
       "json_schema": true,
-      "strict_json_schema": false
+      "strict_json_schema": true
     },
     "params": {
       "temperature": true,
@@ -35,11 +38,15 @@
     "max_tokens_name": "max_completion_tokens",
     "max_completion_tokens_name": "max_completion_tokens",
     "drop_reasoning_when_none": true,
+    "drop_assistant_reasoning_content": true,
     "reasoning_effort_values": [
+      "none",
       "low",
       "medium",
       "high"
     ],
-    "supports_stream_usage": false
+    "supports_stream_usage": false,
+    "supports_strict_json_schema": true,
+    "strict_function_tools": true
   }
 }

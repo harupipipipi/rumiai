@@ -38,8 +38,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "temperature": 0.2,
             "top_p": 1,
         },
+        "gemma-4-31b": {
+            "temperature": 1,
+            "top_p": 0.95,
+            "reasoning_effort": "none",
+        },
     }
-    _CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
+    _CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"}
 
     def __init__(
         self,
@@ -326,6 +331,22 @@ class OpenAICompatibleProvider(OpenAIProvider):
             model_id = model_id.split("/", 1)[1]
         return self.provider_id == "cerebras" and model_id in self._CEREBRAS_REASONING_MODELS
 
+    def build_request(self, messages):
+        converted = super().build_request(messages)
+        normalized = []
+        for message in converted:
+            if not isinstance(message, dict):
+                normalized.append(message)
+                continue
+            item = dict(message)
+            if self.provider_id == "cerebras" and item.get("role") == "assistant":
+                for key in ("reasoning_content", "reasoning", "thinking"):
+                    item.pop(key, None)
+            if self.provider_id == "groq" and item.get("role") == "tool":
+                item.pop("name", None)
+            normalized.append(item)
+        return normalized
+
     @staticmethod
     def _translate_params(params):
         raw = dict(params or {})
@@ -363,13 +384,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
             return self._translate_cerebras_model_params(model, params)
         return super()._translate_model_params(model, params)
 
-    def build_request(self, messages):
-        converted = super().build_request(messages)
-        if self.provider_id == "groq":
-            for message in converted:
-                if isinstance(message, dict) and message.get("role") == "tool":
-                    message.pop("name", None)
-        return converted
+    def _provider_tool_sanitizer_capabilities(self):
+        quirks: Dict[str, Any] = {}
+        if self.provider_id == "cerebras":
+            quirks["strict_function_tools"] = True
+        return {"provider_id": self.provider_id, "quirks": quirks}
 
     def list_models(self):
         provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()

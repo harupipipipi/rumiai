@@ -12,6 +12,7 @@ from domain.ai_client.provider_compiler.base import (
 from domain.ai_client.providers.openai_provider import OpenAIProvider
 from domain.chat.ir import RumiStreamEventIR
 from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages
+from domain.tool.schema_adapter import provider_safe_tool_definitions
 
 
 class OpenAIChatCompiler(ProviderCompiler):
@@ -22,9 +23,15 @@ class OpenAIChatCompiler(ProviderCompiler):
         params = self._translate_params(planned)
         messages = ir_to_legacy_standard_messages(planned.ir)
         provider = OpenAIProvider()
-        body: dict[str, Any] = {"model": planned.model, "messages": provider.build_request(messages)}
+        body: dict[str, Any] = {
+            "model": planned.model,
+            "messages": self._normalize_provider_messages(
+                planned,
+                provider.build_request(messages),
+            ),
+        }
         if planned.provider_tools:
-            body["tools"] = planned.provider_tools
+            body["tools"] = provider_safe_tool_definitions(planned.provider_tools, planned.provider_capabilities)
         self._copy_chat_params(body, params)
         return CompiledProviderRequest(
             api_family=self.api_family,
@@ -110,6 +117,29 @@ class OpenAIChatCompiler(ProviderCompiler):
         extra_body = params.get("extra_body")
         if isinstance(extra_body, dict):
             body.update(extra_body)
+        if not body.get("tools"):
+            body.pop("tool_choice", None)
+            body.pop("parallel_tool_calls", None)
+
+    @staticmethod
+    def _normalize_provider_messages(
+        planned: PlannedProviderRequest,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        quirks = planned.provider_capabilities.get("quirks")
+        if not isinstance(quirks, dict) or not quirks.get("drop_assistant_reasoning_content"):
+            return messages
+        normalized: list[dict[str, Any]] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                normalized.append(message)
+                continue
+            item = dict(message)
+            if item.get("role") == "assistant":
+                for key in ("reasoning_content", "reasoning", "thinking"):
+                    item.pop(key, None)
+            normalized.append(item)
+        return normalized
 
 
 def dumps_body(body: dict[str, Any]) -> str:

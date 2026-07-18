@@ -30,6 +30,7 @@
       "chat": "gpt-oss-120b",
       "reasoning": "gpt-oss-120b",
       "general": "qwen-3-235b-a22b-instruct-2507",
+      "vision": "gemma-4-31b",
       "fast": "llama3.1-8b",
       "coding": "zai-glm-4.7",
       "agent": "zai-glm-4.7"
@@ -39,6 +40,7 @@
       "streaming",
       "tool_calls",
       "reasoning",
+      "vision",
       "openai_compatible"
     ]
   },
@@ -61,6 +63,7 @@
       "chat": "gpt-oss-120b",
       "reasoning": "gpt-oss-120b",
       "general": "qwen-3-235b-a22b-instruct-2507",
+      "vision": "gemma-4-31b",
       "fast": "llama3.1-8b",
       "coding": "zai-glm-4.7",
       "agent": "zai-glm-4.7"
@@ -98,6 +101,7 @@
     "streaming",
     "tool_calls",
     "reasoning",
+    "vision",
     "openai_compatible"
   ]
 }

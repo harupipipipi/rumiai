@@ -225,10 +225,23 @@ def test_cerebras_manifest_first_runtime_provider(monkeypatch):
     assert {
         "cerebras/gpt-oss-120b",
         "cerebras/zai-glm-4.7",
+        "cerebras/gemma-4-31b",
         "cerebras/qwen-3-235b-a22b-instruct-2507",
         "cerebras/llama3.1-8b",
     }.issubset(models)
+    assert provider["default_model_for"]["vision"] == "gemma-4-31b"
     assert provider["metadata"]["config"]["service_tier_request_injection"] == "explicit_only"
+    assert models["cerebras/gemma-4-31b"]["context_window"] == 65536
+    assert models["cerebras/gemma-4-31b"]["max_context"] == 65536
+    assert models["cerebras/gpt-oss-120b"]["max_context_tokens"] == 65536
+    assert models["cerebras/zai-glm-4.7"]["max_context_tokens"] == 64000
+    gemma_rate_limits = models["cerebras/gemma-4-31b"]["metadata"]["rate_limits"]
+    assert gemma_rate_limits["requests_per_minute"] == 5
+    assert gemma_rate_limits["requests_per_hour"] == 150
+    assert gemma_rate_limits["requests_per_day"] == 2400
+    assert gemma_rate_limits["tokens_per_minute"] == 30000
+    assert gemma_rate_limits["tokens_per_hour"] == 1000000
+    assert gemma_rate_limits["tokens_per_day"] == 1000000
 
     monkeypatch.setenv("CEREBRAS_API_KEY", "test-cerebras-key")
     assert "cerebras" in detect_available_providers()
@@ -337,6 +350,19 @@ def test_cerebras_openai_compatible_params_match_model_contract():
                     }
                 },
             },
+            {
+                "id": "cerebras/gemma-4-31b",
+                "model_id": "gemma-4-31b",
+                "display_name": "Gemma 4 31B",
+                "capabilities": {"reasoning": True, "vision": True},
+                "metadata": {
+                    "request_defaults": {
+                        "temperature": 1,
+                        "top_p": 0.95,
+                        "reasoning_effort": "none",
+                    }
+                },
+            },
         ],
     )
 
@@ -357,8 +383,14 @@ def test_cerebras_openai_compatible_params_match_model_contract():
             [],
             {"thinking_level": "medium", "max_tokens": 99},
         )
+        provider.complete(
+            "gemma-4-31b",
+            [{"role": "user", "content": "hi"}],
+            [],
+            {"max_tokens": 77},
+        )
 
-    gpt_body, llama_body = captured["bodies"]
+    gpt_body, llama_body, gemma_body = captured["bodies"]
     assert gpt_body["max_completion_tokens"] == 123
     assert gpt_body["temperature"] == 1
     assert gpt_body["top_p"] == 1
@@ -370,6 +402,12 @@ def test_cerebras_openai_compatible_params_match_model_contract():
     assert llama_body["top_p"] == 1
     assert "reasoning_effort" not in llama_body
     assert "max_tokens" not in llama_body
+
+    assert gemma_body["max_completion_tokens"] == 77
+    assert gemma_body["temperature"] == 1
+    assert gemma_body["top_p"] == 0.95
+    assert gemma_body["reasoning_effort"] == "none"
+    assert "max_tokens" not in gemma_body
 
 
 def test_cerebras_explicit_none_thinking_does_not_restore_default_reasoning_effort():
@@ -416,10 +454,14 @@ def test_cerebras_thinking_normalization_only_emits_supported_reasoning_params()
 
     gpt = service.normalize_for_provider("cerebras", "gpt-oss-120b", "high")
     gpt_none = service.normalize_for_provider("cerebras", "gpt-oss-120b", "none")
+    gemma = service.normalize_for_provider("cerebras", "gemma-4-31b", "medium")
+    gemma_none = service.normalize_for_provider("cerebras", "gemma-4-31b", "none")
     llama = service.normalize_for_provider("cerebras", "llama3.1-8b", "high")
 
     assert gpt["provider_params"] == {"reasoning_effort": "high"}
     assert gpt_none["provider_params"] == {}
+    assert gemma["provider_params"] == {"reasoning_effort": "medium"}
+    assert gemma_none["provider_params"] == {}
     assert llama["provider_params"] == {}
 
 
@@ -503,6 +545,7 @@ def test_cloud_model_capability_false_values_are_preserved():
 
     cerebras_gpt_oss = profiles["cerebras/gpt-oss-120b"]
     cerebras_zai = profiles["cerebras/zai-glm-4.7"]
+    cerebras_gemma = profiles["cerebras/gemma-4-31b"]
     nvidia_nemotron = profiles["nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5"]
 
     for profile in (cerebras_gpt_oss, cerebras_zai, nvidia_nemotron):
@@ -512,6 +555,12 @@ def test_cloud_model_capability_false_values_are_preserved():
 
     assert cerebras_gpt_oss["model_capabilities"]["capabilities"]["parallel_tool_calls"] is False
     assert cerebras_zai["model_capabilities"]["capabilities"]["parallel_tool_calls"] is True
+    assert cerebras_gemma["supports_vision"] is True
+    assert cerebras_gemma["supports_image_input"] is True
+    assert cerebras_gemma["supports_tool_calling"] is True
+    assert cerebras_gemma["supports_thinking"] is True
+    assert "vision" in cerebras_gemma["capability_tags"]
+    assert cerebras_gemma["model_capabilities"]["capabilities"]["parallel_tool_calls"] is False
     assert nvidia_nemotron["model_capabilities"]["capabilities"]["parallel_tool_calls"] is True
 
 

@@ -13,7 +13,10 @@ _INTERPOLATION_RE = re.compile(r"\$\{([^}]+)\}")
 
 class InputProfileEngine:
     def __init__(self, profile: InputProfile | dict[str, Any]) -> None:
-        self.profile = profile if isinstance(profile, InputProfile) else InputProfile.from_dict(profile)
+        if isinstance(profile, InputProfile) or isinstance(getattr(profile, "spec", None), dict):
+            self.profile = profile
+        else:
+            self.profile = InputProfile.from_dict(profile)
 
     def matches(self, event: ExternalEvent) -> bool:
         if self.profile.provider and self.profile.provider != event.provider:

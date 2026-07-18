@@ -80,3 +80,34 @@ def test_provider_catalog_enriches_models_and_profiles():
     sample = next(item for item in profiles if item["profile_id"] == "google/gemini-2.5-flash")
     assert "capability_tags" in sample
     assert "recommended_roles" in sample
+
+
+def test_model_profile_catalog_skips_provider_oauth_metadata(monkeypatch):
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+    from ecosystem.defaultspack.domain.ai_client import providers
+
+    def fail_oauth_call(*args, **kwargs):
+        raise AssertionError("model profile catalog should not inspect provider OAuth state")
+
+    monkeypatch.setattr(providers, "provider_has_oauth_connection", fail_oauth_call)
+    monkeypatch.setattr(providers, "provider_oauth_status", fail_oauth_call)
+
+    profiles = list_profile_catalog()
+
+    assert any(item["profile_id"] == "google/gemini-2.5-flash" for item in profiles)
+
+
+def test_provider_catalog_keeps_oauth_metadata_for_settings_ui(monkeypatch):
+    from ecosystem.defaultspack.domain.ai_client import providers
+
+    monkeypatch.setattr(providers, "provider_has_oauth_connection", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        providers,
+        "provider_oauth_status",
+        lambda provider_id, **kwargs: {"provider_id": provider_id, "status": "test"},
+    )
+
+    catalog = providers.get_provider_catalog()
+    google = next(item for item in catalog if item["provider_id"] == "google")
+
+    assert google["metadata"]["oauth"] == {"provider_id": "google", "status": "test"}

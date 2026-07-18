@@ -117,6 +117,8 @@ class ResponsePromptPolicy:
         spec: dict[str, Any]
         if isinstance(profile, InputProfile):
             spec = profile.spec
+        elif isinstance(getattr(profile, "spec", None), dict):
+            spec = dict(getattr(profile, "spec"))
         elif isinstance(profile, dict):
             spec = profile
         else:

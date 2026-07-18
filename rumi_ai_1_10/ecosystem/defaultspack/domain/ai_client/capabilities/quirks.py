@@ -7,6 +7,7 @@ DEFAULT_QUIRKS: dict[str, Any] = {
     "max_tokens_name": "max_tokens",
     "max_completion_tokens_name": "max_completion_tokens",
     "drop_reasoning_when_none": True,
+    "drop_assistant_reasoning_content": False,
     "reasoning_effort_values": ["low", "medium", "high"],
     "unsupported_params": [],
     "tool_name_regex": r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$",

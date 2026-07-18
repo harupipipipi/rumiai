@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -57,3 +58,82 @@ def test_parallel_tool_calls_are_serialized_when_provider_disallows_parallel():
     )
 
     assert planned.params["parallel_tool_calls"] is False
+
+
+def test_cerebras_strict_function_tools_add_strict_and_no_extra_properties():
+    from domain.tool.provider_adapter import adapt_rumi_tools_to_provider_tools
+
+    provider_tools, _mapping, _definitions = adapt_rumi_tools_to_provider_tools(
+        [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup_city",
+                    "description": "Lookup a city.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "filters": {
+                                "type": "object",
+                                "properties": {"country": {"type": "string"}},
+                            },
+                        },
+                        "required": ["city", "filters"],
+                    },
+                },
+            }
+        ],
+        {"quirks": {"strict_function_tools": True}},
+    )
+
+    function_def = provider_tools[0]["function"]
+    assert function_def["strict"] is True
+    assert function_def["parameters"] == {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string"},
+            "filters": {
+                "type": "object",
+                "properties": {"country": {"type": "string"}},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["city", "filters"],
+        "additionalProperties": False,
+    }
+
+
+def test_provider_safe_tool_payload_strips_local_metadata_for_cerebras():
+    from domain.chat.progress_tool import assistant_progress_provider_tool
+    from domain.tool.schema_adapter import provider_safe_tool_definitions
+
+    provider_tools = provider_safe_tool_definitions(
+        [
+            {
+                "type": "function",
+                "metadata": {"local_policy": "confirm"},
+                "category": "computer",
+                "function": {
+                    "name": "computer_use",
+                    "description": "Use the computer.",
+                    "metadata": {"display_name": "Computer"},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"action": {"type": "string"}},
+                        "required": ["action"],
+                    },
+                },
+            },
+            assistant_progress_provider_tool(),
+        ],
+        {"provider_id": "cerebras", "quirks": {"strict_function_tools": True}},
+    )
+
+    assert [set(tool) for tool in provider_tools] == [{"type", "function"}, {"type", "function"}]
+    assert "metadata" not in json.dumps(provider_tools)
+    assert provider_tools[0]["function"]["strict"] is True
+    assert provider_tools[0]["function"]["parameters"]["additionalProperties"] is False
+    assert provider_tools[1]["function"]["strict"] is True
+    assert provider_tools[1]["function"]["parameters"]["additionalProperties"] is False

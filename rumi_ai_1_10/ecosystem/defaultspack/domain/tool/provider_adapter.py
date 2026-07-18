@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any
 
@@ -40,17 +41,50 @@ def adapt_rumi_tools_to_provider_tools(
     definitions: list[ProviderToolDefinition] = []
     for tool in rumi_tools:
         alias = mapping.alias_for(tool.name)
+        parameters = provider_tool_parameters(tool.parameters)
+        if quirks.get("strict_function_tools"):
+            parameters = _strict_tool_parameters(parameters)
         payload: dict[str, Any] = {
             "type": "function",
             "function": {
                 "name": alias,
                 "description": tool.description,
-                "parameters": provider_tool_parameters(tool.parameters),
+                "parameters": parameters,
             },
         }
+        if quirks.get("strict_function_tools"):
+            payload["function"]["strict"] = True
         provider_tools.append(payload)
         definitions.append(ProviderToolDefinition(name=tool.name, provider_alias=alias, provider_payload=payload, original=tool))
     return provider_tools, mapping, definitions
+
+
+def _strict_tool_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    strict = copy.deepcopy(parameters or {})
+    if not strict:
+        strict = {"type": "object", "properties": {}, "required": []}
+    return _with_no_additional_properties(strict)
+
+
+def _with_no_additional_properties(schema: Any) -> Any:
+    if isinstance(schema, list):
+        return [_with_no_additional_properties(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    strict = {key: _with_no_additional_properties(value) for key, value in schema.items()}
+    properties = strict.get("properties")
+    if isinstance(properties, dict):
+        strict["properties"] = {
+            key: _with_no_additional_properties(value)
+            for key, value in properties.items()
+        }
+    if strict.get("type") == "object" or "properties" in strict or "required" in strict:
+        strict.setdefault("type", "object")
+        strict.setdefault("properties", {})
+        strict.setdefault("required", [])
+        strict["additionalProperties"] = False
+    return strict
 
 
 def decode_provider_tool_call_to_rumi_tool_call(tool_call: dict[str, Any], mapping: ToolNameMapping | None = None) -> RumiToolCall:

@@ -133,6 +133,82 @@ def test_openai_compatible_cerebras_reasoning_none_contract(monkeypatch):
     assert "reasoning_effort" not in captured["body"]
 
 
+def test_openai_compatible_omits_tool_choice_without_tools_contract(monkeypatch):
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        provider_id="cerebras",
+        api_key="key",
+        base_url="https://example.test",
+        known_models=[{"id": "cerebras/gemma-4-31b", "model_id": "gemma-4-31b", "supports_thinking": True}],
+    )
+    captured = {}
+    monkeypatch.setattr(provider, "_request_json", lambda path, body: captured.setdefault("body", body) or {"choices": [{"message": {"content": "ok"}}]})
+
+    provider.complete(
+        "gemma-4-31b",
+        [{"role": "user", "content": "call:computer.apps{}"}],
+        [],
+        {"tool_choice": "auto", "parallel_tool_calls": True},
+    )
+
+    assert "tools" not in captured["body"]
+    assert "tool_choice" not in captured["body"]
+    assert "parallel_tool_calls" not in captured["body"]
+
+
+def test_openai_compatible_provider_strips_tool_metadata_contract(monkeypatch):
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+    from domain.chat.progress_tool import assistant_progress_provider_tool
+
+    provider = OpenAICompatibleProvider(
+        provider_id="cerebras",
+        api_key="key",
+        base_url="https://example.test",
+        known_models=[{"id": "cerebras/gemma-4-31b", "model_id": "gemma-4-31b", "supports_thinking": True}],
+    )
+    captured = {}
+    monkeypatch.setattr(provider, "_request_json", lambda path, body: captured.setdefault("body", body) or {"choices": [{"message": {"content": "ok"}}]})
+
+    provider.complete(
+        "gemma-4-31b",
+        [{"role": "user", "content": "call:computer.apps{}"}],
+        [
+            {
+                "type": "function",
+                "metadata": {"risk": "medium"},
+                "function": {
+                    "name": "computer_use",
+                    "description": "Use the computer.",
+                    "metadata": {"display_name": "Computer"},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"action": {"type": "string"}},
+                        "required": ["action"],
+                    },
+                },
+            },
+            assistant_progress_provider_tool(),
+        ],
+        {"tool_choice": "auto"},
+    )
+
+    assert captured["body"]["tool_choice"] == "auto"
+    assert [set(tool) for tool in captured["body"]["tools"]] == [{"type", "function"}, {"type", "function"}]
+    assert "metadata" not in json.dumps(captured["body"]["tools"])
+    assert all(tool["function"].get("strict") is True for tool in captured["body"]["tools"])
+
+
+def test_ai_client_classifies_cerebras_rate_limit_for_fallback():
+    from domain.ai_client.client import AIClient
+
+    exc = RuntimeError("AI provider HTTP 429 (rate_limit_error): requests per minute exceeded")
+    client = AIClient()
+
+    assert client._error_kind(exc) == "rate_limit"
+    assert client._should_fallback_from_member_error({"fallback_on": ["rate_limit", "quota"]}, exc) is True
+
+
 def test_openrouter_chat_body_preserves_curated_gateway_params(monkeypatch):
     from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
@@ -197,7 +273,12 @@ def test_openrouter_chat_body_preserves_curated_gateway_params(monkeypatch):
     assert captured["request"]["path"] == "/chat/completions"
     for key, value in gateway_params.items():
         assert body[key] == value
-    assert body["tools"] == tools
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "function": {"name": "real_tool", "parameters": {"type": "object", "properties": {}}},
+        }
+    ]
 
 
 def test_groq_tool_messages_omit_name_in_chat_body(monkeypatch):
