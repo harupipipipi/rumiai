@@ -865,6 +865,22 @@ def test_atlas_user_requested_computer_use_prefers_visible_foreground_input() ->
     assert "background" not in payload
 
 
+def test_computer_use_debug_foreground_env_overrides_background_default(monkeypatch) -> None:
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    monkeypatch.setenv("RUMI_COMPUTER_USE_DEBUG_FOREGROUND", "1")
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.key",
+        {"key_combo": "return"},
+        {"computer_use_target_app": "Vivaldi", "user_requested_computer_use": True},
+    )
+
+    assert payload["app"] == "Vivaldi"
+    assert payload["fallback"] == "foreground"
+    assert "background" not in payload
+
+
 def test_user_requested_computer_use_background_default_respects_foreground_controls() -> None:
     from domain.tool.executor import _computer_use_payload_with_context_defaults
 

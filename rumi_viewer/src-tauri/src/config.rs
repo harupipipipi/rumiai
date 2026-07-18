@@ -11,6 +11,7 @@ use std::process::Stdio;
 
 const PACK_SHELL_PATH_ENV: &str = "RUMI_PACK_SHELL_PATH";
 const UV_PATH_ENV: &str = "RUMI_UV_PATH";
+const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -100,6 +101,20 @@ impl AppConfig {
         })
     }
 
+    /// Rebase every writable Viewer runtime path into an owned state root.
+    ///
+    /// Debug parallel instances use this after validating their supervisor
+    /// root. Keeping Python, the virtual environment, logs, secrets, and user
+    /// data together prevents a debug process from mutating production app
+    /// data or another concurrently running Viewer.
+    pub fn isolate_writable_state(&mut self, state_root: &Path, user_data_dir: PathBuf) {
+        self.python_dir = state_root.join("python");
+        self.uv_path = state_root.join(uv_binary_name());
+        self.venv_dir = state_root.join("venv");
+        self.user_data_dir = user_data_dir;
+        self.log_dir = state_root.join("logs");
+    }
+
     /// Return the path to the Python binary inside the PBS directory.
     pub fn python_bin(&self) -> PathBuf {
         if cfg!(target_os = "windows") {
@@ -139,6 +154,11 @@ impl AppConfig {
 
     /// Return the path to the Viewer host broker connection file.
     pub fn host_broker_connection_path(&self) -> PathBuf {
+        if let Some(path) = std::env::var_os("RUMI_VIEWER_HOST_BROKER_CONNECTION") {
+            if !path.is_empty() {
+                return PathBuf::from(path);
+            }
+        }
         self.host_broker_dir().join("connection.json")
     }
 
@@ -372,10 +392,21 @@ fn configured_pack_shell_path() -> Option<PathBuf> {
 }
 
 fn dev_pack_shell_binary_path(root: &Path, profile: &str) -> PathBuf {
-    root.join("pack-shell")
-        .join("target")
+    pack_shell_target_dir(root)
         .join(profile)
         .join(pack_shell_binary_name())
+}
+
+fn pack_shell_target_dir(root: &Path) -> PathBuf {
+    let configured = std::env::var_os(CARGO_TARGET_DIR_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    pack_shell_target_dir_with_override(root, configured)
+}
+
+fn pack_shell_target_dir_with_override(root: &Path, configured: Option<PathBuf>) -> PathBuf {
+    let configured = configured.filter(|path| path.is_absolute());
+    configured.unwrap_or_else(|| root.join("pack-shell").join("target"))
 }
 
 fn dev_pack_shell_path(root: &Path) -> Option<PathBuf> {
@@ -389,10 +420,15 @@ fn dev_pack_shell_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn build_dev_pack_shell(manifest: &Path) -> Result<()> {
+    let workspace_root = manifest
+        .parent()
+        .and_then(Path::parent)
+        .context("pack-shell manifest must be under a workspace root")?;
     let output = process_utils::command("cargo")
         .arg("build")
         .arg("--manifest-path")
         .arg(manifest)
+        .env(CARGO_TARGET_DIR_ENV, pack_shell_target_dir(workspace_root))
         .stdin(Stdio::null())
         .output()
         .context("failed to run cargo build for pack-shell")?;
@@ -515,6 +551,32 @@ mod tests {
         assert_eq!(
             config.user_data_dir,
             PathBuf::from("/tmp/app-data/user_data")
+        );
+    }
+
+    #[test]
+    fn isolated_writable_state_rebases_every_app_data_path() {
+        let mut config = AppConfig::detect_for_tauri(
+            PathBuf::from("/tmp/resources"),
+            PathBuf::from("/tmp/shared-app-data"),
+        )
+        .unwrap();
+        let original_app_dir = config.app_dir.clone();
+        let state_root = PathBuf::from("/tmp/owned-debug-supervisor");
+        let user_data = state_root.join("viewer_user_data");
+
+        config.isolate_writable_state(&state_root, user_data.clone());
+
+        assert_eq!(config.app_dir, original_app_dir);
+        assert_eq!(config.rumi_home, original_app_dir);
+        assert_eq!(config.python_dir, state_root.join("python"));
+        assert_eq!(config.uv_path, state_root.join(uv_binary_name()));
+        assert_eq!(config.venv_dir, state_root.join("venv"));
+        assert_eq!(config.user_data_dir, user_data);
+        assert_eq!(config.log_dir, state_root.join("logs"));
+        assert_eq!(
+            config.panel_bootstrap_secret_path(),
+            state_root.join(".rumi_panel_bootstrap_secret")
         );
     }
 
@@ -734,6 +796,21 @@ mod tests {
             std::env::remove_var(UV_PATH_ENV);
         }
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn pack_shell_target_can_be_isolated_outside_the_workspace() {
+        let workspace = PathBuf::from("/workspace/repository");
+        let isolated_target = PathBuf::from("/owned/supervisor/cargo_target");
+
+        assert_eq!(
+            pack_shell_target_dir_with_override(&workspace, Some(isolated_target.clone())),
+            isolated_target
+        );
+        assert_eq!(
+            pack_shell_target_dir_with_override(&workspace, Some(PathBuf::from("relative-target"))),
+            workspace.join("pack-shell").join("target")
+        );
     }
 
     #[test]

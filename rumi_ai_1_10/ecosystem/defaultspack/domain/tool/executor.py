@@ -1699,6 +1699,11 @@ def _is_browser_app_alias(value):
     return _normalized_app_alias(value) in _BROWSER_APP_ALIASES
 
 
+def _computer_use_debug_foreground_enabled():
+    value = str(os.environ.get("RUMI_COMPUTER_USE_DEBUG_FOREGROUND") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _computer_use_prefers_foreground(action, payload, context):
     if action not in _COMPUTER_USE_FOREGROUND_DEFAULT_ACTIONS:
         return False
@@ -1707,6 +1712,8 @@ def _computer_use_prefers_foreground(action, payload, context):
     if payload.get("physical") is True or payload.get("virtual_only") is True:
         return False
     if _truthy(context.get("computer_use_foreground_preferred")):
+        return True
+    if _computer_use_debug_foreground_enabled():
         return True
     target_alias = _normalized_app_alias(context.get("computer_use_target_app"))
     return target_alias in _COMPUTER_USE_FOREGROUND_APP_ALIASES

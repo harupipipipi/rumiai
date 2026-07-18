@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import signal
 import sys
@@ -105,8 +106,11 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
 
 
 def _url() -> str:
-    port = os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
-    return f"http://localhost:{port}/chat"
+    # The HTTP server itself is loopback-only.  Do not hand the desktop
+    # surface a hostname which might resolve to IPv6 (or another address) in
+    # a debug run while the server is bound to IPv4 loopback.
+    port = os.environ.get("DEFAULTS_HTTP_PORT") or os.environ.get("RUMI_DEFAULTSPACK_PORT") or "8766"
+    return f"http://127.0.0.1:{port}/chat"
 
 
 def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
@@ -121,24 +125,67 @@ def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
-def main() -> int:
-    _ensure_import_path()
+def _require_own_bind() -> bool:
+    """Return whether this process must prove that it owns its HTTP listener.
+
+    Debug isolation is intentionally fail-closed: attaching a new smoke run
+    to an already-running server would mix approval/audit state across runs.
+    The explicit flag is also useful for a harness which does not otherwise
+    need the rest of the debug-isolation environment.
+    """
+
+    return (
+        os.environ.get("RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND") == "1"
+        or os.environ.get("RUMI_DEFAULTSPACK_DEBUG_ISOLATION") == "1"
+    )
+
+
+def _configure_http_environment() -> None:
+    """Normalize the two legacy port variables before constructing the server."""
+
+    port = (
+        os.environ.get("RUMI_DEFAULTSPACK_PORT")
+        or os.environ.get("DEFAULTS_HTTP_PORT")
+        or "8766"
+    )
     os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
-    os.environ.setdefault("DEFAULTS_HTTP_PORT", os.environ.get("RUMI_DEFAULTSPACK_PORT", "8766"))
-    os.environ.setdefault("RUMI_DEFAULTSPACK_PORT", os.environ["DEFAULTS_HTTP_PORT"])
+    os.environ["DEFAULTS_HTTP_PORT"] = port
+    os.environ["RUMI_DEFAULTSPACK_PORT"] = port
+
+    if not _require_own_bind():
+        return
+    if os.environ["DEFAULTS_HTTP_HOST"] != "127.0.0.1":
+        raise RuntimeError(
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires DEFAULTS_HTTP_HOST=127.0.0.1"
+        )
+    if not port.isascii() or not port.isdecimal() or not 1 <= int(port) <= 65535:
+        raise RuntimeError(
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires a decimal localhost port between 1 and 65535"
+        )
+
+
+def _parse_cli_args(argv: list[str]) -> None:
+    """Parse command-line arguments before any runtime setup or imports."""
+
+    parser = argparse.ArgumentParser(description="Launch the Rumi Defaultspack desktop app.")
+    parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    # ``main()`` is also used as a library entry point in focused tests and
+    # launch integrations.  Only the script entry point supplies argv; this
+    # preserves that API while ensuring ``desktop_app.py --help`` has no
+    # scheduler, secret-loader, HTTP-server, or surface side effects.
+    if argv is not None:
+        _parse_cli_args(argv)
+    _ensure_import_path()
+    _configure_http_environment()
     try:
         from domain.integrations.secrets import load_integration_secrets_into_env
 
         load_integration_secrets_into_env()
     except Exception:
         pass
-    try:
-        from domain.scheduler.daemon import start_scheduler_daemon
-
-        start_scheduler_daemon()
-    except Exception:
-        pass
-
     from transport.http import DefaultsHttpServer
 
     url = _url()
@@ -146,10 +193,25 @@ def main() -> int:
     try:
         server.start()
     except OSError:
+        # A debug-isolated run must never adopt a healthy listener from some
+        # other worktree/run.  Its harness owns the selected port and treats a
+        # bind conflict as a retryable, fail-closed startup failure.
+        if _require_own_bind():
+            raise
         if not _wait_until_ready(url, timeout=1.0):
             raise
         server = None
     _wait_until_ready(url)
+
+    # Do not start the scheduler if the process failed to claim its HTTP
+    # listener.  In the legacy shared-port mode this remains after the
+    # compatibility readiness fallback above.
+    try:
+        from domain.scheduler.daemon import start_scheduler_daemon
+
+        start_scheduler_daemon()
+    except Exception:
+        pass
 
     from defaultspack.native_webview import open_desktop_surface
 
@@ -178,4 +240,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -376,6 +376,11 @@ class BrowserComputerController:
     @contextlib.contextmanager
     def _edge_haze(self, action: str, payload: dict[str, Any]):
         metadata: dict[str, Any] = {"attempted": True, "action": action}
+        if str(os.environ.get("RUMI_EDGE_HAZE_DISABLED") or "").strip().lower() in {"1", "true", "yes", "on"}:
+            metadata["started"] = False
+            metadata["disabled"] = True
+            yield metadata
+            return
         manager: Any | None = None
         try:
             from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
@@ -418,6 +423,8 @@ class BrowserComputerController:
             value = edge_haze.get(key)
             if isinstance(value, str) and value:
                 result[key] = value
+        if edge_haze.get("disabled") is True:
+            result["disabled"] = True
         target_window = edge_haze.get("target_window")
         if isinstance(target_window, dict) and target_window:
             result["target_window"] = target_window
@@ -690,8 +697,10 @@ class BrowserComputerController:
 
     @staticmethod
     def _darwin_targeted_open_accepts_command_success(app_name: str) -> bool:
-        del app_name
-        return False
+        if not _truthy_env("RUMI_COMPUTER_USE_DEBUG_FOREGROUND"):
+            return False
+        key = app_name.strip().lower()
+        return key in _DARWIN_BROWSER_BUNDLE_ID_ALIASES
 
     @staticmethod
     def _darwin_open_url_commands(url: str, app_name: str) -> list[list[str]]:

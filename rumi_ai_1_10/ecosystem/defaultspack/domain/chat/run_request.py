@@ -49,6 +49,7 @@ from domain.chat.tool_selection_preview import (
     ToolSelectionPreviewStore,
     preview_payload_bindings,
 )
+from domain.frontend_settings import frontend_settings_path
 from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
@@ -1179,7 +1180,8 @@ def _computer_use_foreground_preferred_for_prompt(context: dict[str, Any]) -> bo
     )
     if target_alias in {"atlas", "chatgptatlas"}:
         return True
-    return False
+    env_value = str(os.environ.get("RUMI_COMPUTER_USE_DEBUG_FOREGROUND") or "").strip().lower()
+    return env_value in {"1", "true", "yes", "on"}
 
 
 def _tool_discovery_fallback_prompt(tools: list[dict[str, Any]]) -> str:
@@ -3826,8 +3828,7 @@ def _tool_selection_selector_model(
 
 
 def _read_frontend_settings() -> dict[str, Any]:
-    env_path = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
-    path = Path(env_path).expanduser() if env_path else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    path = frontend_settings_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
