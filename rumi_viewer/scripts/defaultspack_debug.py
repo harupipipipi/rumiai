@@ -62,8 +62,8 @@ _SMOKE_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
         # to the bundled provider endpoint.  These values must never be
         # learned from an Authority request or caller-supplied configuration.
         "api_id": "legacy",
-        "endpoint_url": "https://opencode.ai/zen/v1/messages",
-        "endpoint_path": "/v1/messages",
+        "endpoint_url": "https://opencode.ai/zen/v1/chat/completions",
+        "endpoint_path": "/v1/chat/completions",
         "origin": "https://opencode.ai",
         "domain": "opencode.ai",
         "port": 443,
@@ -5332,10 +5332,12 @@ class ChatOnlySmokeRunner(ComputerUseSmokeRunner):
         return all(
             (
                 str(resource.get("api_id") or "") == self.profile["api_id"],
+                endpoint_url == self.profile["endpoint_url"],
                 endpoint.username is None,
                 endpoint.password is None,
                 not endpoint.query,
                 not endpoint.fragment,
+                endpoint.scheme.lower() == self.profile["transport"],
                 endpoint_origin == self.profile["origin"],
                 (endpoint.hostname or "").lower() == self.profile["domain"],
                 endpoint_port == self.profile["port"],
