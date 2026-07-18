@@ -23,7 +23,7 @@ def test_computer_use_context_apps_windows_alias_is_canonicalized_for_approval_s
     )
 
     assert operation == "computer.context"
-    assert approval_args == {}
+    assert approval_args == {"action": "computer.context", "payload": {}}
 
 
 def test_computer_use_open_url_alias_is_canonicalized_for_approval_scope():
@@ -33,7 +33,170 @@ def test_computer_use_open_url_alias_is_canonicalized_for_approval_scope():
     )
 
     assert operation == "browser.open_url"
-    assert approval_args == {"url": "https://gemini.google.com"}
+    assert approval_args == {
+        "action": "browser.open_url",
+        "payload": {"url": "https://gemini.google.com"},
+    }
+
+
+def test_computer_use_open_url_replay_scope_keeps_browser_payload_and_ignores_token():
+    from domain.safety import approval
+
+    operation, approval_args = _tool_approval_scope(
+        {"tool_id": "computer_use", "name": "computer_use"},
+        {
+            "action": "browser.open_url",
+            "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "profile_id": "default",
+            "persistent": False,
+            "target_app": "Vivaldi",
+            "approval_token": "spent-token",
+        },
+    )
+
+    expected_args = {
+        "action": "browser.open_url",
+        "payload": {
+            "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "profile_id": "default",
+            "persistent": False,
+            "target_app": "Vivaldi",
+        },
+    }
+    assert operation == "browser.open_url"
+    assert approval_args == expected_args
+    assert approval.hash_arguments(approval_args) == approval.hash_arguments(expected_args)
+
+
+def test_computer_use_open_url_action_scoped_token_approves_replay_context():
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    expected_args = {
+        "action": "browser.open_url",
+        "payload": {
+            "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "profile_id": "default",
+            "persistent": False,
+            "target_app": "Vivaldi",
+        },
+    }
+    request = approval.create_approval_request(
+        "browser.open_url",
+        "high",
+        expected_args,
+        details={
+            "tool_name": "computer_use",
+            "action": "browser.open_url",
+            "function_id": "browser.open_url",
+            "pack_id": "defaultspack",
+            "conversation_id": "conv-open-url",
+            "arguments": expected_args,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+
+    context, error = _context_with_tool_approval_token(
+        {"pack_id": "defaultspack", "conversation_id": "conv-open-url"},
+        {"tool_id": "computer_use", "name": "computer_use", "requires_approval": True, "risk": "high"},
+        {
+            "action": "browser.open_url",
+            "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "profile_id": "default",
+            "persistent": False,
+            "target_app": "Vivaldi",
+            "approval_token": decision["token"],
+        },
+    )
+
+    assert error is None
+    assert context["_tool_server_approval_token_valid"] is True
+    assert context["_tool_server_approval_operation"] == "browser.open_url"
+    assert context["_tool_server_approval_args_hash"] == request["args_hash"]
+
+
+def test_computer_use_physical_click_replay_scope_keeps_mouse_payload_and_ignores_token():
+    from domain.safety import approval
+
+    operation, approval_args = _tool_approval_scope(
+        {"tool_id": "computer_use", "name": "computer_use"},
+        {
+            "action": "click",
+            "app": "Vivaldi",
+            "normalized_x": 362,
+            "normalized_y": 539,
+            "coordinate_space": "normalized_1000",
+            "physical": True,
+            "include_screenshot": False,
+            "approval_token": "spent-token",
+        },
+    )
+
+    expected_args = {
+        "action": "computer.click",
+        "payload": {
+            "app": "Vivaldi",
+            "normalized_x": 362,
+            "normalized_y": 539,
+            "coordinate_space": "normalized_1000",
+            "physical": True,
+            "include_screenshot": False,
+        },
+    }
+    assert operation == "computer.click"
+    assert approval_args == expected_args
+    assert approval.hash_arguments(approval_args) == approval.hash_arguments(expected_args)
+
+
+def test_computer_use_physical_click_action_scoped_token_approves_replay_context():
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    expected_args = {
+        "action": "computer.click",
+        "payload": {
+            "app": "Vivaldi",
+            "normalized_x": 362,
+            "normalized_y": 539,
+            "coordinate_space": "normalized_1000",
+            "physical": True,
+            "include_screenshot": False,
+        },
+    }
+    request = approval.create_approval_request(
+        "computer.click",
+        "high",
+        expected_args,
+        details={
+            "tool_name": "computer_use",
+            "action": "computer.click",
+            "function_id": "computer.click",
+            "pack_id": "defaultspack",
+            "conversation_id": "conv-physical-click",
+            "arguments": expected_args,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+
+    context, error = _context_with_tool_approval_token(
+        {"pack_id": "defaultspack", "conversation_id": "conv-physical-click"},
+        {"tool_id": "computer_use", "name": "computer_use", "requires_approval": True, "risk": "high"},
+        {
+            "action": "click",
+            "app": "Vivaldi",
+            "normalized_x": 362,
+            "normalized_y": 539,
+            "coordinate_space": "normalized_1000",
+            "physical": True,
+            "include_screenshot": False,
+            "approval_token": decision["token"],
+        },
+    )
+
+    assert error is None
+    assert context["_tool_server_approval_token_valid"] is True
+    assert context["_tool_server_approval_operation"] == "computer.click"
+    assert context["_tool_server_approval_args_hash"] == request["args_hash"]
 
 
 def test_computer_use_followup_token_does_not_apply_to_different_action(monkeypatch):
@@ -685,8 +848,10 @@ def test_computer_use_physical_action_returns_approval_before_local_execution(mo
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["risk_level"] == "high"
-    assert result["widget"]["arguments"]["action"] == "click"
-    assert result["widget"]["arguments"]["physical"] is True
+    assert result["widget"]["arguments"] == {
+        "action": "computer.click",
+        "payload": {"physical": True, "x": 10, "y": 20},
+    }
 
 
 def test_computer_use_requires_denied_returns_approval_before_local_execution(monkeypatch):
@@ -726,7 +891,10 @@ def test_computer_use_requires_denied_returns_approval_before_local_execution(mo
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["action"] == "browser.open_url"
-    assert result["widget"]["arguments"]["action"] == "open_url"
+    assert result["widget"]["arguments"] == {
+        "action": "browser.open_url",
+        "payload": {"url": "https://gemini.google.com"},
+    }
 
 
 def test_computer_use_requires_denied_falls_back_after_tool_server_approval(monkeypatch):

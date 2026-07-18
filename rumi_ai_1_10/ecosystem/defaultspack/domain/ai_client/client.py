@@ -588,6 +588,53 @@ class AIClient:
 
         service = get_authority_service()
         request_id, approval_token = self._authority_token_for_permission(context, permission_id)
+        effective_request_id = request_id or str(context.get("request_id") or "").strip()
+        if (
+            context.get("allow_consumed_one_shot_tokens_for_run")
+            and effective_request_id
+            and approval_token
+        ):
+            issued = getattr(service, "one_shot_approval_issued", None)
+            if callable(issued):
+                try:
+                    issued_unconsumed = bool(
+                        issued(
+                            request_id=effective_request_id,
+                            permission_id=permission_id,
+                            token=approval_token,
+                            conversation_id=context.get("conversation_id"),
+                            principal_id=principal_id,
+                            resource=resource,
+                        )
+                    )
+                    issued_consumed = bool(
+                        issued(
+                            request_id=effective_request_id,
+                            permission_id=permission_id,
+                            token=approval_token,
+                            conversation_id=context.get("conversation_id"),
+                            principal_id=principal_id,
+                            resource=resource,
+                            include_consumed=True,
+                        )
+                    )
+                except TypeError:
+                    issued_unconsumed = False
+                    issued_consumed = False
+                except Exception:
+                    issued_unconsumed = False
+                    issued_consumed = False
+                if not issued_unconsumed and issued_consumed:
+                    from core_runtime.authority.models import AuthorityDecision
+
+                    return AuthorityDecision(
+                        allowed=True,
+                        permission_id=permission_id,
+                        principal_id=principal_id,
+                        reason="Trusted consumed one-shot approval",
+                        request_id=effective_request_id,
+                        resource=resource,
+                    )
         decision = service.check(
             principal_id=principal_id,
             permission_id=permission_id,
@@ -694,6 +741,12 @@ class AIClient:
         provider=None,
         stream=False,
     ):
+        authority_context = params.get("_authority_context") if isinstance(params, dict) else None
+        provider_call_key = f"{provider_id}:{api_id}:{model_id}:{bool(stream)}"
+        if isinstance(authority_context, dict):
+            verified_provider_calls = authority_context.get("_provider_one_shot_verified_for_run")
+            if isinstance(verified_provider_calls, list) and provider_call_key in verified_provider_calls:
+                return
         checks = [
             ("model.invoke", lambda *, consume_approval_token=True: self._check_authority_for_model_api(
                 provider_id=provider_id,
@@ -751,6 +804,12 @@ class AIClient:
             decision = get_authority_service().consume_one_shot_approvals_atomically(token_consumes)
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
+            if isinstance(authority_context, dict):
+                current = authority_context.get("_provider_one_shot_verified_for_run")
+                verified = list(current) if isinstance(current, list) else []
+                if provider_call_key not in verified:
+                    verified.append(provider_call_key)
+                authority_context["_provider_one_shot_verified_for_run"] = verified
 
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []

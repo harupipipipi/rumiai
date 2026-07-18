@@ -2845,14 +2845,16 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
     )
 
     assert messages[0]["role"] == "tool"
+    assert messages[0]["tool_call_id"] == "call_1"
     assert messages[1]["role"] == "user"
     guidance = messages[1]["content"][0]["text"]
-    assert "model_image_size" in guidance
-    assert "width=640 height=400" in guidance
-    assert "normalized_x and normalized_y" in guidance
-    assert "Do not return screen pixels" in guidance
-    assert "do not do scale conversion" in guidance
-    assert "scale x=1.1250" not in guidance
+    assert "tool-output evidence for tool_call_id=call_1" in guidance
+    assert "preceding tool result" in guidance
+    assert "not a new user request" in guidance
+    assert not any(
+        imperative in guidance.lower()
+        for imperative in ("refocus", "call screenshot", "request a fresh", "pass only", "do not return", "use source=")
+    )
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
@@ -2886,7 +2888,7 @@ def test_computer_context_tool_result_includes_widget_details_for_model():
     assert "open_apps" in messages[0]["content"]
 
 
-def test_browser_screenshot_guidance_mentions_foreground_and_selected_window():
+def test_browser_screenshot_guidance_is_neutral_tool_output_provenance():
     import blocks.chat.send as send
 
     guidance = send._browser_screenshot_guidance(
@@ -2897,12 +2899,16 @@ def test_browser_screenshot_guidance_mentions_foreground_and_selected_window():
                 "selected_window": {"app": "Google Chrome", "title": "LINE Chat - Google Chrome"},
                 "model_image_size": {"width": 1280, "height": 720},
             },
-        }
+        },
+        "call_screenshot",
     )
 
-    assert "Foreground window: Codex | Codex." in guidance
-    assert "Selected target window: Google Chrome | LINE Chat - Google Chrome." in guidance
-    assert "Foreground and selected target differ" in guidance
+    assert guidance == (
+        "Browser/computer screenshot tool-output evidence for tool_call_id=call_screenshot; "
+        "it belongs to the preceding tool result and is not a new user request."
+    )
+    assert "Codex" not in guidance
+    assert "Google Chrome" not in guidance
 
 
 def test_tool_result_summary_mentions_foreground_window_mismatch():
@@ -3098,6 +3104,8 @@ def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_pat
     assert result["coordinate_contract"]["input_fields"] == ["normalized_x", "normalized_y"]
     assert result["cursor"] == {"x": 12, "y": 34, "origin": "top_left"}
     assert result["cursor_move_contract"]["action"] == "move"
+    assert result["recommended_next_actions"][:2] == ["computer.type", "computer.key"]
+    assert "normal approval gates still apply" in result["input_guidance"]
 
 
 def test_browser_computer_model_copy_uses_png(tmp_path, monkeypatch):
@@ -3951,7 +3959,11 @@ def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
         {},
     )
 
-    assert result == {"status": "ok", "data": {"handled": True}}
+    assert result["status"] == "ok"
+    assert result["data"]["widget"] == {"handled": True}
+    model_context = json.loads(result["data"]["result"])["model_context"]
+    assert model_context["action"] == "computer.screenshot"
+    assert model_context["task_transition"]["next_phase"] == "interact_with_visible_target"
     assert calls == [("computer.screenshot", {"reason": "test"}, {}, {"tool_name": "browser_computer", "artifact_root": None, "yolo_mode": False})]
 
 
@@ -4989,6 +5001,40 @@ def test_chat_text_prefers_vivaldi_and_ignores_negated_chrome():
     assert prefs["computer_use_target_title"] == "ChatGPT"
 
 
+def test_chat_text_marks_explicit_mouse_keyboard_computer_use():
+    import blocks.chat.send as send
+    from domain.chat import run_request
+
+    text = "Vivaldiをマウスとキーボードで操作してYouTubeを開いて"
+
+    send_prefs = send._computer_use_preferences_from_text(text)
+    run_prefs = run_request._computer_use_preferences_from_text(text)
+
+    for prefs in (send_prefs, run_prefs):
+        assert prefs["computer_use_target_app"] == "Vivaldi"
+        assert prefs["computer_use_mouse_keyboard_requested"] is True
+        assert prefs["computer_use_physical_clicks"] is True
+
+
+def test_computer_use_runtime_prompt_requires_visible_mouse_keyboard_steps():
+    from domain.chat.run_request import _computer_use_runtime_prompt
+
+    prompt = _computer_use_runtime_prompt(
+        {
+            "user_requested_computer_use": True,
+            "computer_use_target_app": "Vivaldi",
+            "computer_use_mouse_keyboard_requested": True,
+            "computer_use_physical_clicks": True,
+        },
+        [{"tool_id": "computer_use", "name": "computer_use"}],
+    )
+
+    assert "browser.open_url or app launch" in prompt
+    assert "computer.type, computer.key, computer.click" in prompt
+    assert "command+l" in prompt
+    assert "physical=true" in prompt
+
+
 def test_chat_text_sets_computer_use_chrome_line_target_preferences():
     import blocks.chat.send as send
 
@@ -5021,7 +5067,12 @@ def test_user_requested_computer_use_requires_approval_for_interactive_actions(m
     assert result["widget"]["risk_level"] == "high"
     assert result["widget"]["arguments"] == {
         "action": "browser.open_url",
-        "payload": {"url": "https://chatgpt.com"},
+        "payload": {
+            "url": "https://chatgpt.com",
+            "profile_id": "default",
+            "persistent": False,
+            "target_app": "",
+        },
     }
 
 
@@ -5045,11 +5096,13 @@ def test_user_requested_computer_use_requires_approval_for_drag(monkeypatch):
     assert result["widget"]["tool_name"] == "computer_use"
     assert result["widget"]["risk_level"] == "high"
     assert result["widget"]["arguments"] == {
-        "action": "drag",
-        "x1": 10,
-        "y1": 20,
-        "x2": 30,
-        "y2": 40,
+        "action": "computer.drag",
+        "payload": {
+            "x1": 10,
+            "y1": 20,
+            "x2": 30,
+            "y2": 40,
+        },
     }
 
 
@@ -5083,7 +5136,10 @@ def test_browser_computer_executor_returns_approval_before_controller_errors(mon
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "computer_use"
-    assert result["widget"]["arguments"] == {"action": "type", "text": "hello", "app": "Google Chrome"}
+    assert result["widget"]["arguments"] == {
+        "action": "computer.type",
+        "payload": {"text": "hello", "app": "Google Chrome", "background": True},
+    }
 
 
 def test_browser_open_url_uses_foreground_default_browser(monkeypatch):
@@ -5113,6 +5169,8 @@ def test_browser_open_url_uses_foreground_default_browser(monkeypatch):
     assert result["opened"] is True
     assert result["managed_profile"] is False
     assert result["launch"]["mode"] == "default_browser"
+    assert result["recommended_next_actions"][:2] == ["computer.type", "computer.key"]
+    assert "normal approval gates still apply" in result["input_guidance"]
     assert "chrome_target" not in result
     assert "browser_target" not in result
     assert calls[0][0] == ["open", "https://chatgpt.com"]
@@ -5124,16 +5182,17 @@ def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
 
     calls = []
 
-    def fake_popen(command, **kwargs):
+    def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-
-        class Process:
-            pass
-
-        return Process()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_active_window_for_app",
+        lambda self, app_name: {"app": app_name, "title": "ChatGPT", "width": 900, "height": 700},
+    )
 
     controller = BrowserComputerController()
     result = controller.run(
@@ -5157,16 +5216,17 @@ def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, 
 
     calls = []
 
-    def fake_popen(command, **kwargs):
+    def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-
-        class Process:
-            pass
-
-        return Process()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_active_window_for_app",
+        lambda self, app_name: {"app": app_name, "title": "Gemini", "width": 900, "height": 700},
+    )
 
     controller = BrowserComputerController()
     controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
@@ -5196,16 +5256,17 @@ def test_browser_open_url_app_target_bypasses_managed_profile(monkeypatch):
 
     calls = []
 
-    def fake_popen(command, **kwargs):
+    def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-
-        class Process:
-            pass
-
-        return Process()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_active_window_for_app",
+        lambda self, app_name: {"app": app_name, "title": "ChatGPT", "width": 900, "height": 700},
+    )
 
     controller = BrowserComputerController()
     result = controller.run(
@@ -5225,13 +5286,13 @@ def test_browser_open_url_specific_vivaldi_does_not_fall_back_to_default_browser
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    def fake_popen(command, **kwargs):
+    def fake_run(command, **kwargs):
         raise OSError("missing app")
 
     opened = []
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
     monkeypatch.setattr(browser_computer.webbrowser, "open", lambda url: opened.append(url))
 
     result = BrowserComputerController().run(
@@ -5252,16 +5313,17 @@ def test_browser_open_url_unknown_specific_app_uses_requested_app_only(monkeypat
 
     calls = []
 
-    def fake_popen(command, **kwargs):
+    def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-
-        class Process:
-            pass
-
-        return Process()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_active_window_for_app",
+        lambda self, app_name: {"app": app_name, "title": "Start Page", "width": 900, "height": 700},
+    )
 
     result = BrowserComputerController().run(
         "browser.open_url",

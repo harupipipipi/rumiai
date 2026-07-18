@@ -20,6 +20,7 @@ import {
   authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
+  authorityRelatedPermissions,
   resolvePendingAuthorityApproval,
   type AuthorityApproval,
   type AuthorityApprovalSettledStatus,
@@ -510,6 +511,7 @@ export function AuthorityApprovalWindow() {
       const decision = await authorityApprovalResources.approveAuthorityApproval(request.request_id, {
         scope: selectedScope,
         config,
+        related_permissions: authorityRelatedPermissions(approval),
         ui_operator: context.ui_operator,
       });
       if (!decision.approved) throw new Error("authority approval failed");

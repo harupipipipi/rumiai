@@ -177,6 +177,8 @@ def infer_tool_action(tool_name: str, arguments: dict[str, Any] | None) -> str:
             "open": "browser.open_url",
             "open-url": "browser.open_url",
             "open_url": "browser.open_url",
+            "browser-open-url": "browser.open_url",
+            "browser_open_url": "browser.open_url",
             "click": "computer.click",
             "screenshot": "computer.screenshot",
             "state": "computer.context",

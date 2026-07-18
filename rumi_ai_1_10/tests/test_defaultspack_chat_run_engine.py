@@ -322,6 +322,153 @@ def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_p
     assert prepared.tool_context["tool_approval_tokens"] == expected
     ChatStore._instance = None
 
+
+def test_prepare_chat_run_accepts_authority_related_approvals_alias(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-4o-mini")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "Internal authority resume.",
+                "metadata": {
+                    "authority_followup": {
+                        "approval_token": "tok_model",
+                        "request_id": "auth_model_1",
+                        "permission_id": "model.invoke",
+                        "related_approvals": [
+                            {
+                                "token": "tok_api",
+                                "request_id": "auth_api_1",
+                                "permission_id": "api_key.use",
+                            },
+                            {
+                                "token": "tok_network",
+                                "request_id": "auth_network_1",
+                                "permission_id": "network.egress",
+                            },
+                        ],
+                        "hidden": True,
+                    },
+                    "chat_display": {"hidden": True, "reason": "authority_followup"},
+                },
+            },
+            "tools": ["browser_computer"],
+        },
+        {},
+    )
+
+    authority = prepared.request_context["authority"]
+    assert authority["approval_tokens"] == {
+        "model.invoke": {
+            "approval_token": "tok_model",
+            "request_id": "auth_model_1",
+            "permission_id": "model.invoke",
+        },
+        "api_key.use": {
+            "approval_token": "tok_api",
+            "request_id": "auth_api_1",
+            "permission_id": "api_key.use",
+        },
+        "network.egress": {
+            "approval_token": "tok_network",
+            "request_id": "auth_network_1",
+            "permission_id": "network.egress",
+        },
+    }
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_keeps_authority_resume_after_tool_approval_followup(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    class _ConsumedAuthority:
+        def __init__(self):
+            self.calls = []
+
+        def one_shot_approval_issued(self, **kwargs):
+            self.calls.append(kwargs)
+            return bool(kwargs.get("include_consumed"))
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    authority = _ConsumedAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-4o-mini")
+    store.add_message(conversation["id"], {"role": "user", "content": "Use Atlas and open Google."})
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "user",
+            "content": "Internal authority resume.",
+            "metadata": {
+                "authority_followup": {
+                    "approval_token": "tok_model",
+                    "request_id": "auth_model_1",
+                    "permission_id": "model.invoke",
+                    "related_approvals": [
+                        {
+                            "approval_token": "tok_api",
+                            "request_id": "auth_api_1",
+                            "permission_id": "api_key.use",
+                        },
+                        {
+                            "approval_token": "tok_network",
+                            "request_id": "auth_network_1",
+                            "permission_id": "network.egress",
+                        },
+                    ],
+                    "hidden": True,
+                },
+                "chat_display": {"hidden": True, "reason": "authority_followup"},
+            },
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "Approved browser.open_url.",
+                "metadata": {
+                    "approval_followup": {
+                        "tool_name": "browser_computer",
+                        "action": "browser.open_url",
+                        "approval_request_id": "apr_browser_1",
+                        "approval_token": "tok_browser",
+                    }
+                },
+            },
+            "tools": ["browser_computer"],
+        },
+        {},
+    )
+
+    authority_context = prepared.request_context["authority"]
+    assert authority_context["allow_consumed_one_shot_tokens_for_run"] is True
+    assert set(authority_context["approval_tokens"]) == {
+        "model.invoke",
+        "api_key.use",
+        "network.egress",
+    }
+    assert any(call.get("include_consumed") for call in authority.calls)
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_promotes_profile_and_agent_ids_into_tool_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -1083,11 +1230,22 @@ def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from pathlib import Path
 
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_TRACE", "full")
     gateway, events, stored, store = _run_ir_tool_loop(tmp_path, monkeypatch)
 
     trace = stored["metadata"]["provider_trace"]
     assert trace["request_id"]
-    assert Path(trace["trace_path"]).exists()
+    trace_path = Path(trace["trace_path"])
+    assert trace_path.exists()
+    trace_payload = json.loads(trace_path.read_text(encoding="utf-8"))
+    compiled_payload = trace_payload["compiled_payload"]
+    assert compiled_payload["provider_request_count"] == 2
+    first_messages = compiled_payload["provider_requests"][0]["legacy_messages"]
+    second_messages = compiled_payload["provider_requests"][1]["legacy_messages"]
+    assert not any(message.get("tool_calls") for message in first_messages)
+    assert second_messages[-2]["tool_calls"][0]["id"] == "call-ir-1"
+    assert second_messages[-1]["role"] == "tool"
+    assert compiled_payload["legacy_messages"] == second_messages
     assert stored["metadata"]["ir"]["schema_version"] == "rumi.chat.ir.v2"
     assert "provider_planning" in stored["metadata"]
     planning = stored["metadata"]["provider_planning"]

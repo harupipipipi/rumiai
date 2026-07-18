@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def run(context, args):
     ):
         payload["persistent"] = False
     payload = _payload_with_context_defaults(action, payload, context)
+    payload = _payload_with_open_url_defaults(action, payload, args)
     sequence_id = _sequence_id_from_mapping(payload)
     try:
         run_computer_action = _run_computer_action()
@@ -49,10 +51,13 @@ def run(context, args):
             yolo_mode=yolo_mode,
         )
         summary = "{} {} completed".format(tool_name, result.get("action", "action"))
-        if result.get("is_error"):
+        prompt = _result_prompt(result)
+        if result.get("requires_approval") or result.get("approval_required"):
+            summary = prompt or "{} {} requires approval".format(tool_name, result.get("action", "action"))
+        elif result.get("is_error"):
             summary = "{} {} failed".format(tool_name, result.get("action", "action"))
-            if result.get("reason"):
-                summary += ": {}".format(result.get("reason"))
+            if prompt:
+                summary += ": {}".format(prompt)
         if result.get("path"):
             summary += "; artifact: {}".format(result.get("path"))
         return tool_result(summary, widget={"type": tool_name, **result}, is_error=bool(result.get("is_error")))
@@ -82,11 +87,48 @@ def _payload_with_context_defaults(action, payload, context):
     if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
         target_app = context.get("computer_use_target_app")
         target_title = context.get("computer_use_target_title")
+        physical_clicks = _truthy(context.get("computer_use_physical_clicks"))
         if isinstance(target_app, str) and target_app.strip():
             payload.setdefault("app", target_app.strip())
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
+        if physical_clicks and action == "computer.click" and "physical" not in payload:
+            payload["physical"] = True
     return payload
+
+
+_URL_IN_TEXT_RE = re.compile(r"(?:https?://|file://|www\.)[^\s\"'<>]+")
+
+
+def _payload_with_open_url_defaults(action, payload, args):
+    payload = dict(payload or {})
+    if action != "browser.open_url" or payload.get("url"):
+        return payload
+    for key in ("value", "text", "target", "href", "link", "url_contains", "title", "title_contains"):
+        candidate = _url_from_text(str(payload.get(key) or ""))
+        if candidate:
+            payload["url"] = candidate
+            return payload
+    tool_arguments = args.get("tool_arguments") if isinstance(args, dict) else None
+    if isinstance(tool_arguments, dict):
+        for key in ("value", "text", "target", "href", "link", "url_contains", "title", "title_contains", "action"):
+            candidate = _url_from_text(str(tool_arguments.get(key) or ""))
+            if candidate:
+                payload["url"] = candidate
+                return payload
+    return payload
+
+
+def _url_from_text(value):
+    if not isinstance(value, str):
+        return ""
+    match = _URL_IN_TEXT_RE.search(value.strip())
+    if not match:
+        return ""
+    url = match.group(0).rstrip(".,;)")
+    if url.startswith("www."):
+        return "https://" + url
+    return url
 
 
 def _tool_arguments_from_run_args(args):
@@ -97,6 +139,22 @@ def _tool_arguments_from_run_args(args):
         for key, value in args.items()
         if key not in {"tool_name", "tool_arguments"}
     }
+
+
+def _result_prompt(result):
+    if not isinstance(result, dict):
+        return ""
+    for key in ("user_prompt", "message", "reason", "approval_hint"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    recovery = result.get("recovery")
+    if isinstance(recovery, dict):
+        for key in ("prompt", "note"):
+            value = recovery.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
 
 
 def _payload_with_sequence_defaults(payload, context, args):
