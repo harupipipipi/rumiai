@@ -1170,6 +1170,8 @@ class AuthorityService:
         token: str,
         conversation_id: str | None = None,
         principal_id: str | None = None,
+        resource: dict[str, Any] | None = None,
+        include_consumed: bool = False,
     ) -> bool:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -1184,6 +1186,8 @@ class AuthorityService:
             principal_id=expected_principal,
             permission_id=request.permission_id,
             token=token,
+            resource=resource,
+            include_consumed=include_consumed,
         )
 
     def list_grants(self, principal_id: str = "", *, actor_principal: Any = None) -> dict[str, Any]:

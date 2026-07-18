@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,14 +20,16 @@ use crate::config::AppConfig;
 use crate::desktop_system_info;
 use crate::host_audit::{now_epoch_seconds, summarize_args, write_audit_log, HostAuditEntry};
 use crate::host_broker_types::{
-    HostBrokerComputerRunRequest, HostBrokerComputerRunResponse, HostBrokerConnectionInfo,
-    HostBrokerError, HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
+    canonical_type_semantic_error_code, HostBrokerComputerRunRequest,
+    HostBrokerComputerRunResponse, HostBrokerConnectionInfo, HostBrokerError,
+    HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
     HostBrokerStreamStopRequest,
 };
 use crate::process_utils;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 8770;
+pub(crate) const DEFAULT_PORT: u16 = 8770;
+const BROKER_PORT_ENV: &str = "RUMI_VIEWER_BROKER_PORT";
 const HEALTH_PATH: &str = "/api/host/health";
 const PERMISSIONS_PATH: &str = "/api/host/permissions";
 const COMPUTER_RUN_PATH: &str = "/api/host/computer/run";
@@ -52,6 +54,8 @@ const IMPLEMENTED_HOST_STREAM_OPERATIONS: &[&str] = &[];
 const ARG_HASH_IGNORE_KEYS: &[&str] = &[
     "approval_token",
     "approved",
+    "computer_use_haze_sequence_id",
+    "computer_use_sequence_id",
     "_headers",
     "_method",
     "_raw_body",
@@ -140,7 +144,8 @@ impl HostBrokerRuntime {
                 )
             })?;
 
-            let listener = bind_listener()?;
+            let configured_port = configured_broker_port()?;
+            let listener = bind_listener(configured_port)?;
             let local_addr = listener
                 .local_addr()
                 .context("failed to read host broker local address")?;
@@ -156,6 +161,9 @@ impl HostBrokerRuntime {
                 permission_subject: PERMISSION_SUBJECT.to_string(),
                 pid: std::process::id(),
                 created_at: now_epoch_seconds(),
+                instance_nonce: std::env::var("RUMI_VIEWER_BROKER_INSTANCE_NONCE")
+                    .ok()
+                    .filter(|value| !value.is_empty()),
             };
             write_connection_file(&config.host_broker_connection_path(), &connection)?;
 
@@ -231,10 +239,29 @@ impl HostBrokerRuntime {
     }
 }
 
-fn bind_listener() -> Result<TcpListener> {
-    TcpListener::bind((DEFAULT_HOST, DEFAULT_PORT))
-        .or_else(|_| TcpListener::bind((DEFAULT_HOST, 0)))
-        .context("failed to bind Viewer host broker listener")
+fn configured_broker_port() -> Result<u16> {
+    let Some(raw) = std::env::var_os(BROKER_PORT_ENV) else {
+        return Ok(DEFAULT_PORT);
+    };
+    let text = raw
+        .to_str()
+        .ok_or_else(|| anyhow!("{BROKER_PORT_ENV} must be an ASCII decimal localhost port"))?;
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!("{BROKER_PORT_ENV} must be an ASCII decimal localhost port");
+    }
+    let port = text
+        .parse::<u16>()
+        .with_context(|| format!("{BROKER_PORT_ENV} must be between 1 and 65535"))?;
+    if port == 0 {
+        bail!("{BROKER_PORT_ENV} must be between 1 and 65535");
+    }
+    Ok(port)
+}
+
+fn bind_listener(port: u16) -> Result<TcpListener> {
+    TcpListener::bind((DEFAULT_HOST, port)).with_context(|| {
+        format!("failed to bind Viewer host broker listener at {DEFAULT_HOST}:{port}")
+    })
 }
 
 fn generate_broker_token() -> String {
@@ -256,23 +283,62 @@ fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> 
     }
     let body = serde_json::to_vec_pretty(connection)
         .context("failed to serialize host broker connection")?;
-    fs::write(path, body).with_context(|| {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("connection.json");
+    let temp_path = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    let _ = fs::remove_file(&temp_path);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // The connection payload contains the broker bearer token.  Set the
+        // restrictive mode at creation time; chmod after writing would leave
+        // a disclosure window when the process umask is permissive.
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temp_path).with_context(|| {
         format!(
-            "failed to write host broker connection file at {}",
-            path.display()
+            "failed to create temporary broker connection file at {}",
+            temp_path.display()
         )
     })?;
+    file.write_all(&body).with_context(|| {
+        format!(
+            "failed to write temporary host broker connection file at {}",
+            temp_path.display()
+        )
+    })?;
+    file.sync_all()
+        .context("failed to sync broker connection file")?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions).with_context(|| {
+        fs::set_permissions(&temp_path, permissions).with_context(|| {
             format!(
-                "failed to set host broker connection file permissions at {}",
+                "failed to set temporary host broker connection file permissions at {}",
+                temp_path.display()
+            )
+        })?;
+    }
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path).with_context(|| {
+            format!(
+                "failed to replace host broker connection file at {}",
                 path.display()
             )
         })?;
     }
+    fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "failed to atomically publish host broker connection file at {}",
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -1220,6 +1286,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 ok: false,
                 function_id: raw_function_id,
                 result: None,
+                diagnostics: None,
                 error: Some(HostBrokerError {
                     code: "FUNCTION_NOT_ALLOWED".to_string(),
                     message:
@@ -1251,9 +1318,10 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 ok: false,
                 function_id: function_id.clone(),
                 result: Some(approval_required_payload(&function_id, &helper_args)),
+                diagnostics: None,
                 error: Some(HostBrokerError {
                     code: "APPROVAL_REQUIRED".to_string(),
-                    message: "This Viewer-controlled computer action requires an approval token."
+                    message: "承認してください: This Viewer-controlled computer action requires an approval token."
                         .to_string(),
                 }),
                 audit_id,
@@ -1294,6 +1362,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                     ok: false,
                     function_id,
                     result: None,
+                    diagnostics: None,
                     error: Some(HostBrokerError {
                         code: error.code,
                         message: error.message,
@@ -1311,11 +1380,14 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
         &helper_args,
         request.artifact_root.as_deref(),
         viewer_host_approved,
+        &audit_id,
+        request.conversation_id.as_deref(),
     );
     match helper_result {
         Ok(result) => {
             let result_ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
             let mut payload = result.get("result").cloned();
+            let diagnostics = result.get("diagnostics").cloned();
             let payload_requires_approval = helper_payload_requires_approval(payload.as_ref());
             if payload_requires_approval {
                 payload = payload.map(redact_helper_approval_token);
@@ -1325,14 +1397,15 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 approval_token_present,
                 payload_requires_approval,
             );
-            let helper_error_code = result
-                .get("error_code")
-                .and_then(Value::as_str)
-                .unwrap_or(if payload_requires_approval {
+            let raw_helper_error_code = result.get("error_code").and_then(Value::as_str).unwrap_or(
+                if payload_requires_approval {
                     "APPROVAL_REQUIRED"
                 } else {
                     "VIEWER_HOST_FAILED"
-                })
+                },
+            );
+            let helper_error_code = canonical_type_semantic_error_code(raw_helper_error_code)
+                .unwrap_or(raw_helper_error_code)
                 .to_string();
             let error_message = result
                 .get("error")
@@ -1356,13 +1429,17 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                     result_ok: result_ok && !payload_requires_approval,
                     approval_token_present: Some(approval_token_present),
                     approval_result,
-                    args_summary: summarize_args(&helper_args),
+                    args_summary: summarize_args(&json!({
+                        "args": helper_args,
+                        "diagnostics": diagnostics.clone(),
+                    })),
                 },
                 if result_ok && !payload_requires_approval {
                     HostBrokerComputerRunResponse {
                         ok: true,
                         function_id,
                         result: payload,
+                        diagnostics: diagnostics.clone(),
                         error: None,
                         audit_id,
                     }
@@ -1371,6 +1448,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                         ok: false,
                         function_id,
                         result: payload,
+                        diagnostics,
                         error: Some(HostBrokerError {
                             code: helper_error_code,
                             message: error_message,
@@ -1405,6 +1483,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                     ok: false,
                     function_id,
                     result: None,
+                    diagnostics: None,
                     error: Some(HostBrokerError {
                         code,
                         message: error.to_string(),
@@ -1434,7 +1513,9 @@ fn approval_required_payload(function_id: &str, args: &Value) -> Value {
         "action": function_id,
         "requires_approval": true,
         "approval_required": true,
-        "approval_hint": "Repeat the same action after explicit user confirmation.",
+        "approval_hint": "承認してください: Repeat the same action after explicit user confirmation.",
+        "message": "承認してください",
+        "user_prompt": "承認してください",
         "payload": strip_approval_fields(args),
     })
 }
@@ -1464,6 +1545,13 @@ fn normalize_function_id(function_id: &str) -> String {
         "computer.backspace" | "computer.delete_back" => "computer.key".to_string(),
         other => other.to_string(),
     }
+}
+
+fn controller_shaped_args(function_id: &str, args: &Value) -> Value {
+    json!({
+        "action": function_id,
+        "payload": strip_approval_fields(args),
+    })
 }
 
 fn strip_approval_fields(args: &Value) -> Value {
@@ -1509,6 +1597,7 @@ fn function_allowed(function_id: &str) -> bool {
             | "computer.select_app"
             | "computer.show_app"
             | "computer.select_window"
+            | "computer.probe_text_control"
             | "computer.move"
             | "computer.click"
             | "computer.click_text"
@@ -1675,6 +1764,10 @@ fn validate_approval_token(
     let mut acceptable_hashes = HashSet::new();
     acceptable_hashes.insert(hash_arguments_value(raw_args));
     acceptable_hashes.insert(hash_arguments_value(helper_args));
+    acceptable_hashes.insert(hash_arguments_value(&controller_shaped_args(
+        function_id,
+        helper_args,
+    )));
     if !acceptable_hashes.contains(&payload.args_hash) {
         return Err(approval_error(
             "APPROVAL_ARGUMENTS_CHANGED",
@@ -1772,13 +1865,7 @@ fn approval_runtime_secret(
             return Ok(trimmed.to_string());
         }
     }
-    let path = config
-        .app_dir
-        .join("ecosystem")
-        .join("defaultspack")
-        .join("user_data")
-        .join("safety")
-        .join("approval_runtime_secret");
+    let path = approval_runtime_secret_path(config)?;
     fs::read_to_string(&path)
         .map(|value| value.trim().to_string())
         .ok()
@@ -1790,6 +1877,46 @@ fn approval_runtime_secret(
                 "unverifiable_token",
             )
         })
+}
+
+fn approval_runtime_secret_path(
+    config: &AppConfig,
+) -> std::result::Result<PathBuf, ApprovalValidationError> {
+    approval_runtime_secret_path_for_values(
+        config,
+        crate::debug_defaultspack_approval_secret_path_from_env(),
+        std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH")
+            .ok()
+            .map(PathBuf::from),
+    )
+}
+
+fn approval_runtime_secret_path_for_values(
+    config: &AppConfig,
+    isolated_path: Option<PathBuf>,
+    configured_path: Option<PathBuf>,
+) -> std::result::Result<PathBuf, ApprovalValidationError> {
+    if let Some(expected_path) = isolated_path {
+        // A debug-isolated broker must use the same owner-only file which the
+        // harness created before either child started.  Reject a supplied
+        // alternate pathname rather than silently falling back to shared
+        // production state.
+        if configured_path.as_ref() != Some(&expected_path) {
+            return Err(approval_error(
+                "APPROVAL_TOKEN_UNVERIFIABLE",
+                "approval token signing secret is unavailable",
+                "unverifiable_token",
+            ));
+        }
+        return Ok(expected_path);
+    }
+    Ok(config
+        .app_dir
+        .join("ecosystem")
+        .join("defaultspack")
+        .join("user_data")
+        .join("safety")
+        .join("approval_runtime_secret"))
 }
 
 fn hash_arguments_value(args: &Value) -> String {
@@ -1894,6 +2021,8 @@ fn run_computer_helper(
     args: &Value,
     artifact_root: Option<&str>,
     viewer_host_approved: bool,
+    audit_id: &str,
+    conversation_id: Option<&str>,
 ) -> std::result::Result<Value, ComputerHelperError> {
     let helper_path = config
         .app_dir
@@ -1907,13 +2036,22 @@ fn run_computer_helper(
         )));
     }
 
-    let mut child = process_utils::command(config.venv_python())
+    let mut command = process_utils::command(config.venv_python());
+    command
         .arg(helper_path)
         .current_dir(&config.app_dir)
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_LOG_DIR", &config.log_dir)
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env_remove("RUMI_DEFAULTSPACK_CHAT_STORE_PATH");
+    if let Some(path) = trusted_helper_chat_store_path(
+        std::env::var_os("RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH").as_deref(),
+    ) {
+        command.env("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", path);
+    }
+
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1929,6 +2067,10 @@ fn run_computer_helper(
         "args": args,
         "artifact_root": artifact_root,
         "viewer_host_approved": viewer_host_approved,
+        "trace_context": {
+            "action_id": audit_id,
+            "run_id": conversation_id.unwrap_or("viewer"),
+        },
     });
 
     if let Some(stdin) = child.stdin.as_mut() {
@@ -1969,11 +2111,10 @@ fn run_computer_helper(
     let stdout = join_output(stdout_handle);
     let stderr = join_output(stderr_handle);
     if !status.success() {
-        let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
         return Err(ComputerHelperError::Failed(anyhow!(
-            "Viewer host helper exited with status {}: {}",
+            "Viewer host helper exited with status {} (stderr_present={})",
             status,
-            stderr
+            !stderr.is_empty()
         )));
     }
     let stdout = String::from_utf8(stdout).map_err(|error| {
@@ -1986,6 +2127,10 @@ fn run_computer_helper(
             anyhow!(error).context("failed to decode Viewer host helper response"),
         )
     })
+}
+
+fn trusted_helper_chat_store_path(value: Option<&std::ffi::OsStr>) -> Option<std::ffi::OsString> {
+    value.filter(|path| !path.is_empty()).map(std::ffi::OsStr::to_os_string)
 }
 
 fn wait_for_helper_status(
@@ -2124,7 +2269,23 @@ fn write_json_response(stream: &mut TcpStream, status_code: u16, body: &Value) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host_broker_types::HostBrokerIntentCaller;
+    use crate::host_broker_types::{HostBrokerComputerRunRequest, HostBrokerIntentCaller};
+
+    #[test]
+    fn computer_request_chat_store_cannot_override_viewer_owned_helper_root() {
+        let request: HostBrokerComputerRunRequest = serde_json::from_value(json!({
+            "function_id": "computer.screenshot",
+            "artifact_root": "/malicious/conversations/conv/workspace/tools/computer",
+            "chat_store_path": "/malicious/conversations.json",
+            "args": {}
+        }))
+        .unwrap();
+        assert_eq!(request.function_id, "computer.screenshot");
+        assert_eq!(
+            trusted_helper_chat_store_path(Some(std::ffi::OsStr::new("/viewer-owned/chat/conversations.json"))),
+            Some(std::ffi::OsString::from("/viewer-owned/chat/conversations.json"))
+        );
+    }
 
     #[test]
     fn parse_authorization_header_accepts_bearer_and_custom_token() {
@@ -2212,6 +2373,7 @@ mod tests {
             permission_subject: PERMISSION_SUBJECT.to_string(),
             pid: 42,
             created_at: 123,
+            instance_nonce: Some("instance-test".to_string()),
         };
         write_connection_file(&path, &info).expect("connection file should be written");
         let stored: HostBrokerConnectionInfo =
@@ -2220,6 +2382,22 @@ mod tests {
         assert_eq!(stored.permission_subject, PERMISSION_SUBJECT);
         assert_eq!(stored.port, DEFAULT_PORT);
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn configured_broker_port_defaults_and_strictly_validates() {
+        std::env::remove_var(BROKER_PORT_ENV);
+        assert_eq!(configured_broker_port().unwrap(), DEFAULT_PORT);
+        std::env::set_var(BROKER_PORT_ENV, "8771");
+        assert_eq!(configured_broker_port().unwrap(), 8771);
+        for invalid in ["", "0", " 8771", "8771 ", "localhost:8771", "65536"] {
+            std::env::set_var(BROKER_PORT_ENV, invalid);
+            assert!(
+                configured_broker_port().is_err(),
+                "{invalid:?} must fail closed"
+            );
+        }
+        std::env::remove_var(BROKER_PORT_ENV);
     }
 
     #[test]
@@ -2235,6 +2413,8 @@ mod tests {
         assert!(function_allowed("computer.ocr"));
         assert!(function_allowed("computer.ax_tree"));
         assert!(function_allowed("computer.clipboard.clear"));
+        assert!(function_allowed("computer.probe_text_control"));
+        assert!(!high_risk_function("computer.probe_text_control"));
         assert!(!function_allowed("computer.launch_missiles"));
     }
 
@@ -2387,6 +2567,42 @@ mod tests {
     }
 
     #[test]
+    fn broker_accepts_controller_shaped_computer_key_approval_hash() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"key": "k"});
+        let approved_args = json!({"action": "computer.key", "payload": {"key": "k"}});
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-controller-key",
+                "operation": "computer.key",
+                "function_id": "computer.key",
+                "args_hash": hash_arguments_value(&approved_args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+
+        let result = validate_approval_token(
+            &shared,
+            &token,
+            "computer.key",
+            "computer.key",
+            &args,
+            &args,
+            "defaultspack",
+            "conv-1",
+            true,
+        );
+
+        assert!(result.is_ok());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn broker_rejects_expired_approval_token() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
@@ -2483,6 +2699,14 @@ mod tests {
             hash_arguments_value(&json!({"text": "あ", "approval_token": "tok"})),
             "a93f199e5601efaaa265174dfdd9d291ee80085bd9d2dd2dfb88d59b33b9d247"
         );
+        assert_eq!(
+            hash_arguments_value(
+                &json!({"action": "computer.show_app", "payload": {"app": "Vivaldi", "computer_use_haze_sequence_id": "run_1"}})
+            ),
+            hash_arguments_value(
+                &json!({"action": "computer.show_app", "payload": {"app": "Vivaldi"}})
+            )
+        );
     }
 
     #[test]
@@ -2515,6 +2739,26 @@ mod tests {
         assert_eq!(
             helper_error_code(&ComputerHelperError::Timeout),
             "VIEWER_HOST_TIMEOUT"
+        );
+    }
+
+    #[test]
+    fn legacy_stale_helper_code_is_normalized_to_repeated_branch_code() {
+        assert_eq!(
+            canonical_type_semantic_error_code("TYPE_SEMANTIC_AX_SUBTREE_PERSISTENTLY_STALE"),
+            Some("TYPE_SEMANTIC_AX_BRANCH_REPEATEDLY_STALE")
+        );
+        assert_eq!(
+            canonical_type_semantic_error_code("TYPE_SEMANTIC_AX_BRANCH_REPEATEDLY_STALE"),
+            Some("TYPE_SEMANTIC_AX_BRANCH_REPEATEDLY_STALE")
+        );
+        assert_eq!(
+            canonical_type_semantic_error_code("TYPE_ACCESSIBILITY_API_UNAVAILABLE"),
+            Some("TYPE_ACCESSIBILITY_API_UNAVAILABLE")
+        );
+        assert_eq!(
+            canonical_type_semantic_error_code("TYPE_SEMANTIC_PROTOCOL_INVALID"),
+            Some("TYPE_SEMANTIC_PROTOCOL_INVALID")
         );
     }
 
@@ -2761,6 +3005,35 @@ mod tests {
             dev_workspace_root: None,
         };
         (config, temp_dir)
+    }
+
+    #[test]
+    fn isolated_approval_secret_path_requires_the_harness_path() {
+        let (config, temp_dir) = test_config_with_approval_secret("legacy-secret");
+        let isolated = temp_dir
+            .join("isolated")
+            .join("approval")
+            .join("approval_runtime_secret");
+        fs::create_dir_all(isolated.parent().unwrap()).unwrap();
+        fs::write(&isolated, "isolated-secret\n").unwrap();
+
+        assert_eq!(
+            approval_runtime_secret_path_for_values(
+                &config,
+                Some(isolated.clone()),
+                Some(isolated.clone()),
+            )
+            .unwrap(),
+            isolated
+        );
+        let error = approval_runtime_secret_path_for_values(
+            &config,
+            Some(temp_dir.join("expected-secret")),
+            Some(temp_dir.join("foreign-secret")),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "APPROVAL_TOKEN_UNVERIFIABLE");
+        fs::remove_dir_all(temp_dir).ok();
     }
 
     fn test_shared(config: AppConfig) -> HostBrokerShared {
