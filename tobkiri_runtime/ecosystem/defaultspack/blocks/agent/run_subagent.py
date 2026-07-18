@@ -25,6 +25,12 @@ def run(input_data, context):
                 role_id,
                 payload,
                 model=str(data.get("model") or ""),
+                model_policy=data.get("model_policy")
+                if isinstance(data.get("model_policy"), dict)
+                else None,
+                thinking_policy=data.get("thinking_policy")
+                if isinstance(data.get("thinking_policy"), dict)
+                else None,
                 settings=data.get("settings") if isinstance(data.get("settings"), dict) else {},
                 call_handler=runtime_context.get("call_handler"),
                 context=runtime_context,

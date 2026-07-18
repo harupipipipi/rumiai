@@ -70,6 +70,37 @@ def test_agent_run_subagent_compat_routes_to_delegate_or_utility(monkeypatch):
     assert result["data"]["output"]["recommended_tools"][0]["tool_id"] == "search_docs"
 
 
+def test_utility_subagent_records_model_policy_receipt(monkeypatch):
+    receipt = {
+        "contract_version": "tobkiri.secondary-model-policy.v1",
+        "resolved_profile_id": "openai/utility",
+        "requested_model_policy": {"mode": "inherit_conversation"},
+    }
+    monkeypatch.setattr(
+        "domain.agent.subagent_orchestrator.call_model",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "model": "openai/utility",
+            "output": {"recommended_tools": [{"tool_id": "search_docs"}]},
+            "model_policy_receipt": receipt,
+        },
+    )
+
+    result = run_subagent_block(
+        {
+            "role_id": "tool_selector",
+            "payload": {"candidate_tools": [{"tool_id": "search_docs"}]},
+            "model_policy": {"mode": "inherit_conversation"},
+        },
+        {"call_handler": object(), "conversation_model": "openai/utility"},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["model"] == "openai/utility"
+    assert result["data"]["model_policy_receipt"] == receipt
+    assert result["data"]["events"][0]["model_policy_receipt"] == receipt
+
+
 def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(monkeypatch):
     seen: dict[str, object] = {}
 
