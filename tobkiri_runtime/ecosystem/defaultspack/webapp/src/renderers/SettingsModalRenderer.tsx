@@ -7,6 +7,7 @@ import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { MobilePairingApproval } from "../components/MobilePairingApproval";
+import { ClientDiagnosticPrivacyPanel } from "../components/ClientDiagnosticPrivacyPanel";
 import { normalizeLocale, t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -4441,12 +4442,12 @@ export function SettingsModalRenderer({
                     <div className="grid gap-4 2xl:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}
                     </div>
-                    {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                    {activeSection.id !== "diagnostics" && normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
                         {t(locale, "settings.noFields")}
                       </div>
                     )}
-                    {!normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                    {activeSection.id !== "diagnostics" && !normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
                         {localizedCopy(
                           "Pack or provider contributions for this section will appear here after registry validation.",
@@ -4473,6 +4474,8 @@ export function SettingsModalRenderer({
                   {t(locale, "settings.developerDiagnostics")}
                 </summary>
                 <div className="space-y-6 border-t border-zinc-800 p-4">
+                  <ClientDiagnosticPrivacyPanel locale={locale} />
+
                   <section className="space-y-3">
                     <h3 className="text-sm font-medium text-zinc-100">Extension Points</h3>
                     <div className="grid gap-3 md:grid-cols-3">
