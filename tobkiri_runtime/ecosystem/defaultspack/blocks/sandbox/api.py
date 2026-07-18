@@ -757,13 +757,22 @@ def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any], contex
     confirmation_error = _destructive_confirmation_error(payload, action="delete", resource="desktop")
     if confirmation_error is not None:
         return confirmation_error
+    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(service, payload, seat_id=seat_id, action="delete")
+    if reservation_error is not None:
+        return reservation_error
+    if replayed:
+        replay = _desktop_operation_replay(operation)
+        if replay is not None:
+            return replay
     result = service.manager.destroy(seat_id)
     if result.get("ok") is not True:
-        return _api_error(str(result.get("error") or "Desktop delete failed"), str(result.get("code") or "DESKTOP_DELETE_FAILED"), int(result.get("status_code") or 400))
+        return _fail_desktop_lifecycle_operation(service, operation, result, fallback_code="DESKTOP_DELETE_FAILED", fallback_message="Desktop delete failed")
     service.frame_cache.discard(seat_id)
     service.lease_manager.invalidate(seat_id)
     _desktop_exchange(service).revoke_seat(seat_id, reason="desktop_destroyed")
-    return ok({"deleted": True, "seat_id": seat_id})
+    response = {"deleted": True, "seat_id": seat_id}
+    _complete_desktop_lifecycle_operation(service, operation, response)
+    return ok(response)
 
 
 def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any], *, action: str):
@@ -775,6 +784,13 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], con
         confirmation_error = _destructive_confirmation_error(payload, action="stop", resource="desktop")
         if confirmation_error is not None:
             return confirmation_error
+    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(service, payload, seat_id=seat_id, action=action)
+    if reservation_error is not None:
+        return reservation_error
+    if replayed:
+        replay = _desktop_operation_replay(operation)
+        if replay is not None:
+            return replay
     if action == "start":
         result = service.manager.start(seat_id)
     elif action == "stop":
@@ -784,12 +800,116 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], con
     else:
         return _api_error(f"Unknown desktop lifecycle action: {action}", "DESKTOP_LIFECYCLE_UNKNOWN", 400)
     if result.get("ok") is not True:
-        return _api_error(str(result.get("error") or "Desktop lifecycle failed"), str(result.get("code") or "DESKTOP_LIFECYCLE_FAILED"), int(result.get("status_code") or 400))
+        return _fail_desktop_lifecycle_operation(service, operation, result, fallback_code="DESKTOP_LIFECYCLE_FAILED", fallback_message="Desktop lifecycle failed")
     if action in {"stop", "restart"}:
         service.frame_cache.discard(seat_id)
         service.lease_manager.invalidate(seat_id)
         _desktop_exchange(service).revoke_seat(seat_id, reason=f"desktop_{action}")
-    return ok(_desktop_payload(service, result))
+    response = _desktop_payload(service, result)
+    _complete_desktop_lifecycle_operation(service, operation, response)
+    return ok(response)
+
+
+def _reserve_desktop_lifecycle_operation(
+    service: _SandboxApiService,
+    payload: dict[str, Any],
+    *,
+    seat_id: str,
+    action: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
+    operation_id = _runtime_operation_id(payload, provider_id="desktop", action=action)
+    operation, state = _operation_store(service).reserve_desktop_operation({
+        "operation_id": operation_id,
+        "operation_kind": "desktop_lifecycle",
+        "seat_id": seat_id,
+        "action": action,
+        "status": "running",
+        "step": "mutating",
+        "message": f"Desktop {action} is in progress.",
+        "progress": 25,
+        "progress_events": [],
+        "reboot_required": False,
+        "provider_id": "desktop",
+        "updated_at": timestamp(),
+        "error": None,
+    })
+    if state == "id_conflict":
+        return operation, _api_error(
+            "This operation ID was already used for a different desktop action.",
+            "DESKTOP_OPERATION_ID_CONFLICT",
+            409,
+            details={"operation_id": operation_id},
+        ), False
+    if state == "seat_busy":
+        return operation, _api_error(
+            f"Desktop {seat_id} already has a lifecycle action in progress.",
+            "DESKTOP_OPERATION_IN_PROGRESS",
+            409,
+            details={"operation_id": operation.get("operation_id"), "seat_id": seat_id, "action": operation.get("action")},
+        ), False
+    return operation, None, state == "replay"
+
+
+def _desktop_operation_replay(operation: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(operation.get("status") or "")
+    if status == "completed" and isinstance(operation.get("result"), dict):
+        return ok(dict(operation["result"]))
+    if status in {"failed", "cancelled"}:
+        failure = operation.get("error") if isinstance(operation.get("error"), dict) else {}
+        return _api_error(
+            str(failure.get("message") or operation.get("message") or "Desktop lifecycle operation failed."),
+            str(failure.get("code") or "DESKTOP_LIFECYCLE_FAILED"),
+            int(failure.get("status_code") or 400),
+            details={"operation_id": operation.get("operation_id"), "seat_id": operation.get("seat_id"), "action": operation.get("action")},
+        )
+    if status in {"running", "planned", "starting"}:
+        return _api_error(
+            "This desktop lifecycle operation is still in progress.",
+            "DESKTOP_OPERATION_IN_PROGRESS",
+            409,
+            details={"operation_id": operation.get("operation_id"), "seat_id": operation.get("seat_id"), "action": operation.get("action")},
+        )
+    return None
+
+
+def _complete_desktop_lifecycle_operation(
+    service: _SandboxApiService,
+    operation: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    _record_operation(service, {
+        **operation,
+        "status": "completed",
+        "step": "done",
+        "message": f"Desktop {operation['action']} completed.",
+        "progress": 100,
+        "updated_at": timestamp(),
+        "error": None,
+        "result": dict(result),
+    })
+
+
+def _fail_desktop_lifecycle_operation(
+    service: _SandboxApiService,
+    operation: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    fallback_code: str,
+    fallback_message: str,
+) -> dict[str, Any]:
+    message = str(result.get("error") or fallback_message)
+    code = str(result.get("code") or fallback_code)
+    status_code = int(result.get("status_code") or 400)
+    _record_operation(service, {
+        **operation,
+        "status": "failed",
+        "step": "failed",
+        "message": message,
+        "progress": 100,
+        "updated_at": timestamp(),
+        "error": {"code": code, "message": message, "status_code": status_code},
+    })
+    return _api_error(message, code, status_code, details={"operation_id": operation.get("operation_id")})
 
 
 def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):

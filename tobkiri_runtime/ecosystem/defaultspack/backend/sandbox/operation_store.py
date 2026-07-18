@@ -87,6 +87,42 @@ class RuntimeOperationStore:
             self._save()
             return dict(stored), True
 
+    def reserve_desktop_operation(
+        self,
+        operation: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        """Atomically reserve a lifecycle mutation or return its replay/conflict state."""
+        operation_id = str(operation.get("operation_id") or "").strip()
+        seat_id = str(operation.get("seat_id") or "").strip()
+        action = str(operation.get("action") or "").strip()
+        if not operation_id:
+            raise ValueError("operation_id is required")
+        if not seat_id:
+            raise ValueError("seat_id is required")
+        if not action:
+            raise ValueError("action is required")
+        with self._lock:
+            existing = self._operations.get(operation_id)
+            if existing is not None:
+                same_request = (
+                    str(existing.get("operation_kind") or "") == "desktop_lifecycle"
+                    and str(existing.get("seat_id") or "") == seat_id
+                    and str(existing.get("action") or "") == action
+                )
+                return dict(existing), "replay" if same_request else "id_conflict"
+            for current in self._operations.values():
+                if str(current.get("operation_kind") or "") != "desktop_lifecycle":
+                    continue
+                if str(current.get("seat_id") or "") != seat_id:
+                    continue
+                if str(current.get("status") or "") in TERMINAL_OPERATION_STATES:
+                    continue
+                return dict(current), "seat_busy"
+            stored = dict(operation)
+            self._operations[operation_id] = stored
+            self._save()
+            return dict(stored), "reserved"
+
     def append_progress(
         self,
         event: dict[str, Any],

@@ -1422,6 +1422,91 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert agent.desktop_inputs[0].action == "click"
 
 
+def test_desktop_lifecycle_operations_are_idempotent_and_queryable(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    agent = FakeGuestAgent()
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities={
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+            guest_agent=agent,
+            sandbox_id_factory=lambda: "seat-1",
+        )
+    )
+    store = RuntimeOperationStore(tmp_path / "runtime_operations.json")
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        operation_store=store,
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        api.run(
+            {
+                "_handler": "desktops_create",
+                "name": "Idempotent desktop",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "resolution": {"width": 800, "height": 600},
+            },
+            {"user_id": "owner-1"},
+        )
+        first = api.run(
+            {
+                "_handler": "desktop_stop",
+                "seat_id": "seat-1",
+                "request_id": "desktop-stop-stable",
+                "confirm_destructive": True,
+            },
+            {"user_id": "owner-1"},
+        )
+        replay = api.run(
+            {
+                "_handler": "desktop_stop",
+                "seat_id": "seat-1",
+                "request_id": "desktop-stop-stable",
+                "confirm_destructive": True,
+            },
+            {"user_id": "owner-1"},
+        )
+        queried = api.run(
+            {"_handler": "runtime_operation_get", "operation_id": "desktop-stop-stable"},
+            {},
+        )
+        conflict = api.run(
+            {
+                "_handler": "desktop_start",
+                "seat_id": "seat-1",
+                "request_id": "desktop-stop-stable",
+            },
+            {"user_id": "owner-1"},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert first["status"] == "ok", first
+    assert replay == first
+    assert queried["data"]["status"] == "completed"
+    assert queried["data"]["seat_id"] == "seat-1"
+    assert queried["data"]["action"] == "stop"
+    assert queried["data"]["result"] == first["data"]
+    assert conflict["status"] == "error"
+    assert conflict["error"]["code"] == "DESKTOP_OPERATION_ID_CONFLICT"
+    assert RuntimeOperationStore(tmp_path / "runtime_operations.json").get("desktop-stop-stable")["status"] == "completed"
+
+
 def test_desktop_api_sees_desktop_created_by_external_tool_manager(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 

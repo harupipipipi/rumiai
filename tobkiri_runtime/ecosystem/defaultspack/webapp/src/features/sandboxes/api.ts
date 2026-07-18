@@ -319,43 +319,43 @@ export const sandboxesApi = {
     }).then(normalizeDesktopInstance);
   },
 
-  startDesktop(seatId: string, accessKey?: string | null) {
+  startDesktop(seatId: string, accessKey?: string | null, operationId?: string) {
     return request<DesktopInstance>(defaultspackContractRoute(`api/desktops/${encodeId(seatId)}/start`), {
       method: "POST",
       body: JSON.stringify({
         desktop_session_credential: accessKey || undefined,
-        request_id: requestId("desktop-start"),
+        request_id: operationId ?? requestId("desktop-start"),
       }),
     }).then(normalizeDesktopInstance);
   },
 
-  stopDesktop(seatId: string, accessKey?: string | null) {
+  stopDesktop(seatId: string, accessKey?: string | null, operationId?: string) {
     return request<DesktopInstance>(defaultspackContractRoute(`api/desktops/${encodeId(seatId)}/stop`), {
       method: "POST",
       body: JSON.stringify({
         desktop_session_credential: accessKey || undefined,
-        request_id: requestId("desktop-stop"),
+        request_id: operationId ?? requestId("desktop-stop"),
         confirm_destructive: true,
       }),
     }).then(normalizeDesktopInstance);
   },
 
-  restartDesktop(seatId: string, accessKey?: string | null) {
+  restartDesktop(seatId: string, accessKey?: string | null, operationId?: string) {
     return request<DesktopInstance>(defaultspackContractRoute(`api/desktops/${encodeId(seatId)}/restart`), {
       method: "POST",
       body: JSON.stringify({
         desktop_session_credential: accessKey || undefined,
-        request_id: requestId("desktop-restart"),
+        request_id: operationId ?? requestId("desktop-restart"),
       }),
     }).then(normalizeDesktopInstance);
   },
 
-  deleteDesktop(seatId: string, accessKey?: string | null) {
+  deleteDesktop(seatId: string, accessKey?: string | null, operationId?: string) {
     const query = new URLSearchParams({
       confirm_destructive: "true",
-      request_id: requestId("desktop-delete"),
+      request_id: operationId ?? requestId("desktop-delete"),
     });
-    return request<{ deleted: boolean; seat_id: string }>(defaultspackContractRoute(`api/desktops/${encodeId(seatId)}?${query.toString()}`), {
+    return request<{ deleted: boolean; seat_id: string; operation_id?: string }>(defaultspackContractRoute(`api/desktops/${encodeId(seatId)}?${query.toString()}`), {
       method: "DELETE",
       headers: {
         ...(accessKey ? { "X-Rumi-Desktop-Session-Credential": accessKey } : {}),
