@@ -1341,7 +1341,8 @@ def _computer_use_foreground_preferred_for_prompt(context: dict[str, Any]) -> bo
     )
     if target_alias in {"atlas", "chatgptatlas"}:
         return True
-    return False
+    env_value = str(os.environ.get("RUMI_COMPUTER_USE_DEBUG_FOREGROUND") or "").strip().lower()
+    return env_value in {"1", "true", "yes", "on"}
 
 
 def _tool_discovery_fallback_prompt(tools: list[dict[str, Any]]) -> str:

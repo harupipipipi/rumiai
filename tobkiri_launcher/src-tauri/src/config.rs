@@ -139,6 +139,11 @@ impl AppConfig {
 
     /// Return the path to the Viewer host broker connection file.
     pub fn host_broker_connection_path(&self) -> PathBuf {
+        if let Some(path) = std::env::var_os("RUMI_VIEWER_HOST_BROKER_CONNECTION") {
+            if !path.is_empty() {
+                return PathBuf::from(path);
+            }
+        }
         self.host_broker_dir().join("connection.json")
     }
 

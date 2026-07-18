@@ -17,6 +17,68 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 class TestDefaultspackDesktopSurface(unittest.TestCase):
+    def test_desktop_app_help_exits_before_runtime_setup(self):
+        from defaultspack import desktop_app
+
+        with patch.object(
+            desktop_app, "_ensure_import_path"
+        ) as ensure_import_path:
+            with self.assertRaises(SystemExit) as exited:
+                desktop_app.main(["--help"])
+
+        self.assertEqual(exited.exception.code, 0)
+        ensure_import_path.assert_not_called()
+
+    def test_desktop_app_url_uses_canonical_ipv4_loopback(self):
+        from defaultspack import desktop_app
+
+        with patch.dict(
+            os.environ,
+            {
+                "DEFAULTS_HTTP_PORT": "18776",
+                "RUMI_DEFAULTSPACK_PORT": "18776",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                desktop_app._url(), "http://127.0.0.1:18776/chat"
+            )
+
+    def test_debug_own_bind_does_not_adopt_existing_healthy_server(self):
+        from defaultspack import desktop_app
+
+        class BindFailureServer:
+            def start(self):
+                raise OSError("address already in use")
+
+        with patch.dict(
+            os.environ,
+            {
+                "DEFAULTS_HTTP_HOST": "127.0.0.1",
+                "DEFAULTS_HTTP_PORT": "18776",
+                "RUMI_DEFAULTSPACK_PORT": "18776",
+                "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
+            },
+            clear=False,
+        ):
+            with patch(
+                "transport.http.DefaultsHttpServer",
+                return_value=BindFailureServer(),
+            ):
+                with patch.object(
+                    desktop_app, "_wait_until_ready"
+                ) as wait_until_ready:
+                    with patch(
+                        "domain.scheduler.daemon.start_scheduler_daemon"
+                    ) as start_scheduler:
+                        with self.assertRaisesRegex(
+                            OSError, "address already in use"
+                        ):
+                            desktop_app.main()
+
+        wait_until_ready.assert_not_called()
+        start_scheduler.assert_not_called()
+
     def test_surface_url_passes_local_auth_only_in_fragment(self):
         from defaultspack import desktop_app
 

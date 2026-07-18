@@ -1003,8 +1003,23 @@ fn read_defaultspack_desktop_metadata(
         .parent()
         .context("defaultspack ecosystem.json has no parent directory")?;
     let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
-    let env_vars = read_desktop_app_env(&desktop_app)?;
-    let port = read_defaultspack_port(&env_vars)?;
+    let mut env_vars = read_desktop_app_env(&desktop_app)?;
+    let mut port = read_defaultspack_port(&env_vars)?;
+    if let Some((debug_http_port, debug_kernel_port)) = crate::debug_defaultspack_ports_from_env() {
+        if config.kernel_port != debug_kernel_port {
+            bail!(
+                "debug Defaultspack isolation kernel port did not match the Viewer configuration"
+            );
+        }
+        // Debug isolation is accepted only after lib.rs has validated the
+        // complete Viewer/run identity.  Override metadata, not production
+        // defaults, so every URL/readiness check and child environment uses
+        // the same run-owned loopback port.
+        env_vars.retain(|(key, _)| key != "RUMI_DEFAULTSPACK_PORT" && key != "DEFAULTS_HTTP_PORT");
+        env_vars.push(("RUMI_DEFAULTSPACK_PORT".into(), debug_http_port.to_string()));
+        env_vars.push(("DEFAULTS_HTTP_PORT".into(), debug_http_port.to_string()));
+        port = debug_http_port;
+    }
 
     Ok(DefaultspackDesktopMetadata {
         command,
@@ -1190,6 +1205,10 @@ pub(crate) fn spawn_defaultspack_local_server(
         )
         .env("RUMI_LOG_DIR", &config.log_dir)
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env(
+            viewer_host_broker_connection_env_key(),
+            viewer_host_broker_connection_env_value(config),
+        )
         .env("RUMI_API_TOKEN", &api_token)
         .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
@@ -1201,6 +1220,19 @@ pub(crate) fn spawn_defaultspack_local_server(
     for (key, value) in &metadata.env_vars {
         command.env(key, value);
     }
+    // Metadata is deliberately applied first.  These exact values are then
+    // asserted for the child so a desktop_app env entry cannot redirect a
+    // debug run to production/default ports or an unrelated listener.
+    command
+        .env("DEFAULTS_HTTP_HOST", "127.0.0.1")
+        .env("DEFAULTS_HTTP_PORT", metadata.port.to_string())
+        .env("RUMI_DEFAULTSPACK_PORT", metadata.port.to_string())
+        .env("RUMI_PORT", config.kernel_port.to_string());
+    if crate::debug_defaultspack_ports_from_env().is_some() {
+        command
+            .env("RUMI_DEFAULTSPACK_DEBUG_ISOLATION", "1")
+            .env("RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND", "1");
+    }
     command
         .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .env("PYTHONDONTWRITEBYTECODE", "1");
@@ -1211,6 +1243,14 @@ pub(crate) fn spawn_defaultspack_local_server(
     command
         .spawn()
         .with_context(|| format!("failed to spawn {}", pack_shell.display()))
+}
+
+fn viewer_host_broker_connection_env_key() -> &'static str {
+    "RUMI_VIEWER_HOST_BROKER_CONNECTION"
+}
+
+fn viewer_host_broker_connection_env_value(config: &AppConfig) -> PathBuf {
+    config.host_broker_connection_path()
 }
 
 fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
@@ -1508,6 +1548,26 @@ exec "$PACK_SHELL" run "defaultspack" \
         assert!(!identify_authenticated_stale_defaultspack_listener(
             &foreign, &metadata,
         ));
+    }
+
+    #[test]
+    fn viewer_broker_env_points_defaultspack_at_connection_file() {
+        let root =
+            std::env::temp_dir().join(format!("rumi_dock_broker_env_{}", std::process::id()));
+        let config = test_config(&root);
+
+        assert_eq!(
+            viewer_host_broker_connection_env_key(),
+            "RUMI_VIEWER_HOST_BROKER_CONNECTION"
+        );
+        assert_eq!(
+            viewer_host_broker_connection_env_value(&config),
+            root.join("app-data")
+                .join("user_data")
+                .join("host_broker")
+                .join("connection.json")
+        );
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

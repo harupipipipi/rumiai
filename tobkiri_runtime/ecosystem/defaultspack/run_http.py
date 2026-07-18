@@ -72,7 +72,11 @@ def main() -> int:
 
     from transport.http import start_http_server
 
-    print("Starting defaultspack HTTP server with the active Tobkiri profile on port 8766...")
+    port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
+    print(
+        "Starting defaultspack HTTP server with the active Tobkiri profile "
+        f"on port {port}..."
+    )
     start_http_server(None)
     return 0
 
