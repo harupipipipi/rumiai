@@ -11,9 +11,7 @@ W19-A: セキュリティフラグ修正のテスト
 """
 
 import json
-import logging
 import os
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -75,11 +73,11 @@ class TestVulnC05PermissionManagerDefaults:
         with patch.dict(os.environ, env, clear=True):
             with patch("core_runtime.permission_manager.logger") as mock_logger:
                 pm = PermissionManager()
-                assert pm.get_mode() == "permissive"
+                assert pm.get_mode() == "secure"
                 # VULN-C05 の特定 WARNING が出力されるか確認
                 warning_calls = [
                     call for call in mock_logger.warning.call_args_list
-                    if "RUMI_PERMISSION_MODE=permissive is explicitly set" in str(call)
+                    if "requested permissive permissions" in str(call)
                 ]
                 assert len(warning_calls) >= 1, (
                     "Expected VULN-C05 warning for strict+permissive combination"
@@ -118,22 +116,24 @@ class TestVulnC05PermissionManagerDefaults:
 
     def test_permissive_mode_has_permission_returns_true(self):
         """permissive モードで has_permission() は常に True"""
-        pm = PermissionManager(mode="permissive")
-        assert pm.has_permission("test:tool:foo", "file_read") is True
+        with patch.dict(os.environ, {"RUMI_SECURITY_MODE": "permissive"}, clear=True):
+            pm = PermissionManager(mode="permissive")
+            assert pm.has_permission("test:tool:foo", "file_read") is True
 
     def test_mode_switch_after_init(self):
         """モード切替後の挙動が正しい"""
-        pm = PermissionManager(mode="secure")
-        assert pm.get_mode() == "secure"
-        assert pm.has_permission("test:tool:foo", "file_read") is False
+        with patch.dict(os.environ, {"RUMI_SECURITY_MODE": "permissive"}, clear=True):
+            pm = PermissionManager(mode="secure")
+            assert pm.get_mode() == "secure"
+            assert pm.has_permission("test:tool:foo", "file_read") is False
 
-        pm.set_mode("permissive")
-        assert pm.get_mode() == "permissive"
-        assert pm.has_permission("test:tool:foo", "file_read") is True
+            pm.set_mode("permissive")
+            assert pm.get_mode() == "permissive"
+            assert pm.has_permission("test:tool:foo", "file_read") is True
 
-        pm.set_mode("secure")
-        assert pm.get_mode() == "secure"
-        assert pm.has_permission("test:tool:foo", "file_read") is False
+            pm.set_mode("secure")
+            assert pm.get_mode() == "secure"
+            assert pm.has_permission("test:tool:foo", "file_read") is False
 
 
 # ======================================================================

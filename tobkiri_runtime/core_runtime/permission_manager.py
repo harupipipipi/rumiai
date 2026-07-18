@@ -34,13 +34,49 @@ import os
 import re
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 
 logger = logging.getLogger(__name__)
+
+
+_PERMISSION_MODES = frozenset({"permissive", "secure"})
+_PERMISSION_ENV_NAMES = ("TOBKIRI_PERMISSION_MODE", "RUMI_PERMISSION_MODE")
+
+
+def _normalized_permission_mode(value: object, *, source: str) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in _PERMISSION_MODES:
+        return mode
+    logger.warning(
+        "Invalid %s value %r; failing closed to secure permission mode.",
+        source,
+        value,
+    )
+    return "secure"
+
+
+def _permission_mode_from_environment() -> str | None:
+    configured: list[tuple[str, str]] = []
+    for name in _PERMISSION_ENV_NAMES:
+        if name not in os.environ:
+            continue
+        configured.append(
+            (name, _normalized_permission_mode(os.environ.get(name), source=name))
+        )
+    if not configured:
+        return None
+    modes = {mode for _name, mode in configured}
+    if len(modes) > 1:
+        logger.warning(
+            "TOBKIRI_PERMISSION_MODE and RUMI_PERMISSION_MODE conflict; "
+            "failing closed to secure permission mode."
+        )
+        return "secure"
+    return configured[0][1]
 
 
 @dataclass
@@ -86,7 +122,7 @@ class PermissionManager:
             pass
     """
     
-    def __init__(self, mode: str = None):
+    def __init__(self, mode: str | None = None):
         """
         Args:
             mode: "permissive" (自動許可) or "secure" (明示的許可必要).
@@ -99,25 +135,27 @@ class PermissionManager:
         Wave 19-A 変更:
           RUMI_SECURITY_MODE との連動デフォルトを導入
         """
-        if mode is None:
-            security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict")
-            explicit_perm = os.environ.get("RUMI_PERMISSION_MODE")
-            if explicit_perm is not None:
-                mode = explicit_perm
-                if security_mode == "strict" and mode == "permissive":
-                    logger.warning(
-                        "RUMI_SECURITY_MODE=strict but RUMI_PERMISSION_MODE=permissive "
-                        "is explicitly set. Respecting explicit setting, but this "
-                        "combination is not recommended for production use."
-                    )
-            else:
-                # 連動デフォルト: strict → secure, それ以外 → permissive
-                mode = "secure" if security_mode == "strict" else "permissive"
+        security_mode = str(
+            os.environ.get("RUMI_SECURITY_MODE", "strict") or "strict"
+        ).strip().lower()
+        environment = str(os.environ.get("RUMI_ENVIRONMENT", "") or "").strip().lower()
+        self._secure_mode_ceiling = (
+            security_mode != "permissive" or environment == "production"
+        )
+        requested_mode = (
+            _permission_mode_from_environment()
+            if mode is None
+            else _normalized_permission_mode(mode, source="PermissionManager(mode=...)")
+        )
+        if requested_mode is None:
+            requested_mode = "secure" if self._secure_mode_ceiling else "permissive"
+        mode = self._effective_mode(requested_mode, source="initial permission policy")
         if mode == "permissive":
             logger.warning(
                 "PermissionManager running in PERMISSIVE mode. "
                 "All permission checks return True. "
-                "Set RUMI_PERMISSION_MODE=secure for production use."
+                "Set TOBKIRI_PERMISSION_MODE=secure (or legacy "
+                "RUMI_PERMISSION_MODE=secure) for production use."
             )
         self._mode = mode
         self._pending_requests: List[PermissionRequest] = []
@@ -130,6 +168,16 @@ class PermissionManager:
         
         # 信頼関係
         self._trust_relationships: Dict[str, List[str]] = {}  # component_id -> [trusted_ids]
+
+    def _effective_mode(self, requested_mode: str, *, source: str) -> str:
+        if self._secure_mode_ceiling and requested_mode == "permissive":
+            logger.warning(
+                "%s requested permissive permissions, but strict security or production "
+                "is authoritative; keeping secure permission mode.",
+                source,
+            )
+            return "secure"
+        return requested_mode
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -142,8 +190,14 @@ class PermissionManager:
     
     def set_mode(self, mode: str) -> None:
         """モードを設定"""
-        if mode in ("permissive", "secure"):
-            self._mode = mode
+        requested_mode = _normalized_permission_mode(
+            mode,
+            source="PermissionManager.set_mode()",
+        )
+        self._mode = self._effective_mode(
+            requested_mode,
+            source="PermissionManager.set_mode()",
+        )
     
     def get_mode(self) -> str:
         """現在のモードを取得"""

@@ -528,7 +528,14 @@ class TestPermissionManagerMode:
         import logging
         from core_runtime.permission_manager import PermissionManager
 
-        with mock.patch.dict(os.environ, {"RUMI_PERMISSION_MODE": "permissive"}, clear=False):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RUMI_SECURITY_MODE": "permissive",
+                "RUMI_PERMISSION_MODE": "permissive",
+            },
+            clear=True,
+        ):
             with caplog.at_level(logging.WARNING, logger="core_runtime.permission_manager"):
                 PermissionManager()
 
@@ -546,6 +553,13 @@ class TestPermissionManagerMode:
         """Explicit mode parameter takes precedence over env var."""
         from core_runtime.permission_manager import PermissionManager
 
-        with mock.patch.dict(os.environ, {"RUMI_PERMISSION_MODE": "secure"}):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RUMI_SECURITY_MODE": "permissive",
+                "RUMI_PERMISSION_MODE": "secure",
+            },
+            clear=True,
+        ):
             pm = PermissionManager(mode="permissive")
         assert pm.get_mode() == "permissive"

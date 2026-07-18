@@ -8,7 +8,7 @@ G-3: バージョン履歴とロールバック
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
 from unittest.mock import patch
 
 import pytest
@@ -51,7 +51,8 @@ def am(tmp_dirs, secret_key):
 
 @pytest.fixture()
 def pm():
-    return PermissionManager(mode="permissive")
+    with patch.dict(os.environ, {"RUMI_SECURITY_MODE": "permissive"}, clear=True):
+        return PermissionManager(mode="permissive")
 
 
 @pytest.fixture()

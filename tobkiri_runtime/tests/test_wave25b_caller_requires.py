@@ -3,7 +3,8 @@ W25-B: check_caller_requires() のテスト
 """
 import os
 import sys
-import pytest
+from unittest.mock import patch
+
 
 # tobkiri_runtime をパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,8 @@ class TestCheckCallerRequiresPermissive:
 
     def _make_pm(self):
         from core_runtime.permission_manager import PermissionManager
-        return PermissionManager(mode="permissive")
+        with patch.dict(os.environ, {"RUMI_SECURITY_MODE": "permissive"}, clear=True):
+            return PermissionManager(mode="permissive")
 
     def test_empty_list_returns_true(self):
         """空リストの場合 True"""
@@ -99,7 +101,8 @@ class TestCheckCallerRequiresEdgeCases:
     def test_caller_requires_not_list_returns_false(self):
         """caller_requires が list でない場合 False"""
         from core_runtime.permission_manager import PermissionManager
-        pm = PermissionManager(mode="permissive")
+        with patch.dict(os.environ, {"RUMI_SECURITY_MODE": "permissive"}, clear=True):
+            pm = PermissionManager(mode="permissive")
         assert pm.check_caller_requires("caller_1", "file_read") is False
         assert pm.check_caller_requires("caller_1", 42) is False
         assert pm.check_caller_requires("caller_1", {"file_read": True}) is False

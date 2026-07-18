@@ -6,6 +6,22 @@ Profile permission files are defaults only.
 
 The final enforcement boundary remains the existing approval, grant, and capability systems. A profile permission file must never permit a high-risk tool by itself, and runtime code must not trust a client-supplied `approved` flag.
 
+## Permission mode precedence
+
+`RUMI_SECURITY_MODE` is an upper security boundary. Permission policy may make execution stricter, but it cannot weaken that boundary:
+
+| Security / environment | Requested permission mode | Effective permission mode |
+| --- | --- | --- |
+| `strict`, `strict_untrusted`, unset, or invalid | any / unset | `secure` |
+| `permissive` + `RUMI_ENVIRONMENT=production` | any / unset | `secure` |
+| `permissive` outside production | unset | `permissive` |
+| `permissive` outside production | `secure` | `secure` |
+| `permissive` outside production | `permissive` | `permissive` |
+
+This ceiling applies equally to environment configuration, `PermissionManager(mode=...)`, and later `set_mode(...)` calls. Invalid permission values fail closed to `secure`.
+
+`TOBKIRI_PERMISSION_MODE` is the canonical compatibility name and `RUMI_PERMISSION_MODE` remains supported. Both accept only `secure` or `permissive`. If both are present and disagree, or either contains an invalid value, the effective mode is `secure` and the runtime emits a warning. A permission-mode setting never grants authority, bypasses approval, or changes the security-mode production guard.
+
 ## Authority v2 Boundary
 
 Signed `CapabilityGrant` records are the source of truth for runtime authority. Profile YAML and UI defaults can propose policy, but enforcement must resolve to a signed grant, a signed one-shot approval token, or a core-local decision path.
