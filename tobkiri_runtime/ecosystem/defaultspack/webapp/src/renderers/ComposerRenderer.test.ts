@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
   atMentionMenuKeyAction,
+  applyComposerVoiceTranscript,
   AtMentionMenu,
   filterAtMentionFiles,
   insertAtMentionText,
@@ -13,6 +14,8 @@ import {
   composerHelperCopy,
   composerModelControlWidth,
   composerPlaceholderCopy,
+  composerVoiceErrorMessage,
+  composerVoiceLanguage,
   modelDropdownPlacementClassName,
   modelCandidateMenuKeyAction,
   modelCandidatePopupStyleForAnchor,
@@ -28,6 +31,35 @@ import {
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 import type { ComposerCommandItem } from "../lib/api";
+
+test("composer voice language follows the document/browser locale with a safe fallback", () => {
+  assert.equal(composerVoiceLanguage("ja-JP", "en-US"), "ja-JP");
+  assert.equal(composerVoiceLanguage("", "fr-FR"), "fr-FR");
+  assert.equal(composerVoiceLanguage("not a locale", "also invalid"), "en-US");
+});
+
+test("composer voice transcript preserves the original draft until an explicit insert mode is chosen", () => {
+  assert.deepEqual(
+    applyComposerVoiceTranscript("hello brave world", "quiet", "insert", { start: 6, end: 11 }),
+    { value: "hello quiet world", cursor: 11 },
+  );
+  assert.deepEqual(
+    applyComposerVoiceTranscript("existing draft", "new transcript", "append", { start: 0, end: 0 }),
+    { value: "existing draft\nnew transcript", cursor: 29 },
+  );
+  assert.deepEqual(
+    applyComposerVoiceTranscript("existing draft", "new transcript", "replace", { start: 0, end: 0 }),
+    { value: "new transcript", cursor: 14 },
+  );
+});
+
+test("composer voice errors provide actionable permission, device, network, and no-match recovery", () => {
+  assert.match(composerVoiceErrorMessage("not-allowed"), /Allow microphone access/);
+  assert.match(composerVoiceErrorMessage("audio-capture"), /input device/);
+  assert.match(composerVoiceErrorMessage("network"), /connection/);
+  assert.match(composerVoiceErrorMessage("nomatch"), /No speech/);
+  assert.match(composerVoiceErrorMessage("unknown", false), /connection/);
+});
 
 test("composer file mention filters string context files", () => {
   const files = ["README.md", "src/App.tsx", "docs/context.md"];
@@ -453,6 +485,7 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   );
 
   assert.match(html, /data-composer-widget="file-attach"/);
+  assert.match(html, /data-composer-widget="voice-input"/);
   assert.match(html, /data-composer-widget="model-picker"/);
   assert.match(html, /data-composer-widget="thinking-control"/);
   assert.match(html, /data-composer-widget="send"/);
@@ -462,6 +495,9 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   assert.match(html, /class="[^"]*rumi-composer-control-surface[^"]*w-full[^"]*gap-2/);
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);
+  assert.match(html, /aria-label="Start reviewable voice input"/);
+  assert.match(html, /aria-controls="composer-voice-panel"/);
+  assert.match(html, /aria-pressed="false"/);
   assert.doesNotMatch(html, />thinking</);
 });
 

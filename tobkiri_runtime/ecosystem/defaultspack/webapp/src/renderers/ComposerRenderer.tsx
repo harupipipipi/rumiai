@@ -103,7 +103,7 @@ type SpeechRecognitionEventLike = {
   resultIndex: number;
   results: ArrayLike<{
     isFinal?: boolean;
-    0?: { transcript?: string };
+    0?: { transcript?: string; confidence?: number };
   }>;
 };
 
@@ -113,9 +113,50 @@ type SpeechRecognitionLike = {
   interimResults: boolean;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onend: (() => void) | null;
+  onerror: ((event: { error?: string; message?: string }) => void) | null;
+  onnomatch: (() => void) | null;
   start: () => void;
   stop: () => void;
+  abort: () => void;
 };
+
+type ComposerVoicePhase = "idle" | "consent" | "listening" | "review" | "error";
+export type ComposerVoiceInsertMode = "insert" | "replace" | "append";
+
+export function composerVoiceLanguage(documentLanguage?: string, browserLanguage?: string): string {
+  const candidate = String(documentLanguage || browserLanguage || "").trim();
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(candidate) ? candidate : "en-US";
+}
+
+export function composerVoiceErrorMessage(errorCode: string, online = true): string {
+  const code = errorCode.trim().toLowerCase();
+  if (code === "not-allowed" || code === "service-not-allowed") return "Microphone permission was denied. Allow microphone access in browser or OS settings, then retry.";
+  if (code === "audio-capture") return "No usable microphone was found. Check the selected input device and OS microphone access.";
+  if (code === "network" || !online) return "Speech recognition could not reach its service. Check your connection or use local/offline transcription.";
+  if (code === "no-speech" || code === "nomatch") return "No speech was recognized. Check the microphone, speak clearly, and retry.";
+  if (code === "aborted") return "Voice input was cancelled. Your original draft was preserved.";
+  return "Speech recognition stopped unexpectedly. Your original draft was preserved; retry or use local/offline transcription.";
+}
+
+export function applyComposerVoiceTranscript(
+  draft: string,
+  transcript: string,
+  mode: ComposerVoiceInsertMode,
+  selection: { start: number; end: number },
+): { value: string; cursor: number } {
+  const cleanTranscript = transcript.trim();
+  if (!cleanTranscript) return { value: draft, cursor: Math.min(selection.end, draft.length) };
+  if (mode === "replace") return { value: cleanTranscript, cursor: cleanTranscript.length };
+  if (mode === "append") {
+    const separator = draft && !draft.endsWith("\n") ? "\n" : "";
+    const value = `${draft}${separator}${cleanTranscript}`;
+    return { value, cursor: value.length };
+  }
+  const start = Math.max(0, Math.min(selection.start, draft.length));
+  const end = Math.max(start, Math.min(selection.end, draft.length));
+  const value = `${draft.slice(0, start)}${cleanTranscript}${draft.slice(end)}`;
+  return { value, cursor: start + cleanTranscript.length };
+}
 
 const COMPOSER_CHROME_WIDTHS = {
   icon: { basis: "2.75rem", min: "2.75rem", max: "2.75rem" },
@@ -1630,6 +1671,16 @@ export function ComposerRenderer({
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<ComposerVoicePhase>("idle");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceInterimTranscript, setVoiceInterimTranscript] = useState("");
+  const [voiceError, setVoiceError] = useState("");
+  const [voiceConfidence, setVoiceConfidence] = useState<number | null>(null);
+  const [voiceElapsedSeconds, setVoiceElapsedSeconds] = useState(0);
+  const [voiceLanguage, setVoiceLanguage] = useState(() => composerVoiceLanguage(
+    typeof document === "undefined" ? "" : document.documentElement.lang,
+    typeof navigator === "undefined" ? "" : navigator.language,
+  ));
   const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
   const [textareaFocused, setTextareaFocused] = useState(false);
   const [textareaScrollTop, setTextareaScrollTop] = useState(0);
@@ -1637,7 +1688,12 @@ export function ComposerRenderer({
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceFinalTranscriptRef = useRef("");
+  const voiceInterimTranscriptRef = useRef("");
+  const voiceCancelledRef = useRef(false);
+  const voiceRecognitionFailedRef = useRef(false);
+  const voiceOriginalDraftRef = useRef({ value: input, selection: { start: input.length, end: input.length } });
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
@@ -2250,6 +2306,10 @@ export function ComposerRenderer({
 
   const handleSubmitWithApiKeyGuard = useCallback(
     (event: React.SyntheticEvent) => {
+      if (voicePhase !== "idle") {
+        event.preventDefault();
+        return;
+      }
       if (isGenerating) {
         event.preventDefault();
         const prompt = input.trim();
@@ -2271,19 +2331,20 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy],
+    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy, voicePhase],
   );
 
   const handleSendButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) return;
+      if (voicePhase !== "idle") return;
       if (!isGenerating && pendingMentionAttachmentPaths.length > 0) return;
       if (!isGenerating && !input.trim() && attachedFiles.length === 0) return;
       if (isGenerating && !input.trim()) return;
       submitPointerHandledRef.current = true;
       handleSubmitWithApiKeyGuard(event);
     },
-    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating, pendingMentionAttachmentPaths.length],
+    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating, pendingMentionAttachmentPaths.length, voicePhase],
   );
 
   const handleSendButtonClick = useCallback(
@@ -2307,46 +2368,202 @@ export function ComposerRenderer({
     [handleSubmitWithApiKeyGuard, input, isGenerating, onStopGenerating],
   );
 
-  const toggleVoiceInput = useCallback(() => {
-    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating) return;
-    if (isVoiceListening) {
-      recognitionRef.current?.stop();
-      setIsVoiceListening(false);
+  const finishVoiceRecognition = useCallback(() => {
+    recognitionRef.current = null;
+    setIsVoiceListening(false);
+    const transcript = `${voiceFinalTranscriptRef.current} ${voiceInterimTranscriptRef.current}`.trim();
+    setVoiceTranscript(transcript);
+    setVoiceInterimTranscript("");
+    if (voiceCancelledRef.current) {
+      voiceCancelledRef.current = false;
+      setVoicePhase("idle");
+      return;
+    }
+    if (voiceRecognitionFailedRef.current) return;
+    if (transcript) {
+      setVoicePhase("review");
+    } else {
+      setVoiceError(composerVoiceErrorMessage("no-speech", typeof navigator === "undefined" ? true : navigator.onLine));
+      setVoicePhase("error");
+    }
+  }, []);
+
+  const startVoiceRecognition = useCallback(() => {
+    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating || isVoiceListening) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setVoiceError(composerVoiceErrorMessage("network", false));
+      setVoicePhase("error");
       return;
     }
     const recognitionCtor = (window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionLike;
       webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
-    if (!recognitionCtor) return;
+    if (!recognitionCtor) {
+      setVoiceError("This browser does not provide speech recognition. Use Tobkiri local/offline transcription or type the message.");
+      setVoicePhase("error");
+      return;
+    }
+    const textarea = textareaRef.current;
+    voiceOriginalDraftRef.current = {
+      value: input,
+      selection: {
+        start: textarea?.selectionStart ?? input.length,
+        end: textarea?.selectionEnd ?? input.length,
+      },
+    };
+    voiceFinalTranscriptRef.current = "";
+    voiceInterimTranscriptRef.current = "";
+    voiceCancelledRef.current = false;
+    voiceRecognitionFailedRef.current = false;
+    setVoiceTranscript("");
+    setVoiceInterimTranscript("");
+    setVoiceError("");
+    setVoiceConfidence(null);
+    setVoiceElapsedSeconds(0);
     const recognition = new recognitionCtor();
-    recognition.lang = "ja-JP";
-    recognition.continuous = false;
+    recognition.lang = voiceLanguage;
+    recognition.continuous = true;
     recognition.interimResults = true;
-    let finalTranscript = "";
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
       let interim = "";
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
-        const text = result?.[0]?.transcript ?? "";
-        if (result?.isFinal) finalTranscript += text;
-        else interim += text;
+        const text = String(result?.[0]?.transcript ?? "").trim();
+        if (!text) continue;
+        const confidence = result?.[0]?.confidence;
+        if (typeof confidence === "number" && Number.isFinite(confidence) && confidence >= 0) {
+          setVoiceConfidence(Math.min(1, confidence));
+        }
+        if (result?.isFinal) voiceFinalTranscriptRef.current = `${voiceFinalTranscriptRef.current} ${text}`.trim();
+        else interim = `${interim} ${text}`.trim();
       }
-      const transcript = `${finalTranscript}${interim}`.trim();
-      if (!transcript) return;
-      const prefix = voiceInputUseAi ? "文字起こしして: " : "";
-      const base = input.trimEnd();
-      onInputChange(`${base}${base ? "\n" : ""}${prefix}${transcript}`);
+      voiceInterimTranscriptRef.current = interim;
+      setVoiceTranscript(voiceFinalTranscriptRef.current);
+      setVoiceInterimTranscript(interim);
+    };
+    recognition.onerror = (event) => {
+      const errorCode = String(event.error || "unknown");
+      if (errorCode === "aborted" && voiceCancelledRef.current) return;
+      voiceRecognitionFailedRef.current = true;
+      recognitionRef.current = null;
+      setVoiceError(composerVoiceErrorMessage(errorCode, typeof navigator === "undefined" ? true : navigator.onLine));
+      setVoicePhase("error");
+      setIsVoiceListening(false);
+    };
+    recognition.onnomatch = () => {
+      voiceRecognitionFailedRef.current = true;
+      recognitionRef.current = null;
+      setVoiceError(composerVoiceErrorMessage("nomatch"));
+      setVoicePhase("error");
     };
     recognition.onend = () => {
-      recognitionRef.current = null;
-      setIsVoiceListening(false);
-      window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+      if (recognitionRef.current !== recognition) return;
+      finishVoiceRecognition();
     };
     recognitionRef.current = recognition;
+    setVoicePhase("listening");
     setIsVoiceListening(true);
-    recognition.start();
-  }, [input, isGenerating, isVoiceListening, onInputChange, templateAllowsVoiceInput, voiceInputEnabled, voiceInputUseAi]);
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setIsVoiceListening(false);
+      setVoiceError("Speech recognition could not start. Check microphone access and close other recorders before retrying.");
+      setVoicePhase("error");
+    }
+  }, [finishVoiceRecognition, input, isGenerating, isVoiceListening, templateAllowsVoiceInput, voiceInputEnabled, voiceLanguage]);
+
+  const cancelVoiceInput = useCallback(() => {
+    voiceCancelledRef.current = true;
+    try {
+      recognitionRef.current?.abort();
+    } catch {
+      // Some WebViews throw after recognition has already ended.
+    }
+    recognitionRef.current = null;
+    voiceFinalTranscriptRef.current = "";
+    voiceInterimTranscriptRef.current = "";
+    voiceRecognitionFailedRef.current = false;
+    setVoiceTranscript("");
+    setVoiceInterimTranscript("");
+    setVoiceError("");
+    setVoiceConfidence(null);
+    setVoiceElapsedSeconds(0);
+    setIsVoiceListening(false);
+    setVoicePhase("idle");
+    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+  }, []);
+
+  const applyVoiceTranscript = useCallback((mode: ComposerVoiceInsertMode) => {
+    const result = applyComposerVoiceTranscript(
+      voiceOriginalDraftRef.current.value,
+      `${voiceTranscript} ${voiceInterimTranscript}`,
+      mode,
+      voiceOriginalDraftRef.current.selection,
+    );
+    onInputChange(result.value);
+    setVoicePhase("idle");
+    setVoiceTranscript("");
+    setVoiceInterimTranscript("");
+    window.setTimeout(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+      textareaRef.current?.setSelectionRange(result.cursor, result.cursor);
+    }, 0);
+  }, [onInputChange, voiceInterimTranscript, voiceTranscript]);
+
+  const toggleVoiceInput = useCallback(() => {
+    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating) return;
+    if (isVoiceListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    setVoiceError("");
+    setVoicePhase((current) => current === "review" ? "review" : "consent");
+  }, [isGenerating, isVoiceListening, templateAllowsVoiceInput, voiceInputEnabled]);
+
+  useEffect(() => {
+    if (voicePhase !== "listening") return;
+    const timer = window.setInterval(() => setVoiceElapsedSeconds((seconds) => {
+      const next = seconds + 1;
+      if (next >= 300) recognitionRef.current?.stop();
+      return next;
+    }), 1000);
+    return () => window.clearInterval(timer);
+  }, [voicePhase]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible" && recognitionRef.current) recognitionRef.current.stop();
+    };
+    const handleDeviceChange = () => {
+      const recognition = recognitionRef.current;
+      if (!recognition) return;
+      voiceRecognitionFailedRef.current = true;
+      recognitionRef.current = null;
+      try {
+        recognition.abort();
+      } catch {
+        // Some WebViews throw after recognition has already ended.
+      }
+      setIsVoiceListening(false);
+      setVoiceError("The browser microphone list changed during capture. Review the active input device, then retry.");
+      setVoicePhase("error");
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    navigator.mediaDevices?.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      navigator.mediaDevices?.removeEventListener?.("devicechange", handleDeviceChange);
+      voiceCancelledRef.current = true;
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        // Some WebViews throw after recognition has already ended.
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2479,15 +2696,17 @@ export function ComposerRenderer({
       homeSlot: "editor-trailing",
       order: 30,
       visible: templateAllowsVoiceInput,
-      mobile: "hide",
+      mobile: "show",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
 	        <button
 	          type="button"
-	          tabIndex={chromeButtonTabIndex}
-	          aria-label={isVoiceListening ? "音声入力を停止" : "音声入力を開始"}
+	          aria-label={isVoiceListening ? "Stop voice input and review transcript" : voicePhase === "review" ? "Review captured voice transcript" : "Start reviewable voice input"}
+	          aria-pressed={isVoiceListening}
+	          aria-expanded={voicePhase !== "idle"}
+	          aria-controls="composer-voice-panel"
 	          disabled={isGenerating || !voiceInputEnabled || !templateAllowsVoiceInput}
-	          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
+	          title={isVoiceListening ? "Stop and review voice input" : "Reviewable voice input"}
 	          onClick={toggleVoiceInput}
 	          className={`h-11 w-11 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
 	            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
@@ -2731,6 +2950,8 @@ export function ComposerRenderer({
               ? "ファイルを読み込み中"
               : "メッセージを送信"}
           disabled={!isGenerating && (
+            voicePhase !== "idle"
+            ||
             pendingMentionAttachmentPaths.length > 0
             || (!input.trim() && attachedFiles.length === 0)
           )}
@@ -3122,6 +3343,109 @@ export function ComposerRenderer({
             />
           )}
 
+          {voicePhase !== "idle" && (
+            <section
+              id="composer-voice-panel"
+              data-composer-voice-panel={voicePhase}
+              aria-labelledby="composer-voice-heading"
+              aria-live="polite"
+              className="mx-3 mt-2 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 id="composer-voice-heading" className="font-semibold">
+                    {voicePhase === "consent" ? "Review voice input privacy" : voicePhase === "listening" ? "Listening" : voicePhase === "review" ? "Review transcript" : "Voice input needs attention"}
+                  </h2>
+                  <p className="mt-1 text-[11px] leading-5 text-sky-100/75">
+                    Browser speech recognition · default browser microphone · {voiceLanguage}{voicePhase === "listening" ? ` · ${Math.floor(voiceElapsedSeconds / 60)}:${String(voiceElapsedSeconds % 60).padStart(2, "0")}` : ""}
+                  </p>
+                </div>
+                {voicePhase === "listening" && (
+                  <span className="inline-flex items-center gap-2 rounded-full border border-rose-400/40 bg-rose-500/15 px-2.5 py-1 text-[11px] font-medium text-rose-100" role="status" aria-live="polite">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-rose-400" aria-hidden="true" />
+                    Microphone active
+                  </span>
+                )}
+              </div>
+
+              {voicePhase === "consent" && (
+                <div className="mt-3 space-y-3">
+                  <p className="leading-5 text-sky-50/85">
+                    Your browser or WebView controls this recognition engine and may send microphone audio to its vendor's service. Tobkiri does not retain audio in this composer, but vendor processing and retention depend on that browser. For private or offline work, use Tobkiri local/offline transcription instead.
+                  </p>
+                  {voiceInputUseAi && (
+                    <p className="rounded-lg border border-sky-400/20 bg-black/15 px-2.5 py-2 text-[11px] leading-5 text-sky-100/75">
+                      Enhanced transcription is configured, but no hidden instruction will be inserted into your message. This capture still uses the browser engine identified above.
+                    </p>
+                  )}
+                  <label className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">Recognition language</span>
+                    <select
+                      value={voiceLanguage}
+                      onChange={(event) => setVoiceLanguage(event.target.value)}
+                      className="h-9 min-w-32 rounded-lg border border-sky-400/30 bg-zinc-950 px-2.5 text-xs text-zinc-100 outline-none focus:border-sky-300"
+                    >
+                      {!['en-US', 'en-GB', 'ja-JP', 'ko-KR', 'zh-CN'].includes(voiceLanguage) && <option value={voiceLanguage}>{voiceLanguage}</option>}
+                      <option value="en-US">English (US)</option>
+                      <option value="en-GB">English (UK)</option>
+                      <option value="ja-JP">Japanese</option>
+                      <option value="ko-KR">Korean</option>
+                      <option value="zh-CN">Chinese (Simplified)</option>
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={startVoiceRecognition} className="rounded-lg bg-sky-100 px-3 py-2 font-medium text-zinc-950 hover:bg-white">Allow and start microphone</button>
+                    <button type="button" onClick={cancelVoiceInput} className="rounded-lg border border-sky-300/35 px-3 py-2 text-sky-50 hover:bg-sky-400/10">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {voicePhase === "listening" && (
+                <div className="mt-3 space-y-3">
+                  <div className="min-h-16 whitespace-pre-wrap rounded-lg border border-sky-400/20 bg-black/20 p-2.5 leading-5" aria-live="polite" aria-atomic="true">
+                    {voiceTranscript || voiceInterimTranscript ? (
+                      <><span>{voiceTranscript}</span>{voiceInterimTranscript && <span className="text-sky-200/60"> {voiceInterimTranscript}</span>}</>
+                    ) : <span className="text-sky-100/55">Speak when ready. The composer draft remains unchanged.</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => recognitionRef.current?.stop()} className="rounded-lg bg-sky-100 px-3 py-2 font-medium text-zinc-950 hover:bg-white">Stop and review</button>
+                    <button type="button" onClick={cancelVoiceInput} className="rounded-lg border border-rose-300/40 px-3 py-2 text-rose-100 hover:bg-rose-500/10">Cancel and discard</button>
+                  </div>
+                </div>
+              )}
+
+              {voicePhase === "review" && (
+                <div className="mt-3 space-y-3">
+                  <p className="leading-5 text-sky-100/75">Edit the transcript, then choose exactly how it changes the preserved composer draft.</p>
+                  <p className="text-[11px] text-sky-100/65">Recognition confidence: {voiceConfidence === null ? "not reported by this browser" : `${Math.round(voiceConfidence * 100)}%`}</p>
+                  <textarea
+                    value={`${voiceTranscript}${voiceInterimTranscript ? ` ${voiceInterimTranscript}` : ""}`}
+                    onChange={(event) => { setVoiceTranscript(event.target.value); setVoiceInterimTranscript(""); }}
+                    aria-label="Voice transcript for review"
+                    className="min-h-24 w-full resize-y rounded-lg border border-sky-400/30 bg-zinc-950 px-3 py-2 text-sm leading-6 text-zinc-100 outline-none focus:border-sky-300"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => applyVoiceTranscript("insert")} className="rounded-lg bg-sky-100 px-3 py-2 font-medium text-zinc-950 hover:bg-white">Insert at saved cursor</button>
+                    <button type="button" onClick={() => applyVoiceTranscript("append")} className="rounded-lg border border-sky-300/40 px-3 py-2 text-sky-50 hover:bg-sky-400/10">Append</button>
+                    <button type="button" onClick={() => applyVoiceTranscript("replace")} className="rounded-lg border border-amber-300/40 px-3 py-2 text-amber-100 hover:bg-amber-500/10">Replace draft</button>
+                    <button type="button" onClick={startVoiceRecognition} className="rounded-lg border border-sky-300/40 px-3 py-2 text-sky-50 hover:bg-sky-400/10">Retry</button>
+                    <button type="button" onClick={cancelVoiceInput} className="rounded-lg border border-rose-300/40 px-3 py-2 text-rose-100 hover:bg-rose-500/10">Discard</button>
+                  </div>
+                </div>
+              )}
+
+              {voicePhase === "error" && (
+                <div className="mt-3 space-y-3" role="alert">
+                  <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 leading-5 text-rose-100">{voiceError}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={startVoiceRecognition} className="rounded-lg bg-sky-100 px-3 py-2 font-medium text-zinc-950 hover:bg-white">Retry microphone</button>
+                    <button type="button" onClick={cancelVoiceInput} className="rounded-lg border border-sky-300/35 px-3 py-2 text-sky-50 hover:bg-sky-400/10">Close</button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {isNewConversation ? (
             <div className="grid gap-1.5">
               <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
@@ -3145,6 +3469,7 @@ export function ComposerRenderer({
                       autoFocus
                       rows={1}
                       value={input}
+                      readOnly={voicePhase !== "idle"}
                       data-template-composer-input={templateComposerInputId || undefined}
                       onChange={(event) => {
                         resizeNewConversationTextarea(event.currentTarget);
@@ -3218,6 +3543,7 @@ export function ComposerRenderer({
                 ref={textareaRef}
                 autoFocus
                 value={input}
+                readOnly={voicePhase !== "idle"}
                 data-template-composer-input={templateComposerInputId || undefined}
                 onChange={(event) => handleInputChange(event.target.value)}
                 placeholder={effectiveComposerPlaceholder}
