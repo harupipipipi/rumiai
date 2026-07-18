@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
+from domain.frontend_settings import frontend_settings_path
 from domain.tool.service_catalog import (
     infer_action_class,
     infer_service_id,
@@ -105,8 +105,7 @@ class ToolPermissionResolver:
 
 
 def _read_frontend_settings(pack_root: Path) -> dict[str, Any]:
-    env_path = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
-    path = Path(env_path).expanduser() if env_path else pack_root / "user_data" / "shared" / "frontend_settings.json"
+    path = frontend_settings_path(pack_root)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

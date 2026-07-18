@@ -10,11 +10,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
 import secrets
+import signal
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -41,6 +44,91 @@ SMOKE_TOOL = "browser_computer"
 _TRUSTED_SMOKE_PROVIDER_ID = "cerebras"
 _TRUSTED_SMOKE_PROVIDER_ENV = "CEREBRAS_API_KEY"
 _TRUSTED_SMOKE_CREDENTIAL_SOURCE = "inherited_env"
+MIMO_CHAT_PROFILE = "mimo-chat"
+CEREBRAS_COMPUTER_PROFILE = "cerebras-computer-use"
+_SMOKE_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
+    CEREBRAS_COMPUTER_PROFILE: {
+        "provider_id": "cerebras",
+        "model": "cerebras/gemma-4-31b",
+        "credential_env": "CEREBRAS_API_KEY",
+        "env_prefix": "CEREBRAS_",
+    },
+    MIMO_CHAT_PROFILE: {
+        "provider_id": "opencode-zen",
+        "model": "opencode-zen/mimo-v2.5-free",
+        "credential_env": "OPENCODE_ZEN_API_KEY",
+        "env_prefix": "OPENCODE_ZEN_",
+        # Authority approval for this debug-only profile is intentionally tied
+        # to the bundled provider endpoint.  These values must never be
+        # learned from an Authority request or caller-supplied configuration.
+        "api_id": "legacy",
+        "endpoint_url": "https://opencode.ai/zen/v1/messages",
+        "endpoint_path": "/v1/messages",
+        "origin": "https://opencode.ai",
+        "domain": "opencode.ai",
+        "port": 443,
+        "transport": "https",
+    },
+}
+# Provider credentials and endpoint overrides are data-plane authority.  A
+# smoke child starts from ``os.environ.copy()``, so the allowlist must remove
+# every provider namespace supported by Defaultspack before restoring the one
+# selected code-owned key.  Runtime necessities such as PATH remain intact.
+_SMOKE_PROVIDER_ENV_PREFIXES = (
+    "ANTHROPIC_",
+    "AVIAN_",
+    "AZURE_OPENAI_",
+    "CEREBRAS_",
+    "CF_API_",
+    "CLOUDFLARE_",
+    "DEEPINFRA_",
+    "DEEPSEEK_",
+    "FIREWORKS_",
+    "FRIENDLI_",
+    "GEMINI_",
+    "GENSPARK_",
+    "GITLAWB_OPENGATEWAY_",
+    "GLM_",
+    "GOOGLE_",
+    "GROQ_",
+    "HYPERBOLIC_",
+    "INFERENCENET_",
+    "INFERENCE_NET_",
+    "LLAMACPP_",
+    "LMSTUDIO_",
+    "LONGCAT_",
+    "MIMO_",
+    "MISTRAL_",
+    "MOONSHOT_",
+    "NEBIUS_",
+    "NGC_",
+    "NVIDIA_",
+    "NOVITA_",
+    "OLLAMA_",
+    "OPENAI_",
+    "OPENAI_COMPATIBLE_",
+    "OPENCODE_GO_",
+    "OPENCODE_ZEN_",
+    "OPENROUTER_",
+    "PERPLEXITY_",
+    "RUMIOAUTH_CLOUDFLARE_",
+    "RUMIOAUTH_GOOGLE_",
+    "SAMBANOVA_",
+    "TOGETHER_",
+    "UPSTAGE_",
+    "VLLM_",
+    "XAI_",
+    "XIAOMI_MIMO_",
+)
+_SMOKE_PROVIDER_ENV_KEYS = frozenset(
+    {
+        "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",
+        "RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN",
+        "RUMI_CLOUDFLARE_SANDBOX_API_KEY",
+    }
+)
+DEFAULT_CHAT_STREAM_INACTIVITY_SECONDS = 60.0
+_SYSTEM_POPEN = subprocess.Popen
 DEFAULT_SMOKE_MIN_STREAM_INTERVAL_SECONDS = 35.0
 DEFAULT_MAX_TRANSIENT_RESUMES = 2
 DEFAULT_VIEWER_BROKER_PORT = 8770
@@ -1126,8 +1214,19 @@ def _direct_failure_report(error: BaseException) -> dict[str, Any]:
     return report
 
 
+def _smoke_provider_profile(profile_name: str) -> dict[str, Any]:
+    """Return a code-owned provider profile; caller supplied profiles are forbidden."""
+
+    try:
+        return _SMOKE_PROVIDER_PROFILES[profile_name]
+    except KeyError:
+        raise SmokeRunnerError("SMOKE_PROVIDER_PROFILE_NOT_ALLOWED") from None
+
+
 def isolated_smoke_provider_preflight(
     parent_env: Mapping[str, str] | None = None,
+    *,
+    profile_name: str = CEREBRAS_COMPUTER_PROFILE,
 ) -> dict[str, Any]:
     """Describe the fixed smoke credential without retaining or logging it.
 
@@ -1136,11 +1235,12 @@ def isolated_smoke_provider_preflight(
     no credential value, length, prefix, suffix, or hash is returned.
     """
 
+    profile = _smoke_provider_profile(profile_name)
     source = os.environ if parent_env is None else parent_env
-    credential_present = bool(str(source.get(_TRUSTED_SMOKE_PROVIDER_ENV) or "").strip())
+    credential_present = bool(str(source.get(profile["credential_env"]) or "").strip())
     return {
-        "provider_id": _TRUSTED_SMOKE_PROVIDER_ID,
-        "model": SMOKE_MODEL,
+        "provider_id": profile["provider_id"],
+        "model": profile["model"],
         "credential_present": credential_present,
         "credential_source": _TRUSTED_SMOKE_CREDENTIAL_SOURCE,
         "credential_persisted": False,
@@ -1153,6 +1253,7 @@ def apply_isolated_smoke_provider_env(
     *,
     parent_env: Mapping[str, str] | None,
     require_credential: bool,
+    profile_name: str = CEREBRAS_COMPUTER_PROFILE,
 ) -> None:
     """Forward only the fixed Cerebras credential to an owned debug child.
 
@@ -1163,42 +1264,53 @@ def apply_isolated_smoke_provider_env(
     existing environment behaviour.
     """
 
-    # Remove the complete namespace first.  ``os.environ.copy()`` otherwise
-    # makes an ambient custom endpoint silently part of the debug run.
+    profile = _smoke_provider_profile(profile_name)
+    # Remove every allowlisted provider namespace first. ``os.environ.copy()``
+    # must not silently select another credential or a custom endpoint.
     for key in tuple(child_env):
-        if key.startswith("CEREBRAS_"):
+        if key in _SMOKE_PROVIDER_ENV_KEYS or key.startswith(
+            _SMOKE_PROVIDER_ENV_PREFIXES
+        ):
             child_env.pop(key, None)
     child_env["RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS"] = "1"
     if parent_env is None:
         if require_credential:
             raise SmokeRunnerError("PROVIDER_ENV_NOT_PRESENT")
         return
-    credential = str(parent_env.get(_TRUSTED_SMOKE_PROVIDER_ENV) or "").strip()
+    credential = str(parent_env.get(profile["credential_env"]) or "").strip()
     if not credential:
         if require_credential:
             raise SmokeRunnerError("PROVIDER_ENV_NOT_PRESENT")
         return
-    child_env[_TRUSTED_SMOKE_PROVIDER_ENV] = credential
+    child_env[profile["credential_env"]] = credential
 
 
 def isolated_smoke_provider_secret_values(
     parent_env: Mapping[str, str] | None,
+    *,
+    profile_name: str = CEREBRAS_COMPUTER_PROFILE,
 ) -> tuple[str, ...]:
     """Return an in-memory redaction value for an already trusted child only."""
 
     if parent_env is None:
         return ()
-    value = str(parent_env.get(_TRUSTED_SMOKE_PROVIDER_ENV) or "").strip()
+    profile = _smoke_provider_profile(profile_name)
+    value = str(parent_env.get(profile["credential_env"]) or "").strip()
     return (value,) if value else ()
 
 
-def seed_isolated_smoke_model_selection(state_root: Path) -> None:
+def seed_isolated_smoke_model_selection(
+    state_root: Path,
+    *,
+    profile_name: str = CEREBRAS_COMPUTER_PROFILE,
+) -> None:
     """Write the secret-free default model fixture for an isolated smoke run."""
 
+    profile = _smoke_provider_profile(profile_name)
     settings_path = state_root / "frontend_settings.json"
     payload = {
         "models": {
-            "preferred_model": SMOKE_MODEL,
+            "preferred_model": profile["model"],
             "thinking_level": "medium",
             "deepthink_enabled": False,
         }
@@ -1288,6 +1400,7 @@ def apply_defaultspack_debug_isolation(
     state_root: Path,
     http_port: int,
     kernel_port: int,
+    provider_profile: str = CEREBRAS_COMPUTER_PROFILE,
 ) -> None:
     """Attach the complete, non-authorizing debug run identity to an owned child.
 
@@ -1320,7 +1433,7 @@ def apply_defaultspack_debug_isolation(
             raise SmokeRunnerError(f"failed to secure Defaultspack debug state: {error}") from error
     # This is intentionally the only provider configuration written to the
     # run root.  Credentials stay exclusively in the inherited child env.
-    seed_isolated_smoke_model_selection(root)
+    seed_isolated_smoke_model_selection(root, profile_name=provider_profile)
     env.update(
         {
             DEFAULTSPACK_DEBUG_ISOLATION_ENV: "1",
@@ -1489,6 +1602,36 @@ def generate_debug_instance_id() -> str:
     return value
 
 
+def create_unique_run_dir(prefix: str = "run") -> tuple[str, Path]:
+    """Atomically reserve a collision-safe, public run identity and directory."""
+
+    RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    for _ in range(8):
+        run_id = (
+            f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}-"
+            f"{time.time_ns()}-{secrets.token_hex(4)}"
+        )
+        path = RUN_ROOT / run_id
+        try:
+            path.mkdir(mode=0o700)
+            return run_id, path
+        except FileExistsError:
+            continue
+    raise SmokeRunnerError("could not allocate a unique debug run directory")
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    """Publish a JSON manifest without exposing a partially written file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+
+
 def validate_debug_instance_id(value: str) -> str:
     if not isinstance(value, str) or not _DEBUG_INSTANCE_ID_RE.fullmatch(value):
         raise SmokeRunnerError(
@@ -1529,6 +1672,36 @@ def pid_is_running(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def process_start_marker(pid: int) -> str:
+    """Return the OS process birth marker used to reject PID reuse."""
+
+    try:
+        process = _SYSTEM_POPEN(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, _ = process.communicate(timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            process.kill()
+        except (NameError, OSError):
+            pass
+        return ""
+    return " ".join(stdout.split()) if process.returncode == 0 else ""
+
+
+def process_group_id(pid: int) -> int | None:
+    """Return the current process group for a live process when available."""
+
+    try:
+        value = os.getpgid(pid)
+    except OSError:
+        return None
+    return value if value > 0 else None
 
 
 def request_json(url: str, *, token: str | None = None, timeout: float = 2.0) -> dict[str, Any]:
@@ -1893,7 +2066,7 @@ class DebugHttpClient:
         browser_approval_token: str,
         *,
         timeout: float = 30.0,
-        stream_timeout: float = 600.0,
+        stream_timeout: float = DEFAULT_CHAT_STREAM_INACTIVITY_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token
@@ -2018,41 +2191,262 @@ class DebugHttpClient:
         return self.request("POST", path, payload=payload, query=query, headers=headers)
 
     def stream(self, path: str, payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
-        with self._open(
-            "POST",
-            path,
-            payload=payload,
-            timeout=self.stream_timeout,
-        ) as response:
-            data_lines: list[str] = []
+        if self.stream_timeout <= 0:
+            raise DebugApiError("stream inactivity timeout must be positive")
+        request = {
+            "url": self._url(path),
+            "headers": self._headers("POST"),
+            "payload": payload,
+            # This is a connect safeguard only. The parent watchdog is the
+            # authoritative inactivity deadline and can terminate a worker
+            # even when urllib is stuck inside buffered ``readline``.
+            "connect_timeout": max(self.timeout, self.stream_timeout),
+        }
+        process = _start_debug_stream_worker(request)
+        messages: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=64)
+        stop_reader = threading.Event()
 
-            def consume() -> dict[str, Any] | None:
-                if not data_lines:
-                    return None
-                raw = "\n".join(data_lines)
-                data_lines.clear()
-                if not raw or raw == "[DONE]":
-                    return None
+        def publish(record: dict[str, Any]) -> None:
+            while not stop_reader.is_set():
                 try:
-                    event = json.loads(raw)
-                except Exception:
-                    raise DebugApiError(f"POST {path} returned a malformed stream event") from None
-                if not isinstance(event, dict):
-                    raise DebugApiError(f"POST {path} returned an invalid stream event")
-                return event
-
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-                if not line:
-                    event = consume()
-                    if event is not None:
-                        yield event
+                    messages.put(record, timeout=0.05)
+                    return
+                except queue.Full:
                     continue
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-            event = consume()
-            if event is not None:
-                yield event
+
+        def read_worker_output() -> None:
+            assert process.stdout is not None
+            try:
+                for raw_line in process.stdout:
+                    try:
+                        record = json.loads(raw_line.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        publish({"kind": "protocol_error"})
+                        return
+                    if not isinstance(record, dict):
+                        publish({"kind": "protocol_error"})
+                        return
+                    publish(record)
+            finally:
+                publish({"kind": "worker_eof"})
+
+        reader = threading.Thread(
+            target=read_worker_output,
+            name="defaultspack-debug-stream-reader",
+            daemon=True,
+        )
+        try:
+            reader.start()
+        except BaseException:
+            _stop_debug_stream_worker(process)
+            raise
+        data_lines: list[str] = []
+
+        def consume() -> dict[str, Any] | None:
+            if not data_lines:
+                return None
+            raw = "\n".join(data_lines)
+            data_lines.clear()
+            if not raw or raw == "[DONE]":
+                return None
+            try:
+                event = json.loads(raw)
+            except Exception:
+                raise DebugApiError(
+                    f"POST {path} returned a malformed stream event"
+                ) from None
+            if not isinstance(event, dict):
+                raise DebugApiError(f"POST {path} returned an invalid stream event")
+            return event
+
+        deadline = time.monotonic() + self.stream_timeout
+        try:
+            terminal_seen = False
+            worker_eof = False
+            while not terminal_seen and not worker_eof:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DebugApiError(
+                        f"POST {path} stream was inactive for "
+                        f"{self.stream_timeout:g} seconds"
+                    )
+                try:
+                    record = messages.get(timeout=remaining)
+                except queue.Empty:
+                    raise DebugApiError(
+                        f"POST {path} stream was inactive for "
+                        f"{self.stream_timeout:g} seconds"
+                    ) from None
+                kind = record.get("kind")
+                if kind == "line":
+                    deadline = time.monotonic() + self.stream_timeout
+                    line = str(record.get("line") or "").rstrip("\r\n")
+                    if not line:
+                        event = consume()
+                        if event is not None:
+                            yield event
+                            terminal_seen = event.get("type") in {"done", "error"}
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                    # SSE comments and other fields are heartbeats: they reset
+                    # inactivity but are not surfaced as application events.
+                    continue
+                if kind == "http_error":
+                    raise DebugApiError(
+                        f"POST {path} failed with HTTP {record.get('status')}: "
+                        f"{self._error_text(record.get('body'))}"
+                    )
+                if kind == "transport_error":
+                    raise DebugApiError(
+                        f"POST {path} failed: "
+                        f"{self._error_text(record.get('message'))}"
+                    )
+                if kind == "worker_eof":
+                    worker_eof = True
+                    continue
+                raise DebugApiError(f"POST {path} stream worker protocol failed")
+            if not terminal_seen:
+                event = consume()
+                if event is not None:
+                    yield event
+        finally:
+            stop_reader.set()
+            _stop_debug_stream_worker(process)
+            reader.join(timeout=2.0)
+
+
+def _stream_worker_environment() -> dict[str, str]:
+    """Return the minimal non-provider environment for the stream subprocess."""
+
+    allowed = {
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONIOENCODING",
+        "PYTHONUTF8",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "WINDIR",
+    }
+    environment = {key: value for key, value in os.environ.items() if key in allowed}
+    environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUTF8"] = "1"
+    return environment
+
+
+def _start_debug_stream_worker(request: Mapping[str, Any]) -> subprocess.Popen[bytes]:
+    """Start a killable SSE reader without placing credentials in argv or env."""
+
+    process = _SYSTEM_POPEN(
+        [sys.executable, str(Path(__file__).resolve()), "--internal-stream-worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=_stream_worker_environment(),
+        bufsize=0,
+    )
+    assert process.stdin is not None
+    try:
+        encoded = json.dumps(dict(request), ensure_ascii=False).encode("utf-8")
+        process.stdin.write(encoded)
+        process.stdin.close()
+    except BaseException:
+        _stop_debug_stream_worker(process)
+        raise
+    return process
+
+
+def _stop_debug_stream_worker(process: subprocess.Popen[bytes]) -> None:
+    """Reap a stream worker, escalating only when graceful exit is impossible."""
+
+    try:
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=1.0)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=1.0)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    finally:
+        for pipe in (process.stdin, process.stdout):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+
+
+def _emit_stream_worker_record(record: Mapping[str, Any]) -> None:
+    """Write one private framed record to the parent process."""
+
+    encoded = json.dumps(dict(record), ensure_ascii=False).encode("utf-8")
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.write(b"\n")
+    sys.stdout.buffer.flush()
+
+
+def _debug_stream_worker_main() -> int:
+    """Own a potentially uninterruptible urllib response in a killable process."""
+
+    response = None
+    try:
+        raw_request = sys.stdin.buffer.read()
+        request = json.loads(raw_request.decode("utf-8"))
+        if not isinstance(request, dict):
+            raise ValueError("invalid request")
+        url = str(request["url"])
+        headers = request["headers"]
+        payload = request["payload"]
+        timeout = float(request["connect_timeout"])
+        if not isinstance(headers, dict) or not isinstance(payload, dict):
+            raise ValueError("invalid request")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        http_request = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={str(key): str(value) for key, value in headers.items()},
+        )
+        response = urllib.request.urlopen(http_request, timeout=timeout)
+        for raw_line in response:
+            _emit_stream_worker_record(
+                {"kind": "line", "line": raw_line.decode("utf-8", errors="replace")}
+            )
+        return 0
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+            body = json.loads(raw) if raw else {}
+        except Exception:
+            body = {}
+        _emit_stream_worker_record(
+            {"kind": "http_error", "status": exc.code, "body": body}
+        )
+        return 1
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        reason = getattr(exc, "reason", exc)
+        _emit_stream_worker_record(
+            {"kind": "transport_error", "message": str(reason or "connection failed")}
+        )
+        return 1
+    except Exception:
+        _emit_stream_worker_record(
+            {"kind": "transport_error", "message": "stream worker failed"}
+        )
+        return 1
+    finally:
+        if response is not None:
+            response.close()
 
 
 class SmokeReporter:
@@ -2329,32 +2723,81 @@ def _read_debug_token(artifact: dict[str, Any], keys: tuple[str, ...], label: st
 
 
 def load_smoke_configuration(port_override: int | None = None) -> dict[str, Any]:
+    """Load tokens only for the currently validated harness-owned listener."""
+
     if not LATEST_JSON.exists():
         raise SmokeRunnerError(f"launch artifact not found: {LATEST_JSON}")
     try:
         artifact = read_json(LATEST_JSON)
     except Exception as exc:
         raise SmokeRunnerError(f"could not read launch artifact: {exc}") from None
-    port = port_override or _optional_int(artifact.get("port"))
-    if port is None:
-        raise SmokeRunnerError("latest run has no valid defaultspack port")
-    api_token = _read_debug_token(
-        artifact,
-        ("token_file", "api_token_file", "desktop_api_token_file"),
-        "local API",
+    details = _validated_owned_launch_details(artifact)
+    if details is None:
+        raise SmokeRunnerError("latest run is not a validated owned launch")
+    pid, port, run_dir, manifest = details
+    if port_override is not None and port_override != port:
+        raise SmokeRunnerError("smoke port does not match the owned launch manifest")
+    listener = lsof_listener(port)
+    listener_pid = _optional_int(listener.get("pid")) if listener else None
+    if listener_pid != pid or not pid_is_running(pid):
+        raise SmokeRunnerError("validated launch is not the active owned listener")
+    api_token = _read_owned_debug_token(
+        manifest, run_dir, "token_file", ".desktop_api_token", "local API"
     )
-    browser_token = _read_debug_token(
-        artifact,
-        ("browser_approval_token_file", "authority_browser_test_token_file"),
+    browser_token = _read_owned_debug_token(
+        manifest,
+        run_dir,
+        "browser_approval_token_file",
+        ".authority_browser_test_token",
         "browser approval",
     )
     return {
-        "artifact": artifact,
+        "artifact": manifest,
         "base_url": f"http://127.0.0.1:{port}",
         "port": port,
         "api_token": api_token,
         "browser_approval_token": browser_token,
     }
+
+
+def _read_owned_debug_token(
+    artifact: Mapping[str, Any],
+    run_dir: Path,
+    key: str,
+    filename: str,
+    label: str,
+) -> str:
+    """Read one canonical, owner-only, non-symlink token file."""
+
+    expected = run_dir / filename
+    raw = str(artifact.get(key) or "")
+    if not raw or Path(raw).resolve() != expected:
+        raise SmokeRunnerError(f"owned launch has an invalid {label} token-file path")
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(expected, flags)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o077
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+        ):
+            raise SmokeRunnerError(f"owned launch has an insecure {label} token file")
+        with os.fdopen(descriptor, "r", encoding="utf-8") as source:
+            descriptor = -1
+            token = source.read().strip()
+    except SmokeRunnerError:
+        raise
+    except OSError as exc:
+        raise SmokeRunnerError(
+            f"could not read {label} token file: {exc.strerror or 'unavailable'}"
+        ) from None
+    finally:
+        if "descriptor" in locals() and descriptor >= 0:
+            os.close(descriptor)
+    if not token:
+        raise SmokeRunnerError(f"{label} token file is empty")
+    return token
 
 
 def _message_request(
@@ -4465,6 +4908,18 @@ class ComputerUseSmokeRunner:
             return True
         return permission_id in _SMOKE_HOST_PERMISSIONS
 
+    def _authority_approval_config(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Return the production-style constraint config for this smoke run."""
+
+        return _authority_config(request)
+
+    def _authority_approval_related_permissions(
+        self, request: dict[str, Any]
+    ) -> list[str]:
+        """Return related production Authority permissions for this request."""
+
+        return _authority_related_permissions(request)
+
     def _approve_authority(self, request: dict[str, Any]) -> dict[str, Any]:
         request_id = str(request.get("request_id") or "").strip()
         permission_id = str(request.get("permission_id") or "").strip()
@@ -4506,8 +4961,10 @@ class ComputerUseSmokeRunner:
             f"/api/authority/requests/{urllib.parse.quote(request_id, safe='')}/approve",
             {
                 "scope": scope,
-                "config": _authority_config(request),
-                "related_permissions": _authority_related_permissions(request),
+                "config": self._authority_approval_config(request),
+                "related_permissions": self._authority_approval_related_permissions(
+                    request
+                ),
                 "ui_operator": ui_operator,
             },
         )
@@ -4746,6 +5203,268 @@ class ComputerUseSmokeRunner:
         return summary
 
 
+class ChatOnlySmokeRunner(ComputerUseSmokeRunner):
+    """Exercise ordinary chat plus the production Authority resume contract."""
+
+    def __init__(
+        self,
+        client: DebugHttpClient,
+        artifact: dict[str, Any],
+        *,
+        prompt: str,
+        max_turns: int,
+        reporter: SmokeReporter,
+        provider_preflight: Mapping[str, Any],
+    ) -> None:
+        super().__init__(
+            client,
+            artifact,
+            prompt=prompt,
+            max_turns=max_turns,
+            reporter=reporter,
+            min_stream_interval_seconds=0,
+            provider_preflight=provider_preflight,
+        )
+        self.profile = _smoke_provider_profile(MIMO_CHAT_PROFILE)
+
+    def _preflight(self) -> None:
+        self.client.get("/api/health")
+        expected = {
+            "provider_id": self.profile["provider_id"],
+            "model": self.profile["model"],
+            "credential_source": _TRUSTED_SMOKE_CREDENTIAL_SOURCE,
+            "credential_persisted": False,
+            "allow_custom_base_url": False,
+        }
+        if any(self.provider_preflight.get(key) != value for key, value in expected.items()):
+            raise SmokeRunnerError("PROVIDER_PREFLIGHT_INVALID")
+        if self.provider_preflight.get("credential_present") is not True:
+            raise SmokeRunnerError("PROVIDER_ENV_NOT_PRESENT")
+        providers = self.client.get("/api/ai/providers").get("providers")
+        if not isinstance(providers, list) or not any(
+            isinstance(item, dict)
+            and str(item.get("provider_id") or item.get("id") or "")
+            == self.profile["provider_id"]
+            and item.get("registered") is True
+            for item in providers
+        ):
+            raise SmokeRunnerError("PROVIDER_NOT_REGISTERED")
+        models = self.client.get(
+            "/api/ai/models", query={"provider": self.profile["provider_id"]}
+        ).get("models")
+        if not isinstance(models, list) or not any(
+            isinstance(item, dict)
+            and str(
+                item.get("qualified_model_id")
+                or item.get("id")
+                or item.get("model_ref")
+                or ""
+            )
+            == self.profile["model"]
+            for item in models
+        ):
+            raise SmokeRunnerError("PROVIDER_MODEL_UNAVAILABLE")
+        self.reporter.emit(
+            "provider_preflight",
+            provider_id=self.profile["provider_id"],
+            model=self.profile["model"],
+            credential_present=True,
+            credential_source=_TRUSTED_SMOKE_CREDENTIAL_SOURCE,
+            credential_persisted=False,
+            allow_custom_base_url=False,
+        )
+
+    def _create_conversation(self) -> str:
+        conversation = self.client.post(
+            "/api/chat/conversations",
+            {
+                "model": self.profile["model"],
+                "tags": ["debug-smoke", "mimo-chat"],
+                "metadata": {
+                    "debug_harness": "defaultspack_debug",
+                    "smoke": "chat_only",
+                    "provider_profile": MIMO_CHAT_PROFILE,
+                    "model": self.profile["model"],
+                },
+            },
+        )
+        conversation_id = str(conversation.get("id") or "").strip()
+        if not conversation_id:
+            raise SmokeRunnerError("defaultspack did not return a conversation id")
+        self.conversation_id = conversation_id
+        self.reporter.emit(
+            "chat_created", conversation_id=conversation_id, model=self.profile["model"]
+        )
+        return conversation_id
+
+    def _authority_is_allowed(self, request: dict[str, Any]) -> bool:
+        if str(request.get("permission_id") or "") not in _SMOKE_PROVIDER_PERMISSIONS:
+            return False
+        resource = request.get("resource") if isinstance(request.get("resource"), dict) else {}
+        provider_id = str(resource.get("provider_id") or "")
+        model = str(resource.get("model_ref") or resource.get("model_id") or "")
+        if provider_id != self.profile["provider_id"] or model not in {
+            self.profile["model"],
+            self.profile["model"].split("/", 1)[1],
+        }:
+            return False
+
+        endpoint_url = str(resource.get("endpoint_url") or "").strip()
+        try:
+            endpoint = urllib.parse.urlsplit(endpoint_url)
+            endpoint_port = endpoint.port
+        except ValueError:
+            return False
+        if endpoint_port is None and endpoint.scheme == "https":
+            endpoint_port = 443
+        request_port = resource.get("port")
+        if isinstance(request_port, bool):
+            return False
+        try:
+            request_port = int(request_port)
+        except (TypeError, ValueError):
+            return False
+        endpoint_origin = (
+            f"{endpoint.scheme.lower()}://{(endpoint.hostname or '').lower()}"
+        )
+        if endpoint_port != 443:
+            endpoint_origin += f":{endpoint_port}"
+        return all(
+            (
+                str(resource.get("api_id") or "") == self.profile["api_id"],
+                endpoint.username is None,
+                endpoint.password is None,
+                not endpoint.query,
+                not endpoint.fragment,
+                endpoint_origin == self.profile["origin"],
+                (endpoint.hostname or "").lower() == self.profile["domain"],
+                endpoint_port == self.profile["port"],
+                endpoint.path == "/zen" + self.profile["endpoint_path"],
+                str(resource.get("endpoint_path") or "")
+                == self.profile["endpoint_path"],
+                str(resource.get("domain") or "").lower()
+                == self.profile["domain"],
+                request_port == self.profile["port"],
+                str(resource.get("transport") or "").lower()
+                == self.profile["transport"],
+                resource.get("stream") is True,
+            )
+        )
+
+    def _authority_approval_config(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Constrain approval with code-owned Mimo endpoint facts only."""
+
+        del request
+        return {
+            "provider_ids": [self.profile["provider_id"]],
+            "api_ids": [self.profile["api_id"]],
+            "model_ids": [self.profile["model"].split("/", 1)[1]],
+            "domains": [self.profile["domain"]],
+            "ports": [self.profile["port"]],
+            "allow_stream": True,
+        }
+
+    def _authority_approval_related_permissions(
+        self, request: dict[str, Any]
+    ) -> list[str]:
+        """Return only the fixed provider permission set, never request config."""
+
+        permission_id = str(request.get("permission_id") or "")
+        return [
+            candidate
+            for candidate in ("model.invoke", "api_key.use", "network.egress")
+            if candidate != permission_id
+        ]
+
+    def run(self) -> dict[str, Any]:
+        self._preflight()
+        conversation_id = self._create_conversation()
+        path = f"/api/chat/conversations/{urllib.parse.quote(conversation_id, safe='')}/stream"
+        next_request = _message_request(self.prompt)
+        turns = 0
+        for turn in range(1, self.max_turns + 1):
+            turns = turn
+            self.turns = turn
+            events: list[dict[str, Any]] = []
+            terminal_count = 0
+            self.reporter.emit("turn_started", turn=turn)
+            for event in self.client.stream(path, next_request):
+                events.append(event)
+                if event.get("type") in {"done", "error"}:
+                    terminal_count += 1
+                compact = _compact_stream_event(event, turn)
+                if compact is not None:
+                    self.reporter.emit("stream", **compact)
+            if terminal_count != 1:
+                raise SmokeRunnerError("chat stream did not produce exactly one terminal result")
+            if events[-1].get("type") == "error":
+                raise SmokeRunnerError("defaultspack stream returned an error")
+            authority = self._pending_authority(events)
+            if authority is not None:
+                next_request = self._approve_authority(authority)
+                continue
+            finish_reason = _finish_reason(events)
+            if finish_reason in {"approval_required", "authority_approval_required"}:
+                raise SmokeRunnerError(
+                    "chat ended for approval, but no matching Authority request was found"
+                )
+            if not finish_reason:
+                raise SmokeRunnerError("defaultspack stream ended without a finish reason")
+            summary = self._summary(
+                ok=finish_reason == "stop", turns=turns, stop_reason=finish_reason
+            )
+            summary["provider_id"] = self.profile["provider_id"]
+            summary["model"] = self.profile["model"]
+            self.reporter.emit("chat_smoke_summary", **summary)
+            return summary
+        summary = self._summary(ok=False, turns=turns, stop_reason="max_turns")
+        summary["provider_id"] = self.profile["provider_id"]
+        summary["model"] = self.profile["model"]
+        self.reporter.emit("chat_smoke_summary", **summary)
+        return summary
+
+
+def smoke_chat(args: argparse.Namespace) -> dict[str, Any]:
+    """Run the fixed Mimo chat profile against an owned/latest Defaultspack."""
+
+    bootstrap_reporter = SmokeReporter(sys.stdout)
+    try:
+        if args.max_turns < 1 or args.max_turns > 4:
+            raise SmokeRunnerError("--max-turns must be between 1 and 4")
+        configuration = load_smoke_configuration(args.port)
+        preflight = isolated_smoke_provider_preflight(
+            os.environ, profile_name=MIMO_CHAT_PROFILE
+        )
+    except Exception as exc:
+        safe_error = _redact_string(str(exc))
+        bootstrap_reporter.emit("chat_smoke_failed", ok=False, error=safe_error)
+        return {"ok": False, "error": safe_error}
+    api_key = str(os.environ.get("OPENCODE_ZEN_API_KEY") or "").strip()
+    client = DebugHttpClient(
+        configuration["base_url"],
+        configuration["api_token"],
+        configuration["browser_approval_token"],
+        stream_timeout=DEFAULT_CHAT_STREAM_INACTIVITY_SECONDS,
+    )
+    client.hide_secrets(api_key)
+    reporter = SmokeReporter(sys.stdout, secrets_to_hide=client.secrets_to_hide)
+    runner = ChatOnlySmokeRunner(
+        client,
+        configuration["artifact"],
+        prompt=args.prompt,
+        max_turns=args.max_turns,
+        reporter=reporter,
+        provider_preflight=preflight,
+    )
+    try:
+        return runner.run()
+    except Exception as exc:
+        safe_error = _redact_string(str(exc), secrets_to_hide=client.secrets_to_hide)
+        result = runner.failure_summary(safe_error)
+        reporter.emit("chat_smoke_failed", **result)
+        return result
+
+
 def smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
     bootstrap_reporter = SmokeReporter(sys.stdout)
     try:
@@ -4808,7 +5527,7 @@ def status(args: argparse.Namespace) -> dict[str, Any]:
     latest = latest_run()
     user_data = Path(latest["user_data"]) if isinstance(latest.get("user_data"), str) else None
     chat_store = Path(latest["chat_store"]) if isinstance(latest.get("chat_store"), str) else None
-    return {
+    result = {
         "ok": bool(broker.get("ok")) and bool(desktop["health"].get("ok")),
         "broker": broker,
         "broker_connection": stale_connection_status(connection_path, broker),
@@ -4817,6 +5536,376 @@ def status(args: argparse.Namespace) -> dict[str, Any]:
         "edge_haze": edge_haze_status(user_data, broker_connection_path=connection_path),
         "pending_approval": pending_approval_status(chat_store),
     }
+    result["owned_launch"] = owned_launch_status(latest)
+    return result
+
+
+def _validated_persisted_launch(
+    artifact: Mapping[str, Any],
+) -> tuple[int, int, Path] | None:
+    """Validate an owned Defaultspack manifest without requiring it is live."""
+
+    if artifact.get("schema") != "rumi.defaultspack-debug-run.v1":
+        return None
+    pid = _optional_int(artifact.get("pid"))
+    port = _optional_int(artifact.get("port"))
+    run_id = str(artifact.get("run_id") or "")
+    start_marker = str(artifact.get("process_start_marker") or "")
+    run_dir_value = str(artifact.get("run_dir") or "")
+    if pid is None or port is None or not run_id or not run_dir_value or not start_marker:
+        return None
+    run_dir = Path(run_dir_value).resolve()
+    root = RUN_ROOT.resolve()
+    if run_dir.parent != root or run_dir.name != run_id:
+        return None
+    manifest = Path(str(artifact.get("manifest_path") or "")).resolve()
+    if manifest != run_dir / "manifest.json" or not manifest.is_file():
+        return None
+    try:
+        persisted = read_json(manifest)
+    except Exception:
+        return None
+    identity_fields = (
+        "schema",
+        "run_id",
+        "run_dir",
+        "manifest_path",
+        "pid",
+        "process_start_marker",
+        "port",
+        "token_file",
+        "browser_approval_token_file",
+        "user_data",
+        "chat_store",
+    )
+    if any(persisted.get(key) != artifact.get(key) for key in identity_fields):
+        return None
+    return pid, port, run_dir
+
+
+def _validated_owned_launch(
+    artifact: Mapping[str, Any],
+) -> tuple[int, int, Path] | None:
+    """Validate persisted identity before status/stop may treat a PID as owned."""
+
+    identity = _validated_persisted_launch(artifact)
+    if identity is None:
+        return None
+    pid, _port, _run_dir = identity
+    if process_start_marker(pid) != str(artifact.get("process_start_marker") or ""):
+        return None
+    return identity
+
+
+def _validated_owned_launch_details(
+    artifact: Mapping[str, Any],
+) -> tuple[int, int, Path, dict[str, Any]] | None:
+    """Return the canonical owned manifest together with its live identity."""
+
+    identity = _validated_owned_launch(artifact)
+    if identity is None:
+        return None
+    pid, port, run_dir = identity
+    try:
+        persisted = read_json(run_dir / "manifest.json")
+    except Exception:
+        return None
+    # Re-run persisted validation so a manifest replacement between reads is
+    # never allowed to select token paths for another process.
+    if _validated_persisted_launch(persisted) != identity:
+        return None
+    return pid, port, run_dir, persisted
+
+
+def _owned_viewer_pair_manifest_path(
+    artifact: Mapping[str, Any],
+) -> Path | None:
+    """Return the in-run pair manifest referenced by a latest launch artifact."""
+
+    value = artifact.get("viewer_pair_manifest")
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value).expanduser().resolve()
+    root = RUN_ROOT.resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    if path.name != "viewer-pair-manifest.json" or not path.is_file():
+        return None
+    return path
+
+
+def _validated_owned_viewer_pair(
+    artifact: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Validate a persisted keep-running Viewer/Defaultspack pair manifest.
+
+    This validates only the immutable launch records.  Liveness is checked for
+    each process immediately before it receives a signal so an already-exited
+    owned process does not prevent cleanup of the remaining member of the
+    pair.
+    """
+
+    manifest_path = _owned_viewer_pair_manifest_path(artifact)
+    if manifest_path is None:
+        return None
+    try:
+        pair = read_json(manifest_path)
+    except Exception:
+        return None
+    if pair.get("schema") != "rumi.viewer-defaultspack-debug-pair.v1":
+        return None
+    run_id = str(pair.get("run_id") or "")
+    run_dir_value = str(pair.get("run_dir") or "")
+    if not run_id or not run_dir_value:
+        return None
+    run_dir = Path(run_dir_value).resolve()
+    root = RUN_ROOT.resolve()
+    if run_dir.parent != root or run_dir.name != run_id:
+        return None
+    if manifest_path != run_dir / "viewer-pair-manifest.json":
+        return None
+    if str(pair.get("manifest_path") or "") != str(manifest_path):
+        return None
+
+    defaultspack = pair.get("defaultspack")
+    viewer = pair.get("viewer")
+    if not isinstance(defaultspack, dict) or not isinstance(viewer, dict):
+        return None
+    default_identity = _validated_persisted_launch(defaultspack)
+    default_group = _optional_int(defaultspack.get("process_group"))
+    if default_identity is None or default_group is None:
+        return None
+    expected_default = (
+        "run_id",
+        "pid",
+        "port",
+        "process_start_marker",
+        "manifest_path",
+    )
+    if any(defaultspack.get(key) != artifact.get(key) for key in expected_default):
+        return None
+
+    expected_connection = (
+        run_dir / "viewer_user_data" / "host_broker" / "connection.json"
+    ).resolve()
+    connection_path = (
+        Path(str(viewer.get("connection_path") or "")).expanduser().resolve()
+    )
+    broker_port = _optional_int(viewer.get("broker_port"))
+    launch_pid = _optional_int(viewer.get("launch_pid"))
+    broker_pid = _optional_int(viewer.get("broker_pid"))
+    launch_marker = str(viewer.get("launch_start_marker") or "")
+    broker_marker = str(viewer.get("broker_start_marker") or "")
+    launch_group = _optional_int(viewer.get("launch_process_group"))
+    broker_group = _optional_int(viewer.get("broker_process_group"))
+    broker_listener_pid = _optional_int(viewer.get("broker_listener_pid"))
+    instance_nonce = str(viewer.get("instance_nonce") or "")
+    if (
+        connection_path != expected_connection
+        or broker_port is None
+        or launch_pid is None
+        or broker_pid is None
+        or not launch_marker
+        or not broker_marker
+        or launch_group is None
+        or broker_group is None
+        or broker_listener_pid != broker_pid
+        or not instance_nonce
+    ):
+        return None
+    return {
+        "pair": pair,
+        "run_dir": run_dir,
+        "defaultspack": defaultspack,
+        "viewer": viewer,
+    }
+
+
+def _owned_pair_process_current(record: Mapping[str, Any]) -> bool:
+    """Confirm the exact live PID and process group before pair cleanup."""
+
+    pid = _optional_int(record.get("pid"))
+    marker = str(record.get("start_marker") or "")
+    process_group = _optional_int(record.get("process_group"))
+    if pid is None or not marker or process_group is None or not pid_is_running(pid):
+        return False
+    return (
+        process_start_marker(pid) == marker
+        and process_group_id(pid) == process_group
+    )
+
+
+def _stop_validated_owned_pair(
+    validated: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Stop only the exact processes recorded for a supervised Viewer pair.
+
+    The Viewer deliberately remains attached to the foreground PTY, so its
+    process group can contain the invoking shell.  We record and validate the
+    group as part of PID-reuse protection, but never signal it.  The broker
+    listener and cargo launcher are stopped individually, followed by the
+    independently-sessioned Defaultspack process.
+    """
+
+    viewer = validated["viewer"]
+    defaultspack = validated["defaultspack"]
+    records = [
+        {
+            "label": "viewer_broker",
+            "pid": viewer["broker_pid"],
+            "start_marker": viewer["broker_start_marker"],
+            "process_group": viewer["broker_process_group"],
+        },
+        {
+            "label": "viewer_launcher",
+            "pid": viewer["launch_pid"],
+            "start_marker": viewer["launch_start_marker"],
+            "process_group": viewer["launch_process_group"],
+        },
+        {
+            "label": "defaultspack",
+            "pid": defaultspack["pid"],
+            "start_marker": defaultspack["process_start_marker"],
+            "process_group": defaultspack["process_group"],
+        },
+    ]
+    unique_records: list[dict[str, Any]] = []
+    seen_pids: set[int] = set()
+    for record in records:
+        pid = _optional_int(record["pid"])
+        if pid is None or pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        unique_records.append(record)
+
+    results: dict[str, dict[str, Any]] = {}
+    active: list[dict[str, Any]] = []
+    for record in unique_records:
+        label = str(record["label"])
+        if _owned_pair_process_current(record):
+            active.append(record)
+            results[label] = {"stopped": False, "pid": record["pid"]}
+        elif pid_is_running(_optional_int(record["pid"]) or -1):
+            results[label] = {
+                "stopped": False,
+                "pid": record["pid"],
+                "reason": "owned identity changed",
+            }
+        else:
+            results[label] = {
+                "stopped": True,
+                "pid": record["pid"],
+                "reason": "already exited",
+            }
+
+    for record in active:
+        try:
+            os.kill(int(record["pid"]), signal.SIGTERM)
+        except OSError as error:
+            results[str(record["label"])] = {
+                "stopped": False,
+                "pid": record["pid"],
+                "reason": f"terminate failed: {error.__class__.__name__}",
+            }
+
+    deadline = time.monotonic() + 8.0
+    while active and time.monotonic() < deadline:
+        active = [
+            record for record in active if _owned_pair_process_current(record)
+        ]
+        if active:
+            time.sleep(0.1)
+
+    for record in active:
+        label = str(record["label"])
+        if not _owned_pair_process_current(record):
+            continue
+        try:
+            os.kill(int(record["pid"]), signal.SIGKILL)
+            results[label]["forced"] = True
+        except OSError as error:
+            results[label] = {
+                "stopped": False,
+                "pid": record["pid"],
+                "reason": f"kill failed: {error.__class__.__name__}",
+            }
+
+    for record in unique_records:
+        label = str(record["label"])
+        if not _owned_pair_process_current(record):
+            results[label]["stopped"] = True
+    stopped = all(item.get("stopped") for item in results.values())
+    return {
+        "ok": stopped,
+        "stopped": stopped,
+        "run_id": validated["run_dir"].name,
+        "pair": results,
+    }
+
+
+def owned_launch_status(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    identity = _validated_owned_launch(artifact)
+    if identity is None:
+        return {"owned": False, "running": False}
+    pid, port, run_dir = identity
+    listener = lsof_listener(port)
+    listener_pid = _optional_int(listener.get("pid")) if listener else None
+    return {
+        "owned": True,
+        "running": pid_is_running(pid) and listener_pid == pid,
+        "pid": pid,
+        "port": port,
+        "run_id": run_dir.name,
+    }
+
+
+def stop_latest_owned_launch(_args: argparse.Namespace) -> dict[str, Any]:
+    """Stop only a live listener proven by the latest owned run manifest."""
+
+    artifact = latest_run()
+    if "viewer_pair_manifest" in artifact:
+        pair = _validated_owned_viewer_pair(artifact)
+        if pair is None:
+            return {
+                "ok": False,
+                "stopped": False,
+                "error": "no validated owned Viewer/Defaultspack pair",
+            }
+        return _stop_validated_owned_pair(pair)
+    identity = _validated_owned_launch(artifact)
+    if identity is None:
+        return {"ok": False, "stopped": False, "error": "no validated owned launch"}
+    pid, port, run_dir = identity
+    listener = lsof_listener(port)
+    listener_pid = _optional_int(listener.get("pid")) if listener else None
+    if listener_pid != pid or not pid_is_running(pid):
+        return {
+            "ok": True,
+            "stopped": False,
+            "reason": "owned process is not the active listener",
+            "run_id": run_dir.name,
+        }
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 8.0
+    while pid_is_running(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    forced = False
+    if pid_is_running(pid):
+        # Recheck the port identity immediately before escalation. A recycled
+        # PID or replacement listener must never be killed.
+        listener = lsof_listener(port)
+        if (_optional_int(listener.get("pid")) if listener else None) != pid:
+            return {
+                "ok": False,
+                "stopped": False,
+                "error": "owned listener identity changed during stop",
+                "run_id": run_dir.name,
+            }
+        os.kill(pid, signal.SIGKILL)
+        forced = True
+    return {"ok": True, "stopped": True, "forced": forced, "run_id": run_dir.name}
 
 
 def wait_for_health(port: int, timeout: float) -> bool:
@@ -5148,6 +6237,113 @@ def stop_owned_process(process: subprocess.Popen[Any] | None, *, label: str) -> 
         return {"label": label, "stopped": True, "exit_code": process.returncode, "forced": True}
 
 
+def persist_keep_running_viewer_pair(
+    supervisor_dir: Path,
+    *,
+    viewer_process: subprocess.Popen[Any],
+    defaultspack_process: subprocess.Popen[Any],
+    defaultspack_launch: Mapping[str, Any],
+    connection_path: Path,
+    broker_port: int,
+    instance_nonce: str,
+) -> dict[str, Any]:
+    """Persist a stop-safe identity for a healthy supervised Viewer pair.
+
+    The Viewer command is intentionally attached to the live PTY, so its
+    process group is not exclusively ours. We persist and later validate that
+    group to strengthen PID-reuse checks, while process stop remains limited
+    to the broker listener, cargo launcher, and Defaultspack PID themselves.
+    """
+
+    run_dir = supervisor_dir.resolve()
+    root = RUN_ROOT.resolve()
+    if run_dir.parent != root or not run_dir.name:
+        raise SmokeRunnerError("invalid supervised Viewer run directory")
+    expected_connection = (
+        run_dir / "viewer_user_data" / "host_broker" / "connection.json"
+    ).resolve()
+    if connection_path.resolve() != expected_connection:
+        raise SmokeRunnerError("invalid supervised Viewer connection path")
+    try:
+        connection = read_json(expected_connection)
+    except Exception as error:
+        raise SmokeRunnerError("could not read supervised Viewer connection") from error
+    broker_pid = _optional_int(connection.get("pid"))
+    connection_port = _optional_int(connection.get("port"))
+    if (
+        broker_pid is None
+        or connection_port != broker_port
+        or str(connection.get("instance_nonce") or "") != instance_nonce
+    ):
+        raise SmokeRunnerError("supervised Viewer connection identity changed")
+    listener = lsof_listener(broker_port)
+    listener_pid = _optional_int(listener.get("pid")) if listener else None
+    if listener_pid != broker_pid:
+        raise SmokeRunnerError("supervised Viewer broker is not its recorded listener")
+
+    launch_pid = _optional_int(getattr(viewer_process, "pid", None))
+    defaultspack_pid = _optional_int(getattr(defaultspack_process, "pid", None))
+    if (
+        launch_pid is None
+        or defaultspack_pid is None
+        or viewer_process.poll() is not None
+        or defaultspack_process.poll() is not None
+    ):
+        raise SmokeRunnerError("supervised Viewer pair is no longer running")
+    default_identity = _validated_owned_launch(defaultspack_launch)
+    if default_identity is None or default_identity[0] != defaultspack_pid:
+        raise SmokeRunnerError("supervised Defaultspack identity is not valid")
+    default_listener = lsof_listener(default_identity[1])
+    default_listener_pid = (
+        _optional_int(default_listener.get("pid")) if default_listener else None
+    )
+    if default_listener_pid != defaultspack_pid:
+        raise SmokeRunnerError("supervised Defaultspack is not its recorded listener")
+
+    def process_identity(pid: int, *, role: str) -> tuple[str, int]:
+        marker = process_start_marker(pid)
+        process_group = process_group_id(pid)
+        if not marker or process_group is None:
+            raise SmokeRunnerError(f"supervised {role} process identity is unavailable")
+        return marker, process_group
+
+    launch_marker, launch_group = process_identity(launch_pid, role="Viewer launcher")
+    broker_marker, broker_group = process_identity(broker_pid, role="Viewer broker")
+    default_marker, default_group = process_identity(
+        defaultspack_pid, role="Defaultspack"
+    )
+    if default_marker != str(defaultspack_launch.get("process_start_marker") or ""):
+        raise SmokeRunnerError("supervised Defaultspack start marker changed")
+
+    pair_manifest_path = run_dir / "viewer-pair-manifest.json"
+    defaultspack_record = dict(defaultspack_launch)
+    defaultspack_record["process_group"] = default_group
+    pair = {
+        "schema": "rumi.viewer-defaultspack-debug-pair.v1",
+        "run_id": run_dir.name,
+        "run_dir": str(run_dir),
+        "manifest_path": str(pair_manifest_path),
+        "viewer": {
+            "connection_path": str(expected_connection),
+            "instance_nonce": instance_nonce,
+            "broker_port": broker_port,
+            "broker_listener_pid": broker_pid,
+            "broker_pid": broker_pid,
+            "broker_start_marker": broker_marker,
+            "broker_process_group": broker_group,
+            "launch_pid": launch_pid,
+            "launch_start_marker": launch_marker,
+            "launch_process_group": launch_group,
+        },
+        "defaultspack": defaultspack_record,
+    }
+    _write_json_atomic(pair_manifest_path, pair)
+    latest = dict(defaultspack_launch)
+    latest["viewer_pair_manifest"] = str(pair_manifest_path)
+    _write_json_atomic(LATEST_JSON, latest)
+    return pair
+
+
 def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
     try:
         require_live_pty()
@@ -5169,7 +6365,7 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
             "error": "PROVIDER_ENV_NOT_PRESENT",
             "provider_preflight": provider_preflight,
         }
-    supervisor_dir = RUN_ROOT / ("viewer-smoke-" + time.strftime("%Y%m%d-%H%M%S"))
+    _, supervisor_dir = create_unique_run_dir("viewer-smoke")
     requested_connection_path = (
         Path(args.connection).expanduser()
         if args.connection
@@ -5243,6 +6439,7 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
     viewer_log_tee: ViewerLogTee | None = None
     defaultspack_process: subprocess.Popen[Any] | None = None
     defaultspack_log_tee: ViewerLogTee | None = None
+    keep_running_pair: dict[str, Any] | None = None
     result: dict[str, Any]
     instance_nonce = secrets.token_urlsafe(24)
     debug_instance_id = generate_debug_instance_id()
@@ -5325,6 +6522,20 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
                     f"Viewer hit the detached Wry WKWebView panic ({WRY_DETACHED_PANIC}) during smoke"
                 )
             raise SmokeRunnerError("Viewer exited while the computer-use smoke was running")
+        if args.keep_running:
+            if not smoke.get("ok"):
+                raise SmokeRunnerError("computer-use smoke failed; owned pair was stopped")
+            if defaultspack_process is None:
+                raise SmokeRunnerError("supervised Defaultspack process was not retained")
+            keep_running_pair = persist_keep_running_viewer_pair(
+                supervisor_dir,
+                viewer_process=viewer_process,
+                defaultspack_process=defaultspack_process,
+                defaultspack_launch=launched["launch"],
+                connection_path=connection_path,
+                broker_port=broker_port,
+                instance_nonce=instance_nonce,
+            )
         result = {
             "ok": bool(smoke.get("ok")),
             "viewer_log_path": str(viewer_log_path),
@@ -5332,6 +6543,8 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
             "defaultspack": launched.get("launch"),
             "smoke": smoke,
         }
+        if keep_running_pair is not None:
+            result["viewer_pair_manifest"] = keep_running_pair["manifest_path"]
     except (LivePtyRequiredError, SmokeRunnerError) as error:
         reporter.emit("viewer_smoke_failed", ok=False, error=str(error))
         result = {
@@ -5352,8 +6565,11 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         http_reservation.release()
         kernel_reservation.release()
-        if args.keep_running:
-            cleanup = {"kept_running": True}
+        if keep_running_pair is not None:
+            cleanup = {
+                "kept_running": True,
+                "viewer_pair_manifest": keep_running_pair["manifest_path"],
+            }
         else:
             cleanup = {
                 "defaultspack": stop_owned_process(defaultspack_process, label="defaultspack"),
@@ -5385,7 +6601,7 @@ def viewer_direct_computer_use(args: argparse.Namespace) -> dict[str, Any]:
                 "--viewer-broker-port for debug instance isolation"
             ),
         }
-    supervisor_dir = RUN_ROOT / ("viewer-direct-" + time.strftime("%Y%m%d-%H%M%S"))
+    _, supervisor_dir = create_unique_run_dir("viewer-direct")
     requested_connection_path = (
         Path(args.connection).expanduser()
         if getattr(args, "connection", None)
@@ -5581,6 +6797,31 @@ def viewer_direct_computer_use(args: argparse.Namespace) -> dict[str, Any]:
 def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[str, Any]:
     desktop_app = load_desktop_app()
     port = desktop_port(desktop_app, args.port)
+    isolated_provider_parent_env = getattr(args, "isolated_provider_parent_env", None)
+    isolated_provider_profile = getattr(
+        args, "isolated_provider_profile", CEREBRAS_COMPUTER_PROFILE
+    )
+    if isolated_provider_parent_env is not None:
+        try:
+            _smoke_provider_profile(isolated_provider_profile)
+        except SmokeRunnerError as error:
+            return {"ok": False, "error": str(error)}
+        if getattr(args, "port", None) is None:
+            try:
+                reservation = reserve_loopback_port(
+                    requested=None,
+                    excluded={DEFAULT_DEFAULTSPACK_HTTP_PORT, DEFAULT_KERNEL_PORT},
+                    name="Defaultspack HTTP port",
+                )
+                port = reservation.port
+                reservation.release()
+            except SmokeRunnerError as error:
+                return {"ok": False, "error": str(error)}
+        elif port == DEFAULT_DEFAULTSPACK_HTTP_PORT:
+            return {
+                "ok": False,
+                "error": "provider-profile launch requires a non-default HTTP port",
+            }
     connection_path = Path(args.connection).expanduser() if args.connection else default_connection_path()
     explicit_broker_port = getattr(args, "viewer_broker_port", None)
     if explicit_broker_port is None and "RUMI_VIEWER_BROKER_PORT" in os.environ:
@@ -5602,9 +6843,51 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
             "status": status(args),
         }
 
-    run_dir = RUN_ROOT / time.strftime("%Y%m%d-%H%M%S")
-    user_data = Path(args.user_data).expanduser() if args.user_data else run_dir / "user_data"
+    run_id, run_dir = create_unique_run_dir("launch")
+    debug_run_id = str(getattr(args, "defaultspack_debug_run_id", "") or "")
+    debug_nonce = str(getattr(args, "defaultspack_debug_nonce", "") or "")
     configured_debug_state_root = getattr(args, "defaultspack_debug_state_root", None)
+    debug_kernel_port = getattr(args, "defaultspack_kernel_port", None)
+    explicit_debug_context = any(
+        (
+            debug_run_id,
+            debug_nonce,
+            configured_debug_state_root,
+            debug_kernel_port is not None,
+        )
+    )
+    if isolated_provider_parent_env is not None and getattr(args, "user_data", None):
+        expected_user_data = (
+            Path(configured_debug_state_root).expanduser() / "user_data"
+            if explicit_debug_context and configured_debug_state_root is not None
+            else None
+        )
+        if expected_user_data is None or Path(args.user_data).expanduser() != expected_user_data:
+            return {
+                "ok": False,
+                "error": "provider-profile launch requires harness-owned user data",
+            }
+    if isolated_provider_parent_env is not None and not explicit_debug_context:
+        debug_run_id = generate_debug_instance_id()
+        debug_nonce = secrets.token_urlsafe(32)
+        configured_debug_state_root = run_dir / "defaultspack_state"
+        try:
+            kernel_reservation = reserve_loopback_port(
+                requested=None,
+                excluded={port, DEFAULT_DEFAULTSPACK_HTTP_PORT, DEFAULT_KERNEL_PORT},
+                name="kernel port",
+            )
+            debug_kernel_port = kernel_reservation.port
+            kernel_reservation.release()
+        except SmokeRunnerError as error:
+            return {"ok": False, "error": str(error)}
+    if configured_debug_state_root is not None:
+        state_root = Path(configured_debug_state_root).expanduser()
+        user_data = state_root / "user_data"
+    else:
+        user_data = (
+            Path(args.user_data).expanduser() if args.user_data else run_dir / "user_data"
+        )
     chat_store = (
         Path(configured_debug_state_root).expanduser() / "chat" / "conversations.json"
         if configured_debug_state_root is not None
@@ -5646,13 +6929,13 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     env["RUMI_USER_DATA"] = str(user_data)
     env["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"] = str(chat_store)
     env["RUMI_DEFAULTSPACK_DIRECT_CONVERSATION_WORKSPACE"] = str(direct_workspace)
-    debug_run_id = str(getattr(args, "defaultspack_debug_run_id", "") or "")
-    debug_nonce = str(getattr(args, "defaultspack_debug_nonce", "") or "")
     debug_state_root_value = getattr(args, "defaultspack_debug_state_root", None)
-    debug_kernel_port = getattr(args, "defaultspack_kernel_port", None)
-    isolated_provider_parent_env = getattr(args, "isolated_provider_parent_env", None)
+    if configured_debug_state_root is not None:
+        debug_state_root_value = configured_debug_state_root
     provider_preflight = (
-        isolated_smoke_provider_preflight(isolated_provider_parent_env)
+        isolated_smoke_provider_preflight(
+            isolated_provider_parent_env, profile_name=isolated_provider_profile
+        )
         if isolated_provider_parent_env is not None
         else None
     )
@@ -5667,6 +6950,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
                 state_root=Path(debug_state_root_value),
                 http_port=port,
                 kernel_port=debug_kernel_port,
+                provider_profile=isolated_provider_profile,
             )
         except SmokeRunnerError as error:
             return {"ok": False, "error": str(error)}
@@ -5674,11 +6958,25 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
             env,
             parent_env=isolated_provider_parent_env,
             require_credential=isolated_provider_parent_env is not None,
+            profile_name=isolated_provider_profile,
         )
-    env["RUMI_API_TOKEN"] = env.get("RUMI_API_TOKEN") or secrets.token_urlsafe(32)
+    elif isolated_provider_parent_env is not None:
+        return {"ok": False, "error": "provider-profile isolation context was not created"}
+    if debug_state_root_value is not None:
+        # A harness-owned run must not reuse production control-plane secrets
+        # inherited through os.environ.copy().
+        env["RUMI_API_TOKEN"] = secrets.token_urlsafe(32)
+        env["RUMI_PANEL_BOOTSTRAP_SECRET"] = secrets.token_urlsafe(32)
+        env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] = secrets.token_urlsafe(32)
+    else:
+        env["RUMI_API_TOKEN"] = env.get("RUMI_API_TOKEN") or secrets.token_urlsafe(32)
+        env["RUMI_PANEL_BOOTSTRAP_SECRET"] = (
+            env.get("RUMI_PANEL_BOOTSTRAP_SECRET") or secrets.token_urlsafe(32)
+        )
+        env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] = (
+            env.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or secrets.token_urlsafe(32)
+        )
     env["RUMI_DEFAULTSPACK_LOCAL_TOKEN"] = env["RUMI_API_TOKEN"]
-    env["RUMI_PANEL_BOOTSTRAP_SECRET"] = env.get("RUMI_PANEL_BOOTSTRAP_SECRET") or secrets.token_urlsafe(32)
-    env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] = env.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or secrets.token_urlsafe(32)
     token_path.write_text(env["RUMI_API_TOKEN"], encoding="utf-8")
     token_path.chmod(0o600)
     browser_approval_token_path.write_text(env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"], encoding="utf-8")
@@ -5703,7 +7001,9 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     defaultspack_log_tee = ViewerLogTee(
         process,
         log_path,
-        secrets_to_hide=isolated_smoke_provider_secret_values(isolated_provider_parent_env),
+        secrets_to_hide=isolated_smoke_provider_secret_values(
+            isolated_provider_parent_env, profile_name=isolated_provider_profile
+        ),
         echo=False,
     )
     defaultspack_log_tee.start()
@@ -5713,7 +7013,10 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     # reservation-release TOCTOU window.
     ready = wait_for_owned_defaultspack_health(port, process, args.wait_seconds)
     artifact = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": run_id,
         "pid": process.pid,
+        "process_start_marker": process_start_marker(process.pid),
         "port": port,
         "chat_url": f"http://127.0.0.1:{port}/chat",
         "health_url": f"http://127.0.0.1:{port}/api/health",
@@ -5746,11 +7049,17 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
         },
         "ready": ready,
     }
-    RUN_ROOT.mkdir(parents=True, exist_ok=True)
-    LATEST_JSON.parent.mkdir(parents=True, exist_ok=True)
-    LATEST_JSON.write_text(json.dumps(artifact, indent=2, ensure_ascii=False), encoding="utf-8")
+    manifest_path = run_dir / "manifest.json"
+    artifact["manifest_path"] = str(manifest_path)
+    _write_json_atomic(manifest_path, artifact)
+    if ready:
+        _write_json_atomic(LATEST_JSON, artifact)
     result: dict[str, Any] = {"ok": ready, "launch": artifact, "status": status(args)}
-    if include_process:
+    if not ready:
+        result["error"] = "owned Defaultspack did not become ready"
+        result["cleanup"] = stop_owned_process(process, label="defaultspack")
+        defaultspack_log_tee.join()
+    elif include_process:
         result["_process"] = process
         result["_log_tee"] = defaultspack_log_tee
     return result
@@ -5759,7 +7068,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("status", "launch"):
+    for name in ("status", "launch", "stop"):
         item = sub.add_parser(name)
         item.add_argument("--port", type=int)
         item.add_argument("--connection")
@@ -5767,6 +7076,21 @@ def main() -> int:
     launch_parser.add_argument("--user-data")
     launch_parser.add_argument("--wait-seconds", type=float, default=30.0)
     launch_parser.add_argument("--allow-no-broker", action="store_true")
+    launch_parser.add_argument(
+        "--provider-profile",
+        choices=sorted(_SMOKE_PROVIDER_PROFILES),
+        help=(
+            "forward only the fixed credential for a code-owned smoke profile; "
+            "custom provider URLs and environment names are not accepted"
+        ),
+    )
+    chat_parser = sub.add_parser(
+        "smoke-chat",
+        help="run chat-only Mimo v2.5 free through production Authority approval",
+    )
+    chat_parser.add_argument("--port", type=int)
+    chat_parser.add_argument("--max-turns", type=int, default=3)
+    chat_parser.add_argument("prompt", help="ordinary user request for Mimo")
     smoke_parser = sub.add_parser(
         "smoke-computer-use",
         help="run a bounded Cerebras Gemma 4 broker-backed computer-use smoke",
@@ -5871,9 +7195,24 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.command == "launch":
+        if args.provider_profile:
+            if args.user_data:
+                result = {
+                    "ok": False,
+                    "error": "--provider-profile requires fresh harness-owned user data",
+                }
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+                return 1
+            args.isolated_provider_parent_env = os.environ
+            args.isolated_provider_profile = args.provider_profile
         result = launch(args)
     elif args.command == "status":
         result = status(args)
+    elif args.command == "stop":
+        result = stop_latest_owned_launch(args)
+    elif args.command == "smoke-chat":
+        result = smoke_chat(args)
+        return 0 if result.get("ok") else 1
     elif args.command == "smoke-computer-use":
         result = smoke_computer_use(args)
         return 0 if result.get("ok") else 1
@@ -5886,4 +7225,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--internal-stream-worker"]:
+        raise SystemExit(_debug_stream_worker_main())
     raise SystemExit(main())
