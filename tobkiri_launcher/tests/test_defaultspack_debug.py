@@ -1222,6 +1222,19 @@ def test_mimo_profile_forwards_only_fixed_key_and_seeds_fixed_model(tmp_path):
         "credential_persisted": False,
         "allow_custom_base_url": False,
     }
+    assert debug._SMOKE_PROVIDER_PROFILES[debug.MIMO_CHAT_PROFILE] == {
+        "provider_id": "opencode-zen",
+        "model": "opencode-zen/mimo-v2.5-free",
+        "credential_env": "OPENCODE_ZEN_API_KEY",
+        "env_prefix": "OPENCODE_ZEN_",
+        "api_id": "legacy",
+        "endpoint_url": "https://opencode.ai/zen/v1/chat/completions",
+        "endpoint_path": "/v1/chat/completions",
+        "origin": "https://opencode.ai",
+        "domain": "opencode.ai",
+        "port": 443,
+        "transport": "https",
+    }
     assert child["OPENCODE_ZEN_API_KEY"] == key
     assert "OPENCODE_ZEN_BASE_URL" not in child
     assert "CEREBRAS_API_KEY" not in child
@@ -1566,8 +1579,8 @@ class FakeMimoChatClient(FakeClient):
                             "api_id": "legacy",
                             "model_id": "mimo-v2.5-free",
                             "model_ref": "opencode-zen/mimo-v2.5-free",
-                            "endpoint_url": "https://opencode.ai/zen/v1/messages",
-                            "endpoint_path": "/v1/messages",
+                            "endpoint_url": "https://opencode.ai/zen/v1/chat/completions",
+                            "endpoint_path": "/v1/chat/completions",
                             "domain": "opencode.ai",
                             "transport": "https",
                             "port": 443,
@@ -1686,8 +1699,27 @@ def test_chat_only_mimo_uses_production_authority_followup_and_reports_chat(tmp_
         ("network.egress", {"domain": "attacker.invalid"}, {}),
         ("api_key.use", {"port": 444}, {}),
         ("model.invoke", {"endpoint_url": "https://attacker.invalid/collect"}, {}),
-        ("network.egress", {"endpoint_url": "https://opencode.ai:444/zen/v1/messages"}, {}),
-        ("api_key.use", {"endpoint_url": "https://opencode.ai/other/v1/messages"}, {}),
+        (
+            "network.egress",
+            {"endpoint_url": "https://opencode.ai:444/zen/v1/chat/completions"},
+            {},
+        ),
+        (
+            "api_key.use",
+            {"endpoint_url": "https://opencode.ai/other/v1/chat/completions"},
+            {},
+        ),
+        (
+            "model.invoke",
+            {"endpoint_url": "http://opencode.ai/zen/v1/chat/completions"},
+            {},
+        ),
+        (
+            "network.egress",
+            {"endpoint_url": "https://opencode.ai:443/zen/v1/chat/completions"},
+            {},
+        ),
+        ("api_key.use", {"endpoint_path": "/v1/responses"}, {}),
         ("model.invoke", {"transport": "http"}, {}),
         ("network.egress", {}, {"domains": ["attacker.invalid"], "ports": [444]}),
     ],
