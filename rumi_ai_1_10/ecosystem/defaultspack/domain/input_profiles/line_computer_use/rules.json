@@ -34,10 +34,10 @@
       }
     },
     "chat": {
-      "model": "google/gemma-4-31b-it"
+      "model": "cerebras/gemma-4-31b"
     },
     "params": {
-      "model": "google/gemma-4-31b-it",
+      "model": "cerebras/gemma-4-31b",
       "thinking_level": "high",
       "request_timeout": 45,
       "line_reply_deadline_seconds": 60,
@@ -60,8 +60,14 @@
     "response_prompt": {
       "enabled": true,
       "mode": "plan_only",
-      "allowed_actions": ["reply_text", "store_only"],
-      "fallback_action": "reply_text"
+      "allowed_actions": ["reply_text", "store_only", "run_computer_use", "ask_for_approval"],
+      "fallback_action": "reply_text",
+      "tools": {
+        "computer_use": {
+          "enabled": true,
+          "requires_approval": true
+        }
+      }
     }
   }
 }

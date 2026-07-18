@@ -205,6 +205,27 @@ def test_run_computer_use_enabled_defaults_to_approval_gated_plan():
     assert plan["messages"] == []
 
 
+def test_line_computer_use_profile_defaults_cerebras_gemma4_and_computer_use_on():
+    from domain.external.input_profile_registry import InputProfileRegistry  # noqa: E402
+
+    profile = InputProfileRegistry(DEFAULTSPACK_ROOT).get("line.computer_use")
+    policy = ResponsePromptPolicy.from_profile(profile)
+
+    decision = policy.decide(
+        _event("line"),
+        input_text="reply in LINE Biz",
+        response=RumiResponse(text="local draft"),
+        llm_client=lambda payload: {"action": "run_computer_use", "instruction": "reply in LINE Biz"},
+    )
+
+    assert profile.spec["chat"]["model"] == "cerebras/gemma-4-31b"
+    assert profile.spec["params"]["model"] == "cerebras/gemma-4-31b"
+    assert decision.action == "run_computer_use"
+    assert decision.tool_name == "computer_use"
+    assert decision.requires_approval is True
+    assert decision.executable is False
+
+
 def test_action_not_in_allowed_actions_falls_back_to_reply_text():
     decision = _decision(
         {"action": "run_python", "instruction": "calculate it"},
@@ -354,7 +375,7 @@ def test_pipeline_merges_input_profile_policy_into_runtime_context(monkeypatch):
                     "replyToken": "reply-1",
                 },
                 "verified": True,
-                "metadata": {"model": "google/gemma-4-31b-it"},
+                "metadata": {"model": "cerebras/gemma-4-31b"},
             }
         ),
         input_profile_id="line.computer_use",

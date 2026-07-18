@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import os
 import re
+import time
 from typing import Any
 
 from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_groups import normalize_model_groups
+
+_PROFILE_CATALOG_CACHE_TTL_SECONDS = 60.0
+_profile_catalog_cache: dict[tuple[str, ...], tuple[float, list[dict[str, Any]]]] = {}
 
 
 def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -15,7 +21,7 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
     query = str(filters.get("query") or "").strip().casefold()
     type_filter = _as_set(filters.get("type") or filters.get("model_type"))
     if not type_filter:
-        type_filter = {"chat", "reasoning"}
+        type_filter = {"chat", "reasoning", "vision"}
     requires = filters.get("requires") if isinstance(filters.get("requires"), dict) else {}
     speed_filter = _as_set(filters.get("speed_tier"))
     provider_id = str(filters.get("provider_id") or filters.get("provider") or "").strip()
@@ -113,7 +119,22 @@ def get_model_capabilities(profile_id: str, *, profiles: list[dict[str, Any]] | 
                 }
     except Exception:
         pass
-    for profile in profiles if profiles is not None else _profile_catalog():
+    if profiles is not None:
+        return _model_capabilities_from_profiles(needle, profiles)
+    result = _model_capabilities_from_profiles(
+        needle,
+        _profile_catalog(include_runtime_profiles=False),
+    )
+    if result is not None:
+        return result
+    return _model_capabilities_from_profiles(
+        needle,
+        _profile_catalog(include_runtime_profiles=True),
+    )
+
+
+def _model_capabilities_from_profiles(needle: str, profiles: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for profile in profiles:
         if not isinstance(profile, dict):
             continue
         aliases = {
@@ -150,9 +171,14 @@ def recommend_model(request: dict[str, Any] | None = None, *, profiles: list[dic
 def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     groups = normalize_model_groups((settings or {}).get("model_groups") if isinstance(settings, dict) else None)
     group = groups.get(str(group_id or "default"), groups["default"])
+    catalog_profiles = profiles
+    if catalog_profiles is None:
+        catalog_profiles = _profile_catalog(
+            include_runtime_profiles=_settings_has_runtime_profiles(settings),
+        )
     candidates = [
         _public_model(profile)
-        for profile in (profiles if profiles is not None else _profile_catalog())
+        for profile in catalog_profiles
         if isinstance(profile, dict) and _is_chat_routable_profile(profile)
     ]
     allowed = {str(item) for item in group.get("allowed_models", []) if str(item or "").strip()}
@@ -184,7 +210,7 @@ def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: l
 
 def _is_chat_routable_profile(profile: dict[str, Any]) -> bool:
     model_type = str(profile.get("type") or "chat").strip().lower()
-    if not model_type or model_type == "chat":
+    if not model_type or model_type in {"chat", "vision"}:
         return True
     if model_type != "reasoning":
         return False
@@ -209,7 +235,13 @@ def _capability_dict(value: Any) -> dict[str, bool]:
     return {}
 
 
-def _profile_catalog() -> list[dict[str, Any]]:
+def _profile_catalog(*, include_runtime_profiles: bool = True) -> list[dict[str, Any]]:
+    cache_key = _profile_catalog_cache_key(include_runtime_profiles=include_runtime_profiles)
+    now = time.monotonic()
+    cached = _profile_catalog_cache.get(cache_key)
+    if cached is not None and cached[0] > now:
+        return [dict(profile) for profile in cached[1]]
+
     profiles: list[dict[str, Any]] = []
     try:
         from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
@@ -219,22 +251,69 @@ def _profile_catalog() -> list[dict[str, Any]]:
         profiles = [profile for profile in list_profile_catalog() if isinstance(profile, dict)]
     except Exception:
         profiles = []
-    try:
-        from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
-    except ModuleNotFoundError:
-        from backend.ai_client.provider_catalog import list_model_catalog
-    try:
-        profiles.extend(_embedding_profiles_from_models(list_model_catalog()))
-    except Exception:
-        pass
-    try:
-        from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+    if not any(str(profile.get("type") or "").strip().lower() == "embedding" for profile in profiles):
+        try:
+            from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
+        except ModuleNotFoundError:
+            from backend.ai_client.provider_catalog import list_model_catalog
+        try:
+            profiles.extend(_embedding_profiles_from_models(list_model_catalog()))
+        except Exception:
+            pass
+    if include_runtime_profiles:
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
-        service = ModelRuntimeSettingsService()
-        profiles.extend(service.runtime_defined_profiles(service.get_settings()))
-    except Exception:
-        pass
-    return _dedupe_profiles(profiles)
+            service = ModelRuntimeSettingsService()
+            profiles.extend(service.runtime_defined_profiles(service.get_settings()))
+        except Exception:
+            pass
+    profiles = _dedupe_profiles(profiles)
+    cache_key = _profile_catalog_cache_key(include_runtime_profiles=include_runtime_profiles)
+    _profile_catalog_cache.clear()
+    _profile_catalog_cache[cache_key] = (
+        now + _PROFILE_CATALOG_CACHE_TTL_SECONDS,
+        [dict(profile) for profile in profiles],
+    )
+    return [dict(profile) for profile in profiles]
+
+
+def clear_profile_catalog_cache() -> None:
+    _profile_catalog_cache.clear()
+
+
+def _settings_has_runtime_profiles(settings: dict[str, Any] | None) -> bool:
+    if not isinstance(settings, dict):
+        return False
+    return any(settings.get(key) for key in ("api_bound_profiles", "model_packs", "composite_models"))
+
+
+def _profile_catalog_cache_key(*, include_runtime_profiles: bool) -> tuple[str, ...]:
+    env_markers: list[str] = [f"runtime_profiles:{int(include_runtime_profiles)}"]
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if (
+            upper.startswith("RUMI_DEFAULTSPACK_")
+            or upper.endswith("_API_KEY")
+            or upper.endswith("_BASE_URL")
+            or "OAUTH" in upper
+            or upper in {"GEMINI_API_KEY", "GOOGLE_API_KEY"}
+        ):
+            digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+            env_markers.append(f"env:{key}={digest}")
+    secrets_dir = str(os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR") or "").strip()
+    if secrets_dir:
+        provider_keys_path = os.path.join(secrets_dir, "provider_api_keys.json")
+        env_markers.append(f"secrets:{secrets_dir}:provider_api_keys:{_file_state_marker(provider_keys_path)}")
+    return tuple(sorted(env_markers))
+
+
+def _file_state_marker(path: str) -> str:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return "missing"
+    return f"{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def _dedupe_profiles(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -435,11 +514,18 @@ def _normalize_search_text(value: str) -> str:
     return re.sub(r"[\W_]+", " ", value.casefold()).strip()
 
 
+def _compact_search_text(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value.casefold())
+
+
 def _matches_query(item: dict[str, Any], query: str) -> bool:
     text = _search_text(item)
     normalized_text = _normalize_search_text(text)
     normalized_query = _normalize_search_text(query)
+    compact_query = _compact_search_text(query)
     if query in text or (normalized_query and normalized_query in normalized_text):
+        return True
+    if compact_query and compact_query in _compact_search_text(text):
         return True
     tokens = [token for token in normalized_query.split() if token]
     return bool(tokens) and all(token in normalized_text or token in text for token in tokens)

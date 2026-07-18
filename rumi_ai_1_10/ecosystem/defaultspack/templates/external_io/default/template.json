@@ -140,7 +140,7 @@
           "Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.",
           "Paste the generated URL into the LINE Messaging API Webhook URL field.",
           "Save the Messaging API Channel Secret and Channel Access Token in External Tokens.",
-          "Save a Google API key and choose google/gemma-4-31b-it.",
+          "Save a Cerebras API key and choose cerebras/gemma-4-31b.",
           "Set the LINE Biz chat URL and keep the target Google Chrome window visible on the desktop during replies.",
           "Enable the line-main endpoint after checking the source rules."
         ],
@@ -155,7 +155,7 @@
         },
         "conversation": {
           "strategy": "external_key",
-          "model": "google/gemma-4-31b-it"
+          "model": "cerebras/gemma-4-31b"
         },
         "response": {
           "mode": "computer_use_line_biz"
@@ -177,8 +177,8 @@
             "secret": false
           },
           {
-            "id": "google_api_key",
-            "label": "Google API Key",
+            "id": "cerebras_api_key",
+            "label": "Cerebras API Key",
             "secret": true
           }
         ],

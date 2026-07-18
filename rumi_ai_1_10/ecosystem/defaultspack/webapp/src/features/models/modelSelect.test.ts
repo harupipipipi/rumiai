@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildVisibleModelOptions,
   findSelectedModelOption,
+  modelSelectOptionMatchesSearch,
   modelOptionBadges,
   modelSearchItemToModelSelectOption,
   parseModelAllowlist,
@@ -73,6 +74,20 @@ test("buildVisibleModelOptions searches provider, model, notes, and remote optio
     "selected/model",
     "google/gemini-2.5-pro",
   ]);
+});
+
+test("model search matches compact queries across separators", () => {
+  const option: ModelSelectOption = {
+    value: "cerebras/gemma-4-31b",
+    label: "Cerebras / Gemma 4 31B via Cerebras",
+    provider_id: "cerebras",
+    provider_display_name: "Cerebras",
+    model_id: "gemma-4-31b",
+    supports_vision: true,
+  };
+
+  assert.equal(modelSelectOptionMatchesSearch(option, "gemma4"), true);
+  assert.equal(modelSelectOptionMatchesSearch(option, "cerebras gemma4"), true);
 });
 
 test("model search items map API key and capability status into select options", () => {

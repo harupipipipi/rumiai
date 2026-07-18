@@ -268,6 +268,17 @@ class OpenAIProvider(BaseProvider):
         del model
         return dict(params or {})
 
+    def _provider_tool_sanitizer_capabilities(self):
+        return {}
+
+    def _provider_safe_tool_definitions(self, tools):
+        from domain.ai_client.provider_tool_sanitizer import provider_safe_tool_definitions
+
+        return provider_safe_tool_definitions(
+            tools,
+            self._provider_tool_sanitizer_capabilities(),
+        )
+
     @staticmethod
     def _copy_chat_params(body, params):
         for k in (
@@ -289,6 +300,9 @@ class OpenAIProvider(BaseProvider):
         extra_body = params.get("extra_body")
         if isinstance(extra_body, dict):
             body.update(extra_body)
+        if not body.get("tools"):
+            body.pop("tool_choice", None)
+            body.pop("parallel_tool_calls", None)
 
     @staticmethod
     def _stream_tool_call_events(delta, state):
@@ -322,7 +336,7 @@ class OpenAIProvider(BaseProvider):
         params = self._translate_model_params(model, params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
-            body["tools"] = tools
+            body["tools"] = self._provider_safe_tool_definitions(tools)
         self._copy_chat_params(body, params)
         raw = self._request_json("/chat/completions", body, **self._request_timeout_kwargs(params))
         return self.parse_response(raw)
@@ -332,7 +346,7 @@ class OpenAIProvider(BaseProvider):
         params = self._translate_model_params(model, params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
-            body["tools"] = tools
+            body["tools"] = self._provider_safe_tool_definitions(tools)
         self._copy_chat_params(body, params)
         body.setdefault("stream_options", {"include_usage": True})
         resp = self._request_stream("/chat/completions", body, **self._request_timeout_kwargs(params))

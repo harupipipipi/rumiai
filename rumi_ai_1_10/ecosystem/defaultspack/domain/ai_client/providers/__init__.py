@@ -547,17 +547,17 @@ _BEST_MODEL_BY_PROVIDER = {
 }
 
 
-def _list_provider_manifests() -> List[Dict[str, Any]]:
+def _list_provider_manifests(registry: Any = None) -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = registry or get_extension_registry(force_reload=True)
         return registry.llm().providers(enabled_only=True)
     except Exception:
         return []
 
 
-def _load_model_manifests(provider_id: str = "") -> List[Dict[str, Any]]:
+def _load_model_manifests(provider_id: str = "", registry: Any = None) -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = registry or get_extension_registry(force_reload=True)
         return registry.llm().models(provider_id=provider_id, enabled_only=True)
     except Exception:
         return []
@@ -657,9 +657,9 @@ def validate_provider_catalog_coverage(registry: Any = None) -> List[Dict[str, A
     return issues
 
 
-def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
+def _provider_manifest_map(registry: Any = None) -> Dict[str, Dict[str, Any]]:
     manifests: Dict[str, Dict[str, Any]] = {}
-    for manifest in _list_provider_manifests():
+    for manifest in _list_provider_manifests(registry=registry):
         provider_id = str(manifest.get("id", "")).strip()
         if provider_id:
             manifests[provider_id] = dict(manifest)
@@ -882,11 +882,15 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
     }
 
 
-def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+def _provider_is_configured(
+    entry: Dict[str, Any],
+    *,
+    include_oauth_connection: bool = True,
+) -> tuple[bool, Optional[str]]:
     provider_id = str(entry.get("provider_id", "")).strip()
     credential_required = bool(entry.get("credential_required", True))
     default_base_url = str(entry.get("default_base_url", "") or "").strip()
-    if provider_id and provider_has_oauth_connection(provider_id):
+    if include_oauth_connection and provider_id and provider_has_oauth_connection(provider_id):
         return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
         return True, "defaultspack_secret"
@@ -918,9 +922,14 @@ def _provider_status(entry: Dict[str, Any], active: bool, configured: bool) -> s
     return "unconfigured"
 
 
-def get_provider_catalog(active_provider_ids=None):
+def get_provider_catalog(
+    active_provider_ids=None,
+    *,
+    include_oauth_metadata: bool = True,
+    _registry: Any = None,
+):
     active_ids = set(active_provider_ids or [])
-    manifests = _provider_manifest_map()
+    manifests = _provider_manifest_map(registry=_registry)
     provider_ids = set(manifests.keys()) | set(_CURATED_PROVIDER_METADATA.keys()) | active_ids
     entries = [
         _merge_provider_entry(provider_id, manifests.get(provider_id))
@@ -930,7 +939,10 @@ def get_provider_catalog(active_provider_ids=None):
 
     catalog = []
     for entry in entries:
-        configured, configuration_source = _provider_is_configured(entry)
+        configured, configuration_source = _provider_is_configured(
+            entry,
+            include_oauth_connection=include_oauth_metadata,
+        )
         active = entry["provider_id"] in active_ids
         availability = {
             "active": active,
@@ -942,6 +954,24 @@ def get_provider_catalog(active_provider_ids=None):
             "configuration_source": configuration_source,
             "base_url_hint": entry.get("default_base_url", ""),
         }
+        metadata = {
+            "catalog_only": bool(entry.get("catalog_only", False)),
+            "supports_invoke": bool(entry.get("supports_invoke_base") or active),
+            "default_base_url": entry.get("default_base_url", ""),
+            "default_model_for": dict(entry.get("default_model_for", {})),
+            "subscription_plans": list(entry.get("subscription_plans", [])),
+            "adapter": entry.get("adapter", ""),
+            "entrypoint": entry.get("entrypoint", ""),
+            "config": dict(entry.get("manifest", {}).get("config", {}))
+            if isinstance(entry.get("manifest", {}).get("config"), dict)
+            else {},
+            "catalog_source": entry.get("catalog_source", ""),
+            "curated_fallback_used": bool(entry.get("curated_fallback_used", False)),
+            "manifest_path": entry.get("manifest", {}).get("source_path")
+            or entry.get("manifest", {}).get("component_manifest_path", ""),
+        }
+        if include_oauth_metadata:
+            metadata["oauth"] = provider_oauth_status(entry["provider_id"])
         catalog.append(
             {
                 "id": entry["provider_id"],
@@ -957,32 +987,25 @@ def get_provider_catalog(active_provider_ids=None):
                 "capabilities": list(entry.get("capabilities", [])),
                 "subscription_plans": list(entry.get("subscription_plans", [])),
                 "availability": availability,
-                "metadata": {
-                    "catalog_only": bool(entry.get("catalog_only", False)),
-                    "supports_invoke": bool(entry.get("supports_invoke_base") or active),
-                    "default_base_url": entry.get("default_base_url", ""),
-                    "default_model_for": dict(entry.get("default_model_for", {})),
-                    "subscription_plans": list(entry.get("subscription_plans", [])),
-                    "adapter": entry.get("adapter", ""),
-                    "entrypoint": entry.get("entrypoint", ""),
-                    "config": dict(entry.get("manifest", {}).get("config", {}))
-                    if isinstance(entry.get("manifest", {}).get("config"), dict)
-                    else {},
-                    "catalog_source": entry.get("catalog_source", ""),
-                    "curated_fallback_used": bool(entry.get("curated_fallback_used", False)),
-                    "manifest_path": entry.get("manifest", {}).get("source_path")
-                    or entry.get("manifest", {}).get("component_manifest_path", ""),
-                    "oauth": provider_oauth_status(entry["provider_id"]),
-                },
+                "metadata": metadata,
             }
         )
     return catalog
 
 
-def get_provider_catalog_map(active_provider_ids=None):
+def get_provider_catalog_map(
+    active_provider_ids=None,
+    *,
+    include_oauth_metadata: bool = True,
+    _registry: Any = None,
+):
     return {
         entry["provider_id"]: entry
-        for entry in get_provider_catalog(active_provider_ids=active_provider_ids)
+        for entry in get_provider_catalog(
+            active_provider_ids=active_provider_ids,
+            include_oauth_metadata=include_oauth_metadata,
+            _registry=_registry,
+        )
     }
 
 
@@ -1009,10 +1032,38 @@ def _load_known_models_from_entry(entrypoint: str) -> List[Dict[str, Any]]:
     return [dict(model) for model in known_models if isinstance(model, dict)]
 
 
-def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _load_models_for_provider(entry: Dict[str, Any], registry: Any = None) -> List[Dict[str, Any]]:
     provider_id = entry["provider_id"]
     models: List[Dict[str, Any]] = []
     seen: Dict[str, Dict[str, Any]] = {}
+
+    def _merge_duplicate_model(existing: Dict[str, Any], raw: Dict[str, Any]) -> None:
+        metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+        authoritative_component = bool(
+            metadata.get("component_manifest_path")
+            or metadata.get("source_pack_id")
+            or metadata.get("rate_limits")
+        )
+        for field, value in raw.items():
+            if isinstance(value, dict) and isinstance(existing.get(field), dict) and field in {
+                "metadata",
+                "defaults",
+                "pricing",
+                "capabilities",
+            }:
+                merged = dict(existing[field])
+                merged.update(value)
+                existing[field] = merged
+                continue
+            if field in {"context_window", "max_context", "max_context_tokens", "max_output_tokens"}:
+                if value not in (None, "", [], {}) and (
+                    authoritative_component
+                    or existing.get(field) in (None, "", [], {}, 0)
+                ):
+                    existing[field] = value
+                continue
+            if field not in existing or existing.get(field) in (None, "", [], {}):
+                existing[field] = value
 
     def _append(items: Iterable[Dict[str, Any]]) -> None:
         for raw in items:
@@ -1025,15 +1076,13 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
             key = raw_id or "{}/{}".format(provider_id, model_id)
             if key in seen:
                 existing = seen[key]
-                for field, value in raw.items():
-                    if field not in existing or existing.get(field) in (None, "", [], {}):
-                        existing[field] = value
+                _merge_duplicate_model(existing, raw)
                 continue
             item = dict(raw)
             seen[key] = item
             models.append(item)
 
-    _append(_load_model_manifests(provider_id))
+    _append(_load_model_manifests(provider_id, registry=registry))
     _append(model_manifests_from_provider_components(provider_id))
     _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
     _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
@@ -1092,8 +1141,21 @@ def _annotate_model_collisions(models):
     return models
 
 
-def get_all_known_models(provider_id=None, active_provider_ids=None):
-    catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
+def get_all_known_models(
+    provider_id=None,
+    active_provider_ids=None,
+    *,
+    include_oauth_metadata: bool = False,
+):
+    try:
+        registry = get_extension_registry(force_reload=True)
+    except Exception:
+        registry = None
+    catalog_map = get_provider_catalog_map(
+        active_provider_ids=active_provider_ids,
+        include_oauth_metadata=include_oauth_metadata,
+        _registry=registry,
+    )
     provider_ids = [provider_id] if provider_id else list(catalog_map.keys())
     models = []
 
@@ -1101,7 +1163,10 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
         provider_entry = catalog_map.get(current_provider_id)
         if provider_entry is None:
             continue
-        for raw in _load_models_for_provider(provider_entry["metadata"] | {"provider_id": current_provider_id}):
+        for raw in _load_models_for_provider(
+            provider_entry["metadata"] | {"provider_id": current_provider_id},
+            registry=registry,
+        ):
             model_provider_id = raw.get("provider") or raw.get("provider_id") or current_provider_id
             qualified_model_id = str(raw.get("id", "")).strip()
             model_id = str(raw.get("model_id", "")).strip()
@@ -1139,6 +1204,8 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 }
             )
             context_window = context_window_value(raw, default=0)
+            max_context = context_window
+            max_context_tokens = context_window
             item = {
                 "id": qualified_model_id,
                 "qualified_model_id": qualified_model_id,
@@ -1151,6 +1218,8 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 "display_name": display_name,
                 "type": str(raw.get("type", "chat")),
                 "context_window": context_window,
+                "max_context": max_context,
+                "max_context_tokens": max_context_tokens,
                 "capabilities": capabilities,
                 "request_features": request_features,
                 "routing": routing,
@@ -1194,8 +1263,16 @@ def _find_model_entry(models, model_ref="", provider_id="", model_id=""):
     return None
 
 
-def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
-    models = get_all_known_models(active_provider_ids=active_provider_ids)
+def build_profile_catalog(
+    active_provider_ids=None,
+    custom_profiles=None,
+    *,
+    include_oauth_metadata: bool = False,
+):
+    models = get_all_known_models(
+        active_provider_ids=active_provider_ids,
+        include_oauth_metadata=include_oauth_metadata,
+    )
     profiles = []
     for model in models:
         metadata = dict(model.get("metadata", {}))
@@ -1222,7 +1299,24 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
             "provider_count_for_model_name": model["provider_count_for_model_name"],
             "disambiguated_name": model["disambiguated_name"],
             "type": model.get("type", "chat"),
-            "context_window": int(model.get("context_window", 0) or 0),
+            "context_window": int(
+                model.get("context_window")
+                or model.get("max_context")
+                or model.get("max_context_tokens")
+                or 0
+            ),
+            "max_context": int(
+                model.get("max_context")
+                or model.get("max_context_tokens")
+                or model.get("context_window")
+                or 0
+            ),
+            "max_context_tokens": int(
+                model.get("max_context_tokens")
+                or model.get("max_context")
+                or model.get("context_window")
+                or 0
+            ),
             "capabilities": list(model.get("capabilities", [])),
             "request_features": dict(model.get("request_features", {})) if isinstance(model.get("request_features"), dict) else {},
             "routing": dict(model.get("routing", {})) if isinstance(model.get("routing"), dict) else {},

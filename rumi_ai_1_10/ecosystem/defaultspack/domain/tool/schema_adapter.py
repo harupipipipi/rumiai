@@ -92,6 +92,49 @@ def adapt_tool_definitions(tools: Iterable[Any]) -> List[Any]:
     return [adapt_tool_definition(tool) for tool in tools]
 
 
+def provider_safe_tool_definition(
+    tool: Any,
+    provider_capabilities: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Return the provider-facing OpenAI function-tool payload only.
+
+    Rumi tool records carry local metadata for policy, trust, and UI display.
+    OpenAI-compatible providers reject those local fields inside `tools`, so
+    the final provider payload must keep only the API-supported function shape.
+    """
+    adapted = adapt_tool_definition(tool)
+    if not isinstance(adapted, dict):
+        return adapted
+    function_def = adapted.get("function")
+    if adapted.get("type") != "function" or not isinstance(function_def, dict):
+        return adapted
+
+    safe_function: Dict[str, Any] = {}
+    for key in ("name", "description"):
+        value = function_def.get(key)
+        if value is not None:
+            safe_function[key] = str(value)
+    parameters = provider_tool_parameters(function_def.get("parameters"))
+    quirks = (
+        provider_capabilities.get("quirks")
+        if isinstance(provider_capabilities, dict)
+        and isinstance(provider_capabilities.get("quirks"), dict)
+        else {}
+    )
+    if function_def.get("strict") is True or quirks.get("strict_function_tools"):
+        parameters = _strict_provider_tool_parameters(parameters)
+        safe_function["strict"] = True
+    safe_function["parameters"] = parameters
+    return {"type": "function", "function": safe_function}
+
+
+def provider_safe_tool_definitions(
+    tools: Iterable[Any],
+    provider_capabilities: Optional[Dict[str, Any]] = None,
+) -> List[Any]:
+    return [provider_safe_tool_definition(tool, provider_capabilities) for tool in tools]
+
+
 def provider_tool_parameters(parameters: Any) -> Dict[str, Any]:
     """Return a provider-safe JSON Schema object for function parameters."""
     if not isinstance(parameters, dict) or not parameters:
@@ -101,6 +144,34 @@ def provider_tool_parameters(parameters: Any) -> Dict[str, Any]:
     except ToolSchemaError:
         return copy.deepcopy(_DEFAULT_PARAMETERS_SCHEMA)
     return sanitized if sanitized else {}
+
+
+def _strict_provider_tool_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    strict = copy.deepcopy(parameters or _DEFAULT_PARAMETERS_SCHEMA)
+    if not strict:
+        strict = copy.deepcopy(_DEFAULT_PARAMETERS_SCHEMA)
+    return _with_no_additional_properties(strict)
+
+
+def _with_no_additional_properties(schema: Any) -> Any:
+    if isinstance(schema, list):
+        return [_with_no_additional_properties(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    strict = {key: _with_no_additional_properties(value) for key, value in schema.items()}
+    properties = strict.get("properties")
+    if isinstance(properties, dict):
+        strict["properties"] = {
+            key: _with_no_additional_properties(value)
+            for key, value in properties.items()
+        }
+    if strict.get("type") == "object" or "properties" in strict or "required" in strict:
+        strict.setdefault("type", "object")
+        strict.setdefault("properties", {})
+        strict.setdefault("required", [])
+        strict["additionalProperties"] = False
+    return strict
 
 
 def sanitize_provider_tool_schema(schema: Dict[str, Any]) -> Dict[str, Any]:

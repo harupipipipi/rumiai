@@ -25,19 +25,25 @@ from ecosystem.defaultspack.domain.ai_client.model_capability_schema import (
 from ecosystem.defaultspack.domain.ai_client.model_metadata_schema import context_window_value
 
 
-def list_provider_catalog() -> List[Dict[str, Any]]:
-    return [_with_legacy_provider_fields(provider) for provider in get_provider_catalog()]
+def list_provider_catalog(*, include_oauth_metadata: bool = True) -> List[Dict[str, Any]]:
+    return [
+        _with_legacy_provider_fields(provider)
+        for provider in get_provider_catalog(include_oauth_metadata=include_oauth_metadata)
+    ]
 
 
-def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
-    models = get_all_known_models()
+def list_model_catalog(provider: str = "", *, include_oauth_metadata: bool = False) -> List[Dict[str, Any]]:
+    models = get_all_known_models(include_oauth_metadata=include_oauth_metadata)
     if provider:
         models = [model for model in models if model.get("provider_id") == provider or model.get("provider") == provider]
     return [_with_legacy_model_fields(model) for model in models]
 
 
-def list_profile_catalog() -> List[Dict[str, Any]]:
-    return [_with_legacy_profile_fields(profile) for profile in build_profile_catalog()]
+def list_profile_catalog(*, include_oauth_metadata: bool = False) -> List[Dict[str, Any]]:
+    return [
+        _with_legacy_profile_fields(profile)
+        for profile in build_profile_catalog(include_oauth_metadata=include_oauth_metadata)
+    ]
 
 
 def validate_catalog_coverage() -> List[Dict[str, Any]]:

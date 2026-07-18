@@ -34,7 +34,7 @@
         "response_format": true,
         "tool_choice": true
       },
-      "context_window": 131072,
+      "context_window": 65536,
       "thinking": {
         "supported": true,
         "levels": [
@@ -63,6 +63,15 @@
       "metadata": {
         "service_tier_supported": true,
         "owned_by": "OpenAI",
+        "rate_limits": {
+          "requests_per_minute": 5,
+          "requests_per_hour": 150,
+          "requests_per_day": 2400,
+          "tokens_per_minute": 30000,
+          "tokens_per_hour": 1000000,
+          "tokens_per_day": 1000000,
+          "source": "cerebras_dashboard_2026-07-01"
+        },
         "request_example": {
           "max_completion_tokens": 32768,
           "temperature": 1,
@@ -108,7 +117,7 @@
         "response_format": true,
         "tool_choice": true
       },
-      "context_window": 131072,
+      "context_window": 64000,
       "thinking": {
         "supported": true,
         "levels": [
@@ -133,11 +142,103 @@
       "metadata": {
         "service_tier_supported": true,
         "owned_by": "Z.ai",
-        "preview": true
+        "preview": true,
+        "rate_limits": {
+          "requests_per_minute": 5,
+          "requests_per_hour": 150,
+          "requests_per_day": 2400,
+          "tokens_per_minute": 30000,
+          "tokens_per_hour": 1000000,
+          "tokens_per_day": 1000000,
+          "source": "cerebras_dashboard_2026-07-01"
+        }
       },
       "pricing": {
         "prompt": "0.00000225",
         "completion": "0.00000275"
+      }
+    },
+    {
+      "id": "cerebras/gemma-4-31b",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cerebras",
+      "model_id": "gemma-4-31b",
+      "display_name": "Gemma 4 31B via Cerebras",
+      "type": "chat",
+      "enabled": true,
+      "priority": 3,
+      "routing": {
+        "default_for": [
+          "vision"
+        ]
+      },
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": true,
+        "tool_calling": true,
+        "json_schema": true,
+        "structured_output": true,
+        "parallel_tool_calls": false,
+        "image_input": true,
+        "audio_input": false
+      },
+      "request_features": {
+        "json_mode": true,
+        "response_format": true,
+        "tool_choice": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 40000,
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "none",
+          "medium"
+        ],
+        "default_level": "none",
+        "provider_mapping": {
+          "none": {},
+          "medium": {
+            "reasoning_effort": "medium"
+          }
+        }
+      },
+      "metadata": {
+        "service_tier_supported": true,
+        "owned_by": "Cerebras",
+        "rate_limits": {
+          "requests_per_minute": 5,
+          "requests_per_hour": 150,
+          "requests_per_day": 2400,
+          "tokens_per_minute": 30000,
+          "tokens_per_hour": 1000000,
+          "tokens_per_day": 1000000,
+          "source": "cerebras_dashboard_2026-07-01"
+        },
+        "image_input": {
+          "supported_mime_types": ["image/png", "image/jpeg"],
+          "max_images_per_request": 5,
+          "max_total_payload_bytes": 10485760,
+          "external_image_urls_supported": false
+        },
+        "request_defaults": {
+          "reasoning_effort": "none",
+          "temperature": 1,
+          "top_p": 0.95
+        },
+        "tool_calling": {
+          "transport": "openai_chat_completions",
+          "arguments_format": "json_string",
+          "strict_function_tools": true,
+          "parallel_tool_calls": false
+        }
+      },
+      "pricing": {
+        "prompt": "0.00000099",
+        "completion": "0.00000149"
       }
     },
     {
@@ -149,7 +250,7 @@
       "display_name": "Qwen 3 235B Instruct via Cerebras",
       "type": "chat",
       "enabled": true,
-      "priority": 3,
+      "priority": 4,
       "routing": {
         "default_for": [
           "general"
@@ -192,7 +293,7 @@
       "display_name": "Llama 3.1 8B via Cerebras",
       "type": "chat",
       "enabled": true,
-      "priority": 4,
+      "priority": 5,
       "routing": {
         "speed_tier": "fast"
       },

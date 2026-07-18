@@ -63,6 +63,29 @@ def test_search_models_matches_multi_word_queries_across_model_separators():
     assert [item["profile_id"] for item in result["models"]] == ["gitlawb-opengateway/mimo-v2-omni"]
 
 
+def test_search_models_includes_vision_models_and_compact_queries_by_default():
+    from domain.ai_client.model_search import models_for_group, search_models
+
+    profiles = [
+        _profile(
+            "cerebras/gemma-4-31b",
+            display_name="Gemma 4 31B via Cerebras",
+            provider_display_name="Cerebras",
+            type="vision",
+            supports_vision=True,
+            supports_image_input=True,
+            supports_tool_calling=True,
+        ),
+    ]
+
+    result = search_models({"query": "gemma4", "max_results": 5}, profiles=profiles)
+    group_models = models_for_group("default", {"model_groups": {"default": {"allowed_models": []}}}, profiles=profiles)
+
+    assert [item["profile_id"] for item in result["models"]] == ["cerebras/gemma-4-31b"]
+    assert "vision" in result["filters_applied"]["type"]
+    assert [item["profile_id"] for item in group_models] == ["cerebras/gemma-4-31b"]
+
+
 def test_recommend_model_reports_reason_codes():
     from domain.ai_client.model_search import recommend_model
 
@@ -73,3 +96,104 @@ def test_recommend_model_reports_reason_codes():
 
     assert result["selected_model"]["profile_id"] == "google/gemini"
     assert "requires_vision" in result["reason_codes"]
+
+
+def test_get_model_capabilities_reuses_profile_catalog(monkeypatch):
+    from domain.ai_client import model_search
+    from domain.ai_client import model_runtime_settings
+    from ecosystem.defaultspack.backend.ai_client import provider_catalog
+
+    calls = {"profiles": 0, "models": 0}
+
+    def fake_list_profile_catalog():
+        calls["profiles"] += 1
+        return [
+            _profile(
+                "cerebras/gemma-4-31b",
+                supports_vision=True,
+                supports_tool_calling=True,
+                supports_thinking=False,
+            ),
+            _profile("openai/text-embedding-3-small", type="embedding"),
+        ]
+
+    def fail_list_model_catalog():
+        calls["models"] += 1
+        raise AssertionError("embedding profiles already came from the profile catalog")
+
+    class EmptyRuntimeSettingsService:
+        def get_settings(self):
+            return {}
+
+        def runtime_defined_profiles(self, settings):
+            return []
+
+    model_search.clear_profile_catalog_cache()
+    monkeypatch.setattr(provider_catalog, "list_profile_catalog", fake_list_profile_catalog)
+    monkeypatch.setattr(provider_catalog, "list_model_catalog", fail_list_model_catalog)
+    monkeypatch.setattr(model_runtime_settings, "ModelRuntimeSettingsService", EmptyRuntimeSettingsService)
+
+    first = model_search.get_model_capabilities("cerebras/gemma-4-31b")
+    second = model_search.get_model_capabilities("cerebras/gemma-4-31b")
+
+    assert first["profile_id"] == "cerebras/gemma-4-31b"
+    assert second["profile_id"] == "cerebras/gemma-4-31b"
+    assert calls == {"profiles": 1, "models": 0}
+
+    model_search.clear_profile_catalog_cache()
+
+
+def test_profile_catalog_cache_key_does_not_walk_secrets_dir(monkeypatch, tmp_path):
+    from domain.ai_client import model_search
+    from domain.ai_client import model_runtime_settings
+    from ecosystem.defaultspack.backend.ai_client import provider_catalog
+
+    secrets_dir = tmp_path / "secrets"
+    nested_dir = secrets_dir / "nested" / "deep"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "unrelated.json").write_text("{}", encoding="utf-8")
+    (secrets_dir / "provider_api_keys.json").write_text('{"cerebras":"secret"}', encoding="utf-8")
+
+    calls = {"profiles": 0}
+
+    def fake_list_profile_catalog():
+        calls["profiles"] += 1
+        return [
+            _profile(
+                "cerebras/gemma-4-31b",
+                supports_vision=True,
+                supports_tool_calling=True,
+                supports_thinking=False,
+            ),
+            _profile("openai/text-embedding-3-small", type="embedding"),
+        ]
+
+    class EmptyRuntimeSettingsService:
+        def get_settings(self):
+            return {}
+
+        def runtime_defined_profiles(self, settings):
+            return []
+
+    def fail_rglob(self, pattern):
+        raise AssertionError("profile catalog cache key must not recursively walk secrets dir")
+
+    model_search.clear_profile_catalog_cache()
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(secrets_dir))
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+    monkeypatch.setattr(provider_catalog, "list_profile_catalog", fake_list_profile_catalog)
+    monkeypatch.setattr(
+        provider_catalog,
+        "list_model_catalog",
+        lambda: (_ for _ in ()).throw(AssertionError("embedding profile should come from profile catalog")),
+    )
+    monkeypatch.setattr(model_runtime_settings, "ModelRuntimeSettingsService", EmptyRuntimeSettingsService)
+
+    first = model_search.get_model_capabilities("cerebras/gemma-4-31b")
+    second = model_search.get_model_capabilities("cerebras/gemma-4-31b")
+
+    assert first["profile_id"] == "cerebras/gemma-4-31b"
+    assert second["profile_id"] == "cerebras/gemma-4-31b"
+    assert calls == {"profiles": 1}
+
+    model_search.clear_profile_catalog_cache()

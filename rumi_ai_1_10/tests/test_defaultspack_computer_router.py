@@ -49,6 +49,55 @@ def _computer_router_module():
     return computer_router
 
 
+def test_cerebras_text_call_aliases_google_chrome_open_url_to_computer_use() -> None:
+    from blocks.chat.send import _tool_use_blocks
+
+    response = {
+        "content": [
+            {
+                "type": "text",
+                "text": "call:google_chrome:open_url{url:https://www.google.com}",
+            }
+        ],
+        "finish_reason": "stop",
+    }
+
+    [block] = _tool_use_blocks(response, {"computer_use"})
+
+    assert block["name"] == "computer_use"
+    assert block["input"] == {"url": "https://www.google.com", "action": "open_url"}
+
+
+def test_cerebras_text_call_aliases_computer_namespace_to_computer_use() -> None:
+    from blocks.chat.send import _tool_use_blocks
+
+    response = {
+        "content": [{"type": "text", "text": "call:computer.apps{}"}],
+        "finish_reason": "stop",
+    }
+
+    [block] = _tool_use_blocks(response, {"computer_use"})
+
+    assert block["name"] == "computer_use"
+    assert block["input"] == {"action": "apps"}
+
+
+def test_text_call_parser_rejects_embedded_natural_language() -> None:
+    from blocks.chat.send import _tool_use_blocks
+
+    response = {
+        "content": [
+            {
+                "type": "text",
+                "text": "I will open it now: call:google_chrome:open_url{url:https://www.google.com}",
+            }
+        ],
+        "finish_reason": "stop",
+    }
+
+    assert _tool_use_blocks(response, {"computer_use"}) == []
+
+
 def test_run_computer_action_wraps_controller_approval_with_request_id(monkeypatch) -> None:
     from domain.safety import approval
 
@@ -915,6 +964,34 @@ def test_user_requested_computer_preflight_rejects_empty_show_app_without_approv
     assert result["rejected_by_tool_validation"] is True
     assert "app, application, or name" in result["result"]
     assert approval.list_approval_requests() == []
+
+
+def test_cerebras_strict_computer_payload_schema_keeps_required_payload_fields() -> None:
+    from domain.tool.provider_adapter import adapt_rumi_tools_to_provider_tools
+    from domain.tool.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    provider_tools, _, _ = adapt_rumi_tools_to_provider_tools(
+        [
+            registry.get("browser_computer"),
+            registry.get("computer_use"),
+        ],
+        {"quirks": {"strict_function_tools": True}},
+    )
+
+    by_name = {
+        item["function"]["name"]: item["function"]["parameters"]["properties"]
+        for item in provider_tools
+    }
+    browser_payload = by_name["browser_computer"]["payload"]
+    assert browser_payload["additionalProperties"] is False
+    assert {"url", "app", "application", "name", "text", "key", "key_combo", "normalized_x", "normalized_y"} <= set(
+        browser_payload["properties"]
+    )
+    assert "payload" not in by_name["computer_use"]
+    assert {"url", "app", "application", "name", "text", "key", "key_combo", "normalized_x", "normalized_y"} <= set(
+        by_name["computer_use"]
+    )
 
 
 def test_user_requested_computer_preflight_stores_replayable_atlas_show_app() -> None:

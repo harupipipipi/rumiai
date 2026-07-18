@@ -91,6 +91,7 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "curated_models": [
             _chat("cerebras", "gpt-oss-120b", "GPT OSS 120B"),
             _chat("cerebras", "zai-glm-4.7", "ZAI GLM 4.7"),
+            _chat("cerebras", "gemma-4-31b", "Gemma 4 31B"),
             _chat("cerebras", "qwen-3-235b-a22b-instruct-2507", "Qwen 3 235B Instruct"),
             _chat("cerebras", "llama3.1-8b", "Llama 3.1 8B"),
         ],

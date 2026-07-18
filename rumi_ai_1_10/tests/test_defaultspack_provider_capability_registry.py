@@ -143,9 +143,19 @@ def test_provider_capability_registry_cerebras_quirks_and_google_native():
     from domain.ai_client.capabilities.registry import default_registry
 
     cerebras = default_registry().for_model("cerebras/gpt-oss-120b")
+    cerebras_gemma = default_registry().for_model(
+        "cerebras/gemma-4-31b",
+        {
+            "provider_id": "cerebras",
+            "capabilities": {"vision": True, "tool_calls": True, "reasoning": True},
+        },
+    )
     google = default_registry().for_model("google/gemma-4-31b-it")
 
     assert cerebras.quirks["max_tokens_name"] == "max_completion_tokens"
+    assert cerebras.quirks["strict_function_tools"] is True
+    assert cerebras_gemma.supports_vision is True
+    assert "image_url" in cerebras_gemma.supported_content_blocks
     assert google.api_family == "google_native"
 
 

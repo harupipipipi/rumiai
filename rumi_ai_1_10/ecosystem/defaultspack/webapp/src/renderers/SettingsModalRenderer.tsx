@@ -5,14 +5,11 @@ import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil,
 import { cn } from "../lib/cn";
 import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
-import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
-import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { t } from "../lib/i18n";
-import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
-import { settingsFieldSearchText } from "../lib/settingsSearch";
+import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
@@ -552,13 +549,20 @@ function normalizeModelSearchText(value: string): string {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+function compactModelSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
 function modelOptionMatchesSearch(option: SettingsModelOption, query: string): boolean {
   const rawText = modelOptionSearchText(option);
   const normalizedText = normalizeModelSearchText(rawText);
+  const compactText = compactModelSearchText(rawText);
   const rawQuery = query.trim().toLowerCase();
   const normalizedQuery = normalizeModelSearchText(rawQuery);
+  const compactQuery = compactModelSearchText(rawQuery);
   if (!normalizedQuery) return true;
   if (rawText.includes(rawQuery) || normalizedText.includes(normalizedQuery)) return true;
+  if (compactQuery && compactText.includes(compactQuery)) return true;
   return normalizedQuery.split(/\s+/).every((token) => normalizedText.includes(token) || rawText.includes(token));
 }
 
@@ -2008,15 +2012,6 @@ function SettingsField({
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [apiSaveError, setApiSaveError] = useState("");
   const [apiAvailability, setApiAvailability] = useState<ModelAvailabilityAfterKeySave | null>(null);
-  const [credentialTransfer, setCredentialTransfer] = useState<{
-    providerId: string;
-    providerLabel?: string;
-    apiKey?: string;
-    apiId?: string;
-    baseUrl?: string;
-    defaultModel?: string;
-    refreshOnClose?: boolean;
-  } | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
   const [tokenKind, setTokenKind] = useState("channel_access_token");
@@ -2035,7 +2030,6 @@ function SettingsField({
   const preferredRouteModel = field.type === "model_api_routes" ? String(sectionValues?.preferred_model ?? "").trim() : "";
   const [routeModel, setRouteModel] = useState(() => preferredRouteModel || String(routeOptions[0]?.value ?? ""));
   const [routeModelTouched, setRouteModelTouched] = useState(false);
-  const credentialTransferEnabled = allowCleartextMobileQr();
   useEffect(() => {
     if (field.type !== "model_api_routes") return;
     if (!routeOptions.length) {
@@ -2301,26 +2295,6 @@ function SettingsField({
             candidate_models: [],
             reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
           });
-          const savedProviderId = apiProvider;
-          const savedApiId = apiName;
-          const savedBaseUrl = apiBaseUrl.trim();
-          const savedDefaultModel = apiDefaultModel.trim();
-          if (credentialTransferEnabled) {
-            setCredentialTransfer({
-              providerId: savedProviderId,
-              providerLabel: selectedProviderOption?.label,
-              apiKey: apiSecret,
-              apiId: savedApiId,
-              baseUrl: savedBaseUrl || undefined,
-              defaultModel: savedDefaultModel || undefined,
-              refreshOnClose: true,
-            });
-          } else {
-            setCredentialTransfer(null);
-            onChange(sectionId, field.id, {
-              action: "oauth_refresh",
-            });
-          }
           setApiSecret("");
           setApiBaseUrl("");
           setApiAllowedModels("");
@@ -2328,6 +2302,9 @@ function SettingsField({
           setApiQuotaLabel("");
           setApiNotes("");
           setApiSaveState("saved");
+          onChange(sectionId, field.id, {
+            action: "oauth_refresh",
+          });
         } catch (saveError) {
           setApiSaveState("idle");
           setApiSaveError(saveError instanceof Error ? saveError.message : "API key save failed.");
@@ -3063,26 +3040,6 @@ function SettingsField({
         {control}
       </div>
       {field.help && <p className="text-[11px] text-zinc-500">{field.help}</p>}
-      {credentialTransferEnabled && credentialTransfer && (
-        <CredentialTransferModal
-          enabled={credentialTransferEnabled}
-          providerId={credentialTransfer.providerId}
-          providerLabel={credentialTransfer.providerLabel}
-          apiKey={credentialTransfer.apiKey}
-          apiId={credentialTransfer.apiId}
-          baseUrl={credentialTransfer.baseUrl}
-          defaultModel={credentialTransfer.defaultModel}
-          onClose={() => {
-            const shouldRefresh = credentialTransfer.refreshOnClose;
-            setCredentialTransfer(null);
-            if (shouldRefresh) {
-              onChange(sectionId, field.id, {
-                action: "oauth_refresh",
-              });
-            }
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -3109,8 +3066,6 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
-  const kernelBaseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8765` : "http://127.0.0.1:8765";
-  const cloudflarePagesUrl = String(settingsValues.apps?.cloudflare_pages_url ?? "").trim();
   const [activeSectionId, setActiveSectionId] = useState<ControlCenterSection["id"]>(
     () => mapSettingsSectionId(requestedSectionId) ?? "quick_setup",
   );
@@ -4142,12 +4097,6 @@ export function SettingsModalRenderer({
                     )}
                     {activeSection.id === "computer_automation" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
-                    )}
-                    {activeSection.id === "accounts_connections" && (
-                      <AppsSettingsPanel
-                        kernelBaseUrl={kernelBaseUrl}
-                        cloudflarePagesUrl={cloudflarePagesUrl}
-                      />
                     )}
                     <div className="grid gap-4 lg:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}

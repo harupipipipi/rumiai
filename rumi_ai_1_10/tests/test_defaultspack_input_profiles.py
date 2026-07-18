@@ -68,8 +68,8 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     envelope = InputProfileEngine(profile).to_envelope(event)
 
     assert envelope.input == "open chrome"
-    assert envelope.chat["model"] == "google/gemma-4-31b-it"
-    assert envelope.params["model"] == "google/gemma-4-31b-it"
+    assert envelope.chat["model"] == "cerebras/gemma-4-31b"
+    assert envelope.params["model"] == "cerebras/gemma-4-31b"
     assert envelope.params["thinking_level"] == "high"
     assert envelope.params["request_timeout"] == 45
     assert envelope.params["line_reply_deadline_seconds"] == 60
@@ -78,3 +78,8 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     assert envelope.tools == ["computer_use", "browser_computer", "web_search"]
     assert profile.spec["policy"]["max_tool_calls"] == 30
     assert profile.spec["response_prompt"]["enabled"] is True
+    assert "run_computer_use" in profile.spec["response_prompt"]["allowed_actions"]
+    assert profile.spec["response_prompt"]["tools"]["computer_use"] == {
+        "enabled": True,
+        "requires_approval": True,
+    }

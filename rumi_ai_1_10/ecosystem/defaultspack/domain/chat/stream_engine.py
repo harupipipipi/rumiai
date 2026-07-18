@@ -2252,7 +2252,7 @@ class ChatRunEngine:
                 transcript="".join(self._thinking_transcript_parts),
             )
             fallback_tool_uses = (
-                _tool_use_blocks(fallback_response)
+                _tool_use_blocks(fallback_response, prepared.connected_tool_names)
                 if isinstance(fallback_response, dict)
                 else []
             )
@@ -2279,7 +2279,7 @@ class ChatRunEngine:
                 "metadata": {},
             }
         if not tool_uses:
-            tool_uses = _tool_use_blocks(response)
+            tool_uses = _tool_use_blocks(response, prepared.connected_tool_names)
         return response, tool_uses
 
     def _model_turn_via_complete(
@@ -2289,7 +2289,7 @@ class ChatRunEngine:
         draft: _AssistantDraft | None,
     ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
         response = self._complete_turn(prepared, messages)
-        tool_uses = _tool_use_blocks(response)
+        tool_uses = _tool_use_blocks(response, prepared.connected_tool_names)
         if not tool_uses and self._stream_mode:
             text = self._response_text(response)
             if text:
@@ -2314,7 +2314,7 @@ class ChatRunEngine:
             self._raise_if_cancelled()
             sealed = service.prepare_messages(run_id=self._run_id or prepared.request_id, messages=working_messages)
             response = self._complete_turn(prepared, sealed.messages)
-            tool_uses = _tool_use_blocks(response)
+            tool_uses = _tool_use_blocks(response, prepared.connected_tool_names)
             if tool_uses:
                 return response, tool_uses
             check = service.verify_and_strip(

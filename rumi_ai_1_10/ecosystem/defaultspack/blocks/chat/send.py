@@ -33,6 +33,7 @@ from domain.chat.loop_guard import (
     explicit_param_max_tool_calls,
     loop_guard_config_from_context,
 )
+from domain.chat.text_tool_call_parser import text_tool_calls_from_response
 
 
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
@@ -705,15 +706,18 @@ def _computer_use_prefocus_is_preapproved(context):
     return bool(tool_server_approval_context_is_internal(context) or internal_tool_decision_allows(context))
 
 
-def _tool_use_blocks(response):
+def _tool_use_blocks(response, connected_names=None):
     blocks = response.get("content", []) if isinstance(response, dict) else []
     if not isinstance(blocks, list):
-        return []
-    return [
+        blocks = []
+    tool_uses = [
         block
         for block in blocks
         if isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
     ]
+    if tool_uses:
+        return tool_uses
+    return text_tool_calls_from_response(response if isinstance(response, dict) else None, connected_names)
 
 
 def _response_text(response):
@@ -1586,7 +1590,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 params,
                 events,
             )
-        tool_uses = _tool_use_blocks(response)
+        tool_uses = _tool_use_blocks(response, connected_names)
         if not tool_uses and not _response_text(response).strip():
             retry_params = _params_without_thinking(params)
             if retry_params != params:
@@ -1635,13 +1639,13 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                         retry_response = None
                 _append_ai_debug_response(retry_debug_path, retry_response)
                 if isinstance(retry_response, dict) and (
-                    _response_text(retry_response).strip() or _tool_use_blocks(retry_response)
+                    _response_text(retry_response).strip() or _tool_use_blocks(retry_response, connected_names)
                 ):
                     retry_metadata = dict(retry_response.get("metadata") or {})
                     retry_metadata["recovered_from_empty_response"] = True
                     retry_response["metadata"] = retry_metadata
                     response = retry_response
-                    tool_uses = _tool_use_blocks(response)
+                    tool_uses = _tool_use_blocks(response, connected_names)
         planned_tool_executions = len(tool_logs) + len(tool_uses or [])
         if tool_uses and limit is not None and planned_tool_executions > limit:
             response = {
@@ -1915,7 +1919,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         params,
         events,
     )
-    if not _tool_use_blocks(response) and not _response_text(response).strip():
+    if not _tool_use_blocks(response, connected_names) and not _response_text(response).strip():
         content = response.get("content")
         if not isinstance(content, list):
             content = []

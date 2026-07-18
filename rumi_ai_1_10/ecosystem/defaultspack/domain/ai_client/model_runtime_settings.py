@@ -30,7 +30,7 @@ DEFAULT_MODEL = "stub/default"
 LEGACY_CLOUD_DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
 DEFAULT_THINKING_LEVEL = "medium"
 DEFAULT_DEEPTHINK_ENABLED = False
-CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
+CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"}
 
 
 class ModelRuntimeSettingsService:

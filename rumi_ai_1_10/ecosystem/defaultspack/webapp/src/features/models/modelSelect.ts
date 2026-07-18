@@ -137,13 +137,20 @@ export function normalizeModelSearchText(value: string): string {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+export function compactModelSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
 export function modelSelectOptionMatchesSearch(option: ModelSelectOption, query: string): boolean {
   const rawText = modelSelectOptionSearchText(option);
   const normalizedText = normalizeModelSearchText(rawText);
+  const compactText = compactModelSearchText(rawText);
   const rawQuery = query.trim().toLowerCase();
   const normalizedQuery = normalizeModelSearchText(rawQuery);
+  const compactQuery = compactModelSearchText(rawQuery);
   if (!normalizedQuery) return true;
   if (rawText.includes(rawQuery) || normalizedText.includes(normalizedQuery)) return true;
+  if (compactQuery && compactText.includes(compactQuery)) return true;
   return normalizedQuery.split(/\s+/).every((token) => normalizedText.includes(token) || rawText.includes(token));
 }
 
