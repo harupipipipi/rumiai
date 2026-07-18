@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import http.server
 import importlib.util
 import io
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -279,33 +282,84 @@ def test_smoke_uses_ui_approval_endpoints_and_hidden_followups(tmp_path):
     assert lines[-1]["history_path"].endswith("/conversations/chat-1/history.json")
 
 
-def test_load_smoke_configuration_reads_token_files_without_exposing_values(tmp_path, monkeypatch):
+def _owned_smoke_launch_fixture(tmp_path, monkeypatch):
     run_root = tmp_path / "run-root"
     latest_path = run_root / "latest.json"
-    api_token_path = tmp_path / ".desktop_api_token"
-    browser_token_path = tmp_path / ".browser_token"
+    run_dir = run_root / "launch-owned"
+    run_dir.mkdir(parents=True)
+    api_token_path = run_dir / ".desktop_api_token"
+    browser_token_path = run_dir / ".authority_browser_test_token"
     api_token_path.write_text("api-token-from-file", encoding="utf-8")
     browser_token_path.write_text("browser-token-from-file", encoding="utf-8")
-    run_root.mkdir(parents=True)
-    latest_path.write_text(
-        json.dumps(
-            {
-                "port": 8766,
-                "token_file": str(api_token_path),
-                "browser_approval_token_file": str(browser_token_path),
-            }
-        ),
-        encoding="utf-8",
-    )
+    api_token_path.chmod(0o600)
+    browser_token_path.chmod(0o600)
+    artifact = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": "launch-owned",
+        "run_dir": str(run_dir),
+        "manifest_path": str(run_dir / "manifest.json"),
+        "pid": 7313,
+        "process_start_marker": "owned-start-marker",
+        "port": 18799,
+        "token_file": str(api_token_path),
+        "browser_approval_token_file": str(browser_token_path),
+        "user_data": str(run_dir / "defaultspack_state" / "user_data"),
+        "chat_store": str(run_dir / "defaultspack_state" / "chat" / "conversations.json"),
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(artifact), encoding="utf-8")
+    latest_path.write_text(json.dumps(artifact), encoding="utf-8")
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
     monkeypatch.setattr(debug, "LATEST_JSON", latest_path)
+    monkeypatch.setattr(debug, "process_start_marker", lambda _pid: "owned-start-marker")
+    monkeypatch.setattr(debug, "pid_is_running", lambda _pid: True)
+    monkeypatch.setattr(debug, "lsof_listener", lambda _port: {"pid": "7313"})
+    return artifact
 
-    configuration = debug.load_smoke_configuration(8799)
 
-    assert configuration["base_url"] == "http://127.0.0.1:8799"
+def test_load_smoke_configuration_reads_only_owned_manifest_tokens(
+    tmp_path, monkeypatch
+):
+    artifact = _owned_smoke_launch_fixture(tmp_path, monkeypatch)
+
+    configuration = debug.load_smoke_configuration(artifact["port"])
+
+    assert configuration["base_url"] == "http://127.0.0.1:18799"
     assert configuration["api_token"] == "api-token-from-file"
     assert configuration["browser_approval_token"] == "browser-token-from-file"
     assert "api_token" not in configuration["artifact"]
     assert "browser_approval_token" not in configuration["artifact"]
+
+
+def test_load_smoke_configuration_rejects_foreign_port_before_sending_tokens(
+    tmp_path, monkeypatch
+):
+    _owned_smoke_launch_fixture(tmp_path, monkeypatch)
+
+    with pytest.raises(debug.SmokeRunnerError, match="does not match"):
+        debug.load_smoke_configuration(18800)
+
+
+def test_load_smoke_configuration_rejects_foreign_listener(tmp_path, monkeypatch):
+    artifact = _owned_smoke_launch_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(debug, "lsof_listener", lambda _port: {"pid": "9999"})
+
+    with pytest.raises(debug.SmokeRunnerError, match="active owned listener"):
+        debug.load_smoke_configuration(artifact["port"])
+
+
+def test_load_smoke_configuration_rejects_manifest_token_path_tampering(
+    tmp_path, monkeypatch
+):
+    artifact = _owned_smoke_launch_fixture(tmp_path, monkeypatch)
+    external = tmp_path / "foreign-token"
+    external.write_text("foreign-secret-canary", encoding="utf-8")
+    external.chmod(0o600)
+    artifact["token_file"] = str(external)
+    Path(artifact["manifest_path"]).write_text(json.dumps(artifact), encoding="utf-8")
+    debug.LATEST_JSON.write_text(json.dumps(artifact), encoding="utf-8")
+
+    with pytest.raises(debug.SmokeRunnerError, match="invalid local API token-file"):
+        debug.load_smoke_configuration(artifact["port"])
 
 
 def test_reporter_redacts_nested_text_tokens_and_sensitive_url_query():
@@ -1129,6 +1183,728 @@ def test_isolated_smoke_provider_requires_parent_cerebras_env_before_start(monke
     assert "CEREBRAS_BASE_URL" not in child_env
 
 
+def test_mimo_profile_forwards_only_fixed_key_and_seeds_fixed_model(tmp_path):
+    key = "zen-key-canary-that-must-stay-ephemeral"
+    parent = {
+        "OPENCODE_ZEN_API_KEY": key,
+        "OPENCODE_ZEN_BASE_URL": "https://attacker.invalid/v1",
+        "CEREBRAS_API_KEY": "unselected-provider-key",
+        "CEREBRAS_BASE_URL": "https://also.invalid/v1",
+        "OPENAI_API_KEY": "openai-canary",
+        "OPENAI_COMPATIBLE_BASE_URL": "https://openai-compatible.invalid",
+        "ANTHROPIC_API_KEY": "anthropic-canary",
+        "GOOGLE_API_KEY": "google-canary",
+        "GEMINI_API_KEY": "gemini-canary",
+        "OPENCODE_GO_API_KEY": "go-canary",
+        "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN": "cloudflare-canary",
+        "PATH": "/safe/runtime/bin",
+    }
+    child = dict(parent)
+
+    preflight = debug.isolated_smoke_provider_preflight(
+        parent, profile_name=debug.MIMO_CHAT_PROFILE
+    )
+    debug.apply_isolated_smoke_provider_env(
+        child,
+        parent_env=parent,
+        require_credential=True,
+        profile_name=debug.MIMO_CHAT_PROFILE,
+    )
+    debug.seed_isolated_smoke_model_selection(
+        tmp_path, profile_name=debug.MIMO_CHAT_PROFILE
+    )
+
+    assert preflight == {
+        "provider_id": "opencode-zen",
+        "model": "opencode-zen/mimo-v2.5-free",
+        "credential_present": True,
+        "credential_source": "inherited_env",
+        "credential_persisted": False,
+        "allow_custom_base_url": False,
+    }
+    assert child["OPENCODE_ZEN_API_KEY"] == key
+    assert "OPENCODE_ZEN_BASE_URL" not in child
+    assert "CEREBRAS_API_KEY" not in child
+    assert "CEREBRAS_BASE_URL" not in child
+    assert "OPENAI_API_KEY" not in child
+    assert "OPENAI_COMPATIBLE_BASE_URL" not in child
+    assert "ANTHROPIC_API_KEY" not in child
+    assert "GOOGLE_API_KEY" not in child
+    assert "GEMINI_API_KEY" not in child
+    assert "OPENCODE_GO_API_KEY" not in child
+    assert "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN" not in child
+    assert child["PATH"] == "/safe/runtime/bin"
+    settings = json.loads((tmp_path / "frontend_settings.json").read_text())
+    assert settings["models"]["preferred_model"] == "opencode-zen/mimo-v2.5-free"
+    assert key not in (tmp_path / "frontend_settings.json").read_text()
+
+
+def test_isolated_smoke_strips_complete_canonical_provider_environment():
+    selected_key = "selected-zen-key"
+    # Code-owned mirror of every provider credential and endpoint env declared by
+    # the bundled provider catalog, curated metadata, and provider manifests.  A
+    # new catalog env must be added to the harness isolation contract explicitly.
+    canonical_provider_env_names = {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "AVIAN_API_KEY",
+        "AVIAN_BASE_URL",
+        "CEREBRAS_API_KEY",
+        "CEREBRAS_BASE_URL",
+        "DEEPINFRA_API_KEY",
+        "DEEPINFRA_BASE_URL",
+        "DEEPSEEK_API_KEY",
+        "DEEPSEEK_BASE_URL",
+        "FIREWORKS_API_KEY",
+        "FIREWORKS_BASE_URL",
+        "FRIENDLI_API_KEY",
+        "FRIENDLI_BASE_URL",
+        "GEMINI_API_KEY",
+        "GENSPARK_API_KEY",
+        "GENSPARK_LLM_BASE_URL",
+        "GITLAWB_OPENGATEWAY_API_KEY",
+        "GITLAWB_OPENGATEWAY_BASE_URL",
+        "GLM_API_KEY",
+        "GLM_BASE_URL",
+        "GOOGLE_API_KEY",
+        "GOOGLE_BASE_URL",
+        "GROQ_API_KEY",
+        "GROQ_BASE_URL",
+        "HYPERBOLIC_API_KEY",
+        "HYPERBOLIC_BASE_URL",
+        "INFERENCENET_API_KEY",
+        "INFERENCENET_BASE_URL",
+        "INFERENCE_NET_API_KEY",
+        "INFERENCE_NET_BASE_URL",
+        "LLAMACPP_API_KEY",
+        "LLAMACPP_BASE_URL",
+        "LMSTUDIO_API_KEY",
+        "LMSTUDIO_BASE_URL",
+        "LONGCAT_API_KEY",
+        "LONGCAT_BASE_URL",
+        "MIMO_API_KEY",
+        "MISTRAL_API_KEY",
+        "MISTRAL_BASE_URL",
+        "MOONSHOT_API_KEY",
+        "MOONSHOT_BASE_URL",
+        "NEBIUS_API_KEY",
+        "NEBIUS_BASE_URL",
+        "NGC_API_KEY",
+        "NVIDIA_API_KEY",
+        "NVIDIA_BASE_URL",
+        "NOVITA_API_KEY",
+        "NOVITA_BASE_URL",
+        "OLLAMA_API_KEY",
+        "OLLAMA_BASE_URL",
+        "OLLAMA_HOST",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_COMPATIBLE_BASE_URL",
+        "OPENCODE_GO_API_KEY",
+        "OPENCODE_GO_BASE_URL",
+        "OPENCODE_ZEN_API_KEY",
+        "OPENCODE_ZEN_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_BASE_URL",
+        "PERPLEXITY_API_KEY",
+        "PERPLEXITY_BASE_URL",
+        "SAMBANOVA_API_KEY",
+        "SAMBANOVA_BASE_URL",
+        "TOGETHER_API_KEY",
+        "TOGETHER_BASE_URL",
+        "UPSTAGE_API_KEY",
+        "UPSTAGE_BASE_URL",
+        "VLLM_API_KEY",
+        "VLLM_BASE_URL",
+        "XAI_API_KEY",
+        "XAI_BASE_URL",
+        "XIAOMI_MIMO_CN_API_KEY",
+        "XIAOMI_MIMO_CN_BASE_URL",
+        "XIAOMI_MIMO_GLOBAL_API_KEY",
+        "XIAOMI_MIMO_GLOBAL_BASE_URL",
+        "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_AMS_BASE_URL",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_CN_BASE_URL",
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL",
+    }
+    oauth_provider_env_names = {
+        "CF_API_TOKEN",
+        "CLOUDFLARE_API_TOKEN",
+        "RUMIOAUTH_CLOUDFLARE_ACCESS_TOKEN",
+        "RUMIOAUTH_CLOUDFLARE_CLIENT_CONFIG",
+        "RUMIOAUTH_CLOUDFLARE_ID_TOKEN",
+        "RUMIOAUTH_CLOUDFLARE_REFRESH_TOKEN",
+        "RUMIOAUTH_GOOGLE_ACCESS_TOKEN",
+        "RUMIOAUTH_GOOGLE_CLIENT_CONFIG",
+        "RUMIOAUTH_GOOGLE_ID_TOKEN",
+        "RUMIOAUTH_GOOGLE_REFRESH_TOKEN",
+        "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",
+        "RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN",
+        "RUMI_CLOUDFLARE_SANDBOX_API_KEY",
+    }
+    provider_env_names = canonical_provider_env_names | oauth_provider_env_names
+    parent = {name: f"secret-for-{name}" for name in provider_env_names}
+    parent["OPENCODE_ZEN_API_KEY"] = selected_key
+    child = dict(parent)
+    child.update(
+        {
+            "HOME": "/safe/home",
+            "LANG": "ja_JP.UTF-8",
+            "PATH": "/safe/bin",
+            "SSL_CERT_FILE": "/safe/cert.pem",
+            "RUMI_VIEWER_DEBUG_INSTANCE_ID": "debug-safe",
+        }
+    )
+
+    debug.apply_isolated_smoke_provider_env(
+        child,
+        parent_env=parent,
+        require_credential=True,
+        profile_name=debug.MIMO_CHAT_PROFILE,
+    )
+
+    assert child["OPENCODE_ZEN_API_KEY"] == selected_key
+    assert not (provider_env_names - {"OPENCODE_ZEN_API_KEY"}) & child.keys()
+    assert child["HOME"] == "/safe/home"
+    assert child["LANG"] == "ja_JP.UTF-8"
+    assert child["PATH"] == "/safe/bin"
+    assert child["SSL_CERT_FILE"] == "/safe/cert.pem"
+    assert child["RUMI_VIEWER_DEBUG_INSTANCE_ID"] == "debug-safe"
+
+
+@pytest.mark.parametrize(
+    "ambient_name",
+    [
+        "GENSPARK_FUTURE_ENDPOINT_OVERRIDE",
+        "INFERENCE_NET_FUTURE_API_KEY",
+        "INFERENCENET_FUTURE_API_KEY",
+        "LMSTUDIO_FUTURE_BASE_URL",
+        "XAI_FUTURE_ENDPOINT_OVERRIDE",
+    ],
+)
+def test_isolated_smoke_strips_future_values_in_canonical_provider_namespaces(
+    ambient_name,
+):
+    child = {
+        "OPENCODE_ZEN_API_KEY": "ambient-selected-key",
+        ambient_name: "ambient-provider-value",
+        "PATH": "/safe/bin",
+    }
+
+    debug.apply_isolated_smoke_provider_env(
+        child,
+        parent_env={"OPENCODE_ZEN_API_KEY": "selected-key"},
+        require_credential=True,
+        profile_name=debug.MIMO_CHAT_PROFILE,
+    )
+
+    assert ambient_name not in child
+    assert child == {
+        "OPENCODE_ZEN_API_KEY": "selected-key",
+        "PATH": "/safe/bin",
+        "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
+    }
+
+
+def test_unknown_smoke_provider_profile_is_rejected_without_forwarding():
+    child = {"OPENCODE_ZEN_API_KEY": "ambient"}
+    with pytest.raises(
+        debug.SmokeRunnerError, match="SMOKE_PROVIDER_PROFILE_NOT_ALLOWED"
+    ):
+        debug.apply_isolated_smoke_provider_env(
+            child,
+            parent_env={"ATTACKER_KEY": "secret"},
+            require_credential=True,
+            profile_name="attacker-profile",
+        )
+    assert child == {"OPENCODE_ZEN_API_KEY": "ambient"}
+
+
+def test_mimo_provider_launch_uses_complete_owned_debug_isolation(
+    tmp_path, monkeypatch
+):
+    run_root = tmp_path / "runs"
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "LATEST_JSON", run_root / "latest.json")
+    monkeypatch.setattr(
+        debug,
+        "load_desktop_app",
+        lambda: {"command": "python desktop_app.py", "env": {}},
+    )
+    monkeypatch.setattr(
+        debug,
+        "load_connection",
+        lambda *_args, **_kwargs: ({}, {"ok": False, "connection": {}}),
+    )
+    monkeypatch.setattr(debug, "port_is_open", lambda _port: False)
+    selected_ports = iter((18770, 18771))
+
+    class Reservation:
+        def __init__(self):
+            self.port = next(selected_ports)
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(
+        debug, "reserve_loopback_port", lambda **_kwargs: Reservation()
+    )
+    captured = {}
+
+    class Process:
+        pid = 7314
+        stdout = io.StringIO("")
+
+        def poll(self):
+            return None
+
+    process = Process()
+
+    def popen(_argv, **kwargs):
+        captured["env"] = dict(kwargs["env"])
+        return process
+
+    monkeypatch.setattr(debug.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        debug, "wait_for_owned_defaultspack_health", lambda *_args: True
+    )
+    monkeypatch.setattr(debug, "process_start_marker", lambda _pid: "owned-start")
+    monkeypatch.setattr(debug, "status", lambda _args: {"ok": True})
+    parent = {
+        "OPENCODE_ZEN_API_KEY": "ephemeral-zen-canary",
+        "OPENCODE_ZEN_BASE_URL": "https://attacker.invalid",
+        "OPENAI_API_KEY": "ambient-openai-canary",
+        "ANTHROPIC_API_KEY": "ambient-anthropic-canary",
+        "RUMI_API_TOKEN": "ambient-api-token-canary",
+        "RUMI_PANEL_BOOTSTRAP_SECRET": "ambient-bootstrap-canary",
+        "RUMI_AUTHORITY_BROWSER_TEST_TOKEN": "ambient-browser-token-canary",
+        "PATH": os.environ.get("PATH", ""),
+    }
+    args = type(
+        "Args",
+        (),
+        {
+            "port": None,
+            "connection": None,
+            "viewer_broker_port": None,
+            "user_data": None,
+            "wait_seconds": 0.1,
+            "allow_no_broker": True,
+            "isolated_provider_parent_env": parent,
+            "isolated_provider_profile": debug.MIMO_CHAT_PROFILE,
+        },
+    )()
+
+    result = debug.launch(args, include_process=True)
+
+    assert result["ok"] is True
+    env = captured["env"]
+    state_root = Path(env[debug.DEFAULTSPACK_DEBUG_STATE_ROOT_ENV])
+    assert state_root.parent == Path(result["launch"]["run_dir"])
+    assert state_root.name == "defaultspack_state"
+    assert env[debug.DEFAULTSPACK_DEBUG_ISOLATION_ENV] == "1"
+    assert env[debug.DEFAULTSPACK_REQUIRE_OWN_BIND_ENV] == "1"
+    assert env[debug.DEFAULTSPACK_DEBUG_HTTP_PORT_ENV] == "18770"
+    assert env[debug.DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV] == "18771"
+    assert env["RUMI_USER_DATA"] == str(state_root / "user_data")
+    assert env["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"] == str(
+        state_root / "chat" / "conversations.json"
+    )
+    for key in (
+        "RUMI_DEFAULTSPACK_APPROVAL_DB_PATH",
+        "RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH",
+        "RUMI_DEFAULTSPACK_AUDIT_PATH",
+        "RUMI_DEFAULTSPACK_BROWSER_ARTIFACTS_PATH",
+        "RUMI_DEFAULTSPACK_RUNTIME_CONFIG_PATH",
+        "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
+        "RUMI_DEFAULTSPACK_SECRETS_DIR",
+        "RUMI_DEFAULTSPACK_SCHEDULER_DIR",
+    ):
+        Path(env[key]).resolve().relative_to(state_root)
+    settings = json.loads((state_root / "frontend_settings.json").read_text())
+    assert settings["models"]["preferred_model"] == "opencode-zen/mimo-v2.5-free"
+    assert env["OPENCODE_ZEN_API_KEY"] == "ephemeral-zen-canary"
+    assert "OPENCODE_ZEN_BASE_URL" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+    assert env["RUMI_API_TOKEN"] != "ambient-api-token-canary"
+    assert env["RUMI_PANEL_BOOTSTRAP_SECRET"] != "ambient-bootstrap-canary"
+    assert env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] != "ambient-browser-token-canary"
+    assert "ephemeral-zen-canary" not in json.dumps(result["launch"])
+    assert "ambient-api-token-canary" not in json.dumps(result["launch"])
+
+
+class FakeMimoChatClient(FakeClient):
+    def get(self, path: str, *, query=None) -> dict:
+        if path == "/api/desktop-system-info":
+            raise AssertionError("chat-only smoke must not require the Viewer broker")
+        if path == "/api/ai/providers":
+            return {"providers": [{"provider_id": "opencode-zen", "registered": True}]}
+        if path == "/api/ai/models":
+            assert query == {"provider": "opencode-zen"}
+            return {"models": [{"qualified_model_id": "opencode-zen/mimo-v2.5-free"}]}
+        if path == "/api/authority/requests":
+            pending = []
+            if self.stream_count == 1:
+                pending = [
+                    {
+                        "request_id": "auth-mimo-1",
+                        "status": "pending",
+                        "permission_id": "model.invoke",
+                        "conversation_id": "chat-1",
+                        "allowed_scopes": ["once", "conversation"],
+                        "config": {
+                            "domains": ["request-config-must-not-be-used.invalid"],
+                            "ports": [444],
+                        },
+                        "resource": {
+                            "provider_id": "opencode-zen",
+                            "api_id": "legacy",
+                            "model_id": "mimo-v2.5-free",
+                            "model_ref": "opencode-zen/mimo-v2.5-free",
+                            "endpoint_url": "https://opencode.ai/zen/v1/messages",
+                            "endpoint_path": "/v1/messages",
+                            "domain": "opencode.ai",
+                            "transport": "https",
+                            "port": 443,
+                            "stream": True,
+                        },
+                    }
+                ]
+            return {"pending": pending, "requests": pending}
+        return super().get(path, query=query)
+
+    def post(self, path: str, payload: dict, *, query=None, headers=None) -> dict:
+        if path == "/api/chat/conversations":
+            self.calls.append(
+                ("POST", path, {"payload": payload, "query": query, "headers": headers})
+            )
+            assert payload["model"] == "opencode-zen/mimo-v2.5-free"
+            return {"id": "chat-1", "model": payload["model"]}
+        if path == "/api/authority/browser-ui-operator":
+            self.calls.append(
+                ("POST", path, {"payload": payload, "query": query, "headers": headers})
+            )
+            return {
+                "ui_operator": {
+                    "version": 1,
+                    "kind": "ui_operator",
+                    "request_id": "auth-mimo-1",
+                    "signature": "fixture-signature",
+                }
+            }
+        if path == "/api/authority/requests/auth-mimo-1/approve":
+            self.calls.append(
+                ("POST", path, {"payload": payload, "query": query, "headers": headers})
+            )
+            return {
+                "request_id": "auth-mimo-1",
+                "approved": True,
+                "scope": payload["scope"],
+                "permission_id": "model.invoke",
+                "token": "mimo-authority-token-never-print",
+            }
+        return super().post(path, payload, query=query, headers=headers)
+
+    def stream(self, path: str, payload: dict):
+        self.calls.append(("STREAM", path, {"payload": payload}))
+        self.stream_payloads.append(payload)
+        self.stream_count += 1
+        if self.stream_count == 1:
+            yield {
+                "type": "approval_requested",
+                "authority": True,
+                "request_id": "auth-mimo-1",
+                "permission_id": "model.invoke",
+            }
+            yield {
+                "type": "done",
+                "message": {"finish_reason": "authority_approval_required"},
+            }
+            return
+        yield {"type": "delta", "delta": "movie_project: {}"}
+        yield {"type": "done", "message": {"finish_reason": "stop"}}
+
+
+def test_chat_only_mimo_uses_production_authority_followup_and_reports_chat(tmp_path):
+    client = FakeMimoChatClient()
+    output = io.StringIO()
+    reporter = debug.SmokeReporter(output, secrets_to_hide=client.secrets_to_hide)
+    runner = debug.ChatOnlySmokeRunner(
+        client,
+        {"chat_store": str(tmp_path / "chat" / "conversations.json")},
+        prompt="create a short movie project",
+        max_turns=3,
+        reporter=reporter,
+        provider_preflight=debug.isolated_smoke_provider_preflight(
+            {"OPENCODE_ZEN_API_KEY": "ephemeral-key"},
+            profile_name=debug.MIMO_CHAT_PROFILE,
+        ),
+    )
+
+    result = runner.run()
+
+    assert result["ok"] is True
+    assert result["conversation_id"] == "chat-1"
+    assert result["chat_url"] == "http://127.0.0.1:8785/chat?chat=chat-1"
+    assert result["model"] == "opencode-zen/mimo-v2.5-free"
+    assert "tools" not in client.stream_payloads[0]
+    followup = client.stream_payloads[1]["message"]["metadata"]
+    assert followup["authority_followup"]["hidden"] is True
+    assert followup["chat_display"] == {
+        "hidden": True,
+        "reason": "authority_followup",
+    }
+    assert "mimo-authority-token-never-print" not in output.getvalue()
+    approval = next(
+        call
+        for call in client.calls
+        if call[1] == "/api/authority/requests/auth-mimo-1/approve"
+    )
+    assert approval[2]["payload"]["config"] == {
+        "provider_ids": ["opencode-zen"],
+        "api_ids": ["legacy"],
+        "model_ids": ["mimo-v2.5-free"],
+        "domains": ["opencode.ai"],
+        "ports": [443],
+        "allow_stream": True,
+    }
+    assert approval[2]["payload"]["related_permissions"] == [
+        "api_key.use",
+        "network.egress",
+    ]
+    assert "request-config-must-not-be-used.invalid" not in str(approval)
+
+
+@pytest.mark.parametrize(
+    ("permission_id", "resource_update", "request_config"),
+    [
+        ("network.egress", {"domain": "attacker.invalid"}, {}),
+        ("api_key.use", {"port": 444}, {}),
+        ("model.invoke", {"endpoint_url": "https://attacker.invalid/collect"}, {}),
+        ("network.egress", {"endpoint_url": "https://opencode.ai:444/zen/v1/messages"}, {}),
+        ("api_key.use", {"endpoint_url": "https://opencode.ai/other/v1/messages"}, {}),
+        ("model.invoke", {"transport": "http"}, {}),
+        ("network.egress", {}, {"domains": ["attacker.invalid"], "ports": [444]}),
+    ],
+)
+def test_chat_only_mimo_rejects_untrusted_authority_endpoint_before_approval(
+    tmp_path, permission_id, resource_update, request_config
+):
+    client = FakeMimoChatClient()
+    output = io.StringIO()
+    credential = "sk-malicious-canary-that-must-never-print"
+    reporter = debug.SmokeReporter(
+        output, secrets_to_hide=(*client.secrets_to_hide, credential)
+    )
+    runner = debug.ChatOnlySmokeRunner(
+        client,
+        {"chat_store": str(tmp_path / "chat" / "conversations.json")},
+        prompt="create a short movie project",
+        max_turns=3,
+        reporter=reporter,
+        provider_preflight=debug.isolated_smoke_provider_preflight(
+            {"OPENCODE_ZEN_API_KEY": credential},
+            profile_name=debug.MIMO_CHAT_PROFILE,
+        ),
+    )
+    client.stream_count = 1
+    request = client.get("/api/authority/requests", query={"status": "pending"})[
+        "pending"
+    ][0]
+    request["permission_id"] = permission_id
+    request["resource"].update(resource_update)
+    if request_config:
+        request["config"] = request_config
+
+    if resource_update:
+        with pytest.raises(debug.SmokeRunnerError, match="refusing unexpected"):
+            runner._approve_authority(request)
+        assert not any("/approve" in call[1] for call in client.calls)
+    else:
+        runner._approve_authority(request)
+        approval = next(call for call in client.calls if "/approve" in call[1])
+        assert approval[2]["payload"]["config"]["domains"] == ["opencode.ai"]
+        assert approval[2]["payload"]["config"]["ports"] == [443]
+        assert "attacker.invalid" not in str(approval)
+    assert credential not in output.getvalue()
+
+
+@pytest.mark.parametrize(
+    "permission_id", ["model.invoke", "api_key.use", "network.egress"]
+)
+def test_chat_only_mimo_approves_each_fixed_provider_permission_with_owned_config(
+    tmp_path, permission_id
+):
+    client = FakeMimoChatClient()
+    reporter = debug.SmokeReporter(io.StringIO(), secrets_to_hide=client.secrets_to_hide)
+    runner = debug.ChatOnlySmokeRunner(
+        client,
+        {"chat_store": str(tmp_path / "chat" / "conversations.json")},
+        prompt="fixed Mimo chat",
+        max_turns=3,
+        reporter=reporter,
+        provider_preflight=debug.isolated_smoke_provider_preflight(
+            {"OPENCODE_ZEN_API_KEY": "ephemeral-key"},
+            profile_name=debug.MIMO_CHAT_PROFILE,
+        ),
+    )
+    client.stream_count = 1
+    request = client.get("/api/authority/requests", query={"status": "pending"})[
+        "pending"
+    ][0]
+    request["permission_id"] = permission_id
+
+    runner._approve_authority(request)
+
+    approval = next(call for call in client.calls if "/approve" in call[1])
+    payload = approval[2]["payload"]
+    assert payload["config"]["domains"] == ["opencode.ai"]
+    assert payload["config"]["ports"] == [443]
+    assert permission_id not in payload["related_permissions"]
+    assert set(payload["related_permissions"]) == {
+        "model.invoke",
+        "api_key.use",
+        "network.egress",
+    } - {permission_id}
+
+
+@contextlib.contextmanager
+def _local_stream_server(responder):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            content_length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(content_length)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            responder(self)
+
+        def log_message(self, *_args):
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def _capture_stream_workers(monkeypatch):
+    workers = []
+    original = debug._start_debug_stream_worker
+
+    def start(request):
+        process = original(request)
+        workers.append(process)
+        return process
+
+    monkeypatch.setattr(debug, "_start_debug_stream_worker", start)
+    return workers
+
+
+def test_debug_stream_stops_after_first_terminal_event(monkeypatch):
+    def respond(handler):
+        handler.wfile.write(
+            b'data: {"type":"done","message":{"finish_reason":"stop"}}\n\n'
+            b'data: {"type":"done","message":{"finish_reason":"stop"}}\n\n'
+        )
+        handler.wfile.flush()
+
+    workers = _capture_stream_workers(monkeypatch)
+    with _local_stream_server(respond) as base_url:
+        client = debug.DebugHttpClient(base_url, "api", "browser")
+        events = list(client.stream("/stream", {"message": {"content": "test"}}))
+
+    assert [event["type"] for event in events] == ["done"]
+    assert len(workers) == 1
+    assert workers[0].poll() is not None
+
+
+def test_debug_stream_real_silent_http_is_bounded_and_reaps_child(monkeypatch):
+    connected = threading.Event()
+
+    def respond(_handler):
+        connected.set()
+        time.sleep(1)
+
+    workers = _capture_stream_workers(monkeypatch)
+    with _local_stream_server(respond) as base_url:
+        client = debug.DebugHttpClient(
+            base_url, "api-secret", "browser-secret", stream_timeout=0.1
+        )
+        started = time.monotonic()
+        with pytest.raises(debug.DebugApiError, match="inactive for 0.1 seconds"):
+            list(client.stream("/stream", {}))
+        elapsed = time.monotonic() - started
+
+    assert connected.is_set()
+    assert elapsed < 0.8
+    assert len(workers) == 1
+    assert workers[0].poll() is not None
+
+
+def test_debug_stream_heartbeats_extend_deadline_and_delta_is_incremental(monkeypatch):
+    release_terminal = threading.Event()
+
+    def respond(handler):
+        for _ in range(3):
+            handler.wfile.write(b": heartbeat\n\n")
+            handler.wfile.flush()
+            time.sleep(0.1)
+        handler.wfile.write(b'data: {"type":"delta","delta":"ready"}\n\n')
+        handler.wfile.flush()
+        release_terminal.wait(timeout=1)
+        try:
+            handler.wfile.write(
+                b'data: {"type":"done","message":{"finish_reason":"stop"}}\n\n'
+            )
+            handler.wfile.flush()
+        except BrokenPipeError:
+            pass
+
+    workers = _capture_stream_workers(monkeypatch)
+    with _local_stream_server(respond) as base_url:
+        client = debug.DebugHttpClient(base_url, "api", "browser", stream_timeout=0.2)
+        stream = client.stream("/stream", {})
+        assert next(stream) == {"type": "delta", "delta": "ready"}
+        assert workers[0].poll() is None
+        release_terminal.set()
+        assert [event["type"] for event in stream] == ["done"]
+
+    assert workers[0].poll() is not None
+
+
+def test_debug_stream_consumer_close_terminates_and_reaps_child(monkeypatch):
+    def respond(handler):
+        handler.wfile.write(b'data: {"type":"delta","delta":"first"}\n\n')
+        handler.wfile.flush()
+        time.sleep(1)
+
+    workers = _capture_stream_workers(monkeypatch)
+    with _local_stream_server(respond) as base_url:
+        client = debug.DebugHttpClient(base_url, "api", "browser", stream_timeout=2)
+        stream = client.stream("/stream", {})
+        assert next(stream)["type"] == "delta"
+        stream.close()
+
+    assert len(workers) == 1
+    assert workers[0].poll() is not None
+    assert not any(
+        thread.name == "defaultspack-debug-stream-reader" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
 def test_viewer_smoke_stops_before_start_when_parent_provider_env_is_missing(monkeypatch):
     monkeypatch.setattr(debug, "_has_live_pty", lambda: True)
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
@@ -1246,6 +2022,308 @@ def test_owned_defaultspack_readiness_accepts_matching_child(monkeypatch):
     monkeypatch.setattr(debug, "lsof_listener", lambda port: {"pid": "100", "command": "python"})
     monkeypatch.setattr(debug, "http_status", lambda url: {"ok": True})
     assert debug.wait_for_owned_defaultspack_health(18771, Process(), 1.0) is True
+
+
+def test_launch_readiness_failure_stops_owned_child_and_does_not_publish_latest(
+    tmp_path, monkeypatch
+):
+    run_root = tmp_path / "runs"
+    latest = run_root / "latest.json"
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "LATEST_JSON", latest)
+    monkeypatch.setattr(
+        debug,
+        "load_desktop_app",
+        lambda: {"command": "python desktop_app.py", "env": {}},
+    )
+    monkeypatch.setattr(
+        debug,
+        "load_connection",
+        lambda *_args, **_kwargs: ({}, {"ok": False, "connection": {}}),
+    )
+    monkeypatch.setattr(debug, "port_is_open", lambda _port: False)
+    monkeypatch.setattr(
+        debug, "wait_for_owned_defaultspack_health", lambda *_args: False
+    )
+    monkeypatch.setattr(debug, "status", lambda _args: {"ok": False})
+
+    class Process:
+        pid = 4321
+        stdout = io.StringIO("")
+
+        def __init__(self):
+            self.returncode = None
+            self.terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout):
+            return self.returncode
+
+    process = Process()
+    monkeypatch.setattr(debug.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    result = debug.launch(
+        type(
+            "Args",
+            (),
+            {
+                "port": 18771,
+                "connection": None,
+                "viewer_broker_port": None,
+                "user_data": None,
+                "wait_seconds": 0.01,
+                "allow_no_broker": True,
+            },
+        )()
+    )
+
+    assert result["ok"] is False
+    assert result["cleanup"]["stopped"] is True
+    assert process.terminated is True
+    assert latest.exists() is False
+    assert Path(result["launch"]["manifest_path"]).is_file()
+
+
+def test_unique_run_directories_do_not_collide(tmp_path, monkeypatch):
+    monkeypatch.setattr(debug, "RUN_ROOT", tmp_path / "runs")
+    first_id, first = debug.create_unique_run_dir("launch")
+    second_id, second = debug.create_unique_run_dir("launch")
+
+    assert first_id != second_id
+    assert first != second
+    assert first.is_dir() and second.is_dir()
+    assert first.parent == second.parent == tmp_path / "runs"
+
+
+def test_owned_stop_refuses_manifest_that_does_not_match_run_root(tmp_path, monkeypatch):
+    run_root = tmp_path / "runs"
+    foreign_root = tmp_path / "foreign" / "launch-foreign"
+    foreign_root.mkdir(parents=True)
+    artifact = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": "launch-foreign",
+        "run_dir": str(foreign_root),
+        "manifest_path": str(foreign_root / "manifest.json"),
+        "pid": 123,
+        "port": 18771,
+    }
+    (foreign_root / "manifest.json").write_text(json.dumps(artifact))
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "latest_run", lambda: artifact)
+    killed = []
+    monkeypatch.setattr(debug.os, "kill", lambda *args: killed.append(args))
+
+    result = debug.stop_latest_owned_launch(type("Args", (), {})())
+
+    assert result["ok"] is False
+    assert result["stopped"] is False
+    assert killed == []
+
+
+def test_owned_stop_signals_only_manifest_pid_when_it_owns_listener(tmp_path, monkeypatch):
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "launch-owned"
+    run_dir.mkdir(parents=True)
+    manifest = run_dir / "manifest.json"
+    artifact = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": "launch-owned",
+        "run_dir": str(run_dir),
+        "manifest_path": str(manifest),
+        "pid": 321,
+        "process_start_marker": "Mon Jul 20 12:00:00 2026",
+        "port": 18771,
+    }
+    manifest.write_text(json.dumps(artifact))
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "latest_run", lambda: artifact)
+    monkeypatch.setattr(debug, "lsof_listener", lambda _port: {"pid": "321"})
+    monkeypatch.setattr(
+        debug, "process_start_marker", lambda _pid: "Mon Jul 20 12:00:00 2026"
+    )
+    running = iter([True, False, False])
+    monkeypatch.setattr(debug, "pid_is_running", lambda _pid: next(running))
+    signals = []
+    monkeypatch.setattr(debug.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+
+    result = debug.stop_latest_owned_launch(type("Args", (), {})())
+
+    assert result == {
+        "ok": True,
+        "stopped": True,
+        "forced": False,
+        "run_id": "launch-owned",
+    }
+    assert signals == [(321, debug.signal.SIGTERM)]
+
+
+def test_keep_running_viewer_pair_persists_all_owned_identities(tmp_path, monkeypatch):
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def poll(self):
+            return None
+
+    run_root = tmp_path / "runs"
+    supervisor_dir = run_root / "viewer-smoke-owned"
+    launch_dir = run_root / "launch-owned"
+    connection_path = (
+        supervisor_dir / "viewer_user_data" / "host_broker" / "connection.json"
+    )
+    connection_path.parent.mkdir(parents=True)
+    launch_dir.mkdir(parents=True)
+    default_manifest = launch_dir / "manifest.json"
+    defaultspack_launch = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": "launch-owned",
+        "run_dir": str(launch_dir),
+        "manifest_path": str(default_manifest),
+        "pid": 103,
+        "process_start_marker": "default-start",
+        "port": 18771,
+    }
+    default_manifest.write_text(json.dumps(defaultspack_launch), encoding="utf-8")
+    connection_path.write_text(
+        json.dumps(
+            {
+                "pid": 102,
+                "port": 18770,
+                "instance_nonce": "owned-nonce",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "LATEST_JSON", run_root / "latest.json")
+    monkeypatch.setattr(
+        debug,
+        "process_start_marker",
+        lambda pid: {
+            101: "launcher-start",
+            102: "broker-start",
+            103: "default-start",
+        }.get(pid, ""),
+    )
+    monkeypatch.setattr(
+        debug,
+        "process_group_id",
+        lambda pid: {101: 501, 102: 501, 103: 503}.get(pid),
+    )
+    monkeypatch.setattr(
+        debug,
+        "lsof_listener",
+        lambda port: {"pid": "102"} if port == 18770 else {"pid": "103"},
+    )
+
+    pair = debug.persist_keep_running_viewer_pair(
+        supervisor_dir,
+        viewer_process=Process(101),
+        defaultspack_process=Process(103),
+        defaultspack_launch=defaultspack_launch,
+        connection_path=connection_path,
+        broker_port=18770,
+        instance_nonce="owned-nonce",
+    )
+
+    assert pair["viewer"] == {
+        "connection_path": str(connection_path.resolve()),
+        "instance_nonce": "owned-nonce",
+        "broker_port": 18770,
+        "broker_listener_pid": 102,
+        "broker_pid": 102,
+        "broker_start_marker": "broker-start",
+        "broker_process_group": 501,
+        "launch_pid": 101,
+        "launch_start_marker": "launcher-start",
+        "launch_process_group": 501,
+    }
+    assert pair["defaultspack"]["process_group"] == 503
+    assert (supervisor_dir / "viewer-pair-manifest.json").is_file()
+    latest = json.loads((run_root / "latest.json").read_text(encoding="utf-8"))
+    assert latest["viewer_pair_manifest"] == pair["manifest_path"]
+    assert latest["pid"] == 103
+
+
+def test_owned_pair_stop_removes_owned_viewer_children_without_signaling_shared_group(
+    tmp_path, monkeypatch
+):
+    run_root = tmp_path / "runs"
+    supervisor_dir = run_root / "viewer-smoke-owned"
+    launch_dir = run_root / "launch-owned"
+    supervisor_dir.mkdir(parents=True)
+    launch_dir.mkdir(parents=True)
+    default_manifest = launch_dir / "manifest.json"
+    defaultspack = {
+        "schema": "rumi.defaultspack-debug-run.v1",
+        "run_id": "launch-owned",
+        "run_dir": str(launch_dir),
+        "manifest_path": str(default_manifest),
+        "pid": 103,
+        "process_start_marker": "default-start",
+        "port": 18771,
+        "process_group": 503,
+    }
+    default_manifest.write_text(json.dumps(defaultspack), encoding="utf-8")
+    connection_path = (
+        supervisor_dir / "viewer_user_data" / "host_broker" / "connection.json"
+    )
+    connection_path.parent.mkdir(parents=True)
+    connection_path.write_text("{}", encoding="utf-8")
+    pair_manifest = supervisor_dir / "viewer-pair-manifest.json"
+    pair = {
+        "schema": "rumi.viewer-defaultspack-debug-pair.v1",
+        "run_id": "viewer-smoke-owned",
+        "run_dir": str(supervisor_dir),
+        "manifest_path": str(pair_manifest),
+        "viewer": {
+            "connection_path": str(connection_path),
+            "instance_nonce": "owned-nonce",
+            "broker_port": 18770,
+            "broker_listener_pid": 102,
+            "broker_pid": 102,
+            "broker_start_marker": "broker-start",
+            "broker_process_group": 501,
+            "launch_pid": 101,
+            "launch_start_marker": "launcher-start",
+            "launch_process_group": 501,
+        },
+        "defaultspack": defaultspack,
+    }
+    pair_manifest.write_text(json.dumps(pair), encoding="utf-8")
+    latest = {**defaultspack, "viewer_pair_manifest": str(pair_manifest)}
+    running = {101, 102, 103, 999}
+    markers = {101: "launcher-start", 102: "broker-start", 103: "default-start"}
+    groups = {101: 501, 102: 501, 103: 503, 999: 501}
+    signals = []
+
+    monkeypatch.setattr(debug, "RUN_ROOT", run_root)
+    monkeypatch.setattr(debug, "latest_run", lambda: latest)
+    monkeypatch.setattr(debug, "pid_is_running", lambda pid: pid in running)
+    monkeypatch.setattr(debug, "process_start_marker", lambda pid: markers.get(pid, ""))
+    monkeypatch.setattr(debug, "process_group_id", lambda pid: groups.get(pid))
+
+    def fake_kill(pid, sig):
+        signals.append((pid, sig))
+        if sig == debug.signal.SIGTERM:
+            running.discard(pid)
+
+    monkeypatch.setattr(debug.os, "kill", fake_kill)
+
+    result = debug.stop_latest_owned_launch(type("Args", (), {})())
+
+    assert result["ok"] is True
+    assert result["stopped"] is True
+    assert [pid for pid, _sig in signals] == [102, 101, 103]
+    assert 999 in running
+    assert all(pid != 999 for pid, _sig in signals)
+    assert all(item[1] == debug.signal.SIGTERM for item in signals)
 
 
 def test_wait_for_viewer_broker_classifies_clean_exit_before_connection_publish(tmp_path):

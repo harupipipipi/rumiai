@@ -79,6 +79,15 @@ const DEFAULTSPACK_DEBUG_STATE_ROOT_ENV: &str = "RUMI_DEFAULTSPACK_DEBUG_STATE_R
 const DEFAULTSPACK_DEBUG_HTTP_PORT_ENV: &str = "RUMI_DEFAULTSPACK_DEBUG_HTTP_PORT";
 #[cfg(any(debug_assertions, test))]
 const DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV: &str = "RUMI_DEFAULTSPACK_DEBUG_KERNEL_PORT";
+#[cfg(any(debug_assertions, test))]
+const DEBUG_CACHE_ENVIRONMENTS: [(&str, &str); 6] = [
+    ("PYTHONPYCACHEPREFIX", "python_bytecode"),
+    ("PYTHONUSERBASE", "python_user_base"),
+    ("PIP_CACHE_DIR", "pip_cache"),
+    ("XDG_CACHE_HOME", "xdg_cache"),
+    ("UV_CACHE_DIR", "uv_cache"),
+    ("CARGO_TARGET_DIR", "cargo_target"),
+];
 
 /// Debug-only, non-authorizing identity for an isolated Viewer run.
 ///
@@ -88,11 +97,60 @@ const DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV: &str = "RUMI_DEFAULTSPACK_DEBUG_KERNEL
 #[cfg(any(debug_assertions, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DebugParallelInstancePolicy {
+    supervisor_root: PathBuf,
     user_data_root: PathBuf,
     defaultspack_state_root: PathBuf,
     broker_port: u16,
     defaultspack_http_port: u16,
     kernel_port: u16,
+}
+
+#[cfg(any(debug_assertions, test))]
+fn create_secure_debug_subdirectory(
+    supervisor_root: &std::path::Path,
+    name: &str,
+) -> AnyResult<PathBuf> {
+    let path = supervisor_root.join(name);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            if !secure_debug_directory(&path, Some(name))
+                || !debug_directories_have_same_owner(&[supervisor_root, &path])
+            {
+                bail!("debug cache directory failed native ownership checks");
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+
+                builder.mode(0o700);
+            }
+            builder
+                .create(&path)
+                .context("failed to create isolated debug cache directory")?;
+            if !secure_debug_directory(&path, Some(name))
+                || !debug_directories_have_same_owner(&[supervisor_root, &path])
+            {
+                bail!("created debug cache directory failed native ownership checks");
+            }
+        }
+        Err(error) => return Err(error).context("failed to inspect debug cache directory"),
+    }
+    Ok(path)
+}
+
+#[cfg(any(debug_assertions, test))]
+fn prepare_debug_cache_environment(
+    policy: &DebugParallelInstancePolicy,
+) -> AnyResult<Vec<(&'static str, PathBuf)>> {
+    DEBUG_CACHE_ENVIRONMENTS
+        .iter()
+        .map(|(key, name)| {
+            create_secure_debug_subdirectory(&policy.supervisor_root, name).map(|path| (*key, path))
+        })
+        .collect()
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -1597,6 +1655,58 @@ fn is_clean_absolute_path(path: &std::path::Path) -> bool {
 }
 
 #[cfg(any(debug_assertions, test))]
+fn secure_debug_directory(path: &std::path::Path, expected_name: Option<&str>) -> bool {
+    if !is_clean_absolute_path(path)
+        || expected_name
+            .is_some_and(|name| path.file_name().and_then(|part| part.to_str()) != Some(name))
+    {
+        return false;
+    }
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return false;
+    }
+    if path.canonicalize().ok().as_deref() != Some(path) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.permissions().mode() & 0o777 != 0o700 {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(all(any(debug_assertions, test), unix))]
+fn debug_directories_have_same_owner(paths: &[&std::path::Path]) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+
+    let mut owners = paths
+        .iter()
+        .filter_map(|path| fs::metadata(path).ok().map(|item| item.uid()));
+    let Some(owner) = owners.next() else {
+        return false;
+    };
+    // POSIX geteuid has no preconditions and does not dereference memory.
+    let effective_user = unsafe { geteuid() };
+    owner == effective_user && owners.all(|candidate| candidate == owner)
+}
+
+#[cfg(all(any(debug_assertions, test), not(unix)))]
+fn debug_directories_have_same_owner(_paths: &[&std::path::Path]) -> bool {
+    true
+}
+
+#[cfg(any(debug_assertions, test))]
 fn valid_debug_instance_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("debug-") else {
         return false;
@@ -1640,7 +1750,9 @@ fn debug_parallel_instance_policy_from_values(
     }
 
     let user_data_root = PathBuf::from(user_data_root?);
-    if !is_clean_absolute_path(&user_data_root) {
+    if !is_clean_absolute_path(&user_data_root)
+        || user_data_root.file_name()?.to_str()? != "viewer_user_data"
+    {
         return None;
     }
 
@@ -1666,10 +1778,19 @@ fn debug_parallel_instance_policy_from_values(
     {
         return None;
     }
+    let supervisor_root = user_data_root.parent()?.to_path_buf();
     let defaultspack_state_root = PathBuf::from(defaultspack_state_root?);
-    let expected_state_root = user_data_root.parent()?.join("defaultspack_state");
+    let expected_state_root = supervisor_root.join("defaultspack_state");
     if !is_clean_absolute_path(&defaultspack_state_root)
         || defaultspack_state_root != expected_state_root
+        || !secure_debug_directory(&supervisor_root, None)
+        || !secure_debug_directory(&user_data_root, Some("viewer_user_data"))
+        || !secure_debug_directory(&defaultspack_state_root, Some("defaultspack_state"))
+        || !debug_directories_have_same_owner(&[
+            &supervisor_root,
+            &user_data_root,
+            &defaultspack_state_root,
+        ])
     {
         return None;
     }
@@ -1685,6 +1806,7 @@ fn debug_parallel_instance_policy_from_values(
     }
 
     Some(DebugParallelInstancePolicy {
+        supervisor_root,
         user_data_root,
         defaultspack_state_root,
         broker_port,
@@ -1753,13 +1875,29 @@ pub fn run() {
     env_logger::init();
 
     #[cfg(debug_assertions)]
-    let debug_parallel_instance = debug_parallel_instance_policy_from_env();
+    let debug_parallel_instance = debug_parallel_instance_policy_from_env().and_then(|policy| {
+        match prepare_debug_cache_environment(&policy) {
+            Ok(environment) => {
+                for (key, path) in environment {
+                    std::env::set_var(key, path);
+                }
+                Some(policy)
+            }
+            Err(error) => {
+                error!("Viewer debug parallel-instance cache isolation was rejected: {error:#}");
+                None
+            }
+        }
+    });
     #[cfg(debug_assertions)]
-    let debug_user_data_root = debug_parallel_instance
-        .as_ref()
-        .map(|policy| policy.user_data_root.clone());
+    let debug_writable_roots = debug_parallel_instance.as_ref().map(|policy| {
+        (
+            policy.supervisor_root.clone(),
+            policy.user_data_root.clone(),
+        )
+    });
     #[cfg(not(debug_assertions))]
-    let debug_user_data_root: Option<PathBuf> = None;
+    let debug_writable_roots: Option<(PathBuf, PathBuf)> = None;
     let startup_stage = Arc::new(Mutex::new("builder"));
 
     let allowed_navigation_ports =
@@ -1833,8 +1971,8 @@ pub fn run() {
             record_startup_stage(&setup_startup_stage, "building_config");
             let mut config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .context("failed to build AppConfig")?;
-            if let Some(user_data_root) = debug_user_data_root.as_ref() {
-                config.user_data_dir = user_data_root.clone();
+            if let Some((supervisor_root, user_data_root)) = debug_writable_roots.as_ref() {
+                config.isolate_writable_state(supervisor_root, user_data_root.clone());
             }
 
             record_startup_stage(&setup_startup_stage, "creating_state_directories");
@@ -2076,45 +2214,111 @@ mod tests {
         .unwrap()
     }
 
-    fn valid_debug_parallel_policy_values() -> (
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-    ) {
-        (
-            "debug-viewer-smoke-12345",
-            "/tmp/rumi-viewer-smoke-12345/viewer_user_data",
-            "/tmp/rumi-viewer-smoke-12345/viewer_user_data/host_broker/connection.json",
-            "18770",
-            "debug_nonce_0123456789",
-        )
+    struct DebugPolicyFixture {
+        supervisor: PathBuf,
+        user_data: PathBuf,
+        connection: PathBuf,
+        defaultspack_state: PathBuf,
     }
 
-    fn valid_debug_defaultspack_policy_values() -> (
+    impl DebugPolicyFixture {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let supervisor = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "rumi-viewer-policy-{}-{unique}",
+                std::process::id()
+            ));
+            let user_data = supervisor.join("viewer_user_data");
+            let connection = user_data.join("host_broker").join("connection.json");
+            let defaultspack_state = supervisor.join("defaultspack_state");
+            fs::create_dir(&supervisor).unwrap();
+            fs::create_dir(&user_data).unwrap();
+            fs::create_dir(&defaultspack_state).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                for path in [&supervisor, &user_data, &defaultspack_state] {
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+                }
+            }
+            Self {
+                supervisor,
+                user_data,
+                connection,
+                defaultspack_state,
+            }
+        }
+
+        fn path_text(path: &std::path::Path) -> &str {
+            path.to_str().unwrap()
+        }
+
+        fn viewer_values(&self) -> (&'static str, &str, &str, &'static str, &'static str) {
+            (
+                "debug-viewer-smoke-12345",
+                Self::path_text(&self.user_data),
+                Self::path_text(&self.connection),
+                "18770",
+                "debug_nonce_0123456789",
+            )
+        }
+
+        fn defaultspack_values(
+            &self,
+        ) -> (
+            &'static str,
+            &'static str,
+            &'static str,
+            &str,
+            &'static str,
+            &'static str,
+        ) {
+            (
+                "1",
+                "debug-viewer-smoke-12345",
+                "debug_nonce_0123456789",
+                Self::path_text(&self.defaultspack_state),
+                "18771",
+                "18772",
+            )
+        }
+    }
+
+    impl Drop for DebugPolicyFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.supervisor);
+        }
+    }
+
+    fn valid_debug_parallel_policy_values(
+        fixture: &DebugPolicyFixture,
+    ) -> (&'static str, &str, &str, &'static str, &'static str) {
+        fixture.viewer_values()
+    }
+
+    fn valid_debug_defaultspack_policy_values(
+        fixture: &DebugPolicyFixture,
+    ) -> (
         &'static str,
         &'static str,
         &'static str,
-        &'static str,
+        &str,
         &'static str,
         &'static str,
     ) {
-        (
-            "1",
-            "debug-viewer-smoke-12345",
-            "debug_nonce_0123456789",
-            "/tmp/rumi-viewer-smoke-12345/defaultspack_state",
-            "18771",
-            "18772",
-        )
+        fixture.defaultspack_values()
     }
 
     #[test]
     fn debug_parallel_instance_requires_every_isolation_precondition() {
-        let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values();
+        let fixture = DebugPolicyFixture::new();
+        let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values(&fixture);
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
-            valid_debug_defaultspack_policy_values();
+            valid_debug_defaultspack_policy_values(&fixture);
         let policy = debug_parallel_instance_policy_from_values(
             true,
             Some(id),
@@ -2130,6 +2334,7 @@ mod tests {
             Some(kernel_port),
         )
         .expect("fully isolated debug launch should be eligible");
+        assert_eq!(policy.supervisor_root, fixture.supervisor);
         assert_eq!(policy.user_data_root, PathBuf::from(root));
         assert_eq!(policy.broker_port, 18770);
         assert_eq!(policy.defaultspack_http_port, 18771);
@@ -2163,9 +2368,10 @@ mod tests {
 
     #[test]
     fn debug_parallel_instance_rejects_malformed_or_shared_inputs() {
-        let (id, root, connection, _port, nonce) = valid_debug_parallel_policy_values();
+        let fixture = DebugPolicyFixture::new();
+        let (id, root, connection, _port, nonce) = valid_debug_parallel_policy_values(&fixture);
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
-            valid_debug_defaultspack_policy_values();
+            valid_debug_defaultspack_policy_values(&fixture);
         for bad_id in ["viewer-smoke", "debug-x", "debug-has space"] {
             assert!(debug_parallel_instance_policy_from_values(
                 true,
@@ -2235,11 +2441,180 @@ mod tests {
         .is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn debug_parallel_instance_rejects_symlinked_or_permissive_supervisor() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let fixture = DebugPolicyFixture::new();
+        let alias = fixture.supervisor.with_file_name(format!(
+            "{}-alias",
+            fixture.supervisor.file_name().unwrap().to_string_lossy()
+        ));
+        symlink(&fixture.supervisor, &alias).unwrap();
+        let alias_user_data = alias.join("viewer_user_data");
+        let alias_connection = alias_user_data.join("host_broker").join("connection.json");
+        let alias_state = alias.join("defaultspack_state");
+        assert!(debug_parallel_instance_policy_from_values(
+            true,
+            Some("debug-viewer-smoke-12345"),
+            alias_user_data.to_str(),
+            alias_connection.to_str(),
+            Some("18770"),
+            Some("debug_nonce_0123456789"),
+            Some("1"),
+            Some("debug-viewer-smoke-12345"),
+            Some("debug_nonce_0123456789"),
+            alias_state.to_str(),
+            Some("18771"),
+            Some("18772"),
+        )
+        .is_none());
+        fs::remove_file(&alias).unwrap();
+
+        fs::set_permissions(&fixture.supervisor, fs::Permissions::from_mode(0o755)).unwrap();
+        let (id, root, connection, port, nonce) = fixture.viewer_values();
+        let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
+            fixture.defaultspack_values();
+        assert!(debug_parallel_instance_policy_from_values(
+            true,
+            Some(id),
+            Some(root),
+            Some(connection),
+            Some(port),
+            Some(nonce),
+            Some(isolation),
+            Some(run_id),
+            Some(defaultspack_nonce),
+            Some(state_root),
+            Some(http_port),
+            Some(kernel_port),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn debug_parallel_instance_rejects_unexpected_state_basenames() {
+        let fixture = DebugPolicyFixture::new();
+        let wrong_user_data = fixture.supervisor.join("user_data");
+        let wrong_connection = wrong_user_data.join("host_broker").join("connection.json");
+        assert!(debug_parallel_instance_policy_from_values(
+            true,
+            Some("debug-viewer-smoke-12345"),
+            wrong_user_data.to_str(),
+            wrong_connection.to_str(),
+            Some("18770"),
+            Some("debug_nonce_0123456789"),
+            Some("1"),
+            Some("debug-viewer-smoke-12345"),
+            Some("debug_nonce_0123456789"),
+            fixture.defaultspack_state.to_str(),
+            Some("18771"),
+            Some("18772"),
+        )
+        .is_none());
+
+        let wrong_state = fixture.supervisor.join("state");
+        let (id, root, connection, port, nonce) = fixture.viewer_values();
+        assert!(debug_parallel_instance_policy_from_values(
+            true,
+            Some(id),
+            Some(root),
+            Some(connection),
+            Some(port),
+            Some(nonce),
+            Some("1"),
+            Some(id),
+            Some(nonce),
+            wrong_state.to_str(),
+            Some("18771"),
+            Some("18772"),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn debug_cache_environment_stays_under_supervisor_without_recreating_state() {
+        let fixture = DebugPolicyFixture::new();
+        let (id, root, connection, port, nonce) = fixture.viewer_values();
+        let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
+            fixture.defaultspack_values();
+        let policy = debug_parallel_instance_policy_from_values(
+            true,
+            Some(id),
+            Some(root),
+            Some(connection),
+            Some(port),
+            Some(nonce),
+            Some(isolation),
+            Some(run_id),
+            Some(defaultspack_nonce),
+            Some(state_root),
+            Some(http_port),
+            Some(kernel_port),
+        )
+        .unwrap();
+        let sentinel = fixture.supervisor.join("do-not-delete.txt");
+        fs::write(&sentinel, b"preserve").unwrap();
+
+        let environment = prepare_debug_cache_environment(&policy).unwrap();
+        let second = prepare_debug_cache_environment(&policy).unwrap();
+
+        assert_eq!(environment, second);
+        assert_eq!(fs::read(&sentinel).unwrap(), b"preserve");
+        for (_, path) in environment {
+            assert!(path.starts_with(&fixture.supervisor));
+            assert!(secure_debug_directory(
+                &path,
+                path.file_name().and_then(|v| v.to_str())
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn debug_cache_environment_rejects_preplanted_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let fixture = DebugPolicyFixture::new();
+        let (id, root, connection, port, nonce) = fixture.viewer_values();
+        let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
+            fixture.defaultspack_values();
+        let policy = debug_parallel_instance_policy_from_values(
+            true,
+            Some(id),
+            Some(root),
+            Some(connection),
+            Some(port),
+            Some(nonce),
+            Some(isolation),
+            Some(run_id),
+            Some(defaultspack_nonce),
+            Some(state_root),
+            Some(http_port),
+            Some(kernel_port),
+        )
+        .unwrap();
+        let external = fixture.supervisor.with_file_name(format!(
+            "{}-external-cache",
+            fixture.supervisor.file_name().unwrap().to_string_lossy()
+        ));
+        fs::create_dir(&external).unwrap();
+        fs::set_permissions(&external, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&external, fixture.supervisor.join("cargo_target")).unwrap();
+
+        assert!(prepare_debug_cache_environment(&policy).is_err());
+        assert!(external.read_dir().unwrap().next().is_none());
+
+        fs::remove_dir(&external).unwrap();
+    }
+
     #[test]
     fn release_policy_never_bypasses_single_instance() {
-        let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values();
+        let fixture = DebugPolicyFixture::new();
+        let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values(&fixture);
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
-            valid_debug_defaultspack_policy_values();
+            valid_debug_defaultspack_policy_values(&fixture);
         assert!(debug_parallel_instance_policy_from_values(
             false,
             Some(id),

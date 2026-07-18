@@ -28,6 +28,7 @@ from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status
+from domain.frontend_settings import frontend_settings_path
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import (
@@ -45,7 +46,7 @@ class FrontendRegistry:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
-        self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._settings_path = frontend_settings_path(self._pack_root)
 
     def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
