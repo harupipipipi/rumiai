@@ -4,7 +4,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  clampPanelWidth,
   getRailFloatingMenuPosition,
+  nextMenuIndexFromKey,
+  resizedPanelWidthFromKey,
   RightSidebar,
   shouldShowToolManagerEmptyState,
   sidebarActionDisabledReason,
@@ -13,6 +16,72 @@ import {
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
+
+test("right sidebar keeps standard controls tabbable when enhanced keyboard navigation is disabled", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [{ id: "tool_a", label: "Tool A", category: "tool" }],
+      settingsValues: {
+        sidebar: { pinned_item_ids: ["tool_a"], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      keyboardButtonNavigation: false,
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.doesNotMatch(html, /tabindex="-1"/);
+  assert.match(html, /aria-label="Tool A"/);
+  assert.match(html, /aria-controls="right-sidebar-detail-panel"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, /h-11 min-h-11 w-11 min-w-11/);
+});
+
+test("active detail panel exposes a keyboard-resizable separator", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "tool_a",
+      items: [{ id: "tool_a", label: "Tool A", category: "tool" }],
+      settingsValues: {
+        sidebar: { pinned_item_ids: ["tool_a"], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: ["tool_a"],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /id="right-sidebar-detail-panel"/);
+  assert.match(html, /role="separator" tabindex="0" aria-orientation="vertical"/);
+  assert.match(html, /aria-valuemin="220" aria-valuemax="520" aria-valuenow="270"/);
+  assert.match(html, /aria-label="Tool A"[^>]*aria-expanded="true"[^>]*aria-pressed="true"/);
+});
+
+test("panel width keyboard controls clamp and support coarse steps", () => {
+  assert.equal(clampPanelWidth(Number.NaN), 270);
+  assert.equal(resizedPanelWidthFromKey(270, "ArrowLeft"), 280);
+  assert.equal(resizedPanelWidthFromKey(270, "ArrowRight", true), 238);
+  assert.equal(resizedPanelWidthFromKey(519, "ArrowLeft"), 520);
+  assert.equal(resizedPanelWidthFromKey(221, "ArrowRight"), 220);
+  assert.equal(resizedPanelWidthFromKey(300, "Home"), 220);
+  assert.equal(resizedPanelWidthFromKey(300, "End"), 520);
+  assert.equal(resizedPanelWidthFromKey(300, "Enter"), null);
+});
+
+test("menu keyboard navigation wraps and supports Home and End", () => {
+  assert.equal(nextMenuIndexFromKey(2, 3, "ArrowDown"), 0);
+  assert.equal(nextMenuIndexFromKey(0, 3, "ArrowUp"), 2);
+  assert.equal(nextMenuIndexFromKey(1, 3, "Home"), 0);
+  assert.equal(nextMenuIndexFromKey(1, 3, "End"), 2);
+  assert.equal(nextMenuIndexFromKey(1, 3, "Tab"), null);
+  assert.equal(nextMenuIndexFromKey(0, 0, "ArrowDown"), null);
+});
 
 test("share and export actions are disabled until a conversation is saved", () => {
   assert.equal(
