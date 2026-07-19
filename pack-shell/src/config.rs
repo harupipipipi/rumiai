@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-const DEFAULT_KERNEL_CMD: &str = "python -m rumi_ai";
+const DEFAULT_KERNEL_CMD: &str = "python -m tobkiri";
 
 /// Pack desktop app launcher
 #[derive(Parser, Debug)]

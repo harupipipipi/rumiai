@@ -55,17 +55,17 @@ git tag v0.1.0-test.4
 git push origin v0.1.0-test.4
 
 # CI の結果を確認
-# https://github.com/harupipipipi/rumiai/actions
+# https://github.com/harupipipipi/tobkiri/actions
 ```
 
 ### 2.3 CI 結果の確認方法
 
 ```bash
 # ブラウザで確認
-# https://github.com/harupipipipi/rumiai/actions
+# https://github.com/harupipipipi/tobkiri/actions
 
 # API で確認（ログイン不要）
-curl -s https://api.github.com/repos/harupipipipi/rumiai/actions/runs?per_page=3 \
+curl -s https://api.github.com/repos/harupipipipi/tobkiri/actions/runs?per_page=3 \
   | python3 -c "
 import json, sys
 runs = json.load(sys.stdin)['workflow_runs']
@@ -74,7 +74,7 @@ for r in runs:
 "
 
 # ジョブ単位の確認
-curl -s https://api.github.com/repos/harupipipipi/rumiai/actions/runs/<RUN_ID>/jobs \
+curl -s https://api.github.com/repos/harupipipipi/tobkiri/actions/runs/<RUN_ID>/jobs \
   | python3 -c "
 import json, sys
 jobs = json.load(sys.stdin)['jobs']

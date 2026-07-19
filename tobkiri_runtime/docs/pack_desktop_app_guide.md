@@ -218,7 +218,7 @@ pack-shell run <PACK_ID> --command <COMMAND> [OPTIONS]
 | `--command` | string | ✅ | — | 実行するコマンド（例: `"python app.py"`） |
 | `--api-token` | string | ✅ | 環境変数 `RUMI_API_TOKEN` | Kernel API の認証トークン |
 | `--port` | u16 | — | `8765` | Kernel API のポート番号 |
-| `--kernel-cmd` | string | — | `"python -m rumi_ai"` | Kernel が未起動の場合に起動するコマンド |
+| `--kernel-cmd` | string | — | `"python -m tobkiri"` | Kernel が未起動の場合に起動するコマンド |
 | `--timeout` | u64 | — | `60` | Kernel 起動待ちのタイムアウト（秒） |
 | `--working-dir` | string | — | なし | アプリの作業ディレクトリ |
 
@@ -239,7 +239,7 @@ pack-shell run my_desktop_pack --command "python app.py" --working-dir /path/to/
 pack-shell run my_desktop_pack \
   --command "python app.py" \
   --port 8765 \
-  --kernel-cmd "python -m rumi_ai" \
+  --kernel-cmd "python -m tobkiri" \
   --api-token "your-api-token" \
   --timeout 60 \
   --working-dir /path/to/workdir

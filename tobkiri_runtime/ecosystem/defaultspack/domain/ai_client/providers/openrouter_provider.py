@@ -77,11 +77,11 @@ class OpenRouterProvider(OpenAICompatibleProvider):
             extra_headers={
                 "HTTP-Referer": os.environ.get(
                     "OPENROUTER_HTTP_REFERER",
-                    "https://github.com/harupipipipi/rumiai",
+                    "https://github.com/harupipipipi/tobkiri",
                 ),
                 "X-Title": os.environ.get(
                     "OPENROUTER_X_TITLE",
-                    os.environ.get("OPENROUTER_X_OPENROUTER_TITLE", "rumiai-defaultspack"),
+                    os.environ.get("OPENROUTER_X_OPENROUTER_TITLE", "tobkiri-defaultspack"),
                 ),
             },
             remote_model_discovery=True,

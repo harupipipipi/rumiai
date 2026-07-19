@@ -13,7 +13,7 @@ Start Rumi with the Kernel API bound to the trusted LAN:
 
 ```powershell
 $env:RUMI_API_BIND_ADDRESS="0.0.0.0"
-python -m rumi_ai
+python -m tobkiri
 ```
 
 Read the active API token from `tobkiri_runtime/user_data/hmac_keys.json` or run:

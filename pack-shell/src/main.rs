@@ -157,7 +157,7 @@ mod tests {
             "test-pack".to_string(),
             "python app.py".to_string(),
             8765,
-            "python -m rumi_ai".to_string(),
+            "python -m tobkiri".to_string(),
             "admin-api-token".to_string(),
             30,
             Some("/tmp/test-pack".to_string()),

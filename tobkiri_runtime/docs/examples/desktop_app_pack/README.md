@@ -52,7 +52,7 @@ cp -r docs/examples/desktop_app_pack/ ecosystem/desktop_app_pack/
 ### 3. Kernel を起動する
 
 ```bash
-python -m rumi_ai
+python -m tobkiri
 ```
 
 Kernel が起動すると `ecosystem/desktop_app_pack/ecosystem.json` を自動でスキャンします。

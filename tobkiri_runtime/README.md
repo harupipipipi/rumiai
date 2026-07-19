@@ -1,4 +1,4 @@
-# Rumi AI OS
+# Tobkiri Runtime
 
 **「基盤のない基盤」** — 改造される「本体」が存在しないモジュラーAIフレームワーク
 
@@ -40,8 +40,8 @@
 ### 起動確認
 
 ```bash
-python -m rumi_ai --health
-python -m rumi_ai
+python -m tobkiri --health
+python -m tobkiri
 ```
 
 ### viewer 開発起動
@@ -111,7 +111,7 @@ ecosystem は第三者が作成でき、悪意ある作者も存在しうると�
 既存環境で HMAC 署名なしの設定ファイルを再署名する場合:
 
 ```bash
-python -m rumi_ai migrate-hmac
+python -m tobkiri migrate-hmac
 ```
 
 ---
@@ -347,8 +347,8 @@ Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/
 ### インストール
 
 ```bash
-git clone https://github.com/harupipipipi/rumiai.git
-cd rumiai/tobkiri_runtime
+git clone https://github.com/harupipipipi/tobkiri.git
+cd tobkiri/tobkiri_runtime
 python bootstrap.py --cli init
 ```
 

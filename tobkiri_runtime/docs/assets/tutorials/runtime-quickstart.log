@@ -1,4 +1,4 @@
-$ python -m rumi_ai --health
+$ python -m tobkiri --health
 {
   "status": "DEGRADED",
   "timestamp": "2026-04-22T07:05:13.101407Z",

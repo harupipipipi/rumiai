@@ -47,7 +47,7 @@ cp -r docs/examples/viewer_hello_pack/ ecosystem/viewer_hello_pack/
 ### 2. Kernel を起動する
 
 ```bash
-python -m rumi_ai
+python -m tobkiri
 ```
 
 Kernel が起動すると `ecosystem/viewer_hello_pack/ecosystem.json` を自動でスキャンします。

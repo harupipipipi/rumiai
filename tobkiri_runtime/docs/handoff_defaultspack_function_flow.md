@@ -10,7 +10,7 @@ repository name, `rumiai`, and has not read the prior conversation.
   `/Users/haru/Desktop/puroguramukei/rumi_ai_mac`
 - Main package directory: `tobkiri_runtime`
 - Branch: `codex/defaultspack-function-flow`
-- Remote: `origin` at `https://github.com/harupipipipi/rumiai.git`
+- Remote: `origin` at `https://github.com/harupipipipi/tobkiri.git`
 - Checkpoint commit before this handoff file:
   `776178f2 WIP: canonicalize defaultspack function flow runtime`
 
