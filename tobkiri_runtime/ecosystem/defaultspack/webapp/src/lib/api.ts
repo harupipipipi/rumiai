@@ -3527,9 +3527,10 @@ export const api = {
     });
   },
 
-  deleteSchedule(scheduleId: string) {
+  deleteSchedule(scheduleId: string, payload?: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
     });
   },
 

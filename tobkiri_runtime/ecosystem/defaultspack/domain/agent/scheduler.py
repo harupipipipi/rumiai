@@ -59,6 +59,17 @@ _SCHEDULED_CHAT_SECRET_VALUE_RE = re.compile(
 )
 
 
+def _serialized_schedule_mutation(method):
+    """Keep revision checks and their durable writes in one mutation boundary."""
+    def serialized(self, *args, **kwargs):
+        with self._mutation_lock:
+            return method(self, *args, **kwargs)
+
+    serialized.__name__ = method.__name__
+    serialized.__doc__ = method.__doc__
+    return serialized
+
+
 class _SchedulerTaskTimedOut(TimeoutError):
     def __init__(self, timeout_seconds: float):
         self.timeout_seconds = timeout_seconds
@@ -1135,6 +1146,7 @@ class Scheduler:
             return
         self._initialised = True
         self._lock = threading.Lock()
+        self._mutation_lock = threading.Lock()
         self._timers = {}        # schedule_id -> threading.Timer
         self._schedules = {}     # schedule_id -> schedule dict (in-memory cache)
         self._conversation_locks = {}  # conversation_id -> threading.Lock
@@ -1176,7 +1188,16 @@ class Scheduler:
         self._recover_stale_running_executions()
         self._ensure_active_timers()
 
-    def create_schedule(self, schedule_type, task_config, schedule_config, name="", description=""):
+    @_serialized_schedule_mutation
+    def create_schedule(
+        self,
+        schedule_type,
+        task_config,
+        schedule_config,
+        name="",
+        description="",
+        mutation_id=None,
+    ):
         """Create and persist a new schedule.
 
         schedule_type: "interval" | "cron" | "once"
@@ -1187,6 +1208,13 @@ class Scheduler:
           - once: {run_at: "2025-03-01T09:00:00Z"}
         """
         self.ensure_loaded()
+
+        mutation_id = str(mutation_id or "").strip()
+        if mutation_id:
+            with self._lock:
+                for existing in self._schedules.values():
+                    if mutation_id in existing.get("settled_mutation_ids", []):
+                        return existing
 
         # Validate schedule_type
         if schedule_type not in ("interval", "cron", "once"):
@@ -1245,6 +1273,8 @@ class Scheduler:
             "next_execution_at": None,
             "created_at": now,
             "updated_at": now,
+            "revision": 1,
+            "settled_mutation_ids": [mutation_id] if mutation_id else [],
         }
 
         # Compute next execution time
@@ -1273,6 +1303,7 @@ class Scheduler:
         all_s.sort(key=lambda s: s.get("created_at", ""), reverse=True)
         return all_s
 
+    @_serialized_schedule_mutation
     def update_schedule(self, schedule_id, updates):
         """Update a schedule. Allowed fields: name, description, task, config, type.
 
@@ -1283,6 +1314,17 @@ class Scheduler:
             sched = self._schedules.get(schedule_id)
         if sched is None:
             return None
+
+        mutation_id = str(updates.pop("mutation_id", "") or "").strip()
+        settled_mutation_ids = list(sched.get("settled_mutation_ids", []))
+        if mutation_id and mutation_id in settled_mutation_ids:
+            return sched
+        expected_revision = updates.pop("expected_revision", None)
+        current_revision = int(sched.get("revision", 0) or 0)
+        if expected_revision is not None and int(expected_revision) != current_revision:
+            raise ValueError(
+                f"schedule revision conflict: expected {expected_revision}, current {current_revision}"
+            )
 
         allowed_keys = ("name", "description", "task", "config", "type")
         changed = False
@@ -1335,6 +1377,9 @@ class Scheduler:
 
         if changed:
             sched["updated_at"] = timestamp()
+            sched["revision"] = current_revision + 1
+            if mutation_id:
+                sched["settled_mutation_ids"] = (settled_mutation_ids + [mutation_id])[-64:]
             if sched.get("status") == "active":
                 sched["next_execution_at"] = self._compute_next_execution(sched)
             save_schedule(sched)
@@ -1346,9 +1391,18 @@ class Scheduler:
 
         return sched
 
-    def delete_schedule(self, schedule_id):
+    @_serialized_schedule_mutation
+    def delete_schedule(self, schedule_id, expected_revision=None):
         """Delete a schedule. Returns True if deleted."""
         self.ensure_loaded()
+        with self._lock:
+            existing = self._schedules.get(schedule_id)
+        if existing is not None and expected_revision is not None:
+            current_revision = int(existing.get("revision", 0) or 0)
+            if int(expected_revision) != current_revision:
+                raise ValueError(
+                    f"schedule revision conflict: expected {expected_revision}, current {current_revision}"
+                )
         self._cancel_timer(schedule_id)
         with self._lock:
             removed = self._schedules.pop(schedule_id, None)
