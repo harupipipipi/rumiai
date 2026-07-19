@@ -32,6 +32,7 @@ from domain.chat.ir_legacy_adapter import (
     stored_messages_to_ir,
 )
 from domain.chat.modality_detector import detect_modalities
+from domain.chat.attachment_security import validate_attachment_security_reviews
 from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
@@ -1196,6 +1197,9 @@ def _prepared_user_content(
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     runtime_content: list[Any] | None = None
     if isinstance(attachments, list):
+        validate_attachment_security_reviews(
+            [attachment for attachment in attachments if isinstance(attachment, dict)]
+        )
         metadata = dict(metadata)
         persisted_attachments = store.persist_attachments(
             conversation_id,

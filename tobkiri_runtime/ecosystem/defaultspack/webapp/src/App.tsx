@@ -78,6 +78,7 @@ import {
   withComposerMentionSelectionOwnership,
 } from "./lib/composerWidgets";
 import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
+import { attachmentNeedsSecurityReview } from "./lib/attachmentSecurity";
 import { toolGroupFor } from "./lib/toolUi";
 import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -2667,6 +2668,7 @@ function ChatApp() {
     : null;
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
+  const attachmentSecretPatterns = settingList(settingsValues.privacy_security?.attachment_secret_patterns);
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, true);
   const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
@@ -4504,6 +4506,10 @@ function ChatApp() {
     setAttachedFiles((prev) => [...prev, ...files]);
   };
 
+  const handleFileUpdate = (file: AttachedFile) => {
+    setAttachedFiles((previous) => previous.map((item) => item.id === file.id ? file : item));
+  };
+
   const handleAtFileAttach = (path: string) => {
     const normalizedPath = path.trim();
     if (mode !== "coding" || !normalizedPath) return;
@@ -4539,6 +4545,7 @@ function ChatApp() {
               result.path || normalizedPath,
               result.content,
               result.size,
+              attachmentSecretPatterns,
             ),
           ];
         });
@@ -5307,6 +5314,10 @@ function ChatApp() {
     }
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
+    if (attachmentsForSubmit.some(attachmentNeedsSecurityReview)) {
+      setError("Review every sensitive or truncated attachment before sending.");
+      return;
+    }
     const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
     if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
@@ -6126,6 +6137,7 @@ function ChatApp() {
       droppedWidgets={activeDroppedWidgets}
       entityReferences={composerEntityReferences}
       selectedToolIds={selectedToolIds}
+      attachmentSecretPatterns={attachmentSecretPatterns}
       actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
       toolSelectionReview={toolSelectionController.state.pendingReview}
@@ -6161,6 +6173,7 @@ function ChatApp() {
       onAtFileAttach={handleAtFileAttach}
       onPendingMentionAttachmentRemove={handlePendingMentionAttachmentRemove}
       onFileRemove={handleFileRemove}
+      onFileUpdate={handleFileUpdate}
       onDropWidget={handleDropWidget}
       onEntityReferencesChange={setComposerEntityReferences}
       onWidgetAction={handleWidgetAction}

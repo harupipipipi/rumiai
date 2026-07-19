@@ -1,4 +1,5 @@
 import type { AttachedFile } from "../renderers/types";
+import { scanAttachmentSecurity } from "./attachmentSecurity";
 
 const TEXT_TRUNCATE_LIMIT = 120_000;
 const IMAGE_INLINE_LIMIT_BYTES = 8 * 1024 * 1024;
@@ -111,7 +112,7 @@ export function isTextLikeFile(file: Pick<File, "name" | "type">): boolean {
   return TEXT_EXTENSIONS.has(fileExtension(file.name));
 }
 
-export async function fileToAttachment(file: File): Promise<AttachedFile> {
+export async function fileToAttachment(file: File, customPatterns: string[] = []): Promise<AttachedFile> {
   const base = {
     id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: file.name,
@@ -122,10 +123,11 @@ export async function fileToAttachment(file: File): Promise<AttachedFile> {
 
   if (/^image\//.test(file.type || "")) {
     if (file.size > IMAGE_INLINE_LIMIT_BYTES) {
-      return {
+      const attachment = {
         ...base,
         truncated: true,
       };
+      return { ...attachment, securityReview: scanAttachmentSecurity(attachment, customPatterns) };
     }
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -133,24 +135,26 @@ export async function fileToAttachment(file: File): Promise<AttachedFile> {
       reader.onerror = () => reject(reader.error ?? new Error("画像を読み込めませんでした"));
       reader.readAsDataURL(file);
     });
-    return {
+    const attachment = {
       ...base,
       dataUrl,
     };
+    return { ...attachment, securityReview: scanAttachmentSecurity(attachment, customPatterns) };
   }
 
   if (!isTextLikeFile(file)) {
-    return base;
+    return { ...base, securityReview: scanAttachmentSecurity(base, customPatterns) };
   }
 
   const text = await file.text();
   const truncated = text.length > TEXT_TRUNCATE_LIMIT;
-  return {
+  const attachment = {
     ...base,
     type: file.type || "text/plain",
     content: truncated ? text.slice(0, TEXT_TRUNCATE_LIMIT) : text,
     truncated,
   };
+  return { ...attachment, securityReview: scanAttachmentSecurity(attachment, customPatterns) };
 }
 
 export function buildAttachmentSnippet(file: AttachedFile): string {

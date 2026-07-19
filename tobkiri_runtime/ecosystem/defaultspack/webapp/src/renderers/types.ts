@@ -187,6 +187,7 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   entityReferences?: ComposerEntityReference[];
   selectedToolIds?: string[];
+  attachmentSecretPatterns?: string[];
   actionApprovalMode?: ActionApprovalMode;
   toolSelectionTargets?: ToolSelectionChip[];
   toolSelectionReview?: PendingToolReview | null;
@@ -222,6 +223,7 @@ export type ComposerRendererProps = {
   onAtFileAttach?: (path: string) => void;
   onPendingMentionAttachmentRemove?: (path: string) => void;
   onFileRemove?: (fileId: string) => void;
+  onFileUpdate?: (file: AttachedFile) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
   onEntityReferencesChange?: (references: ComposerEntityReference[]) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;
@@ -333,6 +335,26 @@ export type AttachedFile = {
   truncated?: boolean;
   source?: "local_file" | "workspace";
   sourcePath?: string;
+  securityReview?: AttachmentSecurityReview;
+};
+
+export type AttachmentSecurityFinding = {
+  id: string;
+  kind: "high_risk_file" | "mime_mismatch" | "private_key" | "authorization_header" | "cookie" | "connection_string" | "aws_access_key" | "provider_token" | "named_secret" | "high_entropy_candidate" | "custom_pattern";
+  severity: "review" | "high";
+  line: number | null;
+  start: number | null;
+  end: number | null;
+};
+
+export type AttachmentSecurityReview = {
+  version: 1;
+  status: "clear" | "required" | "approved" | "redacted" | "metadata_only";
+  fingerprint: string;
+  scannedCharacters: number;
+  truncated: boolean;
+  findings: AttachmentSecurityFinding[];
+  redactedFindingCount?: number;
 };
 
 export type DroppedWidget = {

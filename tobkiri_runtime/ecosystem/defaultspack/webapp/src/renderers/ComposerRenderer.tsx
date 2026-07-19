@@ -15,6 +15,7 @@ import {
   MousePointerClick,
   PanelRightOpen,
   Search,
+  ShieldAlert,
   SlidersHorizontal,
   Wrench,
   X,
@@ -44,6 +45,12 @@ import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
 import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
+import {
+  approveAttachmentSecurityReview,
+  attachmentMetadataOnly,
+  attachmentNeedsSecurityReview,
+  redactAttachmentSecurityFindings,
+} from "../lib/attachmentSecurity";
 import { composerFileMentionWidget, composerKnownMentionValues, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { COMPOSER_REFERENCE_MIME, insertComposerReferencePaste, mergeComposerReferences, restoreComposerReferences, serializeComposerReferences, type ComposerEntityReference } from "../lib/composerReferences";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -752,13 +759,23 @@ function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
   return sortedToolGroups([...groups.values()].filter((group) => group.items.length > 0));
 }
 
-function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: string) => void }) {
+function FileChip({ file, onRemove, onReview }: { file: AttachedFile; onRemove?: (id: string) => void; onReview?: (file: AttachedFile) => void }) {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const icon = /^(md|txt|json|yaml|yml|toml|ini|cfg)$/.test(ext) ? <FileText size={12} /> : <File size={12} />;
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-zinc-700/60 bg-zinc-800/70 px-2 py-0.5 text-[11px] text-zinc-300 max-w-[160px]">
       {icon}
       <span className="truncate">{file.name}</span>
+      {attachmentNeedsSecurityReview(file) && onReview && (
+        <button
+          type="button"
+          onClick={() => onReview(file)}
+          aria-label={`Review sensitive attachment ${file.name}`}
+          className="inline-flex h-7 items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] text-amber-200 hover:bg-amber-500/20 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-amber-300"
+        >
+          <ShieldAlert size={11} /> Review
+        </button>
+      )}
       {onRemove && (
         <button
           type="button"
@@ -803,7 +820,7 @@ function PendingFileChip({
   );
 }
 
-function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (id: string) => void }) {
+function FilePreviewCard({ file, onRemove, onReview }: { file: AttachedFile; onRemove?: (id: string) => void; onReview?: (file: AttachedFile) => void }) {
   const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
   const lineCount = file.content ? file.content.split(/\r\n|\r|\n/).length : null;
   const isImage = /^image\//.test(file.type ?? "");
@@ -819,6 +836,16 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
         <div className="inline-flex h-7 w-fit items-center rounded-md border border-zinc-500/60 px-2 text-[13px] font-semibold text-zinc-300">
           {isImage ? "IMG" : ext.slice(0, 4)}
         </div>
+        {attachmentNeedsSecurityReview(file) && onReview && (
+          <button
+            type="button"
+            onClick={() => onReview(file)}
+            className="absolute bottom-2 right-2 inline-flex h-8 items-center gap-1 rounded-md border border-amber-500/40 bg-zinc-950/90 px-2 text-[10px] text-amber-200 focus:outline focus:outline-2 focus:outline-amber-300"
+            aria-label={`Review sensitive attachment ${file.name}`}
+          >
+            <ShieldAlert size={12} /> Review
+          </button>
+        )}
       </div>
       {onRemove && (
         <button
@@ -831,6 +858,111 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
           <X size={12} />
         </button>
       )}
+    </div>
+  );
+}
+
+function profileIsLocal(profile: ModelProfile | null | undefined): boolean {
+  const availability = profile?.availability ?? {};
+  return Boolean(
+    profile?.local
+    || availability.local
+    || availability.offline
+    || LOCAL_MODEL_PROVIDER_IDS.has(profileProviderId(profile)),
+  );
+}
+
+export function AttachmentSecurityReviewDialog({
+  file,
+  destination,
+  processing,
+  selectedToolCount = 0,
+  onUseLocalModel,
+  onUpdate,
+  onRemove,
+  onClose,
+}: {
+  file: AttachedFile;
+  destination: string;
+  processing: "local" | "remote" | "unknown";
+  selectedToolCount?: number;
+  onUseLocalModel?: () => void;
+  onUpdate: (file: AttachedFile) => void;
+  onRemove?: (id: string) => void;
+  onClose: () => void;
+}) {
+  const review = file.securityReview;
+  const redactableFindingIds = (review?.findings ?? [])
+    .filter((finding) => typeof finding.start === "number" && typeof finding.end === "number")
+    .map((finding) => finding.id);
+  const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>(redactableFindingIds);
+  const complete = (next: AttachedFile) => {
+    onUpdate(next);
+    onClose();
+  };
+  return (
+    <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center bg-black/70 p-4" role="presentation">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachment-security-review-title"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onClose();
+        }}
+        className="w-full max-w-lg rounded-2xl border border-amber-500/30 bg-zinc-950 p-5 text-zinc-100 shadow-2xl"
+      >
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 flex-shrink-0 text-amber-300" size={20} />
+          <div className="min-w-0">
+            <h2 id="attachment-security-review-title" className="text-base font-semibold">Review sensitive attachment</h2>
+            <p className="mt-1 break-all text-sm text-zinc-300">{file.name}</p>
+          </div>
+        </div>
+        <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg bg-zinc-900/70 p-3 text-xs">
+          <dt className="text-zinc-500">Destination</dt><dd>{destination || "Selected model/provider"}</dd>
+          <dt className="text-zinc-500">Processing</dt><dd>{processing === "local" ? "Local device" : processing === "remote" ? "Remote provider" : "Unknown; review as remote"}</dd>
+          <dt className="text-zinc-500">Tools</dt><dd>{selectedToolCount} selected</dd>
+          <dt className="text-zinc-500">Included</dt><dd>characters 0–{review?.scannedCharacters ?? file.content?.length ?? 0} · {file.size} source bytes{review?.truncated ? " (truncated; unscanned content exists)" : ""}</dd>
+          <dt className="text-zinc-500">Source</dt><dd>{file.source === "workspace" ? "Trusted workspace path" : "Local file picker/drop"}</dd>
+        </dl>
+        <div className="mt-4 max-h-48 overflow-y-auto rounded-lg border border-zinc-800 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Detected categories (values hidden)</p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {(review?.findings ?? []).map((finding) => (
+              <li key={finding.id} className="flex justify-between gap-3">
+                <label className="flex items-center gap-2">
+                  {typeof finding.start === "number" && typeof finding.end === "number" ? (
+                    <input
+                      type="checkbox"
+                      checked={selectedFindingIds.includes(finding.id)}
+                      onChange={(event) => setSelectedFindingIds((current) => (
+                        event.target.checked ? [...current, finding.id] : current.filter((id) => id !== finding.id)
+                      ))}
+                      aria-label={`Redact ${finding.kind.replace(/_/g, " ")} on line ${finding.line ?? "unknown"}`}
+                    />
+                  ) : <span aria-hidden="true" className="w-3" />}
+                  <span>{finding.kind.replace(/_/g, " ")}</span>
+                </label>
+                <span className="text-zinc-500">{finding.line ? `line ${finding.line}` : "filename"}</span>
+              </li>
+            ))}
+            {!review?.findings.length && review?.truncated && <li>File content was truncated before scanning completed.</li>}
+          </ul>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-zinc-400">
+          Secret values are not displayed or copied into diagnostics. Sending unchanged may disclose the listed data to the selected provider and is subject to that provider's retention policy.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button type="button" autoFocus onClick={onClose} className="rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-900">Cancel</button>
+          {onRemove && <button type="button" onClick={() => { onRemove(file.id); onClose(); }} className="rounded-lg border border-rose-500/30 px-3 py-2 text-sm text-rose-200">Remove</button>}
+          <button type="button" onClick={() => complete(attachmentMetadataOnly(file))} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Metadata only</button>
+          {processing !== "local" && (
+            <button type="button" disabled={!onUseLocalModel} onClick={onUseLocalModel} className="rounded-lg border border-sky-500/40 px-3 py-2 text-sm text-sky-100 disabled:cursor-not-allowed disabled:opacity-50">Use local model</button>
+          )}
+          <button type="button" disabled={selectedFindingIds.length === 0} onClick={() => complete(redactAttachmentSecurityFindings(file, selectedFindingIds))} className="rounded-lg border border-amber-500/40 px-3 py-2 text-sm text-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Redact selected</button>
+          <button type="button" onClick={() => complete(approveAttachmentSecurityReview(file))} className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-zinc-950">Send unchanged</button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1567,6 +1699,7 @@ export function ComposerRenderer({
   droppedWidgets = [],
   entityReferences = [],
   selectedToolIds = [],
+  attachmentSecretPatterns = [],
   actionApprovalMode = "ask",
   toolSelectionTargets = [],
   toolSelectionReview = null,
@@ -1602,6 +1735,7 @@ export function ComposerRenderer({
   onAtFileAttach,
   onPendingMentionAttachmentRemove,
   onFileRemove,
+  onFileUpdate,
   onDropWidget,
   onEntityReferencesChange,
   onWidgetAction,
@@ -1630,6 +1764,7 @@ export function ComposerRenderer({
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [attachmentReviewId, setAttachmentReviewId] = useState<string | null>(null);
   const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
   const [textareaFocused, setTextareaFocused] = useState(false);
   const [textareaScrollTop, setTextareaScrollTop] = useState(0);
@@ -1646,6 +1781,7 @@ export function ComposerRenderer({
   const compactSelectedProfileName = compactProfileName(profileName);
   const selectedProviderLabel = profileProviderLabel(selectedProfile);
   const selectedModelRouteLabel = modelRouteReason(selectedProfile) || selectedProviderLabel;
+  const attachmentUnderReview = attachedFiles.find((file) => file.id === attachmentReviewId) ?? null;
   const modelControlWidth = composerModelControlWidth(profileName);
   const visibleModelStatusIndicators = modelStatusIndicators.filter(Boolean);
   const levels = selectedProfile?.supports_thinking
@@ -1693,7 +1829,9 @@ export function ComposerRenderer({
   const templateAllowsAtMentions = templateFeatureFlags.at_mentions !== false
     && templateFeatureFlags.mentions !== false;
 	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
-	  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
+  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
+  const selectedProfileProcessing = profileIsLocal(selectedProfile) ? "local" : selectedProfile ? "remote" : "unknown";
+  const localOnlyProfile = selectableProfiles.find(profileIsLocal);
 	  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const serviceLabelById = useMemo(() => new Map(toolGroups.map((group) => [group.id, group.label])), [toolGroups]);
@@ -2204,9 +2342,11 @@ export function ComposerRenderer({
   const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     if (!templateAllowsFileAttachments) return;
-    const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
+    const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map((file) => (
+      fileToAttachment(file, attachmentSecretPatterns)
+    )));
     onFileAttach?.(newFiles);
-  }, [onFileAttach, templateAllowsFileAttachments]);
+  }, [attachmentSecretPatterns, onFileAttach, templateAllowsFileAttachments]);
 
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
@@ -2264,6 +2404,12 @@ export function ComposerRenderer({
         event.preventDefault();
         return;
       }
+      const pendingSecurityReview = attachedFiles.find(attachmentNeedsSecurityReview);
+      if (pendingSecurityReview) {
+        event.preventDefault();
+        setAttachmentReviewId(pendingSecurityReview.id);
+        return;
+      }
       if (needsApiKey(selectedProfile)) {
         event.preventDefault();
         if (selectedProfile) setApiKeyPromptProfile(selectedProfile);
@@ -2271,7 +2417,7 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy],
+    [attachedFiles, input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy],
   );
 
   const handleSendButtonPointerDown = useCallback(
@@ -2283,7 +2429,7 @@ export function ComposerRenderer({
       submitPointerHandledRef.current = true;
       handleSubmitWithApiKeyGuard(event);
     },
-    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating, pendingMentionAttachmentPaths.length],
+    [attachedFiles, handleSubmitWithApiKeyGuard, input, isGenerating, pendingMentionAttachmentPaths.length],
   );
 
   const handleSendButtonClick = useCallback(
@@ -2783,6 +2929,18 @@ export function ComposerRenderer({
       onDragOver={handleDragOver}
     >
       <div className={`rumi-composer-shell ${isNewConversation ? "rumi-composer-shell-new mx-auto" : "mx-auto"}`}>
+        {attachmentUnderReview && onFileUpdate && (
+          <AttachmentSecurityReviewDialog
+            file={attachmentUnderReview}
+            destination={selectedModelRouteLabel}
+            processing={selectedProfileProcessing}
+            selectedToolCount={selectedToolIds.length}
+            onUseLocalModel={localOnlyProfile ? () => onModelProfileSelect(localOnlyProfile.profile_id) : undefined}
+            onUpdate={onFileUpdate}
+            onRemove={onFileRemove}
+            onClose={() => setAttachmentReviewId(null)}
+          />
+        )}
         <RuntimeCapabilityBanner
           visible={imageBridgePlanned}
           onSwitchToVisionModel={onSwitchToVisionModel}
@@ -3061,7 +3219,7 @@ export function ComposerRenderer({
                 <PendingFileChip key={path} path={path} onRemove={onPendingMentionAttachmentRemove} />
               ))}
               {attachedFiles.map((file) => (
-                <FilePreviewCard key={file.id} file={file} onRemove={onFileRemove} />
+                <FilePreviewCard key={file.id} file={file} onRemove={onFileRemove} onReview={() => setAttachmentReviewId(file.id)} />
               ))}
             </div>
           )}
@@ -3312,7 +3470,7 @@ export function ComposerRenderer({
                 <PendingFileChip key={path} path={path} onRemove={onPendingMentionAttachmentRemove} />
               ))}
               {!isNewConversation && attachedFiles.map((file) => (
-                <FileChip key={file.id} file={file} onRemove={onFileRemove} />
+                <FileChip key={file.id} file={file} onRemove={onFileRemove} onReview={() => setAttachmentReviewId(file.id)} />
               ))}
               {droppedWidgets.map((widget) => (
                 <DroppedWidgetChip
