@@ -20,9 +20,11 @@ def setup_ui_source() -> str:
 def test_setup_pack_landing_avoids_centered_clipping_layout() -> None:
     """Initial desktop view should top-align and allow natural vertical scroll."""
     source = setup_ui_source()
+    body_rules = re.search(r"body \{(?P<body>.*?)\n    \}", source, re.S)
 
-    assert "place-items: center" not in source
-    assert "overflow: hidden;" not in source
+    assert body_rules is not None
+    assert "place-items: center" not in body_rules.group("body")
+    assert "overflow: hidden;" not in body_rules.group("body")
     assert "margin: 0 auto;" in source
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr)" in source
     assert "min-width: 0;" in source
@@ -66,6 +68,10 @@ def test_setup_offers_an_explicit_standard_choice_without_auto_selection() -> No
     assert "details.open = false;" in source
     assert "Defaults Profile" in source
     assert "recommended_default_profile" in source
+    assert "PROFILE_CARDS" not in source
+    assert "matchingPacks" not in source
+    assert "matches.push(packs[0])" not in source
+    assert "pack.recommended" not in source
 
 
 def test_setup_cards_are_full_clickable_labels() -> None:
@@ -146,8 +152,8 @@ def test_install_action_sends_selected_ids_and_reports_feedback() -> None:
     assert 'setInstallProgress("error")' in source
     assert 'id="install-progress"' in source
     assert 'id="install-selected" disabled' in source
-    assert "const refreshed = await load({ preserveStatus: true, redirect: false });" in source
-    assert "if (!refreshed) return;" in source
+    assert "do not immediately issue an unauthenticated refresh request here" in source
+    assert "const refreshed = await load({ preserveStatus: true, redirect: false });" not in source
     assert 'aria-live="polite"' in source
     assert 'setStatus("setup pack をインストール中…"' in source
     assert 'setStatus("setup pack をインストールしました"' in source

@@ -797,8 +797,9 @@
         ], "error");
         return;
       }
-      const refreshed = await load({ preserveStatus: true, redirect: false });
-      if (!refreshed) return;
+      // Installing the selected packs completes initial setup.  Setup APIs are
+      // deliberately no longer available without authentication at that point,
+      // so do not immediately issue an unauthenticated refresh request here.
       setInstallProgress("success");
       const migrationCount = Object.keys(data.migrations || {}).length;
       setStatus("setup pack をインストールしました", { setup_pack_ids: selected, result: data }, [
@@ -1038,7 +1039,7 @@
         input.setAttribute("aria-label", setupPackName(pack) + " を追加");
         const riskClass = pack.risk_level === "high" ? "danger" : "";
         const allOkText = pack.supports_all_ok
-          ? "限定的な All OK 許可に対応"
+          ? "選択的な All OK 許可に対応。安全のため、All OK 権限は明示的に対応する setup pack にのみ付与されます"
           : "All OK 許可なしでインストール";
         const header = document.createElement("header");
         const packDetails = document.createElement("div");
