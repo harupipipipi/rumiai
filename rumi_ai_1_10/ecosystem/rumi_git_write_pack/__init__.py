@@ -1,1 +1,0 @@
-"""Rumi Git write pack."""

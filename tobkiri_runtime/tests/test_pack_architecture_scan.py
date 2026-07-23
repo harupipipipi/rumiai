@@ -30,7 +30,7 @@ def _scanner():
 
 
 def _pack(root: Path, pack_id: str) -> Path:
-    pack = root / "rumi_ai_1_10" / "ecosystem" / pack_id
+    pack = root / "tobkiri_runtime" / "ecosystem" / pack_id
     pack.mkdir(parents=True)
     (pack / "ecosystem.json").write_text(
         json.dumps({"id": pack_id}), encoding="utf-8"
@@ -61,7 +61,7 @@ def test_cross_pack_imports_are_exact_edges(
     assert edge.target == "pack_b"
     assert edge.identity.startswith(
         "cross_pack_import|"
-        f"rumi_ai_1_10/ecosystem/pack_a/{relative_path}|1|"
+        f"tobkiri_runtime/ecosystem/pack_a/{relative_path}|1|"
     )
 
 
@@ -71,7 +71,7 @@ def test_foreign_pack_branch_and_sibling_path_are_detected(tmp_path: Path) -> No
     _pack(tmp_path, "pack_b")
     (pack_a / "consumer.py").write_text(
         "if request.pack_id == 'pack_b':\n"
-        "    path = 'rumi_ai_1_10/ecosystem/pack_b/private.db'\n",
+        "    path = 'tobkiri_runtime/ecosystem/pack_b/private.db'\n",
         encoding="utf-8",
     )
 
@@ -86,7 +86,7 @@ def test_unscoped_kernel_discovery_secret_and_domain_branch_are_detected(
 ) -> None:
     scanner = _scanner()
     _pack(tmp_path, "pack_a")
-    kernel = tmp_path / "rumi_ai_1_10" / "core_runtime"
+    kernel = tmp_path / "tobkiri_runtime" / "core_runtime"
     kernel.mkdir(parents=True)
     (kernel / "unsafe.py").write_text(
         "packs = ecosystem_root.glob('*')\n"

@@ -107,21 +107,24 @@ def compile_startup_capabilities(
     try:
         normalized_startup_profile = dict(startup_profile)
         normalized_startup_profile.setdefault("profile_id", capability_profile_id)
-        resolution_input = resolution_input_from_startup_profile(
+        provisional_input = resolution_input_from_startup_profile(
             normalized_startup_profile
         )
         provisional_profile = resolve_profile(
-            resolution_input,
+            provisional_input,
             ecosystem_dir=ecosystem_dir,
         )
-        authorized_pack_ids = tuple(
-            pack_id
-            for pack_id in provisional_profile.selected_pack_ids
-            if _pack_is_approved(approval_manager, pack_id)
+        verified_pack_trust = _verified_pack_trust(
+            approval_manager,
+            provisional_profile.selected_pack_ids
+        )
+        resolution_input = resolution_input_from_startup_profile(
+            normalized_startup_profile,
+            verified_pack_trust=verified_pack_trust,
         )
         resolution_input = replace(
             resolution_input,
-            authorized_pack_ids=authorized_pack_ids,
+            authorized_pack_ids=tuple(verified_pack_trust),
         )
         resolved_profile = resolve_profile(
             resolution_input,
@@ -333,6 +336,37 @@ def _pack_is_approved(approval_manager: Any, pack_id: str) -> bool:
     if isinstance(result, tuple):
         return bool(result[0])
     return bool(result)
+
+
+def _verified_pack_trust(
+    approval_manager: Any,
+    pack_ids: tuple[str, ...],
+) -> Dict[str, str]:
+    """Read host-verified trust while preserving test/legacy manager support."""
+    if approval_manager is None:
+        try:
+            from .approval_manager import get_approval_manager
+
+            approval_manager = get_approval_manager()
+        except Exception:
+            return {}
+    getter = getattr(approval_manager, "get_verified_pack_trust", None)
+    if callable(getter):
+        try:
+            result = getter(pack_ids)
+        except Exception:
+            return {}
+        if isinstance(result, dict):
+            return {
+                str(pack_id): str(trust_class)
+                for pack_id, trust_class in result.items()
+            }
+        return {}
+    return {
+        pack_id: "verified"
+        for pack_id in pack_ids
+        if _pack_is_approved(approval_manager, pack_id)
+    }
 
 
 def _register_pack_binding_handlers(

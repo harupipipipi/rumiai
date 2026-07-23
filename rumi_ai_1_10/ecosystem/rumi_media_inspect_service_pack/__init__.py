@@ -1,1 +1,0 @@
-"""Workspace media inspection pack."""

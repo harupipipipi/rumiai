@@ -1,1 +1,0 @@
-"""QR pairing connector pack."""

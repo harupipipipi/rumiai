@@ -39,6 +39,11 @@ When reviewing a baseline change, pass the previously approved file as
 and metadata mutation fail closed. A removal followed by reintroduction has a
 new exact identity and is rejected.
 
+The first PR that introduces this gate runs against its reviewed candidate
+baseline without a reference. Once that baseline exists on the target branch,
+CI supplies the target branch version as `--reference-baseline` and enforces
+shrink-only changes.
+
 No suppression is inferred from a package, directory, filename pattern, or
 comment in source code.
 

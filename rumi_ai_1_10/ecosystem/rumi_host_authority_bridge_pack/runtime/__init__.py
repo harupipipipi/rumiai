@@ -1,1 +1,0 @@
-"""Host authority receipt runtime."""

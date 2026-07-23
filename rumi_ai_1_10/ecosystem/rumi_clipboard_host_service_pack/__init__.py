@@ -1,1 +1,0 @@
-"""Clipboard host boundary pack."""

@@ -1,1 +1,0 @@
-"""Mobile pairing connector pack."""

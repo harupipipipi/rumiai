@@ -1,1 +1,0 @@
-"""Company coordinator pack."""

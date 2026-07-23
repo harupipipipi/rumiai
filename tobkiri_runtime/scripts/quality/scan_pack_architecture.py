@@ -161,7 +161,7 @@ def verify_shrink_only_baseline(
 
 def scan_repository(root: Path) -> list[Violation]:
     """Scan all supported source files and return deterministic violations."""
-    ecosystem = root / "rumi_ai_1_10" / "ecosystem"
+    ecosystem = root / "tobkiri_runtime" / "ecosystem"
     pack_roots = discover_pack_roots(ecosystem)
     pack_names = set(pack_roots)
     violations: set[Violation] = set()

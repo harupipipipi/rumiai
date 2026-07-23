@@ -196,12 +196,13 @@ jobs:
             echo "Base commit is unavailable: ${BASE_SHA}" >&2
             exit 1
           fi
-          if ! git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
-            echo "Pack architecture baseline is unavailable at ${BASE_SHA}" >&2
-            exit 1
+          if git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
+            git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
+            python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
+          else
+            echo "Bootstrapping pack architecture baseline; shrink-only comparison starts after merge"
+            python scripts/quality/scan_pack_architecture.py
           fi
-          git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
-          python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
 
   frontend-security-audit:
     strategy:

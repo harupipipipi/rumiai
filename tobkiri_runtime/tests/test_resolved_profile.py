@@ -12,6 +12,7 @@ from core_runtime.resolved_profile import (
     apply_legacy_selection_migration,
     create_lockfile,
     plan_legacy_selection_migration,
+    resolution_input_from_startup_profile,
     resolve_profile,
     read_lockfile,
     refresh_lockfile,
@@ -22,6 +23,7 @@ from core_runtime.resolved_profile_scope import (
     _persisted_startup_pack_ids,
     activate_resolved_profile,
     effective_pack_ids,
+    persisted_resolved_profile,
     require_effective_pack,
     restore_resolved_profile,
 )
@@ -53,6 +55,74 @@ def test_persisted_scope_reads_the_configured_user_data_root(
         "rumi_browser_automation_pack",
     ]
     assert observed["config_path"] == str(tmp_path / "active_ecosystem.json")
+
+
+def test_startup_profile_input_accepts_only_host_supplied_verified_trust() -> None:
+    resolution_input = resolution_input_from_startup_profile(
+        {
+            "profile_id": "fixture",
+            "base_pack": "defaultspack",
+            "packs": ["frontendpack"],
+        },
+        verified_pack_trust={
+            "frontendpack": "verified",
+            "defaultspack": "system",
+        },
+    )
+
+    assert resolution_input.verified_pack_trust == (
+        ("defaultspack", "system"),
+        ("frontendpack", "verified"),
+    )
+
+
+def test_persisted_profile_restores_verified_system_trust(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import core_runtime.approval_manager as approval_module
+    import core_runtime.resolved_profile_scope as scope
+
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    (settings_dir / "startup_profiles.json").write_text(
+        json.dumps(
+            {
+                "active_profile_id": "fixture",
+                "profiles": [
+                    {
+                        "profile_id": "fixture",
+                        "base_pack": "defaultspack",
+                        "packs": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeApprovalManager:
+        def get_verified_pack_trust(
+            self, pack_ids: tuple[str, ...]
+        ) -> dict[str, str]:
+            return {pack_id: "system" for pack_id in pack_ids}
+
+    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(scope, "_PERSISTED_PROFILE_CACHE", None)
+    monkeypatch.setattr(
+        approval_module,
+        "get_approval_manager",
+        lambda: FakeApprovalManager(),
+    )
+
+    plan = persisted_resolved_profile()
+
+    assert plan is not None
+    defaultspack = next(
+        pack for pack in plan.packs if pack.pack_id == "defaultspack"
+    )
+    assert defaultspack.authorized is True
+    assert defaultspack.trust_class == "system"
 
 
 def _write_pack(

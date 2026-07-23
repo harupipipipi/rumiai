@@ -1,1 +1,0 @@
-"""Rumi knowledge store pack."""

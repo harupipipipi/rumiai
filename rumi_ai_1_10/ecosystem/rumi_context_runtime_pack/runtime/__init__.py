@@ -1,1 +1,0 @@
-"""Derived context materialization runtime."""

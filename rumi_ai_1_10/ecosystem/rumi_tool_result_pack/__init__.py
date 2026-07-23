@@ -1,1 +1,0 @@
-"""Tool result normalization pack."""

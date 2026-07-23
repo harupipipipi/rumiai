@@ -362,6 +362,7 @@ def resolution_input_from_startup_profile(
     policy_revision: str | None = None,
     lockfile_revision: str | None = None,
     legacy_selection: Mapping[str, Any] | None = None,
+    verified_pack_trust: Mapping[str, str] | None = None,
 ) -> ResolutionInput:
     """Normalize startup and legacy setup selection into one explicit input."""
     profile_id = str(profile.get("profile_id") or profile.get("id") or "").strip()
@@ -394,6 +395,12 @@ def resolution_input_from_startup_profile(
         authorized_pack_ids=_unique(authorized),
         healthy_pack_ids=(),
         policy_capabilities=_unique(capabilities),
+        verified_pack_trust=tuple(
+            sorted(
+                (str(pack_id), str(trust_class))
+                for pack_id, trust_class in (verified_pack_trust or {}).items()
+            )
+        ),
     )
 
 

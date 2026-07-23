@@ -79,15 +79,21 @@ def persisted_resolved_profile() -> ResolvedProfile | None:
         ) if isinstance(profiles, list) else None
         if not isinstance(profile, dict):
             return None
-        resolution_input = resolution_input_from_startup_profile(profile)
-        provisional = resolve_profile(resolution_input)
+        provisional_input = resolution_input_from_startup_profile(profile)
+        provisional = resolve_profile(provisional_input)
         approval_manager = get_approval_manager()
-        authorized = tuple(
-            pack_id for pack_id in provisional.selected_pack_ids
-            if approval_manager.is_pack_approved_and_verified(pack_id)[0]
+        verified_pack_trust = approval_manager.get_verified_pack_trust(
+            provisional.selected_pack_ids
+        )
+        resolution_input = resolution_input_from_startup_profile(
+            profile,
+            verified_pack_trust=verified_pack_trust,
         )
         resolved = resolve_profile(
-            replace(resolution_input, authorized_pack_ids=authorized)
+            replace(
+                resolution_input,
+                authorized_pack_ids=tuple(verified_pack_trust),
+            )
         )
         with _PERSISTED_PROFILE_LOCK:
             _PERSISTED_PROFILE_CACHE = (cache_key, resolved)

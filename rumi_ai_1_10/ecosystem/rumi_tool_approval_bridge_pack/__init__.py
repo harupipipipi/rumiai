@@ -1,1 +1,0 @@
-"""Tool approval bridge pack."""

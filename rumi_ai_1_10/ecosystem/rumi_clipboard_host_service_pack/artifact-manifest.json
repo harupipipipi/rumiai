@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "artifacts": [
-    {"path": "runtime/service.py", "sha256": "944e78c7320bcb99ef2191cbe43bb546a94060c913434e2e1b94a12f903eb75b", "entrypoints": ["create_clipboard_reader", "create_clipboard_writer"]},
-    {"path": "runtime/runner.py", "sha256": "efc58b22e52a3b3c30e3df60b12b517fdc52309d75e9e95c23438152084f08a1", "entrypoints": ["run_clipboard_host_action"]}
-  ]
-}

@@ -1,1 +1,0 @@
-"""Rumi shell policy pack."""

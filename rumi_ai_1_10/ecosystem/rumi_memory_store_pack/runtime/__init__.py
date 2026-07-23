@@ -1,1 +1,0 @@
-"""Authoritative memory runtime."""

@@ -1,1 +1,0 @@
-"""Discord connector pack."""
