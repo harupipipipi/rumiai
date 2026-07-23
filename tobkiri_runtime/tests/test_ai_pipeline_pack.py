@@ -16,12 +16,14 @@ def test_prepare_preserves_absolute_deadline_and_opaque_handle() -> None:
             "decision_time": 100.0,
             "deadline": 120.0,
             "credential_handle": "credential:opaque",
+            "profile_id": "defaults-profile",
             "requirements": {"modalities": ["text"], "unknown": True},
         },
     )
 
     assert result["deadline"] == 120.0
     assert result["credential_handle"] == "credential:opaque"
+    assert result["profile_id"] == "defaults-profile"
     assert result["requirements"] == {"modalities": ["text"]}
 
 
@@ -42,4 +44,3 @@ def test_failover_requires_every_replay_safety_condition() -> None:
     assert operation("decide", {**base, "tools": [{"name": "write"}]})[
         "allowed"
     ] is False
-

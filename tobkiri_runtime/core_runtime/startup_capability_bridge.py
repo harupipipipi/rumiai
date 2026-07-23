@@ -105,7 +105,11 @@ def compile_startup_capabilities(
         )
 
     try:
-        resolution_input = resolution_input_from_startup_profile(startup_profile)
+        normalized_startup_profile = dict(startup_profile)
+        normalized_startup_profile.setdefault("profile_id", capability_profile_id)
+        resolution_input = resolution_input_from_startup_profile(
+            normalized_startup_profile
+        )
         provisional_profile = resolve_profile(
             resolution_input,
             ecosystem_dir=ecosystem_dir,

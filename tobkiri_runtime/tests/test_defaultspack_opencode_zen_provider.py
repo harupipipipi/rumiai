@@ -33,11 +33,112 @@ class _FakeSseResponse:
         self.closed = True
 
 
+class _FakeJsonResponse:
+    def __init__(self, payload):
+        import json
+
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        del exc_type, exc, traceback
+
+    def read(self):
+        return self._body
+
+
 def _provider(monkeypatch):
     monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-opencode-zen-key")
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
 
     return OpencodeZenProvider()
+
+
+def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
+    provider = _provider(monkeypatch)
+    response = _FakeJsonResponse(
+        {
+            "data": [
+                {"id": "minimax-m3-free", "display_name": "MiniMax M3 (live)"},
+                {"id": "account-only-model", "display_name": "Account Model"},
+            ]
+        }
+    )
+
+    with patch(
+        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+        return_value=response,
+    ):
+        models = provider.list_models()
+
+    assert [model["model_id"] for model in models] == [
+        "minimax-m3-free",
+        "account-only-model",
+    ]
+    assert all(model["metadata"]["inventory_source"] == "live" for model in models)
+    assert models[0]["metadata"]["transport"] == "anthropic_messages"
+
+
+@pytest.mark.parametrize("payload", [{"data": []}, {"unexpected": []}])
+def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(
+    monkeypatch, payload
+):
+    provider = _provider(monkeypatch)
+
+    with patch(
+        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+        return_value=_FakeJsonResponse(payload),
+    ):
+        models = provider.list_models()
+
+    assert {model["model_id"] for model in models} == {
+        "minimax-m3-free",
+        "mimo-v2.5-free",
+    }
+    assert all(
+        model["metadata"]["inventory_source"] == "curated_fallback" for model in models
+    )
+    assert all(
+        model["metadata"]["inventory_fallback_reason"] == "empty_inventory"
+        for model in models
+    )
+
+
+def test_opencode_zen_model_inventory_falls_back_on_network_failure(monkeypatch):
+    provider = _provider(monkeypatch)
+
+    with patch(
+        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+        side_effect=TimeoutError,
+    ):
+        models = provider.list_models()
+
+    assert len(models) == 2
+    assert all(
+        model["metadata"]["inventory_fallback_reason"] == "timeout" for model in models
+    )
+
+
+def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider.MODEL_INVENTORY_TTL_SECONDS = 0
+
+    with patch(
+        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+        side_effect=[
+            _FakeJsonResponse({"data": [{"id": "account-only-model"}]}),
+            TimeoutError(),
+        ],
+    ):
+        live = provider.list_models()
+        fallback = provider.list_models()
+
+    assert [model["model_id"] for model in live] == ["account-only-model"]
+    assert [model["model_id"] for model in fallback] == ["account-only-model"]
+    assert fallback[0]["metadata"]["inventory_source"] == "last_known_good"
+    assert fallback[0]["metadata"]["inventory_stale"] is True
 
 
 def test_opencode_zen_catalog_includes_curated_free_models():

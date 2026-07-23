@@ -49,9 +49,9 @@
     "requires": []
   },
   "entrypoints": [
-    {"id": "model-profile-resource", "contract_id": "rumi.resource.ai.model.profile.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:27f5165d01ebd2b43c39f6b35ca62aebd325f5391974252409a08149ccab26f5"},
-    {"id": "model-profile-manage", "contract_id": "rumi.action.ai.model.profile.manage.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:27f5165d01ebd2b43c39f6b35ca62aebd325f5391974252409a08149ccab26f5"},
-    {"id": "model-registry-migrate", "contract_id": "rumi.action.ai.model.registry.migrate.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:27f5165d01ebd2b43c39f6b35ca62aebd325f5391974252409a08149ccab26f5"}
+    {"id": "model-profile-resource", "contract_id": "rumi.resource.ai.model.profile.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"},
+    {"id": "model-profile-manage", "contract_id": "rumi.action.ai.model.profile.manage.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"},
+    {"id": "model-registry-migrate", "contract_id": "rumi.action.ai.model.registry.migrate.v1", "loader": "process", "module": "ecosystem.rumi_model_registry_pack.runtime.process", "artifact_hash": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"}
   ],
   "resources": [],
   "storage": [
@@ -63,7 +63,7 @@
     {"capability": "ai.model.profile.migrate", "access": "control", "approval_required": true}
   ],
   "provenance": {
-    "content_hash": "sha256:6fad361ea7ea4f02943153825e6401d04d5c6024ccfb07dc39fd771fb22b8651",
+    "content_hash": "sha256:a7570fbdfc47fe2ae4c80a29b28070da3b16825d97846439288a149d847614f6",
     "build_identity": "rumi-model-registry-pack:1.0.0",
     "trust_class": "local",
     "signature": null
@@ -71,7 +71,7 @@
   "migration": {
     "from": ["defaultspack.ai_client.saved_models", "defaultspack.ai_client.model_aliases"],
     "compatibility_aliases": [],
-    "compatibility_projection": "read_only",
+    "compatibility_projection": "legacy_to_v3_read_only",
     "removal_wave": 10,
     "sunset_at": "2027-12-31",
     "rollback": "Remove migrated owner state and restore the owner-only source backup."
@@ -85,4 +85,3 @@
     }
   }
 }
-

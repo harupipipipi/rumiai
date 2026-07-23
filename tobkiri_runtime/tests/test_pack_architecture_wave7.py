@@ -18,6 +18,58 @@ from ecosystem.rumi_conversation_store_pack.runtime.store import (
 from ecosystem.rumi_knowledge_store_pack.runtime.store import KnowledgeStore
 from ecosystem.rumi_memory_store_pack.runtime.store import MemoryStore
 from ecosystem.rumi_turn_runtime_pack.runtime.turns import TurnConflict, TurnRuntime
+from core_runtime.global_contracts.manifest import load_manifest
+from core_runtime.pack_artifact_integrity import verify_declared_artifacts
+
+
+def test_conversation_store_contract_artifacts_are_activatable() -> None:
+    """Keep the authoritative chat owner loadable by the desktop process."""
+    pack_root = (
+        Path(__file__).parents[1] / "ecosystem" / "rumi_conversation_store_pack"
+    )
+    manifest = load_manifest(pack_root / "rumi.pack.v3.json")
+    assert manifest.ok, manifest.diagnostics
+
+    ecosystem_manifest = json.loads(
+        (pack_root / "ecosystem.json").read_text(encoding="utf-8")
+    )
+    integrity_ok, diagnostics = verify_declared_artifacts(
+        pack_root,
+        ecosystem_manifest,
+    )
+    assert integrity_ok, diagnostics
+
+    runtime_hash = "sha256:" + hashlib.sha256(
+        (pack_root / "runtime" / "store.py").read_bytes()
+    ).hexdigest()
+    assert {
+        entrypoint["artifact_hash"]
+        for entrypoint in manifest.value["entrypoints"]
+    } == {runtime_hash}
+
+
+def test_turn_runtime_contract_artifacts_are_activatable() -> None:
+    """Keep live conversation steering available in packaged profiles."""
+    pack_root = Path(__file__).parents[1] / "ecosystem" / "rumi_turn_runtime_pack"
+    manifest = load_manifest(pack_root / "rumi.pack.v3.json")
+    assert manifest.ok, manifest.diagnostics
+
+    ecosystem_manifest = json.loads(
+        (pack_root / "ecosystem.json").read_text(encoding="utf-8")
+    )
+    integrity_ok, diagnostics = verify_declared_artifacts(
+        pack_root,
+        ecosystem_manifest,
+    )
+    assert integrity_ok, diagnostics
+
+    runtime_hash = "sha256:" + hashlib.sha256(
+        (pack_root / "runtime" / "turns.py").read_bytes()
+    ).hexdigest()
+    assert {
+        entrypoint["artifact_hash"]
+        for entrypoint in manifest.value["entrypoints"]
+    } == {runtime_hash}
 
 
 def test_conversation_and_messages_share_one_atomic_revision(tmp_path: Path) -> None:
@@ -176,4 +228,3 @@ def test_legacy_owner_modules_contain_no_old_storage_writes() -> None:
         "shared/knowledge",
     ):
         assert forbidden not in source
-

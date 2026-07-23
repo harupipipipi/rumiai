@@ -9,8 +9,8 @@
     "requires": []
   },
   "entrypoints": [
-    {"id": "ai-tokenize", "contract_id": "rumi.service.ai.tokenize.v1", "loader": "python", "module": "ecosystem.rumi_ai_usage_pack.runtime.usage", "symbol": "create_tokenize_operation", "artifact_hash": "sha256:5e48c34ea8eb49ed0bf4c1d976c25e2e04c0c38adcb5b46acd24236ece50b7ea"},
-    {"id": "ai-usage-cost", "contract_id": "rumi.service.ai.usage.cost.v1", "loader": "python", "module": "ecosystem.rumi_ai_usage_pack.runtime.usage", "symbol": "create_cost_operation", "artifact_hash": "sha256:5e48c34ea8eb49ed0bf4c1d976c25e2e04c0c38adcb5b46acd24236ece50b7ea"}
+    {"id": "ai-tokenize", "contract_id": "rumi.service.ai.tokenize.v1", "loader": "python", "module": "ecosystem.rumi_ai_usage_pack.runtime.usage", "symbol": "create_tokenize_operation", "artifact_hash": "sha256:eddbfa58f46a1b987cf13c7d7f8a6d14482ebdbed126b922bab3eb51a24be9f0"},
+    {"id": "ai-usage-cost", "contract_id": "rumi.service.ai.usage.cost.v1", "loader": "python", "module": "ecosystem.rumi_ai_usage_pack.runtime.usage", "symbol": "create_cost_operation", "artifact_hash": "sha256:eddbfa58f46a1b987cf13c7d7f8a6d14482ebdbed126b922bab3eb51a24be9f0"}
   ],
   "resources": [],
   "storage": [],
@@ -18,8 +18,7 @@
     {"capability": "ai.tokenize", "access": "execute", "approval_required": false},
     {"capability": "ai.usage.cost", "access": "execute", "approval_required": false}
   ],
-  "provenance": {"content_hash": "sha256:5e48c34ea8eb49ed0bf4c1d976c25e2e04c0c38adcb5b46acd24236ece50b7ea", "build_identity": "rumi-ai-usage-pack:1.0.0", "trust_class": "local", "signature": null},
-  "migration": {"from": ["defaultspack.ai_client.tokenizer", "defaultspack.ai_client.usage"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove the usage pack and restore the pinned previous selected usage provider."},
+  "provenance": {"content_hash": "sha256:69610cef7ab9b1e6abd0612393e537a3d3f1becf9abe18ecff6e30a75d444567", "build_identity": "rumi-ai-usage-pack:1.0.0", "trust_class": "local", "signature": null},
+  "migration": {"from": ["defaultspack.ai_client.tokenizer", "defaultspack.ai_client.usage"], "compatibility_aliases": [], "compatibility_projection": "legacy_to_v3_read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove the usage pack and restore the pinned previous selected usage provider."},
   "extensions": {"rumi.ai_usage.boundary": {"exact_tokenizer_claim": false, "unknown_usage_zero": false, "unknown_cost_zero": false}}
 }
-

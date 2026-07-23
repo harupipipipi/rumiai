@@ -8,7 +8,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from jsonschema import Draft202012Validator
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:  # Desktop runtime keeps third-party bootstrap minimal.
+    Draft202012Validator = None  # type: ignore[assignment,misc]
 
 from .global_contracts.canonical import content_identity
 from .paths import PackLocation, resolve_pack_locations
@@ -103,7 +106,11 @@ class FrontendHostRegistry:
             str(ecosystem_dir) if ecosystem_dir is not None else None
         )
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        self._validator = Draft202012Validator(schema)
+        self._validator = (
+            Draft202012Validator(schema)
+            if Draft202012Validator is not None
+            else None
+        )
 
     def build_catalog(self) -> FrontendCatalog:
         """Build a deterministic catalog; one bad pack cannot abort others."""
@@ -263,6 +270,18 @@ class FrontendHostRegistry:
                     "Frontend descriptor hash does not match the manifest",
                     location.pack_id,
                     str(payload.get("id") or "") if isinstance(payload, dict) else None,
+                )
+            ]
+        if self._validator is None:
+            return None, [
+                _diagnostic(
+                    "frontend_descriptor_invalid",
+                    "error",
+                    "Frontend schema validation is unavailable",
+                    location.pack_id,
+                    str(payload.get("id") or "")
+                    if isinstance(payload, dict)
+                    else None,
                 )
             ]
         errors = sorted(
@@ -508,4 +527,3 @@ def _diagnostic(
         owner_pack_id,
         contribution_id,
     )
-

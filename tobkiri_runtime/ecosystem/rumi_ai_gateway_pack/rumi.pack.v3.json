@@ -121,24 +121,24 @@
       "contract_id": "rumi.service.ai.generate.v1",
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
-      "symbol": "create_generate_operation",
-      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
+     "symbol": "create_generate_operation",
+      "artifact_hash": "sha256:8964e5ffdb6ed020db27681d95b58d7c3a769100cdcb7ac78846a0d867866303"
     },
     {
       "id": "ai-gateway-stream",
       "contract_id": "rumi.service.ai.stream.v1",
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
-      "symbol": "create_stream_operation",
-      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
+     "symbol": "create_stream_operation",
+      "artifact_hash": "sha256:8964e5ffdb6ed020db27681d95b58d7c3a769100cdcb7ac78846a0d867866303"
     },
     {
       "id": "ai-gateway-routing-diagnostics",
       "contract_id": "rumi.resource.ai.routing.diagnostics.v1",
       "loader": "python",
       "module": "ecosystem.rumi_ai_gateway_pack.runtime.gateway",
-      "symbol": "create_routing_diagnostics_operation",
-      "artifact_hash": "sha256:55e194fb9f662a6fcae787384ebbd00945f20e3760ece657b2ca18779a57d6cb"
+     "symbol": "create_routing_diagnostics_operation",
+      "artifact_hash": "sha256:8964e5ffdb6ed020db27681d95b58d7c3a769100cdcb7ac78846a0d867866303"
     }
   ],
   "resources": [],
@@ -148,8 +148,8 @@
     {"capability": "ai.gateway.stream", "access": "execute", "approval_required": false},
     {"capability": "ai.gateway.diagnostics.read", "access": "read", "approval_required": false}
   ],
-  "provenance": {
-    "content_hash": "sha256:7cc250a046003e181f1f2763aa425a9f4a9889d7c72d6aef95ce203092e0bf90",
+ "provenance": {
+    "content_hash": "sha256:fbd35d689c65ad9a1b19a25c4b60b7ef1b50ce0c265a7c0a31dcb35bd0787730",
     "build_identity": "rumi-ai-gateway-pack:1.0.0",
     "trust_class": "local",
     "signature": null
@@ -171,4 +171,3 @@
     }
   }
 }
-

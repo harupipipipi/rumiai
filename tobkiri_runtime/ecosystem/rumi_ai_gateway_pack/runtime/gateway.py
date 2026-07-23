@@ -192,6 +192,7 @@ def _invoke(
         "required_capabilities": sorted(requirement.capabilities),
         "required_modalities": sorted(requirement.modalities),
         "request_surface": requirement.request_surface,
+        "profile_id": request.get("profile_id"),
         "deadline": deadline,
         "credential_handle": request.get("credential_handle"),
         "idempotency_key": request.get("idempotency_key"),
@@ -453,6 +454,7 @@ def _catalog_candidates(
             descriptor = dict(raw)
             descriptor["catalog_provider_instance_id"] = catalog_provider_id
             catalog_models.append(descriptor)
+    _append_explicit_live_model(catalog_models, requirement)
     routed = client.invoke(
         ROUTING_CONTRACT,
         "route",
@@ -479,6 +481,55 @@ def _catalog_candidates(
             for item in excluded
             if isinstance(item, Mapping)
         ],
+    )
+
+
+def _append_explicit_live_model(
+    catalog_models: list[dict[str, Any]],
+    requirement: RouteRequirement,
+) -> None:
+    """Bridge a provider-verified live model into deterministic routing.
+
+    The model picker can contain account-scoped models returned by a provider's
+    live ``/models`` endpoint before the bundled catalog is refreshed. An
+    explicit saved reference must remain routable through the selected generic
+    provider adapter instead of failing merely because that static snapshot is
+    older than the provider inventory.
+    """
+    model_id = str(requirement.preferred_model_id or "").strip()
+    provider_id, separator, provider_model_id = model_id.partition("/")
+    if (
+        not separator
+        or not provider_id
+        or not provider_model_id
+        or any(character.isspace() for character in provider_id)
+        or any(not character.isprintable() for character in model_id)
+    ):
+        return
+    if any(str(item.get("model_id") or "") == model_id for item in catalog_models):
+        return
+
+    capabilities = set(requirement.capabilities)
+    if requirement.tool_calling:
+        capabilities.add("tool_calling")
+    if requirement.thinking:
+        capabilities.add("thinking")
+    catalog_models.append(
+        {
+            "model_id": model_id,
+            "provider_model_id": provider_model_id,
+            "provider_id": provider_id,
+            "execution_provider_instance_id": "provider.compatibility",
+            "health_provider_instance_id": f"provider.{provider_id}",
+            "catalog_revision": "explicit-live-model:v1",
+            "capabilities": sorted(capabilities),
+            "modalities": sorted(requirement.modalities or {"text"}),
+            "context_length": requirement.minimum_context,
+            "priority": 0,
+            "available": True,
+            "request_surfaces": [requirement.request_surface],
+            "data_residency": requirement.data_residency or "unknown",
+        }
     )
 
 
@@ -687,4 +738,3 @@ def _optional_float(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-

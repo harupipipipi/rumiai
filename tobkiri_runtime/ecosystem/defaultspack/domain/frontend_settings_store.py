@@ -6,12 +6,53 @@ import shutil
 import tempfile
 import threading
 import time
+from copy import deepcopy
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
 REVISION_KEY = "_settings_revision"
+STATE_REVISIONS_KEY = "_state_revisions"
+MUTATION_RECEIPTS_KEY = "_mutation_receipts"
+MAX_MUTATION_RECEIPTS = 64
+
+
+class FrontendSettingsRevisionConflict(RuntimeError):
+    """Raised when a state mutation targets an obsolete state revision."""
+
+    def __init__(self, state_ref: str, expected: int, actual: int) -> None:
+        super().__init__(
+            f"state revision conflict for {state_ref}: expected {expected}, current {actual}"
+        )
+        self.state_ref = state_ref
+        self.expected = expected
+        self.actual = actual
+
+
+class FrontendSettingsIdempotencyConflict(RuntimeError):
+    """Raised when an idempotency key is reused for a different mutation."""
+
+
+def defaultspack_frontend_settings_path(pack_root: Path) -> Path:
+    """Return the durable settings path for a Defaultspack installation.
+
+    Managed desktop packs are unpacked into a replaceable application bundle.
+    The launcher supplies ``RUMI_USER_DATA`` for state that must survive a
+    bundle update; an explicit path still takes precedence for tests.
+    """
+    override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+    if user_data:
+        return (
+            Path(user_data).expanduser()
+            / "defaultspack"
+            / "shared"
+            / "frontend_settings.json"
+        )
+    return pack_root / "user_data" / "shared" / "frontend_settings.json"
 
 
 class FrontendSettingsCorruptError(ValueError):
@@ -57,6 +98,107 @@ class FrontendSettingsStore:
             updated[REVISION_KEY] = revision + 1
             self._atomic_write(updated, preserve_backup=True)
             return updated
+
+    def mutate_state(
+        self,
+        state_ref: str,
+        transform: Callable[
+            [dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]
+        ],
+        *,
+        expected_revision: int | None = None,
+        idempotency_key: str | None = None,
+        request_fingerprint: str = "",
+    ) -> dict[str, Any]:
+        """Atomically mutate one logical state resource.
+
+        State revisions are independent from the whole settings-document
+        revision. Optional idempotency receipts live in the same atomic file so
+        a retried transport cannot apply the mutation twice.
+        """
+        normalized_ref = str(state_ref or "").strip()
+        if not normalized_ref:
+            raise ValueError("state_ref is required")
+        normalized_key = str(idempotency_key or "").strip()
+        if normalized_key and not 8 <= len(normalized_key) <= 256:
+            raise ValueError("idempotency_key must be 8-256 characters")
+
+        with self._locked():
+            current = self._read_locked(recover=True)
+            receipts = current.get(MUTATION_RECEIPTS_KEY, {})
+            if not isinstance(receipts, dict):
+                receipts = {}
+            if normalized_key:
+                previous = receipts.get(normalized_key)
+                if isinstance(previous, dict):
+                    if str(previous.get("fingerprint") or "") != request_fingerprint:
+                        raise FrontendSettingsIdempotencyConflict(
+                            "idempotency_key was already used for a different mutation"
+                        )
+                    previous_result = previous.get("result")
+                    if isinstance(previous_result, dict):
+                        replay = deepcopy(previous_result)
+                        replay["idempotent_replay"] = True
+                        return replay
+
+            revisions = current.get(STATE_REVISIONS_KEY, {})
+            if not isinstance(revisions, dict):
+                revisions = {}
+            current_revision = revisions.get(normalized_ref, 0)
+            if (
+                not isinstance(current_revision, int)
+                or isinstance(current_revision, bool)
+                or current_revision < 0
+            ):
+                current_revision = 0
+            if expected_revision is not None and expected_revision != current_revision:
+                raise FrontendSettingsRevisionConflict(
+                    normalized_ref, expected_revision, current_revision
+                )
+
+            updated, result = transform(deepcopy(current))
+            if not isinstance(updated, dict) or not isinstance(result, dict):
+                raise TypeError("state mutation must return settings and result objects")
+            next_state_revision = current_revision + 1
+            next_revisions = dict(revisions)
+            next_revisions[normalized_ref] = next_state_revision
+            updated[STATE_REVISIONS_KEY] = next_revisions
+
+            document_revision = current.get(REVISION_KEY, 0)
+            if (
+                not isinstance(document_revision, int)
+                or isinstance(document_revision, bool)
+                or document_revision < 0
+            ):
+                document_revision = 0
+            updated[REVISION_KEY] = document_revision + 1
+
+            settled = deepcopy(result)
+            settled["state_ref"] = normalized_ref
+            settled["revision"] = next_state_revision
+            settled["document_revision"] = updated[REVISION_KEY]
+            settled["idempotent_replay"] = False
+
+            if normalized_key:
+                next_receipts = dict(receipts)
+                next_receipts.pop(normalized_key, None)
+                next_receipts[normalized_key] = {
+                    "fingerprint": request_fingerprint,
+                    "result": deepcopy(settled),
+                }
+                while len(next_receipts) > MAX_MUTATION_RECEIPTS:
+                    next_receipts.pop(next(iter(next_receipts)))
+                updated[MUTATION_RECEIPTS_KEY] = next_receipts
+
+            self._atomic_write(updated, preserve_backup=True)
+            return settled
+
+    def state_revision(self, state_ref: str) -> int:
+        value = self.read().get(STATE_REVISIONS_KEY, {})
+        if not isinstance(value, dict):
+            return 0
+        revision = value.get(str(state_ref or "").strip(), 0)
+        return revision if isinstance(revision, int) and not isinstance(revision, bool) else 0
 
     @contextmanager
     def _locked(self) -> Iterator[None]:

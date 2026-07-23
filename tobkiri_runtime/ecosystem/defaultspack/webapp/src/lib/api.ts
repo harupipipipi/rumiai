@@ -1736,6 +1736,8 @@ export type ComposerCommandArg = {
   required?: boolean;
   values?: string[];
   greedy?: boolean;
+  label?: string;
+  placeholder?: string;
 };
 
 export type ComposerCommandExecution =
@@ -1763,6 +1765,10 @@ export type ComposerCommandItem = {
   source?: string;
   template_id?: string;
   piece_id?: string;
+  canonical_id?: string;
+  protocol_presentation?: ResolvedCommandProtocolCommand["presentation"];
+  protocol_execution?: ResolvedCommandProtocolCommand["execution"];
+  availability?: ResolvedCommandProtocolCommand["availability"];
 };
 
 export type ComposerCommandExecuteResult = {
@@ -1775,6 +1781,69 @@ export type ComposerCommandExecuteResult = {
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;
+  operation_id?: string;
+  operation_status?: "pending" | "succeeded" | "failed";
+  client_sequence?: number;
+  state_changes?: CommandStateSnapshot[];
+};
+
+export type CommandStateSnapshot = {
+  state_ref: string;
+  value: unknown;
+  revision: number;
+  freshness?: "authoritative" | "stale";
+};
+
+export type ResolvedCommandProtocolCommand = {
+  canonical_id: string;
+  pack_id: string;
+  pack_generation: number;
+  command_version: string;
+  identity: { id: string; name: string; aliases?: string[] };
+  presentation: {
+    label: { fallback: string };
+    description?: { fallback: string };
+    category: string;
+    visibility: string;
+    icon?: string;
+    input: { kind: "search_select" | "select" | "toggle" | "action" | "form"; [key: string]: unknown };
+    mounts?: Array<{
+      slot_ref: string;
+      display: "persistent" | "command";
+      order?: number;
+      [key: string]: unknown;
+    }>;
+  };
+  execution: {
+    kind: "state_mutation" | "host_operation" | "pack_operation";
+    [key: string]: unknown;
+  };
+  availability: { status: "available" | "unavailable"; reason?: string; reason_code?: string };
+  legacy: ComposerCommandItem;
+};
+
+export type ResolvedCommandCatalog = {
+  api_version: "tobkiri.commands/v1";
+  kind: "ResolvedCommandCatalog";
+  catalog_revision: string;
+  commands: ResolvedCommandProtocolCommand[];
+  states?: Array<Record<string, unknown>>;
+  datasources?: Array<Record<string, unknown>>;
+  state_snapshots: CommandStateSnapshot[];
+  diagnostics: Array<Record<string, unknown>>;
+};
+
+export type CommandProtocolInvocationResult = {
+  api_version: "tobkiri.commands/v1";
+  operation_id: string;
+  status: "succeeded" | "failed" | "approval_required";
+  command_ref: string;
+  client_sequence?: number;
+  state_changes: CommandStateSnapshot[];
+  message?: string;
+  approval?: { required: boolean; permission_ids?: string[] } | null;
+  error?: { code?: string; message?: string };
+  legacy_result?: ComposerCommandExecuteResult;
 };
 
 export type TemplateComposerFieldOption = {
@@ -1793,12 +1862,20 @@ export type TemplateComposerField = {
   options?: TemplateComposerFieldOption[];
 };
 
+export type TemplateComposerPosition = "center" | "bottom" | "inline";
+
+export type TemplateComposerLayout = {
+  home?: { position?: TemplateComposerPosition };
+  conversation?: { position?: TemplateComposerPosition };
+};
+
 export type TemplateComposerInput = {
   id: string;
   label?: string;
   description?: string;
   placeholder?: string;
   help?: string;
+  layout?: TemplateComposerLayout;
   accepted_modalities?: string[];
   feature_flags?: Record<string, boolean | string | number | null | undefined>;
   fields?: TemplateComposerField[];
@@ -2063,6 +2140,24 @@ export function composerCommandResultMessage(result: ComposerCommandExecuteResul
   if (payloadMessage) return payloadMessage;
   if (path) return `Command wrote ${path}`;
   return null;
+}
+
+export type ComposerCommandFeedbackTone = "success" | "info" | "warning" | "error";
+
+export function composerCommandFeedbackTone(
+  result: ComposerCommandExecuteResult,
+): ComposerCommandFeedbackTone {
+  if (result.operation_status === "failed") return "error";
+  if (result.requires_approval) return "warning";
+
+  const deepthinkState = result.state_changes?.find(
+    (snapshot) => snapshot.state_ref === "defaultspack:models.deepthink_enabled",
+  );
+  if (deepthinkState) {
+    return deepthinkState.value === true ? "warning" : "success";
+  }
+
+  return "success";
 }
 
 type ApiOk<T> = {
@@ -2956,7 +3051,7 @@ export const api = {
   },
 
   uiCatalog() {
-    return request<UICatalog>("/api/ui/catalog");
+    return request<UICatalog>("/api/ui/catalog?include_skills=true");
   },
 
   uiSettings(options: { full?: boolean } = {}) {
@@ -2969,6 +3064,56 @@ export const api = {
 
   uiCommands() {
     return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
+  },
+
+  commandProtocolCatalog() {
+    return request<ResolvedCommandCatalog>("/api/command-protocol/v1/catalog", {
+      cache: "no-store",
+    });
+  },
+
+  async resolvedUiCommands() {
+    try {
+      const protocol = await request<ResolvedCommandCatalog>(
+        "/api/command-protocol/v1/catalog",
+        { cache: "no-store" },
+      );
+      return {
+        commands: protocol.commands.map((command) => ({
+          ...command.legacy,
+          canonical_id: command.canonical_id,
+          protocol_presentation: command.presentation,
+          protocol_execution: command.execution,
+          availability: command.availability,
+        })),
+        protocol,
+      };
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("HTTP 404")) throw error;
+      const legacy = await request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
+      return { commands: legacy.commands, protocol: null };
+    }
+  },
+
+  queryCommandStates(stateRefs: string[]) {
+    return request<{ api_version: string; states: CommandStateSnapshot[] }>(
+      "/api/command-protocol/v1/states/query",
+      { method: "POST", body: JSON.stringify({ state_refs: stateRefs }) },
+    );
+  },
+
+  queryCommandDatasource(payload: {
+    datasource_ref: string;
+    query?: string;
+    cursor?: string | null;
+    limit?: number;
+    selected_values?: string[];
+    request_id?: string;
+  }, options: { signal?: AbortSignal } = {}) {
+    return request<Record<string, unknown>>(
+      "/api/command-protocol/v1/datasources/query",
+      { method: "POST", body: JSON.stringify(payload), signal: options.signal },
+    );
   },
 
   toolCatalog() {
@@ -3015,6 +3160,10 @@ export const api = {
     args?: Record<string, unknown>;
     conversation_id?: string | null;
     mode?: ComposerCommandMode;
+    invocation_id?: string;
+    idempotency_key?: string;
+    client_sequence?: number;
+    expected_revision?: number;
   }) {
     return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
       method: "POST",
@@ -3022,10 +3171,63 @@ export const api = {
     });
   },
 
+  async executeResolvedUiCommand(payload: {
+    command: string;
+    args?: Record<string, unknown>;
+    conversation_id?: string | null;
+    mode?: ComposerCommandMode;
+    invocation_id?: string;
+    idempotency_key?: string;
+    client_sequence?: number;
+    expected_revision?: number;
+  }): Promise<ComposerCommandExecuteResult> {
+    try {
+      const result = await request<CommandProtocolInvocationResult>(
+        "/api/command-protocol/v1/invoke",
+        {
+          method: "POST",
+          body: JSON.stringify({ ...payload, command_ref: payload.command }),
+        },
+      );
+      if (result.status === "failed") {
+        throw new Error(result.error?.message || "command protocol invocation failed");
+      }
+      const legacy = result.legacy_result;
+      if (!legacy) throw new Error("command protocol returned no compatibility result");
+      return {
+        ...legacy,
+        operation_id: result.operation_id,
+        operation_status: result.status === "succeeded" ? "succeeded" : "pending",
+        client_sequence: result.client_sequence,
+        state_changes: result.state_changes,
+        requires_approval: result.status === "approval_required" || legacy.requires_approval,
+        message: result.message ?? legacy.message,
+      };
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("HTTP 404")) throw error;
+      return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          command: payload.command.includes(":")
+            ? payload.command.split(":").at(-1)
+            : payload.command,
+        }),
+      });
+    }
+  },
+
   updateUiSettings(values: Record<string, Record<string, unknown>>) {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  updateUiSettingsPatches(patches: Array<{ section: string; field: string; value: unknown }>) {
+    return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
+      method: "PUT",
+      body: JSON.stringify({ patches }),
     });
   },
 

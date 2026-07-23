@@ -71,6 +71,7 @@ def create_prepare_operation(
             "allow_failover": bool(payload.get("allow_failover", False)),
             "policy_revision": str(payload.get("policy_revision") or ""),
             "conversation_id": payload.get("conversation_id"),
+            "profile_id": payload.get("profile_id"),
             "model_profile_id": payload.get("model_profile_id"),
             "model_reference": payload.get("model_reference"),
         }
@@ -120,4 +121,3 @@ def _number(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-

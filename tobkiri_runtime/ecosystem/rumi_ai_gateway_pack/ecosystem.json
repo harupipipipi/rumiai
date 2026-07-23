@@ -34,8 +34,8 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": true,
   "resources": [],
-  "provenance": {
-    "content_hash": "sha256:7cc250a046003e181f1f2763aa425a9f4a9889d7c72d6aef95ce203092e0bf90",
+ "provenance": {
+    "content_hash": "sha256:fbd35d689c65ad9a1b19a25c4b60b7ef1b50ce0c265a7c0a31dcb35bd0787730",
     "build_identity": "rumi-ai-gateway-pack:1.0.0",
     "trust_class": "local",
     "signature": null
@@ -63,4 +63,3 @@
     }
   }
 }
-

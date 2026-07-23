@@ -381,7 +381,11 @@ class _ProcessContractOperation:
         if user_data_root:
             environment["RUMI_USER_DATA"] = user_data_root
         completed = subprocess.run(
-            [sys.executable, "-s", "-E", "-m", self.module],
+            # ``-E`` intentionally ignores PYTHON* environment variables for
+            # process isolation, including PYTHONDONTWRITEBYTECODE.  ``-B`` is
+            # therefore required as an interpreter flag so a process-backed
+            # pack can never add bytecode files to a signed application bundle.
+            [sys.executable, "-B", "-s", "-E", "-m", self.module],
             input=json.dumps(
                 {"operation": operation, "payload": dict(payload)},
                 ensure_ascii=False,

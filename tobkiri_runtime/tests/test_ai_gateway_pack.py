@@ -46,11 +46,11 @@ class FakeContractClient:
                 {"provider_instance_id": "catalog-main"},
             ),
             GENERATE_PROVIDER_CONTRACT: (
-                {"provider_instance_id": "adapter-a"},
+                {"provider_instance_id": "adapter-a", "routing_keys": ["*"]},
                 {"provider_instance_id": "adapter-b"},
             ),
             STREAM_PROVIDER_CONTRACT: (
-                {"provider_instance_id": "adapter-a"},
+                {"provider_instance_id": "adapter-a", "routing_keys": ["*"]},
             ),
             HEALTH_CONTRACT: (
                 {"provider_instance_id": "health-main"},
@@ -186,6 +186,25 @@ def test_router_selects_by_capability_without_provider_pack_branch() -> None:
     assert result["output"] == "hello"
 
 
+def test_gateway_forwards_startup_profile_to_provider_adapter() -> None:
+    client = FakeContractClient()
+    operation = create_generate_operation(client)  # type: ignore[arg-type]
+
+    operation(
+        "generate",
+        {
+            "profile_id": "defaults-profile",
+            "messages": [{"role": "user", "content": "hello"}],
+            "requirements": {"modalities": ["text", "image"]},
+        },
+    )
+
+    provider_call = next(
+        item for item in client.calls if item[0] == GENERATE_PROVIDER_CONTRACT
+    )
+    assert provider_call[3]["profile_id"] == "defaults-profile"
+
+
 def test_failover_requires_explicit_replay_safe_request() -> None:
     client = FakeContractClient()
     client.fail_first = True
@@ -285,3 +304,23 @@ def test_saved_model_reference_resolves_profile_before_routing() -> None:
     )
     assert provider_call[3]["parameters"]["temperature"] == 0.1
 
+
+def test_live_provider_model_routes_before_static_catalog_refresh() -> None:
+    client = FakeContractClient()
+
+    result = create_generate_operation(client)(
+        "generate",
+        {
+            "model_reference": "opencode-zen/deepseek-v4-flash-free",
+            "messages": [{"role": "user", "content": "hello"}],
+            "requirements": {"modalities": ["text"]},
+        },
+    )
+
+    assert result["model_id"] == "opencode-zen/deepseek-v4-flash-free"
+    provider_call = next(
+        item for item in client.calls if item[0] == GENERATE_PROVIDER_CONTRACT
+    )
+    assert provider_call[2] == "adapter-a"
+    assert provider_call[3]["provider_id"] == "opencode-zen"
+    assert provider_call[3]["model_id"] == "deepseek-v4-flash-free"

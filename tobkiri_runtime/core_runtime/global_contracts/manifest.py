@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator, FormatChecker
+try:
+    from jsonschema import Draft202012Validator, FormatChecker
+except ImportError:  # Desktop runtime keeps third-party bootstrap minimal.
+    Draft202012Validator = None  # type: ignore[assignment,misc]
+    FormatChecker = None  # type: ignore[assignment,misc]
 
 from .canonical import content_identity
 from .models import ContractResult, ContractStatus
@@ -32,6 +36,11 @@ def load_manifest(path: Path) -> ContractResult[Mapping[str, Any]]:
         return ContractResult(
             ContractStatus.INVALID_MANIFEST,
             diagnostics=(f"$: {exc}",),
+        )
+    if Draft202012Validator is None or FormatChecker is None:
+        return ContractResult(
+            ContractStatus.INVALID_MANIFEST,
+            diagnostics=("$: JSON Schema validation is unavailable",),
         )
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
@@ -112,4 +121,3 @@ def _append_duplicate_diagnostics(
                 message=f"duplicate {label}: {duplicate}",
             )
         )
-

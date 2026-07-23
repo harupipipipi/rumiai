@@ -306,3 +306,32 @@ test("HistoryBoard places Desktops directly below Kanban in compact rail", () =>
   assert.ok(desktopsIndex > kanbanIndex);
   assert.match(html, /aria-current="page"/);
 });
+
+test("HistoryBoard constrains custom conversation SVG icons to the same viewport in both layouts", () => {
+  const chatItems: ChatItem[] = [{
+    id: "custom-icon-chat",
+    title: "Custom icon chat",
+    date: "Today",
+    type: "chat",
+    metadata: {
+      icon_svg: '<svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14"/></svg>',
+    },
+  }];
+  const baseProps = {
+    activeChatId: null,
+    chatItems,
+    onChatSelect: () => undefined,
+    onNewTask: () => undefined,
+    onSettingsClick: () => undefined,
+  };
+
+  const fullHtml = renderToStaticMarkup(createElement(HistoryBoard, baseProps));
+  const compactHtml = renderToStaticMarkup(createElement(HistoryBoard, { ...baseProps, isCompact: true }));
+
+  for (const html of [fullHtml, compactHtml]) {
+    assert.match(html, /data-history-chat-icon="true"/);
+    assert.match(html, /data-history-chat-icon-size="14"/);
+    assert.match(html, /style="width:14px;height:14px;flex-basis:14px"/);
+    assert.match(html, /<svg width="32" height="32" viewBox="0 0 32 32">/);
+  }
+});

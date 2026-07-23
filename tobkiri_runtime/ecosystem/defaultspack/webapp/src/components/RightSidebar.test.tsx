@@ -116,6 +116,37 @@ test("right sidebar initially focuses the rail on tools", () => {
   assert.doesNotMatch(html, /title="Widget A"/);
 });
 
+test("right sidebar rail avoids transform and replayed entrance animations", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [
+        {
+          id: "browser_companion",
+          label: "Browser Companion",
+          category: "tool",
+          ui: { group_id: "browser", group_label: "Browser", group_icon: "browser" },
+        },
+      ],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: ["browser_companion"],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /aria-label="browser tool folder"/);
+  assert.doesNotMatch(html, /hover:scale/);
+  assert.doesNotMatch(html, /active:scale/);
+  assert.doesNotMatch(html, /rumi-stagger-tight/);
+  assert.match(html, /rumi-rail-stable-glyph/);
+  assert.match(html, /transform:translateZ\(0\)/);
+  assert.doesNotMatch(html, /transition-\[background-color,color,box-shadow\]/);
+});
+
 test("right sidebar keeps starred tools accessible name when count is nonzero", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {
@@ -362,7 +393,6 @@ test("prompt sidebar widget lists prompt name and token count before details", (
   assert.match(html, /現在のプロンプト/);
   assert.match(html, /default_chat/);
   assert.match(html, /124/);
-  assert.match(html, /Prompt Studio/);
   assert.doesNotMatch(html, /Selected by the active profile/);
 });
 

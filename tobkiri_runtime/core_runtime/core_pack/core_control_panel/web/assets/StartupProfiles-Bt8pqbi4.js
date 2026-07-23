@@ -1,0 +1,1 @@
+import{D as e,O as t,lt as n,ut as r}from"./index-DPhgc_5Z.js";var i=e();function a(){let e=r();return(0,i.jsx)(n,{to:`${t.profileGraph}${e.search}${e.hash}`,replace:!0})}export{a as StartupProfiles};

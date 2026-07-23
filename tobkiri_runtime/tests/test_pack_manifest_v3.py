@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+import core_runtime.global_contracts.manifest as manifest_module
 
 from core_runtime.global_contracts import (
     ActionClient,
@@ -107,6 +108,20 @@ def test_invalid_fixed_fixture_returns_invalid_manifest_status() -> None:
     assert result.status is ContractStatus.INVALID_MANIFEST
     assert result.value is None
     assert result.diagnostics
+
+
+def test_missing_jsonschema_fails_closed_without_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The minimal desktop runtime isolates v3 metadata if validation is absent."""
+    monkeypatch.setattr(manifest_module, "Draft202012Validator", None)
+    monkeypatch.setattr(manifest_module, "FormatChecker", None)
+
+    result = manifest_module.load_manifest(EXAMPLE)
+
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert result.value is None
+    assert "unavailable" in result.diagnostics[0]
 
 
 def test_migration_fixture_declares_one_way_projection_and_rollback() -> None:

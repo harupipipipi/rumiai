@@ -60,6 +60,46 @@ def test_provider_key_save_without_model_binding_requires_explicit_route(tmp_pat
     assert "Choose a default model" in availability["reason"]
 
 
+def test_provider_key_save_auto_binds_every_live_discovered_model(tmp_path, monkeypatch):
+    from domain.ai_client.api_key_store import set_provider_api_key
+    from domain.ai_client.model_availability import ModelAvailabilityService
+
+    # Keep the settings refresh independent of any developer-machine account
+    # keys; live inventory is supplied below as a deterministic fixture.
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    result = set_provider_api_key(
+        "examplellm",
+        "secret",
+        pack_root=tmp_path,
+        api_id="main",
+        name="main",
+    )
+    assert result["success"] is True
+    service = ModelAvailabilityService(tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_catalog_models",
+        lambda _provider_id: [
+            {
+                "model_id": "account/a",
+                "metadata": {"source": "remote_models_endpoint"},
+            },
+            {
+                "model_id": "account/b",
+                "metadata": {"source": "remote_models_endpoint"},
+            },
+        ],
+    )
+
+    availability = service.after_provider_key_saved("examplellm", "main")
+
+    assert availability["status"] == "models_available"
+    assert {profile["profile_id"] for profile in availability["profiles"]} == {
+        "examplellm/main/account/a",
+        "examplellm/main/account/b",
+    }
+
+
 def test_provider_key_approval_binding_redacts_secret() -> None:
     from blocks.ai import provider_key
 

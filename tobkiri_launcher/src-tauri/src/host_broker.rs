@@ -1913,6 +1913,7 @@ fn run_computer_helper(
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_LOG_DIR", &config.log_dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

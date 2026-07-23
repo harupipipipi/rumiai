@@ -16,6 +16,11 @@ from core_runtime.global_contract_dispatch import (
 
 REGISTRY_CONTRACT = "rumi.resource.ai.provider.registry.v1"
 CREDENTIAL_CONTRACT = "rumi.service.credential.resolve.v1"
+DEFAULT_JSON_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "RumiAI/1.0",
+}
 
 
 def create_generate_operation(client: GlobalContractClient):
@@ -51,7 +56,10 @@ def _operation(client: GlobalContractClient, *, streaming: bool):
             connection,
             scope="ai.stream" if streaming else "ai.generate",
         )
-        adapter = _adapter(str(connection.get("adapter_id") or ""))
+        adapter = _adapter(
+            str(connection.get("adapter_id") or ""),
+            provider_id=str(request.get("provider_id") or ""),
+        )
         return adapter(request, connection, credential, streaming)
 
     return operation
@@ -91,7 +99,11 @@ def _connection(
         raise GlobalContractInvocationError(
             "invalid_request", "provider_id is required"
         )
-    result = client.invoke(REGISTRY_CONTRACT, "list", {})
+    registry_payload = {}
+    profile_id = str(request.get("profile_id") or "").strip()
+    if profile_id:
+        registry_payload["profile_id"] = profile_id
+    result = client.invoke(REGISTRY_CONTRACT, "list", registry_payload)
     providers = result.get("providers") if isinstance(result, Mapping) else None
     providers = providers if isinstance(providers, list) else []
     expected = f"provider.{provider_id}"
@@ -142,10 +154,17 @@ def _credential(
     return dict(material)
 
 
-def _adapter(adapter_id: str) -> Callable[..., dict[str, Any]]:
+def _adapter(
+    adapter_id: str,
+    *,
+    provider_id: str = "",
+) -> Callable[..., dict[str, Any]]:
+    if adapter_id == "llm":
+        adapter_id = "anthropic" if provider_id == "anthropic" else "openai-compatible"
     adapters = {
         "openai-compatible": _openai_compatible,
         "openai": _openai_compatible,
+        "openrouter": _openai_compatible,
         "anthropic": _anthropic,
     }
     try:
@@ -164,7 +183,7 @@ def _openai_compatible(
 ) -> dict[str, Any]:
     endpoint = _endpoint(connection, "/chat/completions")
     body = {
-        "model": request.get("model_id"),
+        "model": _provider_model_id(request),
         "messages": list(request.get("messages") or []),
         "stream": False,
         **dict(request.get("parameters") or {}),
@@ -172,7 +191,7 @@ def _openai_compatible(
     tools = request.get("tools")
     if isinstance(tools, list) and tools:
         body["tools"] = tools
-    headers = {"Content-Type": "application/json"}
+    headers = dict(DEFAULT_JSON_HEADERS)
     token = credential.get("api_key") or credential.get("token")
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -205,13 +224,13 @@ def _anthropic(
     endpoint = _endpoint(connection, "/messages")
     parameters = dict(request.get("parameters") or {})
     body = {
-        "model": request.get("model_id"),
+        "model": _provider_model_id(request),
         "messages": list(request.get("messages") or []),
         "max_tokens": int(parameters.pop("max_tokens", 1024)),
         **parameters,
     }
     headers = {
-        "Content-Type": "application/json",
+        **DEFAULT_JSON_HEADERS,
         "anthropic-version": "2023-06-01",
     }
     token = credential.get("api_key") or credential.get("token")
@@ -292,7 +311,7 @@ def _openai_image(
 
 
 def _bearer_headers(credential: Mapping[str, Any]) -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
+    headers = dict(DEFAULT_JSON_HEADERS)
     token = credential.get("api_key") or credential.get("token")
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -356,4 +375,3 @@ def _post(
             "invalid_response", "provider returned a non-object response"
         )
     return value
-

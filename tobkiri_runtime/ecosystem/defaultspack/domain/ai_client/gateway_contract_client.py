@@ -9,6 +9,7 @@ from core_runtime.global_contract_dispatch import (
     GlobalContractUnavailable,
     invoke_global_contract,
 )
+from core_runtime.profile_paths import active_profile_id
 
 _GENERATE_CONTRACT = "rumi.service.ai.generate.v1"
 _STREAM_CONTRACT = "rumi.service.ai.stream.v1"
@@ -39,16 +40,29 @@ def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any
     registry = get_container().get_or_none("interface_registry")
     if registry is None:
         raise GlobalContractUnavailable("interface registry is unavailable")
+    request = dict(payload)
+    profile_id = str(request.get("profile_id") or active_profile_id() or "").strip()
+    if profile_id:
+        request["profile_id"] = profile_id
     return invoke_global_contract(
         registry,
         contract_id,
         operation,
-        dict(payload),
+        request,
     )
 
 
 class ContractLLMGateway:
     """Compatibility object for orchestration that expects gateway methods."""
+
+    def supports_stream(self, model: str) -> bool:
+        """Report the stream capability exposed by the global stream contract.
+
+        Model-specific normalization and rejection remain owned by the AI
+        gateway pack.  This compatibility adapter only declares that its
+        ``stream`` method is a real contract-backed implementation.
+        """
+        return bool(str(model or "").strip())
 
     def complete(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Project one legacy gateway request through the selected owner."""
@@ -60,6 +74,7 @@ class ContractLLMGateway:
                 "parameters": dict(request.get("params") or {}),
                 "model_reference": model,
                 "conversation_id": request.get("conversation_id"),
+                "profile_id": request.get("profile_id"),
                 "idempotency_key": request.get("idempotency_key"),
                 "requirements": {
                     "preferred_model_id": model,
@@ -80,6 +95,7 @@ class ContractLLMGateway:
                     "parameters": dict(request.get("params") or {}),
                     "model_reference": model,
                     "conversation_id": request.get("conversation_id"),
+                    "profile_id": request.get("profile_id"),
                     "idempotency_key": request.get("idempotency_key"),
                     "requirements": {
                         "preferred_model_id": model,

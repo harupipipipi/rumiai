@@ -1950,7 +1950,13 @@ def _apply_defaultspack_local_ui_context(context, payload):
         return
     if payload.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, False) is not True:
         return
-    context["_tool_server_approved"] = True
+    # This flag is only injected after a local bearer token has been verified
+    # for a narrow, sensitive UI route.  Mark it with the unforgeable internal
+    # sentinel as well: downstream approval checks deliberately reject a bare
+    # client-visible boolean.
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    mark_tool_server_approval_context(context)
     context["source"] = "defaultspack_local_ui"
     context["approval_id"] = "defaultspack_local_ui"
     _apply_mimo_company_profile_authority_context(context, payload)

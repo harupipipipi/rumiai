@@ -2326,6 +2326,26 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/provider-health", block_module="blocks.ui.provider_health"),
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
+    HttpRouteSpec(
+        "GET",
+        "/api/command-protocol/v1/catalog",
+        block_module="blocks.ui.command_protocol_catalog",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/command-protocol/v1/invoke",
+        block_module="blocks.ui.command_protocol_invoke",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/command-protocol/v1/states/query",
+        block_module="blocks.ui.command_protocol_states",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/command-protocol/v1/datasources/query",
+        block_module="blocks.ui.command_protocol_datasources",
+    ),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
     HttpRouteSpec("POST", "/api/ui/client-events", block_module="blocks.ui.client_events"),
     HttpRouteSpec("POST", "/api/ui/build-recursive", block_module="blocks.ui.build_recursive", sensitive=True),

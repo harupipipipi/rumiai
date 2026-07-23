@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
 from core_runtime.paths import USER_DATA_DIR
-from core_runtime.resolved_profile_scope import active_resolved_profile
+from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
 CONVERSATION = "rumi.resource.conversation.v1"
 CONVERSATION_MANAGE = "rumi.action.conversation.manage.v1"
@@ -505,14 +505,14 @@ class ChatStore:
 
     @staticmethod
     def _artifact_root() -> Path:
-        plan = active_resolved_profile()
+        plan = persisted_resolved_profile()
         profile_id = plan.profile_id if plan is not None else "default"
         return Path(USER_DATA_DIR) / "compatibility" / "conversation_artifacts" / profile_id
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
     registry = get_container().get_or_none("interface_registry")
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if registry is None or plan is None:
         raise RuntimeError("global conversation owner is unavailable")
     return invoke_global_contract(

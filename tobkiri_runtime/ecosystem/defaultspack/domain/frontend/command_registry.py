@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -132,21 +133,42 @@ class SlashCommandRegistry:
             function_args = dict(args)
             if payload.get("conversation_id"):
                 function_args.setdefault("conversation_id", payload.get("conversation_id"))
-            builtin_result = self._execute_builtin_rumi_function(qualified_name, function_args)
+            builtin_result = self._execute_builtin_rumi_function(
+                qualified_name,
+                function_args,
+                invocation=payload,
+            )
             if isinstance(builtin_result, dict) and builtin_result.get("status") == "error":
                 return builtin_result
             if builtin_result is not None:
-                payload = {
+                operation_id = str(
+                    payload.get("invocation_id")
+                    or payload.get("operation_id")
+                    or uuid.uuid4()
+                )
+                response_payload = {
                     "command": self._public_command(command),
                     "executed": True,
                     "result": builtin_result,
+                    "operation_id": operation_id,
+                    "operation_status": "succeeded",
                 }
+                client_sequence = payload.get("client_sequence")
+                if isinstance(client_sequence, int) and not isinstance(client_sequence, bool):
+                    response_payload["client_sequence"] = client_sequence
+                state_snapshot = (
+                    builtin_result.get("state_snapshot")
+                    if isinstance(builtin_result, dict)
+                    else None
+                )
+                if isinstance(state_snapshot, dict):
+                    response_payload["state_changes"] = [state_snapshot]
                 if (
                     isinstance(builtin_result, dict)
                     and str(builtin_result.get("message") or "").strip()
                 ):
-                    payload["message"] = str(builtin_result.get("message") or "")
-                return ok(payload)
+                    response_payload["message"] = str(builtin_result.get("message") or "")
+                return ok(response_payload)
             return error("rumi_function command is not allowlisted", "INVALID_COMMAND")
 
         if execution_type == "chat_action":
@@ -375,7 +397,11 @@ class SlashCommandRegistry:
         return error("pack_block returned an unexpected response", "EXECUTION_FAILED")
 
     def _execute_builtin_rumi_function(
-        self, qualified_name: str, args: dict[str, Any]
+        self,
+        qualified_name: str,
+        args: dict[str, Any],
+        *,
+        invocation: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         function_id = self._rumi_function_id(qualified_name)
         if function_id not in ALLOWED_RUMI_FUNCTIONS:
@@ -416,8 +442,38 @@ class SlashCommandRegistry:
                 return service.get_deepthink_enabled()
             if function_id == "ai_set_deepthink_enabled":
                 enabled = args.get("enabled")
-                return service.set_deepthink_enabled(enabled if isinstance(enabled, bool) else None)
+                invocation = invocation or {}
+                expected_revision = invocation.get("expected_revision")
+                if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
+                    expected_revision = None
+                idempotency_key = str(invocation.get("idempotency_key") or "").strip() or None
+                kwargs: dict[str, Any] = {}
+                if expected_revision is not None:
+                    kwargs["expected_revision"] = expected_revision
+                if idempotency_key is not None:
+                    kwargs["idempotency_key"] = idempotency_key
+                return service.set_deepthink_enabled(
+                    enabled if isinstance(enabled, bool) else None,
+                    **kwargs,
+                )
         except Exception as exc:
+            from domain.frontend_settings_store import (
+                FrontendSettingsIdempotencyConflict,
+                FrontendSettingsRevisionConflict,
+            )
+
+            if isinstance(exc, FrontendSettingsRevisionConflict):
+                return error(
+                    str(exc),
+                    "STATE_REVISION_CONFLICT",
+                    details={
+                        "state_ref": exc.state_ref,
+                        "expected_revision": exc.expected,
+                        "actual_revision": exc.actual,
+                    },
+                )
+            if isinstance(exc, FrontendSettingsIdempotencyConflict):
+                return error(str(exc), "IDEMPOTENCY_CONFLICT")
             return error(str(exc), "EXECUTION_FAILED")
         return None
 

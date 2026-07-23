@@ -103,6 +103,7 @@
         "id": {"$ref": "#/$defs/contractId"},
         "version": {"$ref": "#/$defs/semver"},
         "provider_instance_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+        "routing_keys": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "instance_key": {"type": "string"},
         "cardinality": {"enum": ["one", "many", "keyed", "chain", "fanout", "optional"]},
         "security": {"enum": ["public", "internal", "sensitive", "restricted"]},
@@ -230,4 +231,3 @@
     }
   }
 }
-

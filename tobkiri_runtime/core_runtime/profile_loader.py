@@ -34,6 +34,7 @@ class CapabilityProfileLoader:
         ecosystem_dir: Optional[str] = None,
         shared_profiles_dir: Optional[str | Path] = None,
         effective_pack_ids: Optional[Iterable[str]] = None,
+        continue_on_invalid: bool = False,
     ) -> None:
         base_dir = Path(__file__).resolve().parent.parent
         self.registry = registry
@@ -45,6 +46,7 @@ class CapabilityProfileLoader:
             if effective_pack_ids is not None
             else None
         )
+        self.continue_on_invalid = continue_on_invalid
         self.shared_profiles_dir = (
             Path(shared_profiles_dir)
             if shared_profiles_dir is not None
@@ -128,7 +130,8 @@ class CapabilityProfileLoader:
                 pack_id=pack_id,
                 path=str(profile_file),
             )
-            raise ProfileDiscoveryError(f"{profile_file}: {exc}") from exc
+            if not self.continue_on_invalid:
+                raise ProfileDiscoveryError(f"{profile_file}: {exc}") from exc
 
     def _register_profile(
         self,

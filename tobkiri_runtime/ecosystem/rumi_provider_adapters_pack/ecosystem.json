@@ -22,7 +22,7 @@
   "required_network": {"allowed_domains": ["registry-selected"], "allowed_ports": [80, 443]},
   "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:03a333351fb5c9966dd9a73c527a645d604bfd5e412aa0787ca4daec983fe7a3", "build_identity": "rumi-provider-adapters-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:586608639869c3a9f37d9283dfed48d295180fc1f9559a44670474d413bf82df", "build_identity": "rumi-provider-adapters-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {
     "authoritative_owner": true,
     "owner_surfaces": ["provider_protocol_execution"],
@@ -30,4 +30,3 @@
     "security": {"environment_secret_injection": false, "opaque_credentials_only": true, "registry_selected_endpoints_only": true, "provider_pack_id_branches": false}
   }
 }
-

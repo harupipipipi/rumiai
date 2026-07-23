@@ -25,7 +25,7 @@
   "host_execution": true,
   "resources": [],
   "provenance": {
-    "content_hash": "sha256:05a2069ed45364f1c17f07f28f60b86330c446fb37c20f0a054bda71387c280a",
+    "content_hash": "sha256:59df5fbfa772a0919a6117afccedd9849c080c929eaff861a50c2ba4ec96b0a6",
     "build_identity": "rumi-credential-broker-pack:1.0.0",
     "trust_class": "local",
     "signature": null
@@ -48,4 +48,3 @@
     }
   }
 }
-

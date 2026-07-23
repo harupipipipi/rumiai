@@ -66,28 +66,28 @@
       "contract_id": "rumi.service.credential.resolve.v1",
       "loader": "process",
       "module": "ecosystem.rumi_credential_broker_pack.runtime.process",
-      "artifact_hash": "sha256:e3c444bae77bb51c8f603136f1d54dce5d8be1d7be786a6408066f293d527272"
+      "artifact_hash": "sha256:770d79305518098331137a364435ba801287485348abfefaac3c9982c1e9b82b"
     },
     {
       "id": "credential-manage",
       "contract_id": "rumi.action.credential.manage.v1",
       "loader": "process",
       "module": "ecosystem.rumi_credential_broker_pack.runtime.process",
-      "artifact_hash": "sha256:e3c444bae77bb51c8f603136f1d54dce5d8be1d7be786a6408066f293d527272"
+      "artifact_hash": "sha256:770d79305518098331137a364435ba801287485348abfefaac3c9982c1e9b82b"
     },
     {
       "id": "credential-status",
       "contract_id": "rumi.resource.credential.status.v1",
       "loader": "process",
       "module": "ecosystem.rumi_credential_broker_pack.runtime.process",
-      "artifact_hash": "sha256:e3c444bae77bb51c8f603136f1d54dce5d8be1d7be786a6408066f293d527272"
+      "artifact_hash": "sha256:770d79305518098331137a364435ba801287485348abfefaac3c9982c1e9b82b"
     },
     {
       "id": "credential-migrate",
       "contract_id": "rumi.action.credential.migrate.v1",
       "loader": "process",
       "module": "ecosystem.rumi_credential_broker_pack.runtime.process",
-      "artifact_hash": "sha256:e3c444bae77bb51c8f603136f1d54dce5d8be1d7be786a6408066f293d527272"
+      "artifact_hash": "sha256:770d79305518098331137a364435ba801287485348abfefaac3c9982c1e9b82b"
     }
   ],
   "resources": [],
@@ -107,7 +107,7 @@
     {"capability": "credential.status.read", "access": "read", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:05a2069ed45364f1c17f07f28f60b86330c446fb37c20f0a054bda71387c280a",
+    "content_hash": "sha256:59df5fbfa772a0919a6117afccedd9849c080c929eaff861a50c2ba4ec96b0a6",
     "build_identity": "rumi-credential-broker-pack:1.0.0",
     "trust_class": "local",
     "signature": null
@@ -128,4 +128,3 @@
     }
   }
 }
-

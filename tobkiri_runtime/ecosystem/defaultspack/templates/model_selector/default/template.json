@@ -2,7 +2,7 @@
     "schema_version": 1,
     "id": "rumi.model_selector.default",
     "kind": "composite",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "status": "active",
     "trust_level": "builtin",
     "capabilities": {
@@ -20,7 +20,42 @@
         "title": "Default Model Selector",
         "template_kind": "fullstack_template",
         "local_first": true,
-        "description": "Declarative metadata for selecting and routing chat models and gateway providers."
+        "description": "Declarative metadata for selecting and routing chat models and gateway providers.",
+        "selector_schema": {
+            "version": 1,
+            "policy_scope": "presentation_only",
+            "dynamic_state_authority": "backend_runtime",
+            "layout": {
+                "placement": "auto",
+                "group_by": "provider",
+                "selected_position": "first",
+                "provider_trigger": "@",
+                "provider_confirm_key": "Tab",
+                "model_confirm_keys": [
+                    "Enter",
+                    "Tab"
+                ],
+                "max_visible_options": 60,
+                "show_provider_count": true,
+                "show_capability_tags": true
+            },
+            "filters": {
+                "include_model_ids": [],
+                "exclude_model_ids": [],
+                "include_provider_ids": [],
+                "exclude_provider_ids": [],
+                "require_tags": [],
+                "require_tag_mode": "all",
+                "exclude_tags": [],
+                "hide_unconfigured": false,
+                "hide_unavailable": false,
+                "hide_models_without_provider": true
+            },
+            "surfaces": {
+                "composer": {},
+                "settings": {}
+            }
+        }
     },
     "pieces": [
         {

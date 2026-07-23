@@ -3,7 +3,7 @@
   "pack": {
     "id": "rumi.model_catalog",
     "version": "2.0.0",
-    "kind": "resource",
+    "kind": "content",
     "display_name": "Rumi Model Catalog",
     "description": "Immutable verified provider and model descriptors without execution code."
   },
@@ -31,18 +31,26 @@
       "loader": "python",
       "module": "ecosystem.rumi_model_catalog_pack.runtime.catalog",
       "symbol": "create_model_catalog_operation",
-      "artifact_hash": "sha256:40465946864c9a4d5cf7fd1810832d5c53b3a2d1cd32402d5a73d2f0ea451326"
+      "artifact_hash": "sha256:cd0cfc5faac6850a77519564be46786ba8bd1004d5ec0156a261e2adeccaed68"
     }
   ],
   "resources": [
-    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:88d96e4fd84af79a636730cdb5633895e61348f7369572cb21462901fa753fcc"}
+    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:b9a7842d2c96ccb4463470f4baba2f242f10e472f7155334ecbf8e821e5a1315"}
   ],
-  "storage": [],
+  "storage": [
+    {
+      "namespace": "rumi.model_catalog.openrouter_inventory",
+      "schema_version": "1.0.0",
+      "authoritative": false,
+      "retention": "latest last-known-good inventory until replacement or cache cleanup",
+      "export_import": false
+    }
+  ],
   "permissions": [
     {"capability": "ai.model.catalog.read", "access": "read", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:88d96e4fd84af79a636730cdb5633895e61348f7369572cb21462901fa753fcc",
+    "content_hash": "sha256:7f351fa11d9ee9508be95e2523f61decf89bdd31eba35d1f4e8c92222583b442",
     "build_identity": "rumi-model-catalog-pack:2.0.0",
     "trust_class": "local",
     "signature": null
@@ -50,7 +58,7 @@
   "migration": {
     "from": ["defaultspack.domain.providers"],
     "compatibility_aliases": [],
-    "compatibility_projection": "read_only",
+    "compatibility_projection": "legacy_to_v3_read_only",
     "removal_wave": 10,
     "sunset_at": "2027-12-31",
     "rollback": "Restore the catalog resource directory to the pinned pre-Wave-5 owner revision."

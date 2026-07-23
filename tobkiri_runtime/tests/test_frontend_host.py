@@ -4,6 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+import core_runtime.frontend_host as frontend_host_module
 from core_runtime.frontend_host import FrontendHostRegistry
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 
@@ -163,3 +166,22 @@ def test_removing_pack_removes_route_without_host_rebuild(tmp_path: Path) -> Non
     assert [item.route for item in with_pack.contributions] == ["/feature"]
     assert without_pack.contributions == ()
 
+
+def test_missing_jsonschema_quarantines_frontend_without_crashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ecosystem = tmp_path / "ecosystem"
+    _write_ui_pack(ecosystem, "pack-a", [_route("pack-a.route", "/feature")])
+    monkeypatch.setattr(frontend_host_module, "Draft202012Validator", None)
+
+    catalog = FrontendHostRegistry(
+        _plan(ecosystem, "pack-a"), ecosystem_dir=ecosystem
+    ).build_catalog()
+
+    assert catalog.contributions == ()
+    assert any(
+        item.code == "frontend_descriptor_invalid"
+        and "unavailable" in item.message
+        for item in catalog.diagnostics
+    )

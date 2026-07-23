@@ -13,11 +13,18 @@ from blocks.coding._approval import (
 )
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
+from domain.ai_client.api_key_store import set_provider_api_key
 
 _CREDENTIAL_MANAGE = "rumi.action.credential.manage.v1"
 _CREDENTIAL_STATUS = "rumi.resource.credential.status.v1"
 _PROVIDER_MANAGE = "rumi.action.ai.provider.registry.manage.v1"
 _PROVIDER_RESOURCE = "rumi.resource.ai.provider.registry.v1"
+
+# Some mixed-protocol providers expose discovery from a gateway root while
+# their generic OpenAI-compatible adapter expects a versioned API base.
+_BUILTIN_PROVIDER_ADAPTER_ENDPOINTS = {
+    "opencode-zen": "https://opencode.ai/zen/v1",
+}
 
 
 def run(input_data, context):
@@ -120,11 +127,43 @@ def _upsert(provider_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     )
     handle = str(created.get("handle") or "")
     try:
+        _sync_legacy_provider_key(provider_id, secret, data)
         result = _save_connection(provider_id, data, credential_handle=handle)
     except Exception:
+        _clear_legacy_provider_key(provider_id)
         _invoke(_CREDENTIAL_MANAGE, "revoke", {"handle": handle})
         raise
     return {**result, "configured": True}
+
+
+def _sync_legacy_provider_key(
+    provider_id: str,
+    secret: str,
+    data: Mapping[str, Any],
+) -> None:
+    """Persist the approved connection for legacy chat execution.
+
+    The provider registry remains the owner of connection metadata and its
+    opaque broker handle. Until the legacy chat client is retired, it needs a
+    synchronized encrypted compatibility copy to execute the same connection.
+    """
+    result = set_provider_api_key(
+        provider_id,
+        secret,
+        base_url=str(data.get("base_url") or data.get("endpoint") or ""),
+        kind=str(data.get("kind") or "openai-compatible"),
+    )
+    if not result.get("success"):
+        raise RuntimeError("legacy provider key synchronization failed")
+
+
+def _clear_legacy_provider_key(provider_id: str) -> None:
+    """Remove the compatibility copy when connection creation rolls back."""
+    try:
+        set_provider_api_key(provider_id, "")
+    except (KeyError, RuntimeError, ValueError):
+        # The broker rollback is authoritative; do not mask the original error.
+        pass
 
 
 def _save_connection(
@@ -137,8 +176,10 @@ def _save_connection(
     revision = int(snapshot.get("revision") or 0)
     endpoint = str(data.get("base_url") or data.get("endpoint") or "").strip()
     if not endpoint:
+        endpoint = _builtin_provider_endpoint(provider_id)
+    if not endpoint:
         raise ValueError("provider endpoint is required")
-    adapter_id = str(data.get("kind") or "openai-compatible").strip()
+    adapter_id = _provider_adapter_id(provider_id)
     result = _invoke(
         _PROVIDER_MANAGE,
         "save",
@@ -163,6 +204,36 @@ def _save_connection(
         "configured": True,
         "provider": result.get("provider"),
     }
+
+
+def _provider_adapter_id(provider_id: str) -> str:
+    """Map a provider connection to its executable protocol adapter."""
+    if provider_id == "anthropic":
+        return "anthropic"
+    if provider_id == "openai":
+        return "openai"
+    return "openai-compatible"
+
+
+def _builtin_provider_endpoint(provider_id: str) -> str:
+    """Return a declared endpoint for a bundled provider, if one exists."""
+    adapter_endpoint = _BUILTIN_PROVIDER_ADAPTER_ENDPOINTS.get(provider_id)
+    if adapter_endpoint:
+        return adapter_endpoint
+    try:
+        from domain.ai_client.providers import get_provider_catalog_map
+
+        descriptor = get_provider_catalog_map().get(provider_id)
+        if isinstance(descriptor, Mapping):
+            metadata = descriptor.get("metadata")
+            return str(
+                descriptor.get("default_base_url")
+                or (metadata.get("default_base_url") if isinstance(metadata, Mapping) else "")
+                or ""
+            ).strip()
+    except Exception:
+        return ""
+    return ""
 
 
 def _delete(provider_id: str) -> dict[str, Any]:
@@ -192,6 +263,7 @@ def _delete(provider_id: str) -> dict[str, Any]:
     handle = record.get("credential_handle")
     if handle:
         _invoke(_CREDENTIAL_MANAGE, "revoke", {"handle": handle})
+    _clear_legacy_provider_key(provider_id)
     return {"success": True, "provider_id": provider_id, "configured": False}
 
 

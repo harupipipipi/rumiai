@@ -36,6 +36,9 @@ from domain.external.token_store import external_token_status
 from domain.frontend_settings_store import (
     FrontendSettingsCorruptError,
     FrontendSettingsStore,
+    MUTATION_RECEIPTS_KEY,
+    STATE_REVISIONS_KEY,
+    defaultspack_frontend_settings_path,
 )
 from domain.tool.catalog_contract_client import ContractToolCatalog as ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
@@ -64,10 +67,16 @@ class FrontendRegistry:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
-        self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._settings_path = defaultspack_frontend_settings_path(self._pack_root)
         self._settings_store = FrontendSettingsStore(self._settings_path)
 
-    def build_catalog(self, profile_id: str | None = None, *, lightweight: bool = False) -> dict[str, Any]:
+    def build_catalog(
+        self,
+        profile_id: str | None = None,
+        *,
+        lightweight: bool = False,
+        include_skills: bool = False,
+    ) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
@@ -123,7 +132,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": chat_renderers,
             },
-            "skills": [] if lightweight else self._skill_items(),
+            "skills": self._skill_items() if include_skills or not lightweight else [],
             "routes": self._route_metadata(),
             "templates": template_catalog.get("templates", []),
             "field_renderers": template_catalog.get("field_renderers", []),
@@ -151,9 +160,9 @@ class FrontendRegistry:
         """Project the active core-owned frontend catalog into the legacy API."""
         try:
             from core_runtime.frontend_host import build_frontend_catalog
-            from core_runtime.resolved_profile_scope import active_resolved_profile
+            from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
-            plan = active_resolved_profile()
+            plan = persisted_resolved_profile()
             if plan is None:
                 return None
             return build_frontend_catalog(plan).to_dict()
@@ -229,7 +238,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "rumi DP",
+            "name": "Tobkiri",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -2676,6 +2685,9 @@ class FrontendRegistry:
                 lambda current: self._migrate_legacy_keyboard_navigation(current)[0]
             )
         if saved:
+            saved = dict(saved)
+            saved.pop(MUTATION_RECEIPTS_KEY, None)
+            saved.pop(STATE_REVISIONS_KEY, None)
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)

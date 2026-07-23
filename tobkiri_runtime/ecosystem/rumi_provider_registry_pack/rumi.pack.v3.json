@@ -10,9 +10,9 @@
     "requires": []
   },
   "entrypoints": [
-    {"id": "provider-registry-resource", "contract_id": "rumi.resource.ai.provider.registry.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.process", "artifact_hash": "sha256:724dde9aac8c7a8beff89cf86d91cc3e58e6ae891222019678a092a85a05a603"},
-    {"id": "provider-registry-manage", "contract_id": "rumi.action.ai.provider.registry.manage.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.process", "artifact_hash": "sha256:724dde9aac8c7a8beff89cf86d91cc3e58e6ae891222019678a092a85a05a603"},
-    {"id": "provider-registry-health", "contract_id": "rumi.resource.ai.provider.health.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.health_process", "artifact_hash": "sha256:5e015848552f0d511f5d4cabcd9a3a7af03aca4a16a261fa279acc90132c4bc9"}
+    {"id": "provider-registry-resource", "contract_id": "rumi.resource.ai.provider.registry.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.process", "artifact_hash": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"},
+    {"id": "provider-registry-manage", "contract_id": "rumi.action.ai.provider.registry.manage.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.process", "artifact_hash": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"},
+    {"id": "provider-registry-health", "contract_id": "rumi.resource.ai.provider.health.v1", "loader": "process", "module": "ecosystem.rumi_provider_registry_pack.runtime.health_process", "artifact_hash": "sha256:f2e3464ed467b6e85dae562a81fa3c0d5ac1c0fd338b96ff3159736f0320d537"}
   ],
   "resources": [],
   "storage": [{"namespace": "rumi.provider_connections", "schema_version": "1.0.0", "authoritative": true, "retention": "until explicit deletion or profile migration rollback", "export_import": true}],
@@ -21,8 +21,7 @@
     {"capability": "ai.provider.registry.manage", "access": "control", "approval_required": true},
     {"capability": "ai.provider.health.read", "access": "read", "approval_required": false}
   ],
-  "provenance": {"content_hash": "sha256:34e22f25db99f47f99dc7c63335a234707c0c5b458c5db85db3aa39f6be4edf2", "build_identity": "rumi-provider-registry-pack:1.0.0", "trust_class": "local", "signature": null},
-  "migration": {"from": ["defaultspack.ai_client.provider_connections"], "compatibility_aliases": [], "compatibility_projection": "read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove migrated owner state and restore the owner-only source backup."},
+  "provenance": {"content_hash": "sha256:bbd2df336da60bf1f79dde082eb35c3615a2ba871544e03ef6d7d70ba067f404", "build_identity": "rumi-provider-registry-pack:1.0.0", "trust_class": "local", "signature": null},
+  "migration": {"from": ["defaultspack.ai_client.provider_connections"], "compatibility_aliases": [], "compatibility_projection": "legacy_to_v3_read_only", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove migrated owner state and restore the owner-only source backup."},
   "extensions": {"rumi.provider_registry.boundary": {"catalog_owner": false, "provider_execution_owner": false, "remote_health_unknown_until_verified": true, "credential_values_accepted": false}}
 }
-

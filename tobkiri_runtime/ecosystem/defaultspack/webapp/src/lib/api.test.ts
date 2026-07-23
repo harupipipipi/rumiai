@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { deleteCalendarScheduleBeforeLocalChange } from "./calendarScheduleDeletion";
@@ -694,6 +694,57 @@ test("composer command feedback surfaces pack block result messages and paths", 
   );
 });
 
+test("deepthink command feedback uses warning only while the mode is enabled", () => {
+  assert.equal(
+    composerCommandFeedbackTone({
+      command: {
+        id: "deepthink",
+        name: "deepthink",
+        label: "DeepThink",
+        category: "model",
+        visibility: "default",
+        risk: "medium",
+        execution: {
+          type: "rumi_function",
+          qualified_name: "defaultspack:ai_set_deepthink_enabled",
+        },
+      },
+      executed: true,
+      operation_status: "succeeded",
+      state_changes: [{
+        state_ref: "defaultspack:models.deepthink_enabled",
+        value: true,
+        revision: 1,
+      }],
+    }),
+    "warning",
+  );
+  assert.equal(
+    composerCommandFeedbackTone({
+      command: {
+        id: "deepthink",
+        name: "deepthink",
+        label: "DeepThink",
+        category: "model",
+        visibility: "default",
+        risk: "medium",
+        execution: {
+          type: "rumi_function",
+          qualified_name: "defaultspack:ai_set_deepthink_enabled",
+        },
+      },
+      executed: true,
+      operation_status: "succeeded",
+      state_changes: [{
+        state_ref: "defaultspack:models.deepthink_enabled",
+        value: false,
+        revision: 2,
+      }],
+    }),
+    "success",
+  );
+});
+
 test("template ai input selects composer and tool policy metadata", () => {
   const catalog = {
     ai_inputs: [
@@ -892,10 +943,10 @@ test("template composer widgets become safe tool toggle widgets", () => {
   });
 });
 
-test("ultra yolo restore state returns to the previous yolo mode", () => {
+test("yolo full access always toggles back to ask instead of restoring agent approval", () => {
   assert.deepEqual(
     resolveUltraYoloModeState({ yoloMode: false, ultraYoloMode: false, restoreYoloMode: false }, true),
-    { yoloMode: true, ultraYoloMode: true, restoreYoloMode: false },
+    { yoloMode: false, ultraYoloMode: true, restoreYoloMode: false },
   );
   assert.deepEqual(
     resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: false }, false),
@@ -903,7 +954,7 @@ test("ultra yolo restore state returns to the previous yolo mode", () => {
   );
   assert.deepEqual(
     resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: true }, false),
-    { yoloMode: true, ultraYoloMode: false, restoreYoloMode: false },
+    { yoloMode: false, ultraYoloMode: false, restoreYoloMode: false },
   );
 });
 
@@ -962,6 +1013,108 @@ test("executeUiCommand preserves model candidate results", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("command protocol catalog is authoritative and invocation preserves its envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  const legacyCommand = {
+    id: "deepthink",
+    name: "deepthink",
+    label: "DeepThink",
+    category: "model",
+    visibility: "default",
+    risk: "medium",
+    execution: { type: "rumi_function", qualified_name: "defaultspack:ai_set_deepthink_enabled" },
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    const data = url.endsWith("/catalog")
+      ? {
+          api_version: "tobkiri.commands/v1",
+          kind: "ResolvedCommandCatalog",
+          catalog_revision: "revision-1",
+          commands: [{
+            canonical_id: "defaultspack:deepthink",
+            pack_id: "defaultspack",
+            pack_generation: 1,
+            command_version: "1.0.0",
+            identity: { id: "deepthink", name: "deepthink", version: "1.0.0" },
+            presentation: {
+              label: { fallback: "DeepThink" },
+              category: "model",
+              visibility: "default",
+              icon: "deepthink",
+              input: { kind: "toggle", state_ref: "defaultspack:models.deepthink_enabled" },
+              mounts: [],
+            },
+            execution: { kind: "state_mutation", state_ref: "defaultspack:models.deepthink_enabled" },
+            availability: { status: "available" },
+            legacy: legacyCommand,
+          }],
+          state_snapshots: [],
+          diagnostics: [],
+        }
+      : {
+          api_version: "tobkiri.commands/v1",
+          operation_id: "operation-1",
+          status: "succeeded",
+          command_ref: "defaultspack:deepthink",
+          state_changes: [{
+            state_ref: "defaultspack:models.deepthink_enabled",
+            value: true,
+            revision: 1,
+            freshness: "authoritative",
+          }],
+          legacy_result: { command: legacyCommand, executed: true },
+        };
+    return new Response(JSON.stringify({ status: "ok", data }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const catalog = await api.resolvedUiCommands();
+    const result = await api.executeResolvedUiCommand({
+      command: catalog.commands[0].canonical_id ?? "",
+      args: { enabled: true },
+    });
+    assert.equal(catalog.protocol?.catalog_revision, "revision-1");
+    assert.equal(catalog.commands[0].protocol_presentation?.input.kind, "toggle");
+    assert.equal(result.operation_id, "operation-1");
+    assert.equal(result.state_changes?.[0].value, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    "/api/command-protocol/v1/catalog",
+    "/api/command-protocol/v1/invoke",
+  ]);
+});
+
+test("updateUiSettingsPatches sends field-scoped settings mutations", async () => {
+  const originalFetch = globalThis.fetch;
+  let body: unknown;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { values: { theme: { font_size: 16 } } },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await api.updateUiSettingsPatches([
+      { section: "theme", field: "font_size", value: 16 },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(body, {
+    patches: [{ section: "theme", field: "font_size", value: 16 }],
+  });
 });
 
 test("listModelProfiles bypasses browser cache", async () => {

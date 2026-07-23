@@ -19,11 +19,40 @@ from core_runtime.resolved_profile import (
     validate_lockfile,
 )
 from core_runtime.resolved_profile_scope import (
+    _persisted_startup_pack_ids,
     activate_resolved_profile,
     effective_pack_ids,
     require_effective_pack,
     restore_resolved_profile,
 )
+
+
+def test_persisted_scope_reads_the_configured_user_data_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Worker fallback must not accidentally read the bundled app's data."""
+    import core_runtime.resolved_profile_scope as scope
+
+    observed: dict[str, str] = {}
+
+    class FakeActiveEcosystemManager:
+        def __init__(self, *, config_path: str) -> None:
+            observed["config_path"] = config_path
+
+        def get_metadata(self, key: str, default: object) -> list[str]:
+            assert key == "startup_packs"
+            assert default == []
+            return ["defaultspack", "rumi_browser_automation_pack"]
+
+    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(scope, "ActiveEcosystemManager", FakeActiveEcosystemManager)
+
+    assert _persisted_startup_pack_ids() == [
+        "defaultspack",
+        "rumi_browser_automation_pack",
+    ]
+    assert observed["config_path"] == str(tmp_path / "active_ecosystem.json")
 
 
 def _write_pack(
@@ -244,4 +273,3 @@ def test_legacy_selection_migration_has_dry_run_backup_and_rollback(
         profile_path, Path(applied.backup_path)
     )
     assert json.loads(profile_path.read_text(encoding="utf-8")) == original
-

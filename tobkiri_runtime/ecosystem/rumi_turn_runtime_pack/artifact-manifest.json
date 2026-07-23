@@ -3,7 +3,7 @@
   "artifacts": [
     {
       "path": "runtime/turns.py",
-      "sha256": "77293f8aed6d5e320b447019334cb3a65315f1312085d777c7487fed687c061f",
+      "sha256": "sha256:77293f8aed6d5e320b447019334cb3a65315f1312085d777c7487fed687c061f",
       "role": "runtime"
     }
   ]

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .interface_registry import InterfaceRegistry
-from .resolved_profile_scope import active_resolved_profile
+from .resolved_profile_scope import persisted_resolved_profile
 
 
 class GlobalContractUnavailable(RuntimeError):
@@ -137,7 +137,7 @@ def _eligible_providers(
     interface_registry: InterfaceRegistry,
     contract_id: str,
 ) -> tuple[list[dict[str, Any]], int]:
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if plan is None:
         raise GlobalContractUnavailable("resolved profile is not active")
     candidates = interface_registry.get(
@@ -183,4 +183,3 @@ def _eligible_providers(
         )
     )
     return eligible, denied
-
