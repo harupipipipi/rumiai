@@ -182,8 +182,21 @@ jobs:
         working-directory: tobkiri_runtime
         run: python scripts/quality/check_defaultspack_http_fallbacks.py
 
+  pack-architecture:
+    name: Pack architecture
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Run repository pack architecture boundary scan
-        working-directory: .
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
