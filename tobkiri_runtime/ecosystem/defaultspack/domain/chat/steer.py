@@ -114,9 +114,12 @@ class ConversationSteerStore:
         conversation_id: str = "",
         context: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Consume guidance for the exact turn or conversation."""
-        del context
-        return self._consume(conversation_id, execution_id)
+        """Send queued guidance after the exact turn completes."""
+        if isinstance(context, Mapping) and context.get(
+            "_conversation_steer_autosend"
+        ):
+            return []
+        return self._send(self._consume(conversation_id, execution_id))
 
     def process_for_conversation(
         self,
@@ -124,13 +127,16 @@ class ConversationSteerStore:
         *,
         context: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Consume guidance for the latest active conversation turn."""
-        del context
-        return self._consume(conversation_id, "")
+        """Send guidance that was queued after the final model decision."""
+        if isinstance(context, Mapping) and context.get(
+            "_conversation_steer_autosend"
+        ):
+            return []
+        return self._send(self._consume(conversation_id, ""))
 
     def consume_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]:
         """Atomically consume queued guidance for the active turn."""
-        return self._consume(conversation_id, "")
+        return self._consume(conversation_id, "", status="injected")
 
     def process(
         self,
@@ -140,20 +146,105 @@ class ConversationSteerStore:
         conversation_id: str = "",
         context: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Consume guidance through the same turn-runtime operation."""
-        del target_type, context
-        return self._consume(conversation_id, target_id)
+        """Send queued guidance through the same turn-runtime operation."""
+        del target_type
+        if isinstance(context, Mapping) and context.get(
+            "_conversation_steer_autosend"
+        ):
+            return []
+        return self._send(self._consume(conversation_id, target_id))
 
-    def _consume(self, conversation_id: str, turn_id: str) -> list[dict[str, Any]]:
+    def _consume(
+        self,
+        conversation_id: str,
+        turn_id: str,
+        *,
+        status: str = "consumed",
+    ) -> list[dict[str, Any]]:
         turn = self._resolve_existing_turn(conversation_id, turn_id)
         if turn is None:
+            return []
+        guidance_ids = [
+            str(item.get("id") or "")
+            for item in turn.get("guidance") or []
+            if isinstance(item, Mapping)
+            and item.get("status") == "queued"
+            and isinstance(item.get("value"), Mapping)
+            and item["value"].get("auto_send", True) is not False
+        ]
+        if not guidance_ids:
             return []
         result = _invoke(
             TURN_ACTION,
             "consume_guidance",
-            {"turn_id": turn["id"], "expected_revision": turn["revision"]},
+            {
+                "turn_id": turn["id"],
+                "expected_revision": turn["revision"],
+                "guidance_ids": guidance_ids,
+            },
         )
-        return [_legacy_item(result["turn"], item) for item in result["items"]]
+        return [
+            _legacy_item(result["turn"], item, status=status)
+            for item in result["items"]
+        ]
+
+    @staticmethod
+    def _send(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dispatch consumed guidance as a normal follow-up chat message."""
+        sent: list[dict[str, Any]] = []
+        for item in items:
+            destination = str(
+                item.get("conversation_id") or item.get("target_id") or ""
+            ).strip()
+            if not destination:
+                sent.append(
+                    {
+                        **item,
+                        "status": "failed",
+                        "error": "conversation_id is required",
+                    }
+                )
+                continue
+            try:
+                from blocks.chat.send import run as send_chat
+
+                result = send_chat(
+                    {
+                        "conversation_id": destination,
+                        "message": {
+                            "role": "user",
+                            "content": str(item.get("prompt") or ""),
+                            "metadata": {
+                                "source": "conversation_steer",
+                                "steer_id": item.get("id"),
+                            },
+                        },
+                    },
+                    {
+                        "run_source": "conversation_steer",
+                        "_conversation_steer_autosend": True,
+                    },
+                )
+                succeeded = (
+                    isinstance(result, Mapping)
+                    and result.get("status") == "ok"
+                )
+                sent.append(
+                    {
+                        **item,
+                        "status": "sent" if succeeded else "failed",
+                        "result": result,
+                    }
+                )
+            except Exception as exc:
+                sent.append(
+                    {
+                        **item,
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+                )
+        return sent
 
     def _resolve_turn(self, conversation_id: str, turn_id: str) -> dict[str, Any]:
         existing = self._resolve_existing_turn(conversation_id, turn_id)
@@ -211,7 +302,10 @@ class ConversationSteerStore:
 
 
 def _legacy_item(
-    turn: Mapping[str, Any], item: Mapping[str, Any]
+    turn: Mapping[str, Any],
+    item: Mapping[str, Any],
+    *,
+    status: str | None = None,
 ) -> dict[str, Any]:
     value = item.get("value") if isinstance(item.get("value"), Mapping) else {}
     return {
@@ -221,7 +315,7 @@ def _legacy_item(
         "target_type": value.get("target_type") or "conversation",
         "target_id": value.get("target_id") or turn.get("conversation_id"),
         "conversation_id": value.get("conversation_id") or turn.get("conversation_id"),
-        "status": item.get("status") or "queued",
+        "status": status or item.get("status") or "queued",
         "visible": value.get("visible", True),
         "auto_send": value.get("auto_send", True),
         "metadata": dict(value.get("metadata") or {}),

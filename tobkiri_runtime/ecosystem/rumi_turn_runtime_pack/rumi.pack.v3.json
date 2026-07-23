@@ -10,14 +10,14 @@
     {"id": "rumi.resource.message.v1", "version_range": ">=1.0.0 <2.0.0", "cardinality": "one", "optional": false}
   ]},
   "entrypoints": [
-    {"id": "turn-resource", "contract_id": "rumi.resource.turn.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_resource", "artifact_hash": "sha256:77293f8aed6d5e320b447019334cb3a65315f1312085d777c7487fed687c061f"},
-    {"id": "turn-lifecycle", "contract_id": "rumi.action.turn.lifecycle.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_action", "artifact_hash": "sha256:77293f8aed6d5e320b447019334cb3a65315f1312085d777c7487fed687c061f"},
-    {"id": "turn-events", "contract_id": "rumi.event.turn.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_resource", "artifact_hash": "sha256:77293f8aed6d5e320b447019334cb3a65315f1312085d777c7487fed687c061f"}
+    {"id": "turn-resource", "contract_id": "rumi.resource.turn.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_resource", "artifact_hash": "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed"},
+    {"id": "turn-lifecycle", "contract_id": "rumi.action.turn.lifecycle.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_action", "artifact_hash": "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed"},
+    {"id": "turn-events", "contract_id": "rumi.event.turn.v1", "loader": "python", "module": "ecosystem.rumi_turn_runtime_pack.runtime.turns", "symbol": "create_turn_resource", "artifact_hash": "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed"}
   ],
   "resources": [],
   "storage": [{"namespace": "rumi.turns.ephemeral", "schema_version": "1.0.0", "authoritative": true, "retention": "bounded process lifetime", "export_import": false}],
   "permissions": [{"capability": "turn.read", "access": "read", "approval_required": false}, {"capability": "turn.manage", "access": "write", "approval_required": false}],
-  "provenance": {"content_hash": "sha256:f74b34514ebcae77d3fb3d72b80117c1f80b73d2f7e56f2db2e0f87c7dee4926", "build_identity": "rumi-turn-runtime-pack:1.0.0", "trust_class": "local", "signature": null},
+  "provenance": {"content_hash": "sha256:9a6b5db5bc1278522f8b51ccd30c05a6f22f4640239b2154033a8591e08fb064", "build_identity": "rumi-turn-runtime-pack:1.0.0", "trust_class": "local", "signature": null},
   "migration": {"from": ["defaultspack.domain.turn"], "compatibility_aliases": [], "compatibility_projection": "none", "removal_wave": 10, "sunset_at": "2027-12-31", "rollback": "Remove the turn projection; no conversation data is owned."},
   "extensions": {"rumi.turn_runtime.boundary": {"conversation_owner": false, "message_owner": false, "context_owner": false, "persistent_recovery": false}}
 }

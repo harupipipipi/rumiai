@@ -133,14 +133,29 @@ class TurnRuntime:
             return _copy(turn)
 
     def consume_guidance(
-        self, turn_id: str, *, expected_revision: int
+        self,
+        turn_id: str,
+        *,
+        expected_revision: int,
+        guidance_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Atomically mark all queued guidance consumed and return those items."""
         with self._lock:
             turn = self._required(turn_id)
             self._assert_revision(turn, expected_revision)
+            selected_ids = (
+                {str(value) for value in guidance_ids if str(value)}
+                if guidance_ids is not None
+                else None
+            )
             queued = [
-                item for item in turn["guidance"] if item.get("status") == "queued"
+                item
+                for item in turn["guidance"]
+                if item.get("status") == "queued"
+                and (
+                    selected_ids is None
+                    or str(item.get("id") or "") in selected_ids
+                )
             ]
             for item in queued:
                 item["status"] = "consumed"
@@ -289,6 +304,10 @@ def create_turn_action(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
             return runtime.consume_guidance(
                 turn_id,
                 expected_revision=expected,
+                guidance_ids=_optional_identifier_list(
+                    payload,
+                    "guidance_ids",
+                ),
             )
         if name == "cancel_guidance":
             return runtime.cancel_guidance(
@@ -322,10 +341,21 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value
 
 
+def _optional_identifier_list(
+    payload: Mapping[str, Any],
+    key: str,
+) -> list[str] | None:
+    if key not in payload:
+        return None
+    values = payload.get(key)
+    if not isinstance(values, list):
+        raise ValueError(f"{key} must be an array")
+    return [_identifier(value) for value in values]
+
+
 def _copy(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
