@@ -25,7 +25,11 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
+  Bot, BookOpen, BriefcaseBusiness, Bug, Calendar, ChartNoAxesColumn,
+  Cloud, Coffee, Database, FlaskConical, Globe, Heart, Image, Mail, Map as MapIcon,
+  MessageSquare, Music, Palette, PenLine, Search, Server, Settings,
+  Shield, ShoppingCart, Terminal, Video, Wrench, Zap,
+  Plus, ChevronRight,
   GripVertical, FolderOpen, Folder, KanbanSquare, Monitor, PanelLeftOpen, PanelLeftClose, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -66,14 +70,48 @@ export type ChatItem = {
 
 const HISTORY_CHAT_ICON_SIZE = 14;
 const HISTORY_PANE_MINIMIZE_DELAY_MS = 180;
+const HISTORY_ICON_COMPONENTS = {
+  ai: Bot,
+  book: BookOpen,
+  briefcase: BriefcaseBusiness,
+  bug: Bug,
+  calendar: Calendar,
+  chart: ChartNoAxesColumn,
+  chat: MessageSquare,
+  cloud: Cloud,
+  code: Terminal,
+  coffee: Coffee,
+  database: Database,
+  email: Mail,
+  folder: Folder,
+  globe: Globe,
+  heart: Heart,
+  image: Image,
+  lightning: Zap,
+  map: MapIcon,
+  music: Music,
+  paint: Palette,
+  science: FlaskConical,
+  search: Search,
+  security: Shield,
+  server: Server,
+  settings: Settings,
+  shield: Shield,
+  shopping: ShoppingCart,
+  terminal: Terminal,
+  tools: Wrench,
+  video: Video,
+  write: PenLine,
+} as const;
 
 function HistoryChatIcon({ chat, tone = "text-zinc-500" }: { chat: ChatItem; tone?: string }) {
-  const iconSvg = typeof chat.metadata?.icon_svg === "string" ? chat.metadata.icon_svg : "";
-  const Icon = chat.type === "research"
-    ? Globe
-    : chat.type === "code"
-      ? Terminal
-      : MessageSquare;
+  const iconId = typeof chat.metadata?.icon_id === "string" ? chat.metadata.icon_id : "";
+  const Icon = HISTORY_ICON_COMPONENTS[iconId as keyof typeof HISTORY_ICON_COMPONENTS]
+    ?? (chat.type === "research"
+      ? Globe
+      : chat.type === "code"
+        ? Terminal
+        : MessageSquare);
   const className = cn(
     "flex h-3.5 w-3.5 min-h-3.5 min-w-3.5 shrink-0 items-center justify-center overflow-hidden leading-none [&>svg]:block [&>svg]:h-full [&>svg]:w-full",
     tone,
@@ -84,23 +122,11 @@ function HistoryChatIcon({ chat, tone = "text-zinc-500" }: { chat: ChatItem; ton
     flexBasis: HISTORY_CHAT_ICON_SIZE,
   };
 
-  if (iconSvg) {
-    return (
-      <span
-        aria-hidden="true"
-        data-history-chat-icon="true"
-        data-history-chat-icon-size={HISTORY_CHAT_ICON_SIZE}
-        className={className}
-        style={style}
-        dangerouslySetInnerHTML={{ __html: iconSvg }}
-      />
-    );
-  }
-
   return (
     <span
       aria-hidden="true"
       data-history-chat-icon="true"
+      data-history-chat-icon-id={iconId || undefined}
       data-history-chat-icon-size={HISTORY_CHAT_ICON_SIZE}
       className={className}
       style={style}

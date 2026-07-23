@@ -126,7 +126,11 @@ class FrontendHostRegistry:
             pack = pack_records.get(location.pack_id)
             if pack is None:
                 continue
-            loaded, pack_diagnostics = self._load_pack(location, pack.content_hash)
+            loaded, pack_diagnostics = self._load_pack(
+                location,
+                pack.content_hash,
+                pack.trust_class,
+            )
             diagnostics.extend(pack_diagnostics)
             if any(
                 item.code in _PACK_QUARANTINE_CODES
@@ -172,6 +176,7 @@ class FrontendHostRegistry:
         self,
         location: PackLocation,
         expected_pack_hash: str,
+        verified_trust_class: str,
     ) -> tuple[
         list[VerifiedFrontendContribution],
         list[FrontendDiagnostic],
@@ -199,7 +204,6 @@ class FrontendHostRegistry:
                 )
             ]
         build_identity = str(provenance.get("build_identity") or "").strip()
-        trust_class = str(provenance.get("trust_class") or "untrusted").strip()
         descriptors = _declared_descriptors(manifest, location.pack_subdir)
         if not descriptors:
             return [], []
@@ -221,7 +225,7 @@ class FrontendHostRegistry:
                 declared_hash,
                 expected_pack_hash,
                 build_identity,
-                trust_class,
+                verified_trust_class,
             )
             diagnostics.extend(item_diagnostics)
             if contribution is not None:

@@ -74,7 +74,7 @@ class ResolutionDiagnostic:
 
 @dataclass(frozen=True)
 class ResolvedPack:
-    """A selected data-only pack identity pinned by manifest content."""
+    """A selected pack identity with host-verified trust metadata."""
 
     pack_id: str
     version: str
@@ -85,6 +85,7 @@ class ResolvedPack:
     selected: bool
     healthy: bool
     authorized: bool
+    trust_class: str = "untrusted"
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,7 @@ class ResolutionInput:
     authorized_pack_ids: tuple[str, ...] = ()
     healthy_pack_ids: tuple[str, ...] = ()
     policy_capabilities: tuple[str, ...] = ()
+    verified_pack_trust: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,6 +225,9 @@ def resolve_profile(
 
     authorized = set(resolution_input.authorized_pack_ids)
     healthy = set(resolution_input.healthy_pack_ids)
+    verified_pack_trust = _verified_pack_trust(
+        resolution_input.verified_pack_trust
+    )
     if not resolution_input.healthy_pack_ids:
         healthy = set(available)
 
@@ -268,6 +273,7 @@ def resolve_profile(
             selected=pack_id in selected,
             healthy=pack_id in healthy,
             authorized=pack_id in authorized,
+            trust_class=verified_pack_trust.get(pack_id, "untrusted"),
         )
         for pack_id in selected
     )
@@ -770,6 +776,7 @@ def _resolved_pack(
     selected: bool,
     healthy: bool,
     authorized: bool,
+    trust_class: str,
 ) -> ResolvedPack:
     return ResolvedPack(
         pack_id=pack_id,
@@ -781,7 +788,35 @@ def _resolved_pack(
         selected=selected,
         healthy=healthy,
         authorized=authorized,
+        trust_class=trust_class,
     )
+
+
+def _verified_pack_trust(
+    values: tuple[tuple[str, str], ...],
+) -> dict[str, str]:
+    """Validate host-supplied trust records without consulting pack manifests."""
+    result: dict[str, str] = {}
+    for pack_id, trust_class in values:
+        normalized_pack_id = str(pack_id or "").strip()
+        normalized_trust_class = str(trust_class or "").strip()
+        if not normalized_pack_id:
+            raise ValueError("verified pack trust requires a pack ID")
+        if normalized_trust_class not in {
+            "untrusted",
+            "local",
+            "verified",
+            "system",
+        }:
+            raise ValueError(
+                f"invalid verified trust class: {normalized_trust_class!r}"
+            )
+        if normalized_pack_id in result:
+            raise ValueError(
+                f"duplicate verified pack trust record: {normalized_pack_id}"
+            )
+        result[normalized_pack_id] = normalized_trust_class
+    return result
 
 
 def _project_resources(
@@ -1046,6 +1081,7 @@ def _input_payload(
         "authorized_pack_ids": value.authorized_pack_ids,
         "healthy_pack_ids": value.healthy_pack_ids,
         "policy_capabilities": value.policy_capabilities,
+        "verified_pack_trust": value.verified_pack_trust,
         "manifest_hashes": tuple(
             sorted(
                 (pack_id, str(manifest.get("_manifest_hash") or ""))

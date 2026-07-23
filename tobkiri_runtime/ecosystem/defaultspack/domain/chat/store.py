@@ -16,6 +16,7 @@ from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
 from core_runtime.paths import USER_DATA_DIR
 from core_runtime.resolved_profile_scope import persisted_resolved_profile
+from domain.chat.icon_matcher import match_icon
 
 CONVERSATION = "rumi.resource.conversation.v1"
 CONVERSATION_MANAGE = "rumi.action.conversation.manage.v1"
@@ -50,9 +51,11 @@ class ChatStore:
         group_id: str | None = None,
     ) -> dict[str, Any]:
         """Create one conversation through its selected owner."""
+        conversation_id = str(uuid.uuid4())
+        title = str((metadata or {}).get("title") or "New Conversation")
         record = {
-            "id": str(uuid.uuid4()),
-            "title": str((metadata or {}).get("title") or "New Conversation"),
+            "id": conversation_id,
+            "title": title,
             "model_reference": str(model or ""),
             "system_prompt_id": system_prompt_id,
             "agent_id": agent_id,
@@ -60,7 +63,11 @@ class ChatStore:
             "parent_conversation_id": parent_conversation_id,
             "conversation_kind": conversation_kind
             or ("subagent" if parent_conversation_id else "chat"),
-            "metadata": dict(metadata or {}),
+            "metadata": _set_metadata_icon(
+                metadata,
+                title=title,
+                conversation_id=conversation_id,
+            ),
             "group_id": group_id,
         }
         result = _invoke(
@@ -184,6 +191,11 @@ class ChatStore:
             metadata = dict(current.get("metadata") or {})
             metadata.update(extras)
             patch["metadata"] = metadata
+        patch["metadata"] = _set_metadata_icon(
+            patch.get("metadata", current.get("metadata")),
+            title=str(patch.get("title", current.get("title")) or ""),
+            conversation_id=conversation_id,
+        )
         result = _invoke(
             CONVERSATION_MANAGE,
             "update",
@@ -581,6 +593,20 @@ def _message_text(message: Mapping[str, Any]) -> str:
 def _read_only(conversation: Mapping[str, Any]) -> bool:
     metadata = conversation.get("metadata")
     return isinstance(metadata, Mapping) and metadata.get("read_only") is True
+
+
+def _set_metadata_icon(
+    metadata: Any,
+    *,
+    title: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Replace caller icon fields with one host-generated inert icon ID."""
+    value = dict(metadata) if isinstance(metadata, Mapping) else {}
+    value.pop("icon_svg", None)
+    value.pop("icon_id", None)
+    value["icon_id"] = match_icon(title, conversation_id)["icon_id"]
+    return value
 
 
 def _safe_filename(name: str) -> str:

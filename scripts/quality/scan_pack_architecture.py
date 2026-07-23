@@ -10,7 +10,7 @@ from pathlib import Path
 if __name__ == "__main__":
     scanner = (
         Path(__file__).resolve().parents[2]
-        / "rumi_ai_1_10"
+        / "tobkiri_runtime"
         / "scripts"
         / "quality"
         / "scan_pack_architecture.py"

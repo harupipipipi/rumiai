@@ -72,7 +72,11 @@ def _route(
     }
 
 
-def _plan(ecosystem: Path, *pack_ids: str):
+def _plan(
+    ecosystem: Path,
+    *pack_ids: str,
+    verified_pack_trust: tuple[tuple[str, str], ...] = (),
+):
     return resolve_profile(
         ResolutionInput(
             profile_id="frontend-fixture",
@@ -82,6 +86,7 @@ def _plan(ecosystem: Path, *pack_ids: str):
             lockfile_revision=None,
             requested_pack_ids=tuple(pack_ids),
             authorized_pack_ids=tuple(pack_ids),
+            verified_pack_trust=verified_pack_trust,
         ),
         ecosystem_dir=ecosystem,
     )
@@ -108,7 +113,43 @@ def test_declarative_catalog_is_profile_scoped_and_provenance_bound(
     assert contribution.build_identity == "fixture:pack-a"
 
 
-def test_untrusted_same_origin_module_is_quarantined(tmp_path: Path) -> None:
+def test_self_declared_system_same_origin_module_is_quarantined(
+    tmp_path: Path,
+) -> None:
+    ecosystem = tmp_path / "ecosystem"
+    module_raw = b"export const Screen = () => null;\n"
+    descriptor = {
+        **_route("pack-a.executable", "/executable"),
+        "mode": "same_origin_builtin",
+        "module": {
+            "path": "/static/packs/pack-a/frontend/screen.js",
+            "export": "Screen",
+            "content_hash": _sha256(module_raw),
+        },
+    }
+    pack = _write_ui_pack(
+        ecosystem,
+        "pack-a",
+        [descriptor],
+        trust_class="system",
+    )
+    (pack / "frontend" / "screen.js").write_bytes(module_raw)
+    plan = _plan(ecosystem, "pack-a")
+
+    catalog = FrontendHostRegistry(
+        plan, ecosystem_dir=ecosystem
+    ).build_catalog()
+
+    assert catalog.contributions == ()
+    assert any(
+        item.code == "frontend_same_origin_not_system"
+        for item in catalog.diagnostics
+    )
+
+
+def test_host_verified_system_same_origin_module_is_accepted(
+    tmp_path: Path,
+) -> None:
     ecosystem = tmp_path / "ecosystem"
     module_raw = b"export const Screen = () => null;\n"
     descriptor = {
@@ -122,17 +163,20 @@ def test_untrusted_same_origin_module_is_quarantined(tmp_path: Path) -> None:
     }
     pack = _write_ui_pack(ecosystem, "pack-a", [descriptor])
     (pack / "frontend" / "screen.js").write_bytes(module_raw)
-    plan = _plan(ecosystem, "pack-a")
+    plan = _plan(
+        ecosystem,
+        "pack-a",
+        verified_pack_trust=(("pack-a", "system"),),
+    )
 
     catalog = FrontendHostRegistry(
         plan, ecosystem_dir=ecosystem
     ).build_catalog()
 
-    assert catalog.contributions == ()
-    assert any(
-        item.code == "frontend_same_origin_not_system"
-        for item in catalog.diagnostics
-    )
+    assert [item.contribution_id for item in catalog.contributions] == [
+        "pack-a.executable"
+    ]
+    assert plan.packs[0].trust_class == "system"
 
 
 def test_priority_tie_rejects_both_routes_without_crashing_host(

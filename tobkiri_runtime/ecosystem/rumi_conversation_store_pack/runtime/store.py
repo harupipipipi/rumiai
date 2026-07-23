@@ -79,6 +79,23 @@ class ConversationStore:
             if conversation_id in state["conversations"]:
                 raise ConversationConflict("conversation already exists")
             now = _now_ms()
+            normalized["child_conversation_ids"] = []
+            parent_id = normalized.get("parent_conversation_id")
+            if parent_id is not None:
+                parent_id = _identifier(parent_id)
+                parent = state["conversations"].get(parent_id)
+                if not isinstance(parent, Mapping):
+                    raise KeyError("parent conversation is unknown")
+                parent = dict(parent)
+                child_ids = list(parent.get("child_conversation_ids") or [])
+                if conversation_id not in child_ids:
+                    child_ids.append(conversation_id)
+                parent["child_conversation_ids"] = child_ids
+                parent["updated_at"] = now
+                parent["conversation_revision"] = (
+                    int(parent.get("conversation_revision") or 0) + 1
+                )
+                state["conversations"][parent_id] = parent
             normalized.update(
                 {
                     "created_at": int(normalized.get("created_at") or now),
@@ -112,6 +129,18 @@ class ConversationStore:
                 raise KeyError("conversation is unknown")
             current = dict(current)
             _assert_conversation_revision(current, expected_conversation_revision)
+            prior_parent_id = current.get("parent_conversation_id")
+            requested_parent_id = (
+                patch.get("parent_conversation_id")
+                if "parent_conversation_id" in patch
+                else prior_parent_id
+            )
+            if requested_parent_id is not None:
+                requested_parent_id = _identifier(requested_parent_id)
+                if requested_parent_id == conversation_id:
+                    raise ValueError("conversation cannot be its own parent")
+                if requested_parent_id not in state["conversations"]:
+                    raise KeyError("parent conversation is unknown")
             for key in (
                 "title",
                 "model_reference",
@@ -125,14 +154,26 @@ class ConversationStore:
                 "is_archived",
                 "current_node_id",
                 "parent_conversation_id",
-                "child_conversation_ids",
                 "conversation_kind",
                 "group_id",
                 "metadata",
             ):
                 if key in patch:
-                    current[key] = _safe(patch[key])
-            current["updated_at"] = _now_ms()
+                    current[key] = (
+                        _conversation_metadata(patch[key])
+                        if key == "metadata"
+                        else _safe(patch[key])
+                    )
+            now = _now_ms()
+            if requested_parent_id != prior_parent_id:
+                _relink_conversation_parent(
+                    state["conversations"],
+                    conversation_id,
+                    prior_parent_id,
+                    requested_parent_id,
+                    now,
+                )
+            current["updated_at"] = now
             current["conversation_revision"] += 1
             state["conversations"][conversation_id] = current
             state["revision"] += 1
@@ -158,6 +199,28 @@ class ConversationStore:
                 raise KeyError("conversation is unknown")
             _assert_conversation_revision(current, expected_conversation_revision)
             message_count = len(current.get("messages") or [])
+            now = _now_ms()
+            parent_id = current.get("parent_conversation_id")
+            if parent_id in state["conversations"]:
+                parent = dict(state["conversations"][parent_id])
+                parent["child_conversation_ids"] = [
+                    child_id
+                    for child_id in parent.get("child_conversation_ids") or []
+                    if child_id != conversation_id
+                ]
+                _touch_conversation(parent, now)
+                state["conversations"][parent_id] = parent
+            for child_id, child_value in list(state["conversations"].items()):
+                if child_id == conversation_id or not isinstance(
+                    child_value, Mapping
+                ):
+                    continue
+                if child_value.get("parent_conversation_id") != conversation_id:
+                    continue
+                child = dict(child_value)
+                child["parent_conversation_id"] = None
+                _touch_conversation(child, now)
+                state["conversations"][child_id] = child
             del state["conversations"][conversation_id]
             state["revision"] += 1
             self._write(state)
@@ -188,6 +251,29 @@ class ConversationStore:
             messages = list(current.get("messages") or [])
             if any(item.get("id") == normalized["id"] for item in messages):
                 raise ConversationConflict("message already exists")
+            normalized["children_ids"] = []
+            parent_id = normalized.get("parent_id")
+            if parent_id is not None:
+                parent_id = _identifier(parent_id)
+                parent = next(
+                    (
+                        item
+                        for item in messages
+                        if item.get("id") == parent_id
+                    ),
+                    None,
+                )
+                if parent is None:
+                    raise KeyError("parent message is unknown")
+                parent = dict(parent)
+                child_ids = list(parent.get("children_ids") or [])
+                if normalized["id"] not in child_ids:
+                    child_ids.append(normalized["id"])
+                parent["children_ids"] = child_ids
+                messages = [
+                    parent if item.get("id") == parent_id else item
+                    for item in messages
+                ]
             normalized["sequence"] = len(messages)
             messages.append(normalized)
             current["messages"] = messages
@@ -231,17 +317,80 @@ class ConversationStore:
             if index is None:
                 raise KeyError("message is unknown")
             if delete:
+                deleted = messages[index]
+                parent_id = deleted.get("parent_id")
+                if parent_id is not None and not any(
+                    item.get("id") == parent_id for item in messages
+                ):
+                    parent_id = None
+                child_ids = {
+                    str(item.get("id"))
+                    for item in messages
+                    if item.get("parent_id") == message_id
+                }
+                child_ids.update(
+                    str(child_id)
+                    for child_id in deleted.get("children_ids") or []
+                    if any(
+                        item.get("id") == child_id for item in messages
+                    )
+                )
                 del messages[index]
+                for item in messages:
+                    if item.get("id") == parent_id:
+                        item["children_ids"] = [
+                            child_id
+                            for child_id in item.get("children_ids") or []
+                            if child_id != message_id
+                        ]
+                        for child_id in sorted(child_ids):
+                            if child_id not in item["children_ids"]:
+                                item["children_ids"].append(child_id)
+                    if item.get("id") in child_ids:
+                        item["parent_id"] = parent_id
+                    else:
+                        item["children_ids"] = [
+                            child_id
+                            for child_id in item.get("children_ids") or []
+                            if child_id != message_id
+                        ]
                 action = "message_deleted"
                 result_message = None
             else:
+                prior_parent_id = messages[index].get("parent_id")
+                requested_parent_id = (
+                    patch.get("parent_id")
+                    if patch is not None and "parent_id" in patch
+                    else prior_parent_id
+                )
+                if requested_parent_id is not None:
+                    requested_parent_id = _identifier(requested_parent_id)
+                    if requested_parent_id == message_id:
+                        raise ValueError("message cannot be its own parent")
+                    if not any(
+                        item.get("id") == requested_parent_id
+                        for item in messages
+                    ):
+                        raise KeyError("parent message is unknown")
+                if requested_parent_id != prior_parent_id:
+                    for item in messages:
+                        if item.get("id") == prior_parent_id:
+                            item["children_ids"] = [
+                                child_id
+                                for child_id in item.get("children_ids") or []
+                                if child_id != message_id
+                            ]
+                        if item.get("id") == requested_parent_id:
+                            child_ids = list(item.get("children_ids") or [])
+                            if message_id not in child_ids:
+                                child_ids.append(message_id)
+                            item["children_ids"] = child_ids
+                    messages[index]["parent_id"] = requested_parent_id
                 for key in (
                     "content",
                     "parts",
                     "metadata",
                     "status",
-                    "parent_id",
-                    "children_ids",
                     "sequence_number",
                     "raw_text",
                     "finish_reason",
@@ -259,9 +408,7 @@ class ConversationStore:
                 item["sequence"] = sequence
             current["messages"] = messages
             if delete and current.get("current_node_id") == message_id:
-                current["current_node_id"] = (
-                    messages[-1]["id"] if messages else None
-                )
+                current["current_node_id"] = parent_id
             current["updated_at"] = _now_ms()
             current["conversation_revision"] += 1
             state["conversations"][conversation_id] = current
@@ -288,6 +435,7 @@ class ConversationStore:
         message_ids = [item["id"] for item in normalized]
         if len(message_ids) != len(set(message_ids)):
             raise ValueError("duplicate message ID in replacement")
+        _normalize_message_links(normalized)
         for sequence, item in enumerate(normalized):
             item["sequence"] = sequence
         with NamedLock(self.lock_root, "conversations"):
@@ -533,6 +681,7 @@ def _conversation(value: Mapping[str, Any], *, allow_messages: bool) -> dict[str
     message_ids = [item["id"] for item in normalized_messages]
     if len(message_ids) != len(set(message_ids)):
         raise ValueError("duplicate message ID in conversation")
+    _normalize_message_links(normalized_messages)
     for sequence, item in enumerate(normalized_messages):
         item["sequence"] = sequence
     created_at = int(value.get("created_at") or _now_ms())
@@ -560,7 +709,7 @@ def _conversation(value: Mapping[str, Any], *, allow_messages: bool) -> dict[str
         "child_conversation_ids": _safe(value.get("child_conversation_ids") or []),
         "conversation_kind": str(value.get("conversation_kind") or "chat"),
         "group_id": value.get("group_id"),
-        "metadata": _safe(value.get("metadata") or {}),
+        "metadata": _conversation_metadata(value.get("metadata") or {}),
         "messages": normalized_messages,
     }
 
@@ -587,6 +736,69 @@ def _message(value: Mapping[str, Any]) -> dict[str, Any]:
         "events": _safe(value.get("events")),
         "tool_logs": _safe(value.get("tool_logs")),
     }
+
+
+def _normalize_message_links(messages: list[dict[str, Any]]) -> None:
+    """Derive children from validated parent IDs for one complete message set."""
+    by_id = {item["id"]: item for item in messages}
+    for item in messages:
+        item["children_ids"] = []
+    for item in messages:
+        parent_id = item.get("parent_id")
+        if parent_id is None:
+            continue
+        parent_id = _identifier(parent_id)
+        if parent_id == item["id"]:
+            raise ValueError("message cannot be its own parent")
+        parent = by_id.get(parent_id)
+        if parent is None:
+            raise ValueError("message parent is unknown")
+        item["parent_id"] = parent_id
+        parent["children_ids"].append(item["id"])
+
+
+def _conversation_metadata(value: Any) -> dict[str, Any]:
+    """Drop executable legacy icon markup before owner persistence."""
+    if not isinstance(value, Mapping):
+        return {}
+    metadata = dict(_safe(value))
+    metadata.pop("icon_svg", None)
+    return metadata
+
+
+def _touch_conversation(conversation: dict[str, Any], now: int) -> None:
+    conversation["updated_at"] = now
+    conversation["conversation_revision"] = (
+        int(conversation.get("conversation_revision") or 0) + 1
+    )
+
+
+def _relink_conversation_parent(
+    conversations: dict[str, Any],
+    conversation_id: str,
+    prior_parent_id: Any,
+    requested_parent_id: Any,
+    now: int,
+) -> None:
+    if prior_parent_id in conversations:
+        prior_parent = dict(conversations[prior_parent_id])
+        prior_parent["child_conversation_ids"] = [
+            child_id
+            for child_id in prior_parent.get("child_conversation_ids") or []
+            if child_id != conversation_id
+        ]
+        _touch_conversation(prior_parent, now)
+        conversations[prior_parent_id] = prior_parent
+    if requested_parent_id in conversations:
+        requested_parent = dict(conversations[requested_parent_id])
+        child_ids = list(
+            requested_parent.get("child_conversation_ids") or []
+        )
+        if conversation_id not in child_ids:
+            child_ids.append(conversation_id)
+        requested_parent["child_conversation_ids"] = child_ids
+        _touch_conversation(requested_parent, now)
+        conversations[requested_parent_id] = requested_parent
 
 
 def _identifier(value: Any) -> str:
@@ -649,4 +861,3 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-

@@ -88,6 +88,122 @@ def test_conversation_and_messages_share_one_atomic_revision(tmp_path: Path) -> 
     assert [item["id"] for item in conversation["messages"]] == ["message-1"]
 
 
+def test_conversation_parent_links_are_updated_atomically(tmp_path: Path) -> None:
+    store = ConversationStore("default", user_data_root=tmp_path)
+    parent = store.create({"id": "parent"}, expected_revision=0)
+    store.create(
+        {"id": "child", "parent_conversation_id": "parent"},
+        expected_revision=parent["store_revision"],
+    )
+
+    linked_parent = store.get("parent")
+    child = store.get("child")
+    assert linked_parent is not None
+    assert child is not None
+    assert linked_parent["child_conversation_ids"] == ["child"]
+    assert child["parent_conversation_id"] == "parent"
+
+    store.delete(
+        "parent",
+        expected_conversation_revision=linked_parent["conversation_revision"],
+    )
+
+    detached_child = store.get("child")
+    assert detached_child is not None
+    assert detached_child["parent_conversation_id"] is None
+
+
+def test_conversation_create_rejects_unknown_parent(tmp_path: Path) -> None:
+    store = ConversationStore("default", user_data_root=tmp_path)
+
+    with pytest.raises(KeyError, match="parent conversation"):
+        store.create(
+            {"id": "child", "parent_conversation_id": "missing"},
+            expected_revision=0,
+        )
+
+
+def test_owner_drops_client_supplied_icon_svg(tmp_path: Path) -> None:
+    store = ConversationStore("default", user_data_root=tmp_path)
+    created = store.create(
+        {
+            "id": "conversation-1",
+            "metadata": {
+                "icon_id": "database",
+                "icon_svg": '<svg onload="globalThis.pwned=true"></svg>',
+            },
+        },
+        expected_revision=0,
+    )
+
+    assert created["conversation"]["metadata"] == {"icon_id": "database"}
+    updated = store.update(
+        "conversation-1",
+        {"metadata": {"icon_svg": "<svg><script>x</script></svg>"}},
+        expected_conversation_revision=created["conversation"][
+            "conversation_revision"
+        ],
+    )
+    assert "icon_svg" not in updated["conversation"]["metadata"]
+
+
+def test_message_links_are_updated_and_repaired_atomically(
+    tmp_path: Path,
+) -> None:
+    store = ConversationStore("default", user_data_root=tmp_path)
+    created = store.create({"id": "conversation-1"}, expected_revision=0)
+    root = store.append_message(
+        "conversation-1",
+        {"id": "root"},
+        expected_conversation_revision=created["conversation"][
+            "conversation_revision"
+        ],
+    )
+    child = store.append_message(
+        "conversation-1",
+        {"id": "child", "parent_id": "root"},
+        expected_conversation_revision=root["conversation_revision"],
+    )
+    grandchild = store.append_message(
+        "conversation-1",
+        {"id": "grandchild", "parent_id": "child"},
+        expected_conversation_revision=child["conversation_revision"],
+    )
+
+    linked = store.get("conversation-1")
+    assert linked is not None
+    by_id = {item["id"]: item for item in linked["messages"]}
+    assert by_id["root"]["children_ids"] == ["child"]
+    assert by_id["child"]["children_ids"] == ["grandchild"]
+
+    store.mutate_message(
+        "conversation-1",
+        "child",
+        expected_conversation_revision=grandchild["conversation_revision"],
+        delete=True,
+    )
+
+    repaired = store.get("conversation-1")
+    assert repaired is not None
+    by_id = {item["id"]: item for item in repaired["messages"]}
+    assert by_id["root"]["children_ids"] == ["grandchild"]
+    assert by_id["grandchild"]["parent_id"] == "root"
+
+
+def test_message_append_rejects_unknown_parent(tmp_path: Path) -> None:
+    store = ConversationStore("default", user_data_root=tmp_path)
+    created = store.create({"id": "conversation-1"}, expected_revision=0)
+
+    with pytest.raises(KeyError, match="parent message"):
+        store.append_message(
+            "conversation-1",
+            {"id": "message-1", "parent_id": "missing"},
+            expected_conversation_revision=created["conversation"][
+                "conversation_revision"
+            ],
+        )
+
+
 def test_message_replace_is_atomic_and_revision_guarded(tmp_path: Path) -> None:
     store = ConversationStore("default", user_data_root=tmp_path)
     created = store.create({"id": "conversation-1"}, expected_revision=0)

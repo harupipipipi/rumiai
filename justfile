@@ -1,4 +1,4 @@
-set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+set windows-shell := ["cmd.exe", "/C"]
 
 # Display available commands.
 help:

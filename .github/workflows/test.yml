@@ -144,6 +144,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -186,12 +188,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           reference="${RUNNER_TEMP}/pack-architecture-reference.json"
-          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
-            git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
-           python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
-           else
-             python scripts/quality/scan_pack_architecture.py
-           fi
+          if [ -z "${BASE_SHA}" ]; then
+            echo "BASE_SHA is required for shrink-only baseline validation" >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Base commit is unavailable: ${BASE_SHA}" >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
+            echo "Pack architecture baseline is unavailable at ${BASE_SHA}" >&2
+            exit 1
+          fi
+          git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
+          python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
 
   frontend-security-audit:
     strategy:

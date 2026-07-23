@@ -307,14 +307,15 @@ test("HistoryBoard places Desktops directly below Kanban in compact rail", () =>
   assert.match(html, /aria-current="page"/);
 });
 
-test("HistoryBoard constrains custom conversation SVG icons to the same viewport in both layouts", () => {
+test("HistoryBoard ignores stored SVG markup and renders host icon IDs", () => {
   const chatItems: ChatItem[] = [{
     id: "custom-icon-chat",
     title: "Custom icon chat",
     date: "Today",
     type: "chat",
     metadata: {
-      icon_svg: '<svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14"/></svg>',
+      icon_id: "database",
+      icon_svg: '<svg onload="globalThis.pwned=true"></svg>',
     },
   }];
   const baseProps = {
@@ -330,8 +331,10 @@ test("HistoryBoard constrains custom conversation SVG icons to the same viewport
 
   for (const html of [fullHtml, compactHtml]) {
     assert.match(html, /data-history-chat-icon="true"/);
+    assert.match(html, /data-history-chat-icon-id="database"/);
     assert.match(html, /data-history-chat-icon-size="14"/);
     assert.match(html, /style="width:14px;height:14px;flex-basis:14px"/);
-    assert.match(html, /<svg width="32" height="32" viewBox="0 0 32 32">/);
+    assert.doesNotMatch(html, /onload=/);
+    assert.doesNotMatch(html, /globalThis\.pwned/);
   }
 });
