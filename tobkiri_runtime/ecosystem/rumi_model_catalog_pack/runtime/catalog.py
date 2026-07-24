@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from typing import Any, Mapping
 
-CATALOG_REVISION = "sha256:b00281c74c5732db8dea3b7e211a1b64a93575b65da12daa6b1676d6de6d4dea"
+CATALOG_REVISION = "sha256:119a72a75968f56f12c3422ea07e1f2ef4860d7e03dfdd23520c4b9cdbb51788"
 _ROOT = Path(__file__).resolve().parents[1] / "catalog" / "providers"
 _EXTENSION_ROOT = Path(__file__).resolve().parents[1] / "extensions" / "llm" / "providers"
 _OPENROUTER_PROVIDER_ID = "openrouter"
@@ -537,8 +537,10 @@ def _catalog_revision() -> str:
     paths = list(_ROOT.glob("*/*.json"))
     paths.extend(_EXTENSION_ROOT.glob("**/*.json"))
     for path in sorted(paths):
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        lines.append(f"{digest}  {path.relative_to(pack_root)}\n")
+        content = path.read_bytes().replace(b"\r\n", b"\n")
+        digest = hashlib.sha256(content).hexdigest()
+        relative_path = path.relative_to(pack_root).as_posix()
+        lines.append(f"{digest}  {relative_path}\n")
     return "sha256:" + hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
 
 
