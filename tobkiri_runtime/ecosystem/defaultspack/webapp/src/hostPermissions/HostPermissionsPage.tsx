@@ -234,7 +234,7 @@ export function HostPermissionsPage() {
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
           <StatusStrip snapshot={snapshot} loading={loadState === "loading"} />
 
-          <p className="text-[11px] text-zinc-500" role="status">
+          <p className="text-xs text-zinc-500" role="status">
             {lastVerifiedAt ? <>Last verified <time dateTime={new Date(lastVerifiedAt).toISOString()}>{formatTimestamp(lastVerifiedAt)}</time>.</> : "Not verified yet."}
             {staleSince ? <> Last-known values are stale since <time dateTime={new Date(staleSince).toISOString()}>{formatTimestamp(staleSince)}</time>.</> : null}
           </p>
@@ -258,7 +258,7 @@ export function HostPermissionsPage() {
             </div>
           ) : (
             <section className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
-              <div className="grid grid-cols-[minmax(190px,1.2fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_minmax(78px,0.45fr)_minmax(90px,0.5fr)_minmax(180px,1fr)_minmax(220px,0.8fr)] gap-3 border-b border-zinc-800 bg-zinc-900/50 px-3 py-2 text-[11px] font-semibold text-zinc-500 max-lg:hidden">
+              <div className="grid grid-cols-[minmax(190px,1.2fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_minmax(78px,0.45fr)_minmax(90px,0.5fr)_minmax(180px,1fr)_minmax(220px,0.8fr)] gap-3 border-b border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs font-semibold text-zinc-500 max-lg:hidden">
                 <span>Permission</span>
                 <span>Rumi approval</span>
                 <span>OS permission</span>
@@ -378,7 +378,7 @@ function HostPermissionListRow({
           {tauriAvailable ? "Open" : "Desktop only"}
         </button>
         {reconciliation && (
-          <div className="w-full rounded-md border border-zinc-800 bg-black/20 px-2 py-1.5 text-left text-[11px] leading-4 lg:text-right" role="status" aria-live="polite">
+          <div className="w-full rounded-md border border-zinc-800 bg-black/20 px-2 py-1.5 text-left text-xs leading-4 lg:text-right" role="status" aria-live="polite">
             <strong className={cn("font-semibold", reconciliationPhaseClassName(reconciliation.phase))}>
               {hostPermissionReconciliationLabel(reconciliation.phase)}
             </strong>
