@@ -14,6 +14,9 @@ from core_runtime.global_contract_dispatch import (
     invoke_global_contract,
 )
 from core_runtime.resolved_profile_scope import active_resolved_profile
+from domain.capability.orchestrator import CapabilityOrchestrator
+from domain.capability.repository import CapabilityRepository
+from domain.tool.registry import ToolRegistry
 
 _RESOURCE_CONTRACT = "rumi.resource.prompt.studio.v1"
 _AUTHOR_CONTRACT = "rumi.action.prompt.author.v1"
@@ -66,6 +69,35 @@ def run(input_data: dict, context: dict) -> dict:
     if requested_profile and requested_profile != plan.profile_id:
         return error("Prompt Studio profile is not active", "PROMPT_STUDIO_DENIED")
     data["profile_id"] = plan.profile_id
+    if operation in {"test", "preview"}:
+        repository = CapabilityRepository()
+        data["capability_plan"] = CapabilityOrchestrator(
+            call_handler=context.get("call_handler")
+        ).resolve(
+            user_text=str(
+                data.get("user_text")
+                or data.get("input")
+                or data.get("prompt")
+                or ""
+            ),
+            tools=ToolRegistry().list_tools(),
+            settings=repository.settings(),
+            runtime_profile=(
+                context.get("runtime_profile")
+                if isinstance(context.get("runtime_profile"), dict)
+                else None
+            ),
+            selected_model_capabilities=(
+                data.get("model_capabilities")
+                if isinstance(data.get("model_capabilities"), dict)
+                else None
+            ),
+            context={
+                **context,
+                "policy_generation": repository.policy_generation(),
+            },
+            dry_run=True,
+        )
     if contract_id.startswith("rumi.action.") and context.get(
         "_tool_server_approved"
     ) is not True:

@@ -209,7 +209,8 @@ function readStoredStringArrayRecord(key: string): Record<string, string[]> {
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
   all: { label: "All", icon: <Layers size={16} /> },
-  tool: { label: "機能", icon: <Wrench size={16} /> },
+  activity: { label: "Activities", icon: <Route size={16} /> },
+  tool: { label: "Advanced Tools", icon: <Wrench size={16} /> },
   widget: { label: "Widgets", icon: <LayoutGrid size={16} /> },
   system: { label: "System", icon: <Settings size={16} /> },
   integration: { label: "Integrations", icon: <Blocks size={16} /> },
@@ -322,11 +323,12 @@ const ACTION_ICONS: Record<string, ReactElement> = {
 };
 
 const SIDEBAR_CATEGORY_ORDER: Record<SidebarCategory, number> = {
-  tool: 0,
-  widget: 1,
+  widget: 0,
+  activity: 1,
   capability: 2,
   integration: 3,
   system: 4,
+  tool: 5,
 };
 
 function compareText(left: string, right: string): number {
@@ -495,6 +497,7 @@ function iconForItem(item: SidebarItem) {
   const normalized = item.label.toLowerCase().replace(/\s+/g, "_");
   if (ITEM_ICONS[normalized]) return ITEM_ICONS[normalized];
   const byCategory: Record<SidebarCategory, ReactElement> = {
+    activity: <Route size={18} />,
     tool: <Wrench size={18} />,
     widget: <LayoutGrid size={18} />,
     system: <Cpu size={18} />,
@@ -532,6 +535,7 @@ const StableToolGroupRailGlyph = memo(function StableToolGroupRailGlyph({
 
 function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot" | "badge") {
   const map: Record<SidebarCategory, Record<string, string>> = {
+    activity: { bg: "bg-fuchsia-500", indicator: "bg-fuchsia-500", dot: "bg-fuchsia-500/60", badge: "bg-fuchsia-500/20 text-fuchsia-300" },
     tool: { bg: "bg-emerald-500", indicator: "bg-emerald-500", dot: "bg-emerald-500/60", badge: "bg-emerald-500/20 text-emerald-400" },
     widget: { bg: "bg-blue-500", indicator: "bg-blue-500", dot: "bg-blue-500/60", badge: "bg-blue-500/20 text-blue-400" },
     system: { bg: "bg-amber-500", indicator: "bg-amber-500", dot: "bg-amber-500/60", badge: "bg-amber-500/20 text-amber-400" },
@@ -834,7 +838,7 @@ function CategorySwitcher({
               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
             </div>
             <div className="py-0.5">
-              {(["all", "tool", "widget", "system", "integration", "capability"] as const).map((filterId) => {
+              {(["all", "widget", "activity", "capability", "integration", "system", "tool"] as const).map((filterId) => {
                 const count = counts[filterId] ?? 0;
                 if (filterId !== "all" && count === 0) return null;
                 return (
@@ -1031,7 +1035,7 @@ export function RightSidebar({
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(() => requestedPanelIdFromActiveItemId(activeItemId));
-  const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("tool");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("activity");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
@@ -1391,7 +1395,7 @@ export function RightSidebar({
     }));
   }, [toolItems]);
 
-  const showToolGroups = (categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 0;
+  const showToolGroups = categoryFilter === "tool" && toolGroups.length > 0;
 
   const visibleItems = useMemo(() => {
     const base = (categoryFilter === "all" ? searchFilteredItems : searchFilteredItems.filter((item) => item.category === categoryFilter))
@@ -1407,8 +1411,11 @@ export function RightSidebar({
       .filter((item): item is SidebarItem => Boolean(item))
   ), [searchFilteredItems, pinnedItemIds]);
   const unpinnedVisibleItems = useMemo(
-    () => visibleItems.filter((item) => !pinnedItemIdSet.has(item.id)),
-    [pinnedItemIdSet, visibleItems],
+    () => visibleItems.filter((item) => (
+      !pinnedItemIdSet.has(item.id)
+      && (item.category !== "tool" || categoryFilter === "tool")
+    )),
+    [categoryFilter, pinnedItemIdSet, visibleItems],
   );
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;

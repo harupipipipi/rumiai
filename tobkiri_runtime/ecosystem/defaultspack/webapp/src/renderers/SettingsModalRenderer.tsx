@@ -5073,6 +5073,7 @@ export function SettingsModalRenderer({
                         tools={(catalog?.sidebar.items ?? []).filter((item) => item.category === "tool")}
                         settingsValues={settingsValues}
                         onSettingChange={onSettingChange}
+                        displayMode={settingsDisplayMode}
                       />
                     )}
                     {activeSection.id === "computer_automation" && (

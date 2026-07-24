@@ -836,7 +836,7 @@ test("SettingsModalRenderer renders continuity handoff controls", () => {
   assert.doesNotMatch(html, /COMPLETED/);
 });
 
-test("Settings > Tools contains tool experience settings tabs", () => {
+test("Settings > Tools keeps selector internals out of standard mode", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
       isOpen: true,
@@ -888,7 +888,7 @@ test("Settings > Tools contains tool experience settings tabs", () => {
   assert.match(html, /基本/);
   assert.match(html, /権限/);
   assert.match(html, /接続/);
-  assert.match(html, /高度な設定/);
+  assert.doesNotMatch(html, /高度な設定/);
   assert.match(html, /既定の使い方/);
   assert.match(html, /自動で選ぶ/);
 });

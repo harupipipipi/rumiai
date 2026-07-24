@@ -601,12 +601,100 @@ class FrontendRegistry:
         lightweight: bool = False,
     ) -> list[dict[str, Any]]:
         registry = ToolRegistry()
-        items: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = [
+            {
+                "id": "capability-master",
+                "label": "Capabilities",
+                "category": "widget",
+                "description": "Tool・Skill・Activityをまとめて管理します。",
+                "tags": ["capability", "activity", "safety"],
+                "origin": {
+                    "kind": "builtin",
+                    "path": "domain/capability/",
+                },
+                "panel": {
+                    "kind": "capability_settings",
+                    "title": "Capabilities",
+                    "fields": [
+                        {
+                            "id": "enabled",
+                            "label": "Capabilitiesを使う",
+                            "type": "toggle",
+                            "default": True,
+                        }
+                    ],
+                    "actions": [
+                        {
+                            "id": "capability.catalog",
+                            "label": "カタログを開く",
+                            "method": "GET",
+                            "endpoint": "/api/capabilities/catalog",
+                        }
+                    ],
+                    "notes": [
+                        "Activityを選ぶと、必要なToolとSkillが実行時に共同解決されます。",
+                        "個別ToolはAdvancedの機能マネージャーで管理できます。",
+                    ],
+                },
+            }
+        ]
+
+        try:
+            activity_manifests = (
+                get_extension_registry(force_reload=True)
+                .activities()
+                .list(enabled_only=True)
+            )
+        except Exception:
+            activity_manifests = []
+        for activity in activity_manifests:
+            activity_id = str(activity.get("id") or "").strip()
+            if not activity_id:
+                continue
+            label = self._localized_label(
+                activity.get("display_name"), activity_id
+            )
+            items.append(
+                {
+                    "id": activity_id,
+                    "label": label,
+                    "category": "activity",
+                    "description": self._localized_label(
+                        activity.get("description"), ""
+                    ),
+                    "tags": [
+                        "activity",
+                        *[
+                            str(alias)
+                            for alias in activity.get("aliases", [])
+                            if str(alias).strip()
+                        ],
+                    ],
+                    "ui": (
+                        dict(activity.get("ui"))
+                        if isinstance(activity.get("ui"), dict)
+                        else {}
+                    ),
+                    "origin": {
+                        "kind": "activity_registry",
+                        "path": str(activity.get("source_path") or ""),
+                    },
+                    "panel": {
+                        "kind": "activity",
+                        "title": label,
+                        "notes": [
+                            "このActivityのToolとSkillはCapability Planで動的に解決されます。",
+                            "明示指定: @" + activity_id,
+                        ],
+                    },
+                }
+            )
 
         for tool in registry.list_tools():
             schema = tool.get("schema", {}).get("parameters", {})
             execution_type = tool.get("execution", {}).get("type", "local")
             ui = dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {}
+            ui["advanced_only"] = True
             label = self._tool_display_label(tool, ui)
             risk = str(tool.get("risk") or tool.get("metadata", {}).get("risk") or "low").strip().lower()
             tags = [str(tag) for tag in tool.get("tags", []) if str(tag)]
@@ -730,6 +818,21 @@ class FrontendRegistry:
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
     @staticmethod
+    def _localized_label(value: Any, fallback: str) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            for locale in ("ja", "en"):
+                text = str(value.get(locale) or "").strip()
+                if text:
+                    return text
+            for candidate in value.values():
+                text = str(candidate or "").strip()
+                if text:
+                    return text
+        return fallback
+
+    @staticmethod
     def _tool_display_label(tool: dict[str, Any], ui: dict[str, Any]) -> str:
         for value in (
             tool.get("display_name"),
@@ -777,11 +880,12 @@ class FrontendRegistry:
     @staticmethod
     def _sidebar_item_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         category_order = {
-            "tool": 0,
-            "widget": 1,
+            "widget": 0,
+            "activity": 1,
             "capability": 2,
             "integration": 3,
             "system": 4,
+            "tool": 5,
         }
         tool_group_order = {
             "browser": 0,

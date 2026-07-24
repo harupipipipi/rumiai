@@ -3,7 +3,7 @@
   "description": "Project browser_use actions through selected Wave 8 contracts.",
   "risk": "high",
   "requires": ["browser.control", "computer.control"],
-  "caller_requires": [],
+  "caller_requires": ["user.approved.high_risk"],
   "calling_convention": "subprocess",
   "host_execution": false,
   "authority_owner": "core_runtime.authority",

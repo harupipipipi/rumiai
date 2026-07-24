@@ -1486,7 +1486,7 @@ export type ConversationSearchOptions = {
   offset?: number;
 };
 
-export type SidebarCategory = "tool" | "widget" | "system" | "integration" | "capability";
+export type SidebarCategory = "activity" | "tool" | "widget" | "system" | "integration" | "capability";
 
 export type SidebarFieldOption = {
   value: string | number | boolean;
