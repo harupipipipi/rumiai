@@ -31,9 +31,9 @@ class PackSdkGenerator:
         artifacts = self.render()
         if check:
             actual = {
-                path.name
-                for path in output_dir.iterdir()
-                if path.is_file() and path.name != "command_inventory.json"
+                entry.name
+                for entry in os.scandir(output_dir)
+                if entry.is_file() and entry.name != "command_inventory.json"
             } if output_dir.is_dir() else set()
             drift = [
                 name
@@ -56,9 +56,10 @@ class PackSdkGenerator:
             temp_dir = Path(temp_value)
             for name, content in artifacts.items():
                 (temp_dir / name).write_text(content, encoding="utf-8")
-            for existing in output_dir.iterdir():
+            for entry in os.scandir(output_dir):
+                existing = Path(entry.path)
                 if (
-                    existing.is_file()
+                    entry.is_file()
                     and existing.name != "command_inventory.json"
                     and existing.name not in artifacts
                 ):
@@ -432,24 +433,33 @@ def _render_command_protocol_models(
     dart_lines = [
         "// Generated from command-protocol-v1.schema.json; do not edit.",
         "typedef JsonMap = Map<String, Object?>;",
+        "",
         f"enum CommandMode {{ {', '.join(mode_values)} }}",
+        "",
     ]
     for name, model in models.items():
         class_name = _pascal_case(name)
         properties = model.get("properties")
         properties = properties if isinstance(properties, dict) else {}
         required = {str(item) for item in model.get("required") or []}
-        dart_lines.extend(
-            [
-                f"final class {class_name} {{",
-                f"  const {class_name}({{",
-            ]
+        dart_lines.append(f"final class {class_name} {{")
+        constructor_fields = [
+            f"{'required ' if field in required else ''}"
+            f"this.{_lower_camel(field)}"
+            for field in properties
+        ]
+        compact_constructor = (
+            f"  const {class_name}({{{', '.join(constructor_fields)}}});"
         )
-        for field in properties:
-            camel = _lower_camel(field)
-            prefix = "required " if field in required else ""
-            dart_lines.append(f"    {prefix}this.{camel},")
-        dart_lines.append("  });")
+        if len(compact_constructor) <= 80:
+            dart_lines.append(compact_constructor)
+        else:
+            dart_lines.append(f"  const {class_name}({{")
+            for field in properties:
+                camel = _lower_camel(field)
+                prefix = "required " if field in required else ""
+                dart_lines.append(f"    {prefix}this.{camel},")
+            dart_lines.append("  });")
         for field, field_schema in properties.items():
             if not isinstance(field_schema, dict):
                 continue
@@ -468,7 +478,7 @@ def _render_command_protocol_models(
                 required,
             )
         )
-        dart_lines.append("}")
+        dart_lines.extend(["}", ""])
     return (
         "\n".join(python_lines).rstrip() + "\n",
         "\n".join(typescript_lines).rstrip() + "\n",
@@ -559,7 +569,7 @@ def _dart_serialization_lines(
     properties: dict[str, Any],
     required: set[str],
 ) -> list[str]:
-    lines = ["  JsonMap toJson() => <String, Object?>{"]
+    entries: list[str] = []
     for field, schema in properties.items():
         camel = _lower_camel(field)
         if field == "mode":
@@ -573,16 +583,40 @@ def _dart_serialization_lines(
         else:
             value = camel
         if field in required:
-            lines.append(f"    {json.dumps(field)}: {value},")
+            entries.append(f"{json.dumps(field)}: {value}")
         else:
-            lines.append(
-                f"    if ({camel} != null) {json.dumps(field)}: {value},"
+            entries.append(
+                f"if ({camel} != null) {json.dumps(field)}: {value}"
             )
-    lines.append("  };")
+    compact = f"  JsonMap toJson() => <String, Object?>{{{', '.join(entries)}}};"
+    if len(compact) <= 80:
+        lines = [compact]
+    else:
+        lines = ["  JsonMap toJson() => <String, Object?>{"]
+        for entry in entries:
+            rendered = f"        {entry},"
+            if len(rendered) <= 80 or not entry.startswith("if ("):
+                lines.append(rendered)
+                continue
+            condition, value = entry.split(") ", 1)
+            lines.extend(
+                [
+                    f"        {condition})",
+                    f"          {value},",
+                ]
+            )
+        lines.append("      };")
     if class_name != "CommandInvocationRequest":
-        lines.append(
-            f"  factory {class_name}.fromJson(JsonMap json) => {class_name}("
-        )
+        factory_prefix = f"  factory {class_name}.fromJson(JsonMap json) =>"
+        constructor = f"{class_name}("
+        if len(f"{factory_prefix} {constructor}") <= 80:
+            lines.append(f"{factory_prefix} {constructor}")
+            argument_indent = "        "
+            closing = "      );"
+        else:
+            lines.extend([factory_prefix, f"      {constructor}"])
+            argument_indent = "        "
+            closing = "      );"
         for field, schema in properties.items():
             camel = _lower_camel(field)
             dart_type = _dart_schema_type(
@@ -602,18 +636,28 @@ def _dart_serialization_lines(
                 if field in required:
                     expression += " ?? const <String, Object?>{}"
             elif dart_type == "List<JsonMap>":
-                expression = (
-                    f"(json[{json.dumps(field)}] as List<Object?>? ?? const [])"
-                    ".whereType<JsonMap>().toList(growable: false)"
+                lines.extend(
+                    [
+                        f"{argument_indent}{camel}: "
+                        f"(json[{json.dumps(field)}] as List<Object?>? ?? const [])",
+                        f"{argument_indent}    .whereType<JsonMap>()",
+                        f"{argument_indent}    .toList(growable: false),",
+                    ]
                 )
+                continue
             else:
-                expression = (
-                    f"json[{json.dumps(field)}] is JsonMap "
-                    f"? {dart_type}.fromJson("
-                    f"json[{json.dumps(field)}] as JsonMap) : null"
+                lines.extend(
+                    [
+                        f"{argument_indent}{camel}: "
+                        f"json[{json.dumps(field)}] is JsonMap",
+                        f"{argument_indent}    ? {dart_type}.fromJson("
+                        f"json[{json.dumps(field)}] as JsonMap)",
+                        f"{argument_indent}    : null,",
+                    ]
                 )
-            lines.append(f"    {camel}: {expression},")
-        lines.append("  );")
+                continue
+            lines.append(f"{argument_indent}{camel}: {expression},")
+        lines.append(closing)
     return lines
 
 
