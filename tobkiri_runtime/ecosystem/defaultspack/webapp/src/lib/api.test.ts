@@ -993,6 +993,102 @@ test("template composer widgets become safe tool toggle widgets", () => {
   });
 });
 
+test("template button, panel, and selector widgets require registered pack capabilities", () => {
+  const registeredContribution = (
+    id: string,
+    kind: "action" | "data_source" | "renderer",
+  ) => ({
+    contribution_id: id,
+    kind,
+    mode: "declarative",
+    label: id,
+    priority: 1,
+    owner_pack_id: "workflow_pack",
+    owner_pack_hash: "sha256:verified",
+    build_identity: "workflow-pack:1",
+    resolved_profile_revision: "revision-1",
+    resolved_plan_hash: "plan-1",
+    descriptor_hash: "sha256:descriptor",
+    action_contract: kind === "action" ? "rumi.action.workflow.select.v1" : null,
+    data_source_contract: kind === "data_source" ? "rumi.resource.workflow.list.v1" : null,
+    view: kind === "renderer" ? { title: "Workflow" } : {},
+    localization: {},
+    accessibility: { name: id, keyboard: true },
+  });
+  const catalog = {
+    composer_widgets: [
+      {
+        id: "run-workflow",
+        widget: {
+          widget_kind: "button",
+          label: "Run",
+          action_id: "workflows.select",
+          owner_pack_id: "workflow_pack",
+          permissions: ["workspace.admin"],
+          approval_bypass: true,
+          payload_schema: { additionalProperties: true },
+        },
+      },
+      {
+        id: "choose-workflow",
+        widget: {
+          widget_kind: "selector",
+          label: "Workflow",
+          action_id: "workflows.select",
+          data_source: "workflows.list",
+          owner_pack_id: "workflow_pack",
+        },
+      },
+      {
+        id: "workflow-panel",
+        widget: {
+          widget_kind: "panel",
+          label: "Details",
+          panel_id: "workflows.panel",
+          owner_pack_id: "workflow_pack",
+        },
+      },
+      {
+        id: "forged",
+        widget: {
+          widget_kind: "button",
+          label: "Forged",
+          action_id: "workflows.select",
+          owner_pack_id: "other_pack",
+        },
+      },
+    ],
+    dynamic_host: {
+      version: "rumi.ui.contribution.v1",
+      profile_id: "profile-1",
+      profile_revision: "revision-1",
+      plan_hash: "plan-1",
+      contributions: [
+        registeredContribution("workflows.select", "action"),
+        registeredContribution("workflows.list", "data_source"),
+        registeredContribution("workflows.panel", "renderer"),
+      ],
+      diagnostics: [],
+      quarantined_pack_ids: [],
+      catalog_hash: "catalog-1",
+    },
+  };
+
+  const widgets = templateComposerWidgetsForInput(catalog as any, null, null, []);
+
+  assert.deepEqual(widgets.map((widget) => [widget.id, widget.widgetKind]), [
+    ["run-workflow", "button"],
+    ["choose-workflow", "selector"],
+    ["workflow-panel", "panel"],
+  ]);
+  assert.equal(widgets.some((widget) => widget.id === "forged"), false);
+  assert.equal(widgets.some((widget) => widget.action?.type === "call_endpoint"), false);
+  assert.doesNotMatch(
+    JSON.stringify(widgets),
+    /workspace\.admin|approval_bypass|additionalProperties/,
+  );
+});
+
 test("yolo full access always toggles back to ask instead of restoring agent approval", () => {
   assert.deepEqual(
     resolveUltraYoloModeState({ yoloMode: false, ultraYoloMode: false, restoreYoloMode: false }, true),

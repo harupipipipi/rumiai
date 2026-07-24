@@ -16,6 +16,7 @@ import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
+import { invokeFrontendCapability } from "./host/HostBootstrap";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
@@ -107,6 +108,11 @@ import {
   resolveSettingsAssistantSkill,
 } from "./lib/settingsMode";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
+import {
+  normalizeComposerSelectorPage,
+  registeredComposerWidgetDescriptor,
+  resolveRegisteredComposerWidget,
+} from "./lib/registeredComposerWidgets";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { initialComposerFieldValues, normalizeComposerFields, structuredComposerPayload } from "./lib/structuredComposer";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
@@ -117,7 +123,7 @@ import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ComposerWidgetInteraction, ComposerWidgetInteractionResult, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
 import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
@@ -5233,7 +5239,99 @@ function ChatApp() {
     );
   };
 
-  const handleWidgetAction = (widget: DroppedWidget) => {
+  const handleRegisteredWidgetAction = async (
+    widget: DroppedWidget,
+    interaction: ComposerWidgetInteraction,
+  ): Promise<ComposerWidgetInteractionResult | null> => {
+    const registered = resolveRegisteredComposerWidget(widget, catalog);
+    if (!registered) {
+      if (registeredComposerWidgetDescriptor(widget)) {
+        throw new Error("registered_widget_binding_unavailable");
+      }
+      return null;
+    }
+
+    if (interaction.type === "load") {
+      const source = registered.dataSource;
+      if (!source?.data_source_contract) throw new Error("registered_data_source_unavailable");
+      const result = await invokeFrontendCapability(registered.profileId, {
+        contractId: source.data_source_contract,
+        contributionId: source.contribution_id,
+        ownerPackId: source.owner_pack_id,
+        planHash: registered.planHash,
+        payload: {
+          operation: registered.descriptor.queryOperation,
+          input: {
+            cursor: interaction.cursor ?? null,
+            query: interaction.query?.trim().slice(0, 200) || "",
+            limit: 50,
+          },
+        },
+      });
+      return { kind: "options", ...normalizeComposerSelectorPage(result) };
+    }
+
+    if (interaction.type === "select") {
+      const action = registered.action;
+      if (!action?.action_contract) throw new Error("registered_action_unavailable");
+      await invokeFrontendCapability(registered.profileId, {
+        contractId: action.action_contract,
+        contributionId: action.contribution_id,
+        ownerPackId: action.owner_pack_id,
+        planHash: registered.planHash,
+        payload: {
+          operation: registered.descriptor.actionOperation,
+          input: {
+            value: interaction.value,
+            requested_value_scope: registered.descriptor.requestedValueScope,
+            idempotency_key: interaction.idempotencyKey ?? crypto.randomUUID(),
+          },
+        },
+      });
+      return { kind: "completed", message: "Selection applied" };
+    }
+
+    if (registered.panel) {
+      const view = registered.panel.view ?? {};
+      return {
+        kind: "panel",
+        title: String(view.title ?? registered.panel.label),
+        description: String(view.description ?? registered.panel.description ?? "") || undefined,
+        body: String(view.body ?? "") || undefined,
+        sourceLabel: `${registered.panel.owner_pack_id} · ${registered.panel.build_identity}`,
+      };
+    }
+
+    const action = registered.action;
+    if (!action?.action_contract) throw new Error("registered_action_unavailable");
+    const result = await invokeFrontendCapability(registered.profileId, {
+      contractId: action.action_contract,
+      contributionId: action.contribution_id,
+      ownerPackId: action.owner_pack_id,
+      planHash: registered.planHash,
+      payload: {
+        operation: registered.descriptor.actionOperation,
+        input: {
+          requested_value_scope: registered.descriptor.requestedValueScope,
+          idempotency_key: interaction.idempotencyKey ?? crypto.randomUUID(),
+        },
+      },
+    });
+    pushActionPreview(
+      { id: `composer.${widget.id}`, label: widget.label, icon: widget.icon },
+      widget.label,
+      result,
+    );
+    return { kind: "completed", message: "Action completed" };
+  };
+
+  const handleWidgetAction = async (
+    widget: DroppedWidget,
+    interaction: ComposerWidgetInteraction = { type: "activate" },
+  ): Promise<ComposerWidgetInteractionResult | void> => {
+    const registeredResult = await handleRegisteredWidgetAction(widget, interaction);
+    if (registeredResult) return registeredResult;
+
     const trustedAction = trustedComposerActionForWidget(widget, composerExtensions);
     const action = trustedAction ?? (widget.action?.type === "call_endpoint" ? undefined : widget.action);
 

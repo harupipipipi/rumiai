@@ -1479,6 +1479,58 @@ test("composer widget drop requires explicit kind capability contract", () => {
   assert.equal(resolveComposerWidgetDrop({ id: "unknown", type: "button", label: "Unknown" }, toolItems).type, "ignore");
 });
 
+test("declarative composer widgets render generic accessible controls", () => {
+  const html = renderToStaticMarkup(createElement(ComposerRenderer, {
+    input: "",
+    placeholder: "Message Rumi...",
+    isGenerating: false,
+    selectedProfile: {
+      profile_id: "stub/default",
+      display_name: "Stub Default",
+      provider_id: "stub",
+      model_id: "default",
+    },
+    favoriteProfiles: [],
+    inlineExtensions: [],
+    belowExtensions: [],
+    droppedWidgets: [
+      {
+        id: "workflow-selector",
+        type: "selector",
+        label: "Workflow",
+        widgetKind: "selector",
+      },
+      {
+        id: "workflow-panel",
+        type: "panel",
+        label: "Workflow details",
+        widgetKind: "panel",
+      },
+      {
+        id: "run-workflow",
+        type: "button",
+        label: "Run workflow",
+        widgetKind: "button",
+        enabled: false,
+      },
+    ],
+    thinkingLevel: null,
+    contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+    onModelProfileSelect: () => undefined,
+    onThinkingLevelChange: () => undefined,
+    onWidgetAction: () => ({ kind: "completed" as const }),
+  }));
+
+  assert.match(html, /aria-haspopup="listbox"/);
+  assert.match(html, /aria-haspopup="dialog"/);
+  assert.match(html, /Workflow details/);
+  assert.match(html, /Run workflow/);
+  assert.match(html, /disabled=""/);
+  assert.doesNotMatch(html, /call_endpoint/);
+});
+
 test("coding workspace picker renders selected workspace and trust affordance", () => {
   const html = renderToStaticMarkup(
     createElement(CodingWorkspacePicker, {

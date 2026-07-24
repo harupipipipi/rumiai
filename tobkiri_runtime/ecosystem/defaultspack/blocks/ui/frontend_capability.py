@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections import OrderedDict
@@ -15,8 +16,11 @@ from core_runtime.global_contract_dispatch import (
     invoke_global_contract,
 )
 from core_runtime.resolved_profile_scope import active_resolved_profile
+from core_runtime.runtime_audit_helpers import audit_event
 
 _REPLAY_LIMIT = 2048
+_MAX_REQUEST_ID_LENGTH = 128
+_MAX_CONTRACT_INPUT_BYTES = 64 * 1024
 _SEEN_REQUESTS: OrderedDict[str, float] = OrderedDict()
 _REPLAY_LOCK = threading.Lock()
 
@@ -24,7 +28,12 @@ _REPLAY_LOCK = threading.Lock()
 def _consume_request(request_id: str, expires_at: float) -> bool:
     """Consume one short-lived request id and reject replay or expiry."""
     now = time.time()
-    if not request_id or expires_at < now or expires_at > now + 60.0:
+    if (
+        not request_id
+        or len(request_id) > _MAX_REQUEST_ID_LENGTH
+        or expires_at < now
+        or expires_at > now + 60.0
+    ):
         return False
     with _REPLAY_LOCK:
         expired = [key for key, value in _SEEN_REQUESTS.items() if value < now]
@@ -50,6 +59,31 @@ def _declared_contracts(contribution: Any) -> set[str]:
     if isinstance(isolated, dict):
         contracts.update(str(value) for value in isolated.get("rpc_contracts", []))
     return contracts
+
+
+def _audit(
+    context: dict,
+    event_type: str,
+    *,
+    request_id: str,
+    owner_pack_id: str,
+    contribution_id: str,
+    contract_id: str,
+    operation: str = "",
+    code: str = "",
+) -> None:
+    audit_event(
+        context,
+        event_type,
+        {
+            "request_id": request_id,
+            "owner_pack_id": owner_pack_id,
+            "contribution_id": contribution_id,
+            "contract_id": contract_id,
+            "operation": operation,
+            **({"code": code} if code else {}),
+        },
+    )
 
 
 def run(input_data: dict, context: dict) -> dict:
@@ -85,30 +119,105 @@ def run(input_data: dict, context: dict) -> dict:
         and item.resolved_plan_hash == plan_hash
     ]
     if len(matches) != 1 or contract_id not in _declared_contracts(matches[0]):
+        _audit(
+            context,
+            "frontend_capability.denied",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            code="CAPABILITY_DENIED",
+        )
         return error("Capability is not declared by this surface", "CAPABILITY_DENIED")
     if contract_id.startswith("rumi.action.") and context.get(
         "_tool_server_approved"
     ) is not True:
+        _audit(
+            context,
+            "frontend_capability.denied",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            code="APPROVAL_REQUIRED",
+        )
         return error("Capability action requires local approval", "CAPABILITY_DENIED")
 
     payload = data.get("payload")
     payload = dict(payload) if isinstance(payload, dict) else {}
     operation = str(payload.pop("operation", "")).strip()
     contract_input = payload.pop("input", payload)
-    if not operation or not isinstance(contract_input, dict):
+    if (
+        not operation
+        or len(operation) > 160
+        or not isinstance(contract_input, dict)
+    ):
         return error("Capability request is invalid", "INVALID_CAPABILITY_REQUEST")
     contract_input = dict(contract_input)
     contract_input.setdefault("profile_id", profile_id)
     try:
-        return ok(
-            invoke_global_contract(
-                registry,
-                contract_id,
-                operation,
+        input_size = len(
+            json.dumps(
                 contract_input,
-            )
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
         )
+    except (TypeError, ValueError):
+        input_size = _MAX_CONTRACT_INPUT_BYTES + 1
+    if input_size > _MAX_CONTRACT_INPUT_BYTES:
+        _audit(
+            context,
+            "frontend_capability.denied",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            operation=operation,
+            code="CAPABILITY_INPUT_TOO_LARGE",
+        )
+        return error(
+            "Capability input exceeds the registered transport limit",
+            "CAPABILITY_INPUT_TOO_LARGE",
+        )
+    try:
+        result = invoke_global_contract(
+            registry,
+            contract_id,
+            operation,
+            contract_input,
+        )
+        _audit(
+            context,
+            "frontend_capability.executed",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            operation=operation,
+        )
+        return ok(result)
     except GlobalContractUnavailable as exc:
+        _audit(
+            context,
+            "frontend_capability.failed",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            operation=operation,
+            code="CAPABILITY_UNAVAILABLE",
+        )
         return error(str(exc), "CAPABILITY_UNAVAILABLE")
     except GlobalContractInvocationError as exc:
+        _audit(
+            context,
+            "frontend_capability.failed",
+            request_id=request_id,
+            owner_pack_id=owner_pack_id,
+            contribution_id=contribution_id,
+            contract_id=contract_id,
+            operation=operation,
+            code=exc.code or "CAPABILITY_FAILED",
+        )
         return error(str(exc), exc.code or "CAPABILITY_FAILED")

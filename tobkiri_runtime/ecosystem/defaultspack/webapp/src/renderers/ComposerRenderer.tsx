@@ -77,6 +77,8 @@ import type {
   ComposerModelStatusIndicator,
   ComposerRendererProps,
   ComposerSkillItem,
+  ComposerWidgetInteraction,
+  ComposerWidgetInteractionResult,
   DroppedWidget,
   AppMode,
   ToolGroup,
@@ -1224,9 +1226,84 @@ function DroppedWidgetChip({
   onToggle,
 }: {
   widget: DroppedWidget;
-  onAction?: (widget: DroppedWidget) => void;
+  onAction?: (
+    widget: DroppedWidget,
+    interaction?: ComposerWidgetInteraction,
+  ) => Promise<ComposerWidgetInteractionResult | void> | ComposerWidgetInteractionResult | void;
   onToggle?: (id: string) => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorItems, setSelectorItems] = useState<Extract<ComposerWidgetInteractionResult, { kind: "options" }>["items"]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [selectorQuery, setSelectorQuery] = useState("");
+  const [selectedValue, setSelectedValue] = useState<string | null>(null);
+  const [panel, setPanel] = useState<Extract<ComposerWidgetInteractionResult, { kind: "panel" }> | null>(null);
+  const busyRef = useRef(false);
+  const mutationKeysRef = useRef(new Map<string, string>());
+  const panelCloseRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!panel) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    panelCloseRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setPanel(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      previouslyFocused?.focus();
+    };
+  }, [panel]);
+
+  const invoke = async (interaction: ComposerWidgetInteraction) => {
+    if (!onAction || busyRef.current) return;
+    const mutationIdentity = interaction.type === "load"
+      ? ""
+      : `${interaction.type}:${interaction.type === "select" ? interaction.value : ""}`;
+    const idempotencyKey = mutationIdentity
+      ? mutationKeysRef.current.get(mutationIdentity) ?? crypto.randomUUID()
+      : "";
+    if (mutationIdentity) mutationKeysRef.current.set(mutationIdentity, idempotencyKey);
+    const boundInteraction = interaction.type === "load"
+      ? interaction
+      : { ...interaction, idempotencyKey };
+    const previousValue = selectedValue;
+    if (interaction.type === "select") setSelectedValue(interaction.value);
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await onAction(widget, boundInteraction);
+      if (result?.kind === "options") {
+        setSelectorItems((current) => (
+          interaction.type === "load" && interaction.cursor
+            ? [...current, ...result.items.filter((item) => !current.some((currentItem) => currentItem.id === item.id))]
+            : result.items
+        ));
+        setNextCursor(result.nextCursor);
+        setSelectorOpen(true);
+      } else if (result?.kind === "panel") {
+        setPanel(result);
+      } else if (interaction.type === "select") {
+        setSelectorOpen(false);
+      }
+      if (mutationIdentity) mutationKeysRef.current.delete(mutationIdentity);
+    } catch {
+      if (interaction.type === "select") setSelectedValue(previousValue);
+      setError("Widget action failed. Retry after checking the selected pack.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
   if (widget.type === "conversation") {
     const ConversationIcon = composerIconForName(widget.icon, MessageSquare);
     return (
@@ -1253,16 +1330,148 @@ function DroppedWidgetChip({
         ? SlidersHorizontal
         : PanelRightOpen;
     const Icon = composerIconForName(widget.icon, fallbackIcon);
+    const selectedItem = selectorItems.find((item) => item.id === selectedValue);
     return (
-      <button
-        type="button"
-        title={widget.description ?? widget.label}
-        onClick={() => onAction?.(widget)}
-        className="inline-flex max-w-[160px] items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.05] px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
+      <div
+        className="relative inline-flex"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setSelectorOpen(false);
+        }}
       >
-        <Icon size={10} />
-        <span className="truncate">{widget.label}</span>
-      </button>
+        <button
+          type="button"
+          aria-expanded={widget.widgetKind === "selector" ? selectorOpen : undefined}
+          aria-haspopup={widget.widgetKind === "selector" ? "listbox" : widget.widgetKind === "panel" ? "dialog" : undefined}
+          disabled={busy || widget.enabled === false}
+          title={widget.description ?? widget.label}
+          onClick={() => {
+            if (widget.widgetKind === "selector") {
+              if (selectorOpen) {
+                setSelectorOpen(false);
+              } else if (selectorItems.length > 0) {
+                setSelectorOpen(true);
+              } else {
+                void invoke({ type: "load" });
+              }
+              return;
+            }
+            void invoke({ type: "activate" });
+          }}
+          className="inline-flex max-w-[190px] items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.05] px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={10} className="animate-spin" /> : <Icon size={10} />}
+          <span className="truncate">{selectedItem?.label ?? widget.label}</span>
+        </button>
+        {error && (
+          <div role="alert" className="absolute bottom-full left-0 rumi-layer-local-popover mb-2 w-64 rounded-lg border border-red-500/30 bg-zinc-950 p-2 text-[11px] text-red-200 shadow-xl">
+            {error}
+          </div>
+        )}
+        {selectorOpen && widget.widgetKind === "selector" && (
+          <div
+            role="listbox"
+            aria-label={`${widget.label} options`}
+            className="absolute bottom-full left-0 rumi-layer-local-popover mb-2 block w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold text-zinc-200">
+              {widget.label}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void invoke({ type: "load", query: selectorQuery })}
+                className="rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+              >
+                Refresh
+              </button>
+            </div>
+            <form
+              className="border-b border-zinc-800 p-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void invoke({ type: "load", query: selectorQuery });
+              }}
+            >
+              <label className="sr-only" htmlFor={`composer-selector-query-${widget.id}`}>
+                Search {widget.label}
+              </label>
+              <input
+                id={`composer-selector-query-${widget.id}`}
+                type="search"
+                value={selectorQuery}
+                onChange={(event) => setSelectorQuery(event.target.value)}
+                placeholder={`Search ${widget.label}`}
+                disabled={busy}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-sky-500 disabled:opacity-50"
+              />
+            </form>
+            <div className="block max-h-64 overflow-y-auto py-1">
+              {selectorItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="option"
+                  aria-selected={item.id === selectedValue}
+                  disabled={item.disabled || busy}
+                  title={item.disabledReason ?? item.description}
+                  onClick={() => void invoke({ type: "select", value: item.id })}
+                  className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600"
+                >
+                  <span className="block truncate">{item.label}</span>
+                  {(item.description || item.disabledReason) && (
+                    <span className="mt-0.5 block truncate text-[10px] text-zinc-500">
+                      {item.disabledReason ?? item.description}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {selectorItems.length === 0 && !busy && (
+                <span className="block px-3 py-4 text-center text-xs text-zinc-500">No options available</span>
+              )}
+              {nextCursor && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void invoke({ type: "load", cursor: nextCursor, query: selectorQuery })}
+                  className="block w-full border-t border-zinc-800 px-3 py-2 text-xs text-sky-300 hover:bg-zinc-900 disabled:opacity-50"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {panel && typeof document !== "undefined" && createPortal(
+          <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center p-4">
+            <button
+              type="button"
+              aria-label={`Close ${panel.title}`}
+              onClick={() => setPanel(null)}
+              className="absolute inset-0 bg-black/70"
+            />
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label={panel.title}
+              className="relative w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-950 p-5 text-zinc-100 shadow-2xl"
+            >
+              <button
+                ref={panelCloseRef}
+                type="button"
+                aria-label={`Close ${panel.title}`}
+                onClick={() => setPanel(null)}
+                className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              >
+                <X size={15} />
+              </button>
+              <h2 className="pr-10 text-base font-semibold">{panel.title}</h2>
+              {panel.description && <p className="mt-2 text-sm text-zinc-400">{panel.description}</p>}
+              {panel.body && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{panel.body}</p>}
+              <p className="mt-5 border-t border-zinc-800 pt-3 text-xs text-zinc-500">Provided by {panel.sourceLabel}</p>
+            </section>
+          </div>,
+          document.body,
+        )}
+      </div>
     );
   }
 

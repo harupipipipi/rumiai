@@ -239,7 +239,10 @@ export type ComposerRendererProps = {
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
   onEntityReferencesChange?: (references: ComposerEntityReference[]) => void;
-  onWidgetAction?: (widget: DroppedWidget) => void;
+  onWidgetAction?: (
+    widget: DroppedWidget,
+    interaction?: ComposerWidgetInteraction,
+  ) => Promise<ComposerWidgetInteractionResult | void> | ComposerWidgetInteractionResult | void;
   onWidgetToggle?: (widgetId: string) => void;
   onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
   onCodingDirectoryChange?: (directory: string) => void;
@@ -371,3 +374,29 @@ export type DroppedWidget = {
   icon?: string;
   metadata?: Record<string, unknown>;
 };
+
+export type ComposerWidgetInteraction =
+  | { type: "activate"; idempotencyKey?: string }
+  | { type: "load"; cursor?: string | null; query?: string }
+  | { type: "select"; value: string; idempotencyKey?: string };
+
+export type ComposerWidgetInteractionResult =
+  | { kind: "completed"; message?: string }
+  | {
+      kind: "options";
+      items: Array<{
+        id: string;
+        label: string;
+        description?: string;
+        disabled: boolean;
+        disabledReason?: string;
+      }>;
+      nextCursor: string | null;
+    }
+  | {
+      kind: "panel";
+      title: string;
+      description?: string;
+      body?: string;
+      sourceLabel: string;
+    };
