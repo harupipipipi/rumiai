@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Input } from '@/src/components/ui/Input';

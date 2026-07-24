@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { Menu } from 'lucide-react';
 import { TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
 import { useAppStore } from '@/src/store';

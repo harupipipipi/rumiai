@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
 import { Setup } from '@/src/pages/Setup';

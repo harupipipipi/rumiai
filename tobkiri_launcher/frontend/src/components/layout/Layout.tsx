@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ViewerVersionLabel } from './ViewerVersionLabel';

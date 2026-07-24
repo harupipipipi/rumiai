@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {useSearchParams} from 'react-router-dom';
+import {useSearchParams} from 'react-router';
 import {AlertTriangle, Network, RadioTower, Route, Sparkles, Wand2} from 'lucide-react';
 
 import {ProfileGraphCanvas} from '@/src/components/profile-graph/ProfileGraphCanvas';

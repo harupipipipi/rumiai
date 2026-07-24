@@ -13,6 +13,10 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+from domain.ai_client.providers import (  # noqa: E402
+    opencode_zen_provider as opencode_zen_provider_module,
+)
+
 
 class _FakeSseResponse:
     def __init__(self, chunks, *, fail_after_chunks=False):
@@ -70,8 +74,9 @@ def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
         }
     )
 
-    with patch(
-        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+    with patch.object(
+        opencode_zen_provider_module.urllib.request,
+        "urlopen",
         return_value=response,
     ):
         models = provider.list_models()
@@ -90,8 +95,9 @@ def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(
 ):
     provider = _provider(monkeypatch)
 
-    with patch(
-        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+    with patch.object(
+        opencode_zen_provider_module.urllib.request,
+        "urlopen",
         return_value=_FakeJsonResponse(payload),
     ):
         models = provider.list_models()
@@ -102,8 +108,9 @@ def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(
 def test_opencode_zen_model_inventory_falls_back_on_network_failure(monkeypatch):
     provider = _provider(monkeypatch)
 
-    with patch(
-        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+    with patch.object(
+        opencode_zen_provider_module.urllib.request,
+        "urlopen",
         side_effect=TimeoutError,
     ):
         models = provider.list_models()
@@ -115,8 +122,9 @@ def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure
     provider = _provider(monkeypatch)
     provider.MODEL_INVENTORY_TTL_SECONDS = 0
 
-    with patch(
-        "domain.ai_client.providers.opencode_zen_provider.urllib.request.urlopen",
+    with patch.object(
+        opencode_zen_provider_module.urllib.request,
+        "urlopen",
         side_effect=[
             _FakeJsonResponse({"data": [{"id": "account-only-model"}]}),
             TimeoutError(),

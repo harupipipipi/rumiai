@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { useT } from '@/src/lib/i18n';

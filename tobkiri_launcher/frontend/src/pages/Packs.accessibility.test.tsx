@@ -3,7 +3,7 @@ import test from 'node:test';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
-import {MemoryRouter, Route, Routes} from 'react-router-dom';
+import {MemoryRouter, Route, Routes} from 'react-router';
 
 import {type Pack, useAppStore} from '@/src/store';
 import {Packs} from './Packs';
