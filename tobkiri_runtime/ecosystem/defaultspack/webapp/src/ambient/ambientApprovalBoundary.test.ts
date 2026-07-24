@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -302,15 +302,23 @@ test("ambient approval gesture requires audit event before executing approval", 
   assert.match(submitApprovalGestureSource, /await onApprovalGestureRef\.current\?\.\(decision\)/);
 });
 
-test("Viewer authenticates every dedicated Defaultspack window and rejects unsafe stale listeners", () => {
+test("Viewer validates every dedicated Defaultspack window and uses the local-auth handoff", (context) => {
+  const viewerPath = resolve(REPOSITORY_ROOT, "tobkiri_launcher", "src-tauri", "src", "lib.rs");
+  const dockPath = resolve(REPOSITORY_ROOT, "tobkiri_launcher", "src-tauri", "src", "dock_registration.rs");
+  if (!existsSync(viewerPath) || !existsSync(dockPath)) {
+    context.skip("Requires the sibling tobkiri_launcher repository.");
+    return;
+  }
   const viewerSource = readRepositorySource("tobkiri_launcher", "src-tauri", "src", "lib.rs");
   const dockSource = readRepositorySource("tobkiri_launcher", "src-tauri", "src", "dock_registration.rs");
 
-  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, authority_approval_url/);
-  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, ambient_trigger_url/);
-  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, finger_recording_url/);
-  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, defaults_console_url/);
-  assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, host_permissions_url/);
+  assert.match(viewerSource, /validated_defaultspack_window_url\(config, authority_approval_url/);
+  assert.match(viewerSource, /validated_defaultspack_window_url\(config, ambient_trigger_url/);
+  assert.match(viewerSource, /validated_defaultspack_window_url\(config, finger_recording_url/);
+  assert.match(viewerSource, /validated_defaultspack_window_url\(config, defaults_console_url/);
+  assert.match(viewerSource, /validated_defaultspack_window_url\(config, host_permissions_url/);
+  assert.match(viewerSource, /dock_registration::defaultspack_local_auth_exchange/);
+  assert.match(dockSource, /issue_defaultspack_local_auth_exchange/);
   assert.match(dockSource, /active HMAC store is encrypted; using the Kernel-managed desktop token cache/);
   assert.match(dockSource, /Viewer did not stop it\. Close that process or free port/);
   assert.match(dockSource, /identify_defaultspack_listener\(&listener, metadata\)/);
