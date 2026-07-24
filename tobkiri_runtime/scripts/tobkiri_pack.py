@@ -21,6 +21,12 @@ from core_runtime.pack_sdk import (  # noqa: E402
     scaffold_pack,
     validate_pack_manifest,
 )
+from core_runtime.pack_templates import (  # noqa: E402
+    COMPONENT_KINDS,
+    PROFILES,
+    scaffold_component,
+    validate_template_components,
+)
 from core_runtime.pack_signature import (  # noqa: E402
     SIGNED_MANIFEST_RELATIVE,
     build_signed_manifest,
@@ -58,7 +64,21 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("target", type=Path)
     init.add_argument("--pack-id", required=True)
     init.add_argument("--display-name", required=True)
+    init.add_argument("--profile", choices=PROFILES, default="complete")
+    init.add_argument(
+        "--intent",
+        default="",
+        help="Used by --profile auto to choose codex, hermes, or complete.",
+    )
     init.set_defaults(handler=_init)
+
+    add = subcommands.add_parser("add")
+    add.add_argument("pack_root", type=Path)
+    add.add_argument("kind", choices=COMPONENT_KINDS)
+    add.add_argument("--id", required=True)
+    add.add_argument("--display-name", required=True)
+    add.add_argument("--description", required=True)
+    add.set_defaults(handler=_add)
 
     generate = subcommands.add_parser("generate")
     generate.add_argument("output", type=Path)
@@ -117,8 +137,44 @@ def _init(args: argparse.Namespace) -> dict[str, object]:
         args.target,
         pack_id=args.pack_id,
         display_name=args.display_name,
+        profile=args.profile,
+        intent=args.intent,
     )
-    return {"created": str(path)}
+    validate_template_components(
+        args.target,
+        ROOT / "ecosystem" / "defaultspack" / "schemas",
+    )
+    contract_path = args.target / "template.contract.json"
+    contract = (
+        json.loads(contract_path.read_text(encoding="utf-8"))
+        if contract_path.is_file()
+        else {}
+    )
+    return {
+        "created": str(path),
+        "profile": contract.get("profile", args.profile),
+        "authority": "none",
+    }
+
+
+def _add(args: argparse.Namespace) -> dict[str, object]:
+    paths = scaffold_component(
+        args.pack_root,
+        kind=args.kind,
+        component_id=args.id,
+        display_name=args.display_name,
+        description=args.description,
+    )
+    validate_template_components(
+        args.pack_root,
+        ROOT / "ecosystem" / "defaultspack" / "schemas",
+        component_paths=paths,
+    )
+    return {
+        "created": [str(path) for path in paths],
+        "kind": args.kind,
+        "enabled": False if args.kind == "tool" else True,
+    }
 
 
 def _generate(args: argparse.Namespace) -> dict[str, object]:

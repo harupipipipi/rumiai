@@ -492,6 +492,7 @@ export function ProfileSettingsPanel({
                 return (
                   <button
                     key={`${profile.source}:${profile.id}`}
+                    onClick={() => setSelectedId(profile.id)}
                     ref={(node) => {
                       if (node) profileButtonRefs.current.set(profile.id, node);
                       else profileButtonRefs.current.delete(profile.id);
@@ -500,7 +501,6 @@ export function ProfileSettingsPanel({
                     role="option"
                     aria-selected={selectedRow}
                     tabIndex={selectedRow ? 0 : -1}
-                    onClick={() => setSelectedId(profile.id)}
                     onKeyDown={(event) => handleProfileKeyDown(event, index)}
                     className={cn(
                       "group mb-1 w-full border-l-2 px-3 py-2.5 text-left transition-colors last:mb-0",

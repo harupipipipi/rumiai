@@ -29,7 +29,7 @@ referencing==0.37.0 \
     # via
     #   jsonschema
     #   jsonschema-specifications
-rpds-py==2026.6.3 \
+rpds-py==2026.6.3 ; python_version >= "3.11" \
     --hash=sha256:0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5 \
     --hash=sha256:127565fead0a10943b282957bd5447804ff3160ad79f2ad2635e6d249e380680 \
     --hash=sha256:127e08c0642d880cf32ca47ec2a4a77b901f7e2dd1ad9762adb13955d72ffcc9 \
@@ -204,6 +204,11 @@ pyyaml==6.0.2 \
     --hash=sha256:a9f8c2e67970f13b16084e04f134610fd1d374bf477b17ec1599185cf611d725 \
     --hash=sha256:6395c297d42274772abc367baaa79683958044e5d3835486c16da75d2a694631 \
     --hash=sha256:39693e1f8320ae4f43943590b49779ffb98acb81f788220ea932a6b6c51004d8
+
+# Latest rpds-py releases require Python 3.11. Keep the supported 3.10 CI
+# interpreter on the final compatible wheel.
+rpds-py==0.27.1 ; python_version < "3.11" \
+    --hash=sha256:50c946f048209e6362e22576baea09193809f87687a95a8db24e5fbdb307b93a
 
 # Template compatibility/version checks (required by defaultspack template kernel)
 packaging==26.2 \

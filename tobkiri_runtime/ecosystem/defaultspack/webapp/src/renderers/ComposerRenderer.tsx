@@ -3819,6 +3819,7 @@ export function ComposerRenderer({
       render: () => (
         <button
           type={isGenerating ? "button" : "submit"}
+          onClick={handleSendButtonClick}
           tabIndex={chromeButtonTabIndex}
           aria-label={isGenerating
             ? (input.trim() ? "追加指示を送る" : "生成を停止")
@@ -3829,7 +3830,6 @@ export function ComposerRenderer({
             pendingMentionAttachmentPaths.length > 0
             || (!input.trim() && attachedFiles.length === 0)
           )}
-          onClick={handleSendButtonClick}
           title={isGenerating
             ? (input.trim() ? "追加指示を送る" : "停止")
             : pendingMentionAttachmentPaths.length > 0

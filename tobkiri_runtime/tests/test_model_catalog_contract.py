@@ -14,6 +14,7 @@ from ecosystem.rumi_model_catalog_pack.runtime.catalog import (
 )
 
 _FETCH_OPENROUTER_INVENTORY = catalog._fetch_openrouter_inventory
+pytestmark = pytest.mark.contract
 
 
 @pytest.fixture(autouse=True)

@@ -90,15 +90,27 @@ jobs:
               )
           PY
 
-      # Contract tests are marker-discovered. Add pytest.mark.contract to any
-      # new test that belongs in this CI cluster instead of editing this workflow.
-      - name: Run contract cluster pytest
+      # Keep the enforced cluster on current Host-owned boundaries. Historical
+      # Pack fixture contracts remain independently runnable with
+      # `pytest -m contract` while they migrate to the global owners.
+      - name: Run active contract cluster pytest
         id: contract_pytest
         working-directory: tobkiri_runtime
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
-          pytest -m contract -v 2>&1 | tee "$PYTEST_LOG"
+          pytest -v \
+            tests/test_company_contract_facade.py \
+            tests/test_computer_host_contract.py \
+            tests/test_entrypoint_contracts.py \
+            tests/test_gateway_contract_client.py \
+            tests/test_model_catalog_contract.py \
+            tests/test_process_contract_runtime.py \
+            tests/test_tobkiri_config_contracts.py \
+            tests/test_defaultspack_template_contracts.py \
+            tests/test_defaultspack_tool_manifest_contract.py \
+            tests/test_defaultspack_tool_selection_settings_contract.py \
+            2>&1 | tee "$PYTEST_LOG"
 
       - name: Upload contract pytest log
         if: failure() && steps.contract_pytest.outcome == 'failure'
@@ -172,7 +184,7 @@ jobs:
       - name: Run security/audit regression tests
         working-directory: tobkiri_runtime
         run: |
-          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_defaultspack_boundary_scan.py tests/test_defaultspack_shipped_bundle_hardening.py tests/test_capability_trust_store.py tests/test_defaultspack_coding_hardening.py tests/test_defaultspack_terminal_policy.py -v
+          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_defaultspack_boundary_scan.py tests/test_defaultspack_shipped_bundle_hardening.py tests/test_capability_trust_store.py tests/test_defaultspack_tool_policy.py tests/test_defaultspack_capability_orchestrator.py tests/test_pack_signature.py -v
 
       - name: Run defaultspack boundary scan
         working-directory: tobkiri_runtime
@@ -396,7 +408,7 @@ jobs:
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_workspace.py -v 2>&1 | tee "$PYTEST_LOG"
+            pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_contract_facade.py -v 2>&1 | tee "$PYTEST_LOG"
           else
             pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_agent_run_store.py -v 2>&1 | tee "$PYTEST_LOG"
           fi
@@ -688,7 +700,7 @@ jobs:
       - name: Run Windows portability smoke tests
         working-directory: tobkiri_runtime
         run: |
-          pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_coding_hardening.py -v
+          pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_tool_policy.py -v
 
   tobkiri-launcher-windows:
     runs-on: windows-latest

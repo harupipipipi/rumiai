@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from ecosystem.defaultspack.domain.ai_client import gateway_contract_client
 from ecosystem.defaultspack.domain.ai_client.gateway_contract_client import (
     ContractLLMGateway,
@@ -12,6 +14,8 @@ from ecosystem.rumi_provider_adapters_pack.runtime.adapter import (
     _connection,
     _provider_model_id,
 )
+
+pytestmark = pytest.mark.contract
 
 
 def test_contract_gateway_reports_its_stream_implementation() -> None:

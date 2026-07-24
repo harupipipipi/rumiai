@@ -2,9 +2,7 @@ import {
   Component,
   Suspense,
   lazy,
-  useEffect,
   useMemo,
-  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -69,7 +67,6 @@ export function DynamicFrontendHost({
         >
           <ContributionView
             item={item}
-            profileId={catalog.profile_id}
             capabilities={capabilities}
           />
         </ContributionBoundary>
@@ -80,24 +77,16 @@ export function DynamicFrontendHost({
 
 function ContributionView({
   item,
-  profileId,
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
-  profileId: string;
   capabilities: FrontendCapabilityClient;
 }) {
   if (item.mode === "declarative") {
     return <DeclarativeView item={item} capabilities={capabilities} />;
   }
   if (item.mode === "isolated") {
-    return (
-      <IsolatedView
-        item={item}
-        profileId={profileId}
-        capabilities={capabilities}
-      />
-    );
+    return <IsolatedView item={item} />;
   }
   return <BuiltinModuleView item={item} />;
 }
@@ -152,93 +141,10 @@ function DeclarativeView({
 
 function IsolatedView({
   item,
-  profileId,
-  capabilities,
 }: {
   item: VerifiedFrontendContribution;
-  profileId: string;
-  capabilities: FrontendCapabilityClient;
 }) {
-  const source = item.isolated?.path;
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const nonce = useMemo(() => rpcNonce(), []);
-  const frameSource = useMemo(() => {
-    if (!source) return "";
-    const url = new URL(source, window.location.origin);
-    url.searchParams.set("profile_id", profileId);
-    url.hash = `rumi_rpc_nonce=${encodeURIComponent(nonce)}`;
-    return `${url.pathname}${url.search}${url.hash}`;
-  }, [nonce, profileId, source]);
-  useEffect(() => {
-    const allowed = new Set(item.isolated?.rpc_contracts ?? []);
-    const receive = async (event: MessageEvent) => {
-      if (event.source !== frameRef.current?.contentWindow || event.origin !== "null") return;
-      const request = asCapabilityRequest(event.data);
-      if (!request || request.nonce !== nonce || !allowed.has(request.contractId)) return;
-      const invocation = {
-        contractId: request.contractId,
-        payload: request.payload,
-        contributionId: item.contribution_id,
-        ownerPackId: item.owner_pack_id,
-        planHash: item.resolved_plan_hash,
-      };
-      try {
-        const value = request.contractId.startsWith("rumi.action.")
-          ? await capabilities.invokeAction(invocation)
-          : await capabilities.readDataSource(invocation);
-        frameRef.current?.contentWindow?.postMessage({
-          type: "rumi.capability.response",
-          requestId: request.requestId,
-          nonce,
-          ok: true,
-          value,
-        }, "*");
-      } catch {
-        frameRef.current?.contentWindow?.postMessage({
-          type: "rumi.capability.response",
-          requestId: request.requestId,
-          nonce,
-          ok: false,
-          error: "capability_unavailable",
-        }, "*");
-      }
-    };
-    window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
-  }, [capabilities, item, nonce]);
-  if (!source) return <HostFallback title={`${item.label} is unavailable`} />;
-  return (
-    <iframe
-      ref={frameRef}
-      title={item.accessibility.name}
-      src={frameSource}
-      sandbox="allow-scripts"
-      referrerPolicy="no-referrer"
-      loading="lazy"
-      style={{ width: "100%", minHeight: "100vh", border: 0 }}
-      data-contribution-id={item.contribution_id}
-    />
-  );
-}
-
-function asCapabilityRequest(value: unknown): {
-  requestId: string;
-  nonce: string;
-  contractId: string;
-  payload: Record<string, unknown>;
-} | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  if (candidate.type !== "rumi.capability.request") return null;
-  if (typeof candidate.requestId !== "string" || typeof candidate.nonce !== "string") return null;
-  if (typeof candidate.contractId !== "string") return null;
-  if (!candidate.payload || typeof candidate.payload !== "object" || Array.isArray(candidate.payload)) return null;
-  return {
-    requestId: candidate.requestId,
-    nonce: candidate.nonce,
-    contractId: candidate.contractId,
-    payload: candidate.payload as Record<string, unknown>,
-  };
+  return <HostFallback title={`${item.label} requires a dedicated isolated origin`} />;
 }
 
 function BuiltinModuleView({ item }: { item: VerifiedFrontendContribution }) {
@@ -272,15 +178,6 @@ function VerifiedBuiltinModule({
       <Loaded />
     </Suspense>
   );
-}
-
-function rpcNonce(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-  const bytes = new Uint8Array(16);
-  globalThis.crypto?.getRandomValues?.(bytes);
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 export function isBackendVerifiedBuiltinModule(item: VerifiedFrontendContribution): boolean {
@@ -332,4 +229,3 @@ class ContributionBoundary extends Component<{
     return this.state.failed ? this.props.fallback : this.props.children;
   }
 }
-

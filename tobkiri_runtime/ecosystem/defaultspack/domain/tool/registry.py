@@ -61,7 +61,167 @@ def _search_metadata_from_manifest(manifest: dict, config: dict) -> dict:
             metadata[key] = manifest[key]
         if key in config:
             metadata[key] = config[key]
+    if manifest.get("schema_version") == "tobkiri.tool/v3":
+        config_metadata = (
+            config.get("metadata")
+            if isinstance(config.get("metadata"), dict)
+            else {}
+        )
+        for key in ("schema_version", "effects", "security", "activity_ids"):
+            if key in config_metadata:
+                metadata[key] = config_metadata[key]
     return metadata
+
+
+def _localized_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if not isinstance(value, dict):
+        return ""
+    for locale in ("en", "ja"):
+        text = str(value.get(locale) or "").strip()
+        if text:
+            return text
+    return next(
+        (
+            str(item).strip()
+            for _, item in sorted(value.items())
+            if str(item).strip()
+        ),
+        "",
+    )
+
+
+def _v3_tool_config(manifest: dict) -> dict:
+    """Project a strict Tool v3 manifest into the canonical registry shape."""
+
+    discovery = (
+        manifest.get("discovery")
+        if isinstance(manifest.get("discovery"), dict)
+        else {}
+    )
+    contract = (
+        manifest.get("contract")
+        if isinstance(manifest.get("contract"), dict)
+        else {}
+    )
+    risk = (
+        manifest.get("risk")
+        if isinstance(manifest.get("risk"), dict)
+        else {}
+    )
+    approval = (
+        manifest.get("approval")
+        if isinstance(manifest.get("approval"), dict)
+        else {}
+    )
+    requirements = (
+        manifest.get("requirements")
+        if isinstance(manifest.get("requirements"), dict)
+        else {}
+    )
+    effects = [
+        item
+        for item in (manifest.get("effects") or [])
+        if isinstance(item, dict)
+    ]
+    effect_operations = {
+        str(item.get("operation") or "").strip().casefold()
+        for item in effects
+    }
+    effect_classes = {
+        str(item.get("class") or "").strip().casefold()
+        for item in effects
+    }
+    write_markers = {
+        "write",
+        "create",
+        "update",
+        "delete",
+        "send",
+        "publish",
+        "execute",
+        "control",
+        "mutate",
+    }
+    write_action = bool(
+        (effect_operations | effect_classes) & write_markers
+        or any(bool(item.get("external")) for item in effects)
+    )
+    minimum = str(approval.get("minimum") or "auto").strip()
+    default = str(approval.get("default") or "inherit").strip()
+    activity_ids = [
+        str(item)
+        for item in discovery.get("activity_ids", [])
+        if str(item).strip()
+    ]
+    aliases = [
+        str(item)
+        for item in discovery.get("aliases", [])
+        if str(item).strip()
+    ]
+    keywords = [
+        str(item)
+        for item in discovery.get("keywords", [])
+        if str(item).strip()
+    ]
+    return {
+        "tool_id": str(manifest.get("id") or "").strip(),
+        "name": str(manifest.get("id") or "").strip(),
+        "display_name": _localized_text(manifest.get("display_name")),
+        "summary": _localized_text(manifest.get("description")),
+        "schema": {
+            "parameters": dict(contract.get("input_schema") or {}),
+            **(
+                {"returns": dict(contract.get("output_schema") or {})}
+                if isinstance(contract.get("output_schema"), dict)
+                else {}
+            ),
+        },
+        "execution": dict(manifest.get("execution") or {}),
+        "risk": str(risk.get("level") or "medium"),
+        "requires_approval": (
+            minimum in {"confirm", "deny"}
+            or default in {"confirm", "deny"}
+        ),
+        "approval_policy": minimum if minimum != "auto" else default,
+        "write_action": write_action,
+        "action_type": (
+            sorted(effect_operations)[0]
+            if effect_operations
+            else ("write" if write_action else "read")
+        ),
+        "category": activity_ids[0] if activity_ids else "tool",
+        "tool_category": activity_ids[0] if activity_ids else "tool",
+        "tags": list(dict.fromkeys([*keywords, *activity_ids])),
+        "aliases": aliases,
+        "keywords": keywords,
+        "activity_ids": activity_ids,
+        "loading": (
+            "lazy"
+            if discovery.get("schema_loading") == "on_demand"
+            else "always"
+        ),
+        "requires_model_capabilities": list(
+            requirements.get("model_capabilities") or []
+        ),
+        "requires_runtime_capabilities": list(
+            requirements.get("runtime_capabilities") or []
+        ),
+        "capability_requirements": {
+            "connections": list(requirements.get("connections") or []),
+            "env": list(requirements.get("env") or []),
+        },
+        "ui": dict(manifest.get("ui") or {}),
+        "metadata": {
+            "aliases": aliases,
+            "keywords": keywords,
+            "activity_ids": activity_ids,
+            "schema_version": "tobkiri.tool/v3",
+            "effects": effects,
+            "security": dict(manifest.get("security") or {}),
+        },
+    }
 
 
 class ToolRegistry:
@@ -357,7 +517,10 @@ class ToolRegistry:
 
     @staticmethod
     def _tool_from_manifest(manifest, source_pack_id: str = "", allow_legacy_compat: bool = False):
-        config = manifest.get("config", {}) or {}
+        if manifest.get("schema_version") == "tobkiri.tool/v3":
+            config = _v3_tool_config(manifest)
+        else:
+            config = manifest.get("config", {}) or {}
         tool_id = str(config.get("tool_id", manifest.get("id", ""))).strip()
         if not tool_id:
             return None
@@ -366,11 +529,11 @@ class ToolRegistry:
             ui = manifest.get("ui")
         if not isinstance(ui, dict):
             ui = {}
-        display_name = str(
+        display_name = _localized_text(
             config.get("display_name")
             or manifest.get("display_name")
             or ""
-        ).strip()
+        )
         execution = dict(config.get("execution", {}))
         handler = str(config.get("handler", "")).strip()
         write_action = bool(config.get("write_action", False))
@@ -429,8 +592,10 @@ class ToolRegistry:
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
             "display_name": display_name,
-            "summary": str(config.get("summary", manifest.get("description", ""))),
-            "description": str(manifest.get("description", "")),
+            "summary": _localized_text(
+                config.get("summary") or manifest.get("description", "")
+            ),
+            "description": _localized_text(manifest.get("description", "")),
             "tags": tags,
             "schema": dict(
                 config.get(
@@ -521,8 +686,10 @@ class ToolRegistry:
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
             "display_name": display_name,
-            "summary": str(config.get("summary", manifest.get("description", ""))),
-            "description": str(manifest.get("description", "")),
+            "summary": _localized_text(
+                config.get("summary") or manifest.get("description", "")
+            ),
+            "description": _localized_text(manifest.get("description", "")),
             "tags": tags,
             "risk": risk,
             "schema": dict(

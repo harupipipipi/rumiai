@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from core_runtime.capability_binding_registration import _ProcessContractOperation
+
+pytestmark = pytest.mark.contract
 
 
 def test_process_contract_disables_bytecode_with_isolated_python(monkeypatch, tmp_path):

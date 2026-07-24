@@ -316,8 +316,21 @@ def validate_pack_manifest(
     return manifest
 
 
-def scaffold_pack(target: Path, *, pack_id: str, display_name: str) -> Path:
-    """Create a minimal, untrusted Pack v3 manifest in an empty directory."""
+def scaffold_pack(
+    target: Path,
+    *,
+    pack_id: str,
+    display_name: str,
+    profile: str = "complete",
+    intent: str = "",
+) -> Path:
+    """Create an untrusted Pack v3 with a deterministic agent template."""
+
+    from core_runtime.pack_templates import (
+        PackTemplateError,
+        render_template_files,
+        resolve_profile,
+    )
 
     normalized_id = str(pack_id or "").strip()
     if not re.fullmatch(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+", normalized_id):
@@ -325,6 +338,16 @@ def scaffold_pack(target: Path, *, pack_id: str, display_name: str) -> Path:
     if target.exists() and next(os.scandir(target), None) is not None:
         raise PackSdkError("target directory must be empty")
     target.mkdir(parents=True, exist_ok=True)
+    try:
+        selected_profile = resolve_profile(profile, intent)
+        template_files = render_template_files(
+            pack_id=normalized_id,
+            display_name=str(display_name or normalized_id),
+            profile=selected_profile,
+            intent=intent,
+        )
+    except PackTemplateError as exc:
+        raise PackSdkError(str(exc)) from exc
     manifest = {
         "pack_api_version": "rumi.pack.v3",
         "pack": {
@@ -352,12 +375,23 @@ def scaffold_pack(target: Path, *, pack_id: str, display_name: str) -> Path:
             "sunset_at": "2099-12-31",
             "rollback": "Remove the scaffolded Pack.",
         },
+        "extensions": {
+            "tobkiri.template": {
+                "profile": selected_profile,
+                "selection": "ai_hybrid_progressive",
+                "authority": "none",
+            }
+        },
     }
     manifest_path = target / "pack.json"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    for relative, content in sorted(template_files.items()):
+        path = target / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
     return manifest_path
 
 

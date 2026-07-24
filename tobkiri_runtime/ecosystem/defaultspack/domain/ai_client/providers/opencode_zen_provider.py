@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List
 
+from ..api_key_store import read_provider_api_key
 from .anthropic_provider import AnthropicProvider
 from .openai_provider import OpenAIProvider
 
@@ -99,7 +100,8 @@ class OpencodeZenProvider(AnthropicProvider):
     ANTHROPIC_MESSAGES_MODELS = {"minimax-m3-free"}
     OPENAI_CHAT_MODELS = {"mimo-v2.5-free"}
     MODEL_IDS = ANTHROPIC_MESSAGES_MODELS | OPENAI_CHAT_MODELS
-    KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    CURATED_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    KNOWN_MODELS: List[Dict[str, Any]] = []
     _OPENAI_CHAT_PARAM_KEYS = {
         "temperature",
         "top_p",
@@ -111,7 +113,9 @@ class OpencodeZenProvider(AnthropicProvider):
     _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
     def __init__(self) -> None:
-        self._api_key = os.environ.get("OPENCODE_ZEN_API_KEY", "")
+        self._api_key = str(
+            read_provider_api_key("opencode-zen", "default") or ""
+        )
         self._ssl_ctx = ssl.create_default_context()
         self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
         self._model_inventory_cache: List[Dict[str, Any]] = []
@@ -126,9 +130,15 @@ class OpencodeZenProvider(AnthropicProvider):
             model_id = model_id.split("/", 1)[1]
         return model_id
 
-    @classmethod
-    def _assert_supported_model(cls, model: str) -> str:
-        model_id = cls._normalize_model_id(model)
+    def _assert_supported_model(self, model: str) -> str:
+        model_id = self._normalize_model_id(model)
+        discovered = {
+            str(item.get("model_id") or "").strip()
+            for item in self._model_inventory_cache
+            if isinstance(item, dict)
+        }
+        if model_id not in self.MODEL_IDS | discovered:
+            raise RuntimeError(f"unsupported model: {model_id}")
         return model_id
 
     def _headers(self) -> Dict[str, str]:
@@ -205,7 +215,7 @@ class OpencodeZenProvider(AnthropicProvider):
             return self._inventory_fallback("invalid_response")
         records = payload.get("data") if isinstance(payload, dict) else []
         models = []
-        curated_by_id = {model["model_id"]: model for model in self.KNOWN_MODELS}
+        curated_by_id = {model["model_id"]: model for model in self.CURATED_MODELS}
         for raw in records if isinstance(records, list) else []:
             item = raw if isinstance(raw, dict) else {"id": raw}
             model_id = str(item.get("id") or item.get("model_id") or item.get("name") or "").strip()
@@ -271,7 +281,7 @@ class OpencodeZenProvider(AnthropicProvider):
     @classmethod
     def _curated_model_fallback(cls, reason: str) -> List[Dict[str, Any]]:
         models: List[Dict[str, Any]] = []
-        for raw in cls.KNOWN_MODELS:
+        for raw in cls.CURATED_MODELS:
             model = dict(raw)
             metadata = dict(model.get("metadata") or {})
             metadata.update(

@@ -1836,7 +1836,7 @@ export type ResolvedCommandCatalog = {
   api_version: "tobkiri.commands/v1";
   kind: "ResolvedCommandCatalog";
   catalog_revision: string;
-  rollout: {
+  rollout?: {
     feature_flag: "command_protocol_v1";
     phase: "enforced";
     legacy_execution_enabled: false;
@@ -1845,7 +1845,7 @@ export type ResolvedCommandCatalog = {
   states?: Array<Record<string, unknown>>;
   datasources?: Array<Record<string, unknown>>;
   state_snapshots: CommandStateSnapshot[];
-  diagnostics: Array<Record<string, unknown>>;
+  diagnostics?: Array<Record<string, unknown>>;
 };
 
 export type CommandProtocolInvocationResult = {

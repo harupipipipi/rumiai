@@ -141,7 +141,7 @@ def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure
     assert fallback[0]["metadata"]["inventory_stale"] is True
 
 
-def test_opencode_zen_catalog_includes_curated_free_models():
+def test_opencode_zen_catalog_uses_live_inventory_not_bundled_models():
     from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
 
     catalog = get_provider_catalog_map()
@@ -153,20 +153,7 @@ def test_opencode_zen_catalog_includes_curated_free_models():
     assert provider["env_vars"] == ["OPENCODE_ZEN_API_KEY"]
     assert provider["default_model_for"]["coding"] == "minimax-m3-free"
     assert provider["default_model_for"]["cheap"] == "mimo-v2.5-free"
-    assert "opencode-zen/minimax-m3-free" in models
-    assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
-    assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
-    assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
-    assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
-    assert "opencode-zen/mimo-v2.5-free" in models
-    mimo = models["opencode-zen/mimo-v2.5-free"]
-    assert mimo["metadata"]["transport"] == "openai_chat_completions"
-    assert mimo["metadata"]["endpoint_path"] == "/v1/chat/completions"
-    assert mimo["metadata"]["free_tier"] is True
-    assert mimo["metadata"]["capabilities"]["tool_calls"] is False
-    assert mimo["metadata"]["capabilities"]["reasoning"] is False
-    assert "tool_calls_verified" not in mimo["metadata"]
-    assert "reasoning_effort_verified" not in mimo["metadata"]
+    assert models == {}
 
 
 def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):

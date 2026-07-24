@@ -7054,8 +7054,8 @@ function ChatApp() {
                     </summary>
                     <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] text-zinc-500">
                       <dt>revision</dt><dd className="font-mono">{commandProtocolInfo.catalog_revision}</dd>
-                      <dt>rollout</dt><dd>{commandProtocolInfo.rollout.phase}</dd>
-                      <dt>diagnostics</dt><dd>{commandProtocolInfo.diagnostics.length}</dd>
+                      <dt>rollout</dt><dd>{commandProtocolInfo.rollout?.phase ?? "unavailable"}</dd>
+                      <dt>diagnostics</dt><dd>{commandProtocolInfo.diagnostics?.length ?? 0}</dd>
                       <dt>events</dt><dd>{commandProgressEvents.length}</dd>
                     </dl>
                   </details>

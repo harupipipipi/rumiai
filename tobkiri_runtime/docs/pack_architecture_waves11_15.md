@@ -50,6 +50,10 @@ adopted work ships in one change set.
 
 - `tobkiri-pack` provides `init`, `generate`, `validate`, `sign`, `verify`, and
   `inspect`.
+- `init --profile codex|hermes|complete|auto|minimal` generates strict
+  Activity v1, Skill v2, Tool v3, `AGENTS.md`, and least-authority function
+  templates. `add activity|skill|tool` extends a Pack without overwriting
+  files. See [Agent Pack templates](agent_pack_templates.md).
 - Generation is deterministic from the Pack v3, global-contract, and command
   protocol schemas, producing a hash-indexed contract inventory plus Python,
   TypeScript, and Dart IDs.

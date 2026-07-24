@@ -493,13 +493,10 @@ class ToolExecutor:
 
     @staticmethod
     def _first_party_browser_computer_tool_for_function(pack_id, function_id):
-        if pack_id != "rumi_default_tools_pack":
-            return None
-        return {
-            "browser_computer": "browser_computer",
-            "browser_use": "browser_use",
-            "computer_use": "computer_use",
-        }.get(function_id)
+        # Pack identity is not an execution capability. Browser/computer
+        # authority is resolved from the Tool manifest and Capability Plan.
+        del pack_id, function_id
+        return None
 
     @staticmethod
     def _local_tool_fallback_for_capability_response(response, request):
@@ -515,11 +512,6 @@ class ToolExecutor:
 
     @staticmethod
     def _first_party_local_tool_for_function(pack_id, function_id):
-        if pack_id == "rumi_default_tools_pack":
-            return {
-                "calculator": "calculator",
-                "subagent": "subagent",
-            }.get(function_id)
         if pack_id == "defaultspack":
             return {
                 "tool_calculator": "calculator",
@@ -995,52 +987,6 @@ class ToolExecutor:
             if isinstance(result.get("recovery"), dict):
                 output["recovery"] = result.get("recovery")
             return output
-        elif tool_name == "browser_companion":
-            from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
-
-            action = str(arguments.get("action") or "session")
-            payload = {key: value for key, value in (arguments or {}).items() if key != "action"}
-            current_tool_def = explicit_tool_def if isinstance(explicit_tool_def, dict) else {
-                "tool_id": tool_name,
-                "name": tool_name,
-                "requires_approval": True,
-                "risk": "high",
-                "capability_grants": ["browser.control", "computer.control"],
-            }
-            next_context, approval_error = _context_with_tool_approval_token(context, current_tool_def, arguments)
-            if approval_error is not None:
-                return approval_error
-            result = BrowserCompanionController(
-                artifact_root=_conversation_browser_companion_artifact_root(next_context),
-            ).run(
-                action,
-                payload,
-                context=next_context if isinstance(next_context, dict) else {},
-            )
-            is_error = bool(result.get("is_error"))
-            summary = "{} {} {}".format(
-                tool_name,
-                result.get("action", "action"),
-                "failed" if is_error else "completed",
-            )
-            if result.get("reason"):
-                summary += ": {}".format(result.get("reason"))
-            if result.get("path"):
-                summary += "; artifact: {}".format(result.get("path"))
-            return {
-                "result": summary,
-                "is_error": is_error,
-                "widget": {"type": tool_name, **result},
-            }
-        elif tool_name == "todo":
-            from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
-
-            result = TodoController().run(arguments, context if isinstance(context, dict) else {})
-            return {
-                "result": result.get("summary", "todo updated"),
-                "is_error": False,
-                "widget": {"type": "todo", **result},
-            }
         elif tool_name in {"task_board", "tool_task_board"}:
             from domain.tool.task_board import TaskBoardController
 
@@ -1058,16 +1004,6 @@ class ToolExecutor:
                 "result": result.get("summary", "task board agent session updated"),
                 "is_error": False,
                 "widget": {"type": "task_board_agent_session", **result},
-            }
-        elif tool_name == "subagent":
-            from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
-
-            result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
-            is_error = bool(result.get("is_error"))
-            return {
-                "result": result.get("summary", "subagent completed"),
-                "is_error": is_error,
-                "widget": {"type": "subagent", **result},
             }
         elif tool_name == "calculator":
             expression = arguments.get("expression", "")
