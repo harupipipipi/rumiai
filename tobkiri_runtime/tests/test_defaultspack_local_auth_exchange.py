@@ -9,6 +9,7 @@ from domain.safety.local_auth_exchange import (
     LocalAuthAudience,
     LocalAuthExchangeStore,
 )
+from domain.safety.local_auth_secret import configured_local_auth_environment_tokens
 
 
 def audience(**changes: str) -> LocalAuthAudience:
@@ -54,6 +55,19 @@ def test_exchange_is_single_use_and_session_is_bound(monkeypatch: pytest.MonkeyP
     )
     with pytest.raises(ValueError, match="already consumed"):
         store.redeem(str(issued["exchange_code"]), target)
+
+
+def test_legacy_launcher_tokens_are_deduplicated_at_safety_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "launcher-token")
+    monkeypatch.setenv("RUMI_API_TOKEN", "launcher-token")
+    monkeypatch.setenv("RUMI_TOKEN", "issued-token")
+
+    assert configured_local_auth_environment_tokens() == (
+        "launcher-token",
+        "issued-token",
+    )
 
 
 def test_wrong_audience_rejects_and_revokes_exchange() -> None:

@@ -2102,7 +2102,7 @@ test("API headers keep explicit Authorization over Viewer local auth", () => {
   }
 });
 
-test("local auth URL helper keeps child-window routes credential-free", () => {
+test("local auth URL helper keeps child-window routes clean", () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
   Object.defineProperty(globalThis, "window", {
@@ -2131,7 +2131,7 @@ test("local auth URL helper keeps child-window routes credential-free", () => {
   }
 });
 
-test("local auth URL helper rejects external, malformed, credential-bearing, and fragment destinations", () => {
+test("local auth URL helper rejects external, malformed, query-bearing, and fragment destinations", () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -2169,8 +2169,8 @@ test("native one-time exchange creates only a memory-bound local auth session", 
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const previousTauri = Object.getOwnPropertyDescriptor(globalThis, "__TAURI_INTERNALS__");
   const originalFetch = globalThis.fetch;
-  const legacySecret = "legacy-reusable-secret";
-  const values = new Map([["rumi-defaultspack-local-auth", legacySecret]]);
+  const legacyValue = "legacy-value";
+  const values = new Map([["rumi-defaultspack-local-auth", legacyValue]]);
   const storage = {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
@@ -2223,7 +2223,7 @@ test("native one-time exchange creates only a memory-bound local auth session", 
     assert.equal(headers.get("X-Rumi-Local-Auth-Process"), "launcher-42");
     assert.equal([...headers.values()].some((value) => value.includes("single-use-code")), false);
     assert.equal(values.has("rumi-defaultspack-local-auth"), false);
-    assert.doesNotMatch(redeemRequest, new RegExp(legacySecret));
+    assert.doesNotMatch(redeemRequest, new RegExp(legacyValue));
   } finally {
     resetDefaultspackLocalAuthForTests();
     globalThis.fetch = originalFetch;

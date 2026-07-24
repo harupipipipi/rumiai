@@ -1707,6 +1707,10 @@ def _websocket_auth_error(headers, client_address=None):
 
 
 def _configured_local_auth_tokens():
+    from domain.safety.local_auth_secret import (
+        configured_local_auth_environment_tokens,
+    )
+
     tokens = []
     seen = set()
 
@@ -1716,8 +1720,7 @@ def _configured_local_auth_tokens():
             seen.add(token)
             tokens.append(token)
 
-    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
-        value = os.environ.get(key, "").strip()
+    for value in configured_local_auth_environment_tokens():
         add_token(value)
     for path in _local_auth_token_file_candidates():
         try:

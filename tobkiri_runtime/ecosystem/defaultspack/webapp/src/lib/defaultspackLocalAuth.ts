@@ -56,7 +56,7 @@ function removeLegacyStorage(): void {
       const storage = globalThis[key];
       storage?.removeItem(LEGACY_LOCAL_AUTH_STORAGE_KEY);
     } catch {
-      // Sandboxed storage is treated as unavailable.
+      console.warn("Defaultspack local auth legacy storage cleanup was unavailable.");
     }
   }
 }
@@ -83,7 +83,7 @@ function stripLegacyCredentialsFromLocation(): void {
     try {
       window.history.replaceState(window.history.state, document.title, window.location.pathname);
     } catch {
-      // A malformed legacy route is left unauthenticated and never parsed for reuse.
+      console.warn("Defaultspack local auth removed an unreadable legacy route.");
     }
   }
 }
