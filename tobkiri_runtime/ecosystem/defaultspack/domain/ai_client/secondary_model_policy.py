@@ -151,7 +151,7 @@ def resolve_secondary_model_policy(
         selected, source = _select_requested_profile(requested_model_policy, runtime, profile_list)
 
     strict_validation = bool(requested_model_policy["strict_validation"])
-    if requested_model_policy["mode"] == "auto_route" or not strict_validation:
+    if not strict_validation:
         profile = profile_index.get(selected)
         failure_code = ""
         failure_reason = ""
@@ -162,6 +162,19 @@ def resolve_secondary_model_policy(
             requested_model_policy["required_capabilities"],
             catalog_is_authoritative=bool(profile_list),
         )
+    if failure_code and requested_model_policy["mode"] == "auto_route":
+        routed_profile = _first_available_profile(
+            profile_list,
+            requested_model_policy["required_capabilities"],
+            excluded_profile_id=selected,
+        )
+        if routed_profile is not None:
+            receipt["fallback_reason"] = f"{failure_code}:{failure_reason}"
+            selected = _profile_id(routed_profile)
+            profile = routed_profile
+            source = "canonical_catalog_fallback"
+            failure_code = ""
+            failure_reason = ""
     if failure_code:
         fallback = requested_model_policy["fallback_profile_id"]
         if fallback and requested_model_policy["on_unavailable"] == "fallback":
@@ -304,6 +317,27 @@ def _validate_profile(
             "missing capabilities: " + ", ".join(missing),
         )
     return profile, "", ""
+
+
+def _first_available_profile(
+    profiles: list[dict[str, Any]],
+    required_capabilities: list[str],
+    *,
+    excluded_profile_id: str = "",
+) -> dict[str, Any] | None:
+    for profile in profiles:
+        profile_id = _profile_id(profile)
+        if not profile_id or profile_id == excluded_profile_id:
+            continue
+        _, failure_code, _ = _validate_profile(
+            profile_id,
+            _profile_index([profile]),
+            required_capabilities,
+            catalog_is_authoritative=True,
+        )
+        if not failure_code:
+            return profile
+    return None
 
 
 def _resolve_thinking(

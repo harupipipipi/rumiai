@@ -136,6 +136,39 @@ def test_required_capabilities_are_checked_before_fixed_invocation() -> None:
     assert captured.value.code == "MODEL_CAPABILITY_UNSATISFIED"
 
 
+def test_auto_route_skips_unavailable_and_capability_incompatible_profiles() -> None:
+    receipt = resolve_secondary_model_policy(
+        {
+            "mode": "auto_route",
+            "required_capabilities": ["model.image_input"],
+        },
+        context={"preferred_model": "openai/missing-key"},
+        profiles=[
+            _profile("openai/missing-key", configured=False, supports_image_input=True),
+            _profile("local/text", supports_image_input=False),
+            _profile("local/vision", supports_image_input=True),
+        ],
+    )
+
+    assert receipt["resolved_profile_id"] == "local/vision"
+    assert receipt["resolution_source"] == "canonical_catalog_fallback"
+    assert receipt["fallback_reason"].startswith("MODEL_API_KEY_MISSING:")
+
+
+def test_auto_route_fails_before_invocation_when_no_profile_meets_requirements() -> None:
+    with pytest.raises(ModelPolicyResolutionError) as captured:
+        resolve_secondary_model_policy(
+            {
+                "mode": "auto_route",
+                "required_capabilities": ["model.audio_input"],
+            },
+            context={"preferred_model": "local/text"},
+            profiles=[_profile("local/text", supports_audio_input=False)],
+        )
+
+    assert captured.value.code == "MODEL_CAPABILITY_UNSATISFIED"
+
+
 def test_unsupported_fixed_thinking_level_fails_before_invocation() -> None:
     with pytest.raises(ModelPolicyResolutionError) as captured:
         resolve_secondary_model_policy(
