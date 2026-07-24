@@ -134,3 +134,74 @@ def test_concurrent_devices_cannot_both_commit_the_same_revision(scheduler):
 
     assert sorted(result[0] for result in outcomes) == ["conflict", "ok"]
     assert scheduler.get_schedule(schedule["id"])["revision"] == 2
+
+
+def test_failed_update_write_does_not_publish_an_in_memory_revision(scheduler, monkeypatch):
+    schedule = _create(scheduler, "calendar-create-1")
+    import domain.agent.scheduler as scheduler_module
+
+    def fail_save(_schedule):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(scheduler_module, "save_schedule", fail_save)
+    with pytest.raises(OSError, match="disk full"):
+        scheduler.update_schedule(
+            schedule["id"],
+            {
+                "name": "must not leak",
+                "expected_revision": 1,
+                "mutation_id": "calendar-update-failed",
+            },
+        )
+
+    cached = scheduler.get_schedule(schedule["id"])
+    assert cached["name"] == "Calendar: task"
+    assert cached["revision"] == 1
+    assert "calendar-update-failed" not in cached["settled_mutation_ids"]
+
+
+def test_failed_delete_write_keeps_the_schedule_visible(scheduler, monkeypatch):
+    schedule = _create(scheduler, "calendar-create-1")
+    import domain.agent.scheduler as scheduler_module
+
+    def fail_delete(_schedule_id):
+        raise OSError("access denied")
+
+    monkeypatch.setattr(scheduler_module, "store_delete", fail_delete)
+    with pytest.raises(OSError, match="access denied"):
+        scheduler.delete_schedule(schedule["id"], expected_revision=1)
+
+    assert scheduler.get_schedule(schedule["id"])["revision"] == 1
+
+
+def test_completed_delete_tombstone_blocks_late_execution_resurrection(scheduler):
+    schedule = _create(scheduler, "calendar-create-1")
+    schedule_id = schedule["id"]
+    import domain.agent.scheduler as scheduler_module
+
+    assert scheduler.delete_schedule(schedule_id, expected_revision=1) is True
+    assert scheduler._save_schedule_durable(schedule) is False
+    assert scheduler_module.load_schedule(schedule_id) is None
+
+    # Even if an already-running execution publishes its stale in-memory
+    # object after deletion, public reads and timer arming stay deleted.
+    with scheduler._lock:
+        scheduler._schedules[schedule_id] = schedule
+    scheduler._arm_timer(schedule_id)
+    assert scheduler.get_schedule(schedule_id) is None
+    assert all(item["id"] != schedule_id for item in scheduler.list_schedules())
+    assert schedule_id not in scheduler._timers
+
+
+def test_update_does_not_consume_the_callers_revision_envelope(scheduler):
+    schedule = _create(scheduler, "calendar-create-1")
+    updates = {
+        "name": "Calendar: updated",
+        "expected_revision": 1,
+        "mutation_id": "calendar-update-1",
+    }
+
+    scheduler.update_schedule(schedule["id"], updates)
+
+    assert updates["expected_revision"] == 1
+    assert updates["mutation_id"] == "calendar-update-1"
