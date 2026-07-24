@@ -67,4 +67,19 @@ test('OAuth and pack-selection errors remain distinct non-success outcomes', () 
   assert.equal(pack.kind, 'pack-selection-error');
   assert.equal(oauth.canRedirect, false);
   assert.equal(pack.canRedirect, false);
+  assert.match(oauth.description, /canceled/i);
+});
+
+test('OAuth query details are not reflected into the setup UI', () => {
+  const untrustedDetail = 'server_error token=secret-user-value';
+  const result = resolveSetupCompletion({
+    source: 'oauth',
+    accountConnected: false,
+    packSelected: false,
+    oauthError: untrustedDetail,
+  });
+
+  assert.equal(result.kind, 'oauth-error');
+  assert.doesNotMatch(result.description, /secret-user-value/);
+  assert.equal(result.description, 'Account connection failed. Try connecting again.');
 });

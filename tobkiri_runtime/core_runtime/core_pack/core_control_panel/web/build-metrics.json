@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-07-24T16:00:19.297Z",
+  "generated_at": "2026-07-24T23:23:16.164Z",
   "entry": "index.html",
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-BCXGoF_b.js",
-        "raw_bytes": 509997,
-        "gzip_bytes": 158552
+        "file": "assets/index-Dn9ykcs0.js",
+        "raw_bytes": 511610,
+        "gzip_bytes": 159685
       },
       {
         "file": "assets/preload-helper-Dnnhjc5W.js",
         "raw_bytes": 9482,
-        "gzip_bytes": 3754
+        "gzip_bytes": 3737
       }
     ],
-    "raw_bytes": 519479,
-    "gzip_bytes": 162306
+    "raw_bytes": 521092,
+    "gzip_bytes": 163422
   },
   "initial_css": {
     "files": [
@@ -31,14 +31,14 @@
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-BCXGoF_b.js",
-        "raw_bytes": 509997,
-        "gzip_bytes": 158552
+        "file": "assets/index-Dn9ykcs0.js",
+        "raw_bytes": 511610,
+        "gzip_bytes": 159685
       },
       {
         "file": "assets/preload-helper-Dnnhjc5W.js",
         "raw_bytes": 9482,
-        "gzip_bytes": 3754
+        "gzip_bytes": 3737
       },
       {
         "file": "assets/index-OKKThC1B.css",
@@ -46,632 +46,632 @@
         "gzip_bytes": 14849
       }
     ],
-    "raw_bytes": 603769,
-    "gzip_bytes": 177155
+    "raw_bytes": 605382,
+    "gzip_bytes": 178271
   },
   "all_javascript": {
     "files": [
       {
-        "file": "assets/Card-BsZeuciF.js",
+        "file": "assets/Card-lxOB-m_m.js",
         "raw_bytes": 2033,
-        "gzip_bytes": 798
+        "gzip_bytes": 799
       },
       {
-        "file": "assets/InlineLoadError-zofuPyy4.js",
+        "file": "assets/InlineLoadError-tZ5G5rwB.js",
         "raw_bytes": 972,
-        "gzip_bytes": 499
+        "gzip_bytes": 496
       },
       {
-        "file": "assets/Input-B5jNnGsh.js",
+        "file": "assets/Input-KuMyjcD1.js",
         "raw_bytes": 1321,
-        "gzip_bytes": 673
+        "gzip_bytes": 676
       },
       {
-        "file": "assets/boxes-BOQyObcW.js",
+        "file": "assets/boxes-BVhPdqYm.js",
         "raw_bytes": 840,
-        "gzip_bytes": 390
+        "gzip_bytes": 384
       },
       {
-        "file": "assets/braces-dycOJNmt.js",
+        "file": "assets/braces-riYiRthH.js",
         "raw_bytes": 268,
-        "gzip_bytes": 198
+        "gzip_bytes": 196
       },
       {
-        "file": "assets/chevron-down-Bs8gGOEq.js",
+        "file": "assets/chevron-down-CHmKjBvb.js",
         "raw_bytes": 117,
-        "gzip_bytes": 131
+        "gzip_bytes": 130
       },
       {
-        "file": "assets/database-CyRgr2vV.js",
+        "file": "assets/database-C9BwivHA.js",
         "raw_bytes": 232,
-        "gzip_bytes": 191
+        "gzip_bytes": 190
       },
       {
-        "file": "assets/earth-CqnO4us6.js",
+        "file": "assets/earth-BtkXjFVf.js",
         "raw_bytes": 382,
-        "gzip_bytes": 256
+        "gzip_bytes": 257
       },
       {
-        "file": "assets/js-yaml-CpEXTTE4.js",
-        "raw_bytes": 42799,
-        "gzip_bytes": 14048
+        "file": "assets/js-yaml-C_kuwb3r.js",
+        "raw_bytes": 42903,
+        "gzip_bytes": 13950
       },
       {
-        "file": "assets/package-B9TWtAcM.js",
+        "file": "assets/package-DiVhHwQj.js",
         "raw_bytes": 361,
-        "gzip_bytes": 251
+        "gzip_bytes": 246
       },
       {
-        "file": "assets/play-FB6ihPhR.js",
+        "file": "assets/play-DC-Xy5h_.js",
         "raw_bytes": 179,
-        "gzip_bytes": 172
+        "gzip_bytes": 168
       },
       {
         "file": "assets/preload-helper-Dnnhjc5W.js",
         "raw_bytes": 9482,
-        "gzip_bytes": 3754
+        "gzip_bytes": 3737
       },
       {
-        "file": "assets/sparkles-BPmQPNTA.js",
+        "file": "assets/sparkles-V2UG0CGY.js",
         "raw_bytes": 483,
-        "gzip_bytes": 271
+        "gzip_bytes": 269
       },
       {
-        "file": "assets/triangle-alert-CKDEG7RP.js",
+        "file": "assets/triangle-alert-fjoPwEX_.js",
         "raw_bytes": 254,
-        "gzip_bytes": 203
+        "gzip_bytes": 201
       },
       {
-        "file": "assets/workflow-SSo4m6gX.js",
+        "file": "assets/workflow-BY2sPK-z.js",
         "raw_bytes": 254,
-        "gzip_bytes": 195
+        "gzip_bytes": 192
       },
       {
-        "file": "assets/index-BCXGoF_b.js",
-        "raw_bytes": 509997,
-        "gzip_bytes": 158552
+        "file": "assets/index-Dn9ykcs0.js",
+        "raw_bytes": 511610,
+        "gzip_bytes": 159685
       },
       {
         "file": "assets/core-SwWLTXZB.js",
         "raw_bytes": 2706,
-        "gzip_bytes": 1054
+        "gzip_bytes": 1053
       },
       {
-        "file": "assets/advancedWarmup-BWv5WZhw.js",
+        "file": "assets/advancedWarmup-BSiQH51T.js",
         "raw_bytes": 4036,
-        "gzip_bytes": 1760
+        "gzip_bytes": 1743
       },
       {
-        "file": "assets/AiInputInspector-B9_dXRdA.js",
+        "file": "assets/AiInputInspector-DejbfLK2.js",
         "raw_bytes": 17620,
-        "gzip_bytes": 4971
+        "gzip_bytes": 4974
       },
       {
-        "file": "assets/ApiMap-BhFdzDUn.js",
+        "file": "assets/ApiMap-BqL8rF4L.js",
         "raw_bytes": 20563,
-        "gzip_bytes": 5775
+        "gzip_bytes": 5792
       },
       {
-        "file": "assets/Flows-Vx5xCLPT.js",
+        "file": "assets/Flows-l5nodb3i.js",
         "raw_bytes": 650790,
-        "gzip_bytes": 205813
+        "gzip_bytes": 206335
       },
       {
-        "file": "assets/GraphEditor-ZTmANv9v.js",
+        "file": "assets/GraphEditor-z0MvuvyK.js",
         "raw_bytes": 13308,
-        "gzip_bytes": 3770
+        "gzip_bytes": 3763
       },
       {
-        "file": "assets/NodeManager-C3iXGG3f.js",
+        "file": "assets/NodeManager-BYGiVU-x.js",
         "raw_bytes": 14239,
-        "gzip_bytes": 4324
+        "gzip_bytes": 4332
       },
       {
-        "file": "assets/PackDetail-sNot3dR2.js",
+        "file": "assets/PackDetail-Dk9XKT4p.js",
         "raw_bytes": 4509,
-        "gzip_bytes": 1429
+        "gzip_bytes": 1421
       },
       {
-        "file": "assets/Packs-BRyJctMY.js",
+        "file": "assets/Packs-YGmapP1F.js",
         "raw_bytes": 4801,
-        "gzip_bytes": 1862
+        "gzip_bytes": 1843
       },
       {
-        "file": "assets/ProfileGraphEditor-DatN5SIT.js",
+        "file": "assets/ProfileGraphEditor-AKaMPvcd.js",
         "raw_bytes": 34730,
-        "gzip_bytes": 9510
+        "gzip_bytes": 9548
       },
       {
-        "file": "assets/ProfileWorkspace-CXOnElco.js",
+        "file": "assets/ProfileWorkspace-DryG9tfO.js",
         "raw_bytes": 14048,
-        "gzip_bytes": 4084
+        "gzip_bytes": 4092
       },
       {
-        "file": "assets/Settings-XS4KoOwT.js",
+        "file": "assets/Settings-Bg1o7I5a.js",
         "raw_bytes": 22555,
-        "gzip_bytes": 5793
+        "gzip_bytes": 5820
       },
       {
-        "file": "assets/StartupProfiles-DV-Np3Hd.js",
+        "file": "assets/StartupProfiles-CHPK0DZQ.js",
         "raw_bytes": 200,
-        "gzip_bytes": 180
+        "gzip_bytes": 178
       }
     ],
-    "raw_bytes": 1374079,
-    "gzip_bytes": 430907
+    "raw_bytes": 1375796,
+    "gzip_bytes": 432470
   },
   "routes": {
     "src/pages/Packs.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-BRyJctMY.js",
+          "file": "assets/Packs-YGmapP1F.js",
           "raw_bytes": 4801,
-          "gzip_bytes": 1862
+          "gzip_bytes": 1843
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/package-B9TWtAcM.js",
+          "file": "assets/package-DiVhHwQj.js",
           "raw_bytes": 361,
-          "gzip_bytes": 251
+          "gzip_bytes": 246
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         },
         {
-          "file": "assets/Card-BsZeuciF.js",
+          "file": "assets/Card-lxOB-m_m.js",
           "raw_bytes": 2033,
-          "gzip_bytes": 798
+          "gzip_bytes": 799
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 529221,
-      "gzip_bytes": 166592
+      "raw_bytes": 530834,
+      "gzip_bytes": 167683
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-sNot3dR2.js",
+          "file": "assets/PackDetail-Dk9XKT4p.js",
           "raw_bytes": 4509,
-          "gzip_bytes": 1429
+          "gzip_bytes": 1421
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/play-FB6ihPhR.js",
+          "file": "assets/play-DC-Xy5h_.js",
           "raw_bytes": 179,
-          "gzip_bytes": 172
+          "gzip_bytes": 168
         },
         {
-          "file": "assets/Card-BsZeuciF.js",
+          "file": "assets/Card-lxOB-m_m.js",
           "raw_bytes": 2033,
-          "gzip_bytes": 798
+          "gzip_bytes": 799
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         }
       ],
-      "raw_bytes": 527426,
-      "gzip_bytes": 165407
+      "raw_bytes": 529039,
+      "gzip_bytes": 166507
     },
     "src/pages/NodeManager.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/NodeManager-C3iXGG3f.js",
+          "file": "assets/NodeManager-BYGiVU-x.js",
           "raw_bytes": 14239,
-          "gzip_bytes": 4324
+          "gzip_bytes": 4332
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/boxes-BOQyObcW.js",
+          "file": "assets/boxes-BVhPdqYm.js",
           "raw_bytes": 840,
-          "gzip_bytes": 390
+          "gzip_bytes": 384
         },
         {
-          "file": "assets/earth-CqnO4us6.js",
+          "file": "assets/earth-BtkXjFVf.js",
           "raw_bytes": 382,
-          "gzip_bytes": 256
+          "gzip_bytes": 257
         },
         {
-          "file": "assets/package-B9TWtAcM.js",
+          "file": "assets/package-DiVhHwQj.js",
           "raw_bytes": 361,
-          "gzip_bytes": 251
+          "gzip_bytes": 246
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         }
       ],
-      "raw_bytes": 536527,
-      "gzip_bytes": 168229
+      "raw_bytes": 538140,
+      "gzip_bytes": 169338
     },
     "src/pages/GraphEditor.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/GraphEditor-ZTmANv9v.js",
+          "file": "assets/GraphEditor-z0MvuvyK.js",
           "raw_bytes": 13308,
-          "gzip_bytes": 3770
+          "gzip_bytes": 3763
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/braces-dycOJNmt.js",
+          "file": "assets/braces-riYiRthH.js",
           "raw_bytes": 268,
-          "gzip_bytes": 198
+          "gzip_bytes": 196
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         }
       ],
-      "raw_bytes": 534281,
-      "gzip_bytes": 166976
+      "raw_bytes": 535894,
+      "gzip_bytes": 168078
     },
     "src/pages/ProfileGraphEditor.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ProfileGraphEditor-DatN5SIT.js",
+          "file": "assets/ProfileGraphEditor-AKaMPvcd.js",
           "raw_bytes": 34730,
-          "gzip_bytes": 9510
+          "gzip_bytes": 9548
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/boxes-BOQyObcW.js",
+          "file": "assets/boxes-BVhPdqYm.js",
           "raw_bytes": 840,
-          "gzip_bytes": 390
+          "gzip_bytes": 384
         },
         {
-          "file": "assets/braces-dycOJNmt.js",
+          "file": "assets/braces-riYiRthH.js",
           "raw_bytes": 268,
-          "gzip_bytes": 198
+          "gzip_bytes": 196
         },
         {
-          "file": "assets/database-CyRgr2vV.js",
+          "file": "assets/database-C9BwivHA.js",
           "raw_bytes": 232,
-          "gzip_bytes": 191
+          "gzip_bytes": 190
         },
         {
-          "file": "assets/earth-CqnO4us6.js",
+          "file": "assets/earth-BtkXjFVf.js",
           "raw_bytes": 382,
-          "gzip_bytes": 256
+          "gzip_bytes": 257
         },
         {
-          "file": "assets/play-FB6ihPhR.js",
+          "file": "assets/play-DC-Xy5h_.js",
           "raw_bytes": 179,
-          "gzip_bytes": 172
+          "gzip_bytes": 168
         },
         {
-          "file": "assets/sparkles-BPmQPNTA.js",
+          "file": "assets/sparkles-V2UG0CGY.js",
           "raw_bytes": 483,
-          "gzip_bytes": 271
+          "gzip_bytes": 269
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         },
         {
-          "file": "assets/workflow-SSo4m6gX.js",
+          "file": "assets/workflow-BY2sPK-z.js",
           "raw_bytes": 254,
-          "gzip_bytes": 195
+          "gzip_bytes": 192
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 558422,
-      "gzip_bytes": 174365
+      "raw_bytes": 560035,
+      "gzip_bytes": 175503
     },
     "src/pages/AiInputInspector.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/AiInputInspector-B9_dXRdA.js",
+          "file": "assets/AiInputInspector-DejbfLK2.js",
           "raw_bytes": 17620,
-          "gzip_bytes": 4971
+          "gzip_bytes": 4974
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/sparkles-BPmQPNTA.js",
+          "file": "assets/sparkles-V2UG0CGY.js",
           "raw_bytes": 483,
-          "gzip_bytes": 271
+          "gzip_bytes": 269
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 538903,
-      "gzip_bytes": 168221
+      "raw_bytes": 540516,
+      "gzip_bytes": 169341
     },
     "src/pages/ApiMap.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ApiMap-BhFdzDUn.js",
+          "file": "assets/ApiMap-BqL8rF4L.js",
           "raw_bytes": 20563,
-          "gzip_bytes": 5775
+          "gzip_bytes": 5792
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/boxes-BOQyObcW.js",
+          "file": "assets/boxes-BVhPdqYm.js",
           "raw_bytes": 840,
-          "gzip_bytes": 390
+          "gzip_bytes": 384
         },
         {
-          "file": "assets/braces-dycOJNmt.js",
+          "file": "assets/braces-riYiRthH.js",
           "raw_bytes": 268,
-          "gzip_bytes": 198
+          "gzip_bytes": 196
         },
         {
-          "file": "assets/workflow-SSo4m6gX.js",
+          "file": "assets/workflow-BY2sPK-z.js",
           "raw_bytes": 254,
-          "gzip_bytes": 195
+          "gzip_bytes": 192
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 542725,
-      "gzip_bytes": 169537
+      "raw_bytes": 544338,
+      "gzip_bytes": 170662
     },
     "src/pages/ProfileWorkspace.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ProfileWorkspace-CXOnElco.js",
+          "file": "assets/ProfileWorkspace-DryG9tfO.js",
           "raw_bytes": 14048,
-          "gzip_bytes": 4084
+          "gzip_bytes": 4092
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/js-yaml-CpEXTTE4.js",
-          "raw_bytes": 42799,
-          "gzip_bytes": 14048
+          "file": "assets/js-yaml-C_kuwb3r.js",
+          "raw_bytes": 42903,
+          "gzip_bytes": 13950
         },
         {
-          "file": "assets/database-CyRgr2vV.js",
+          "file": "assets/database-C9BwivHA.js",
           "raw_bytes": 232,
-          "gzip_bytes": 191
+          "gzip_bytes": 190
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         }
       ],
-      "raw_bytes": 577784,
-      "gzip_bytes": 181331
+      "raw_bytes": 579501,
+      "gzip_bytes": 182351
     },
     "src/pages/StartupProfiles.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/StartupProfiles-DV-Np3Hd.js",
+          "file": "assets/StartupProfiles-CHPK0DZQ.js",
           "raw_bytes": 200,
-          "gzip_bytes": 180
+          "gzip_bytes": 178
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         }
       ],
-      "raw_bytes": 519679,
-      "gzip_bytes": 162486
+      "raw_bytes": 521292,
+      "gzip_bytes": 163600
     },
     "src/pages/Flows.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Flows-Vx5xCLPT.js",
+          "file": "assets/Flows-l5nodb3i.js",
           "raw_bytes": 650790,
-          "gzip_bytes": 205813
+          "gzip_bytes": 206335
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/js-yaml-CpEXTTE4.js",
-          "raw_bytes": 42799,
-          "gzip_bytes": 14048
+          "file": "assets/js-yaml-C_kuwb3r.js",
+          "raw_bytes": 42903,
+          "gzip_bytes": 13950
         },
         {
-          "file": "assets/chevron-down-Bs8gGOEq.js",
+          "file": "assets/chevron-down-CHmKjBvb.js",
           "raw_bytes": 117,
-          "gzip_bytes": 131
+          "gzip_bytes": 130
         },
         {
-          "file": "assets/play-FB6ihPhR.js",
+          "file": "assets/play-DC-Xy5h_.js",
           "raw_bytes": 179,
-          "gzip_bytes": 172
+          "gzip_bytes": 168
         },
         {
-          "file": "assets/workflow-SSo4m6gX.js",
+          "file": "assets/workflow-BY2sPK-z.js",
           "raw_bytes": 254,
-          "gzip_bytes": 195
+          "gzip_bytes": 192
         },
         {
-          "file": "assets/InlineLoadError-zofuPyy4.js",
+          "file": "assets/InlineLoadError-tZ5G5rwB.js",
           "raw_bytes": 972,
-          "gzip_bytes": 499
+          "gzip_bytes": 496
         },
         {
-          "file": "assets/triangle-alert-CKDEG7RP.js",
+          "file": "assets/triangle-alert-fjoPwEX_.js",
           "raw_bytes": 254,
-          "gzip_bytes": 203
+          "gzip_bytes": 201
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 1216165,
-      "gzip_bytes": 384040
+      "raw_bytes": 1217882,
+      "gzip_bytes": 385570
     },
     "src/pages/Settings.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Settings-XS4KoOwT.js",
+          "file": "assets/Settings-Bg1o7I5a.js",
           "raw_bytes": 22555,
-          "gzip_bytes": 5793
+          "gzip_bytes": 5820
         },
         {
           "file": "assets/preload-helper-Dnnhjc5W.js",
           "raw_bytes": 9482,
-          "gzip_bytes": 3754
+          "gzip_bytes": 3737
         },
         {
-          "file": "assets/index-BCXGoF_b.js",
-          "raw_bytes": 509997,
-          "gzip_bytes": 158552
+          "file": "assets/index-Dn9ykcs0.js",
+          "raw_bytes": 511610,
+          "gzip_bytes": 159685
         },
         {
-          "file": "assets/chevron-down-Bs8gGOEq.js",
+          "file": "assets/chevron-down-CHmKjBvb.js",
           "raw_bytes": 117,
-          "gzip_bytes": 131
+          "gzip_bytes": 130
         },
         {
-          "file": "assets/Card-BsZeuciF.js",
+          "file": "assets/Card-lxOB-m_m.js",
           "raw_bytes": 2033,
-          "gzip_bytes": 798
+          "gzip_bytes": 799
         },
         {
-          "file": "assets/Input-B5jNnGsh.js",
+          "file": "assets/Input-KuMyjcD1.js",
           "raw_bytes": 1321,
-          "gzip_bytes": 673
+          "gzip_bytes": 676
         }
       ],
-      "raw_bytes": 545505,
-      "gzip_bytes": 169701
+      "raw_bytes": 547118,
+      "gzip_bytes": 170847
     }
   }
 }

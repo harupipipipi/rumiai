@@ -16,6 +16,12 @@ test('panel setup does not bypass setup-pack installation', () => {
   );
 });
 
+test('setup-pack return uses a pack-specific completion outcome', () => {
+  assert.match(source, /source:\s*'setup-pack'/);
+  assert.match(source, /data-setup-outcome=\{completion\.kind\}/);
+  assert.doesNotMatch(source, /setLinked\(/);
+});
+
 test('panel entry shows Home first and verifies the setup pack in the background', () => {
   assert.match(appSource, /import \{ hasSelectedSetupPack \} from '@\/src\/lib\/setupPacks'/);
   assert.match(appSource, /requestIdleCallback/);

@@ -13,6 +13,14 @@ export type SetupCompletion = {
   toast: string | null;
 };
 
+function oauthFailureDescription(value: string): string {
+  const code = value.trim().toLowerCase();
+  if (code === 'access_denied' || code === 'cancelled' || code === 'canceled') {
+    return 'Account connection was canceled. No account changes were applied.';
+  }
+  return 'Account connection failed. Try connecting again.';
+}
+
 export function resolveSetupCompletion({
   source,
   accountConnected,
@@ -29,7 +37,7 @@ export function resolveSetupCompletion({
       kind: 'oauth-error',
       canRedirect: false,
       title: 'Account connection failed',
-      description: `OAuth error: ${oauthError}`,
+      description: oauthFailureDescription(oauthError),
       toast: null,
     };
   }
