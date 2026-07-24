@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState, type ReactNode} from 'react';
-import {useSearchParams} from 'react-router-dom';
+import {useSearchParams} from 'react-router';
 import {BrainCircuit, Eye, GitBranch, RefreshCw, Save, Scissors, Sparkles, type LucideIcon} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';

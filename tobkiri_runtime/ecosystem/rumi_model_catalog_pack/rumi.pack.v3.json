@@ -31,11 +31,11 @@
       "loader": "python",
       "module": "ecosystem.rumi_model_catalog_pack.runtime.catalog",
       "symbol": "create_model_catalog_operation",
-      "artifact_hash": "sha256:cd0cfc5faac6850a77519564be46786ba8bd1004d5ec0156a261e2adeccaed68"
+      "artifact_hash": "sha256:12a158af6ea6837fc883db5ddee9d5aa5598f105ff64adcb6ebd0414f30a6a88"
     }
   ],
   "resources": [
-    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:b9a7842d2c96ccb4463470f4baba2f242f10e472f7155334ecbf8e821e5a1315"}
+    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:119a72a75968f56f12c3422ea07e1f2ef4860d7e03dfdd23520c4b9cdbb51788"}
   ],
   "storage": [
     {
@@ -50,7 +50,7 @@
     {"capability": "ai.model.catalog.read", "access": "read", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:7f351fa11d9ee9508be95e2523f61decf89bdd31eba35d1f4e8c92222583b442",
+    "content_hash": "sha256:94db7bf6697b2468ff3b6bc6f1ab720c826677d6394b23d2466bc9d69dba80ed",
     "build_identity": "rumi-model-catalog-pack:2.0.0",
     "trust_class": "local",
     "signature": null

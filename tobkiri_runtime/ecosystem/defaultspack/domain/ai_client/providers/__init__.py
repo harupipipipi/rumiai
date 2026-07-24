@@ -2123,7 +2123,14 @@ def detect_rumi_provider(client):
 
 
 def get_best_model_for_provider(name, use_case="chat"):
-    """Return the preferred default model id for the provider."""
+    """Return a preferred model only for internal pseudo-providers.
+
+    External provider inventories are account- and connection-scoped. Their
+    checked-in extension manifests may describe routing preferences, but those
+    references are not proof that a model is currently visible or invokable.
+    """
+    if name not in {"stub", "rumi"}:
+        return None
     try:
         registry = get_extension_registry(force_reload=False)
         best = registry.llm().best_model(name, use_case=use_case)
@@ -2138,6 +2145,4 @@ def get_best_model_for_provider(name, use_case="chat"):
                 return str(provider_manifest["default_model"])
     except Exception:
         pass
-    # A stale preferred external model is worse than no default: model
-    # selection must be based on the connected provider's live inventory.
-    return _BEST_MODEL_BY_PROVIDER.get(name) if name in {"stub", "rumi"} else None
+    return _BEST_MODEL_BY_PROVIDER.get(name)
