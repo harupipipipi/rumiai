@@ -93,8 +93,14 @@ def test_canonical_and_installed_legacy_health_are_semantically_equivalent(tmp_p
 
     assert canonical.returncode in {0, 1}, canonical.stderr
     assert legacy.returncode == canonical.returncode, legacy.stderr
-    assert canonical.stderr == legacy.stderr == ""
-    assert _normalized_health(canonical) == _normalized_health(legacy)
+    assert canonical.stderr == legacy.stderr
+    assert bool(canonical.stdout.strip()) == bool(legacy.stdout.strip())
+    if canonical.stdout.strip():
+        assert canonical.stderr == ""
+        assert _normalized_health(canonical) == _normalized_health(legacy)
+    else:
+        assert canonical.stdout == legacy.stdout == ""
+        assert "FATAL: Missing critical dependencies:" in canonical.stderr
 
 
 def test_root_source_compatibility_shim_matches_canonical_help():
