@@ -15,6 +15,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.frontend_settings_store import (  # noqa: E402
     FrontendSettingsCorruptError,
+    FrontendSettingsIdempotencyConflict,
+    FrontendSettingsRevisionConflict,
     FrontendSettingsStore,
     REVISION_KEY,
 )
@@ -70,6 +72,39 @@ def test_registry_and_model_service_updates_share_one_transaction(
     assert saved[REVISION_KEY] == 2
 
 
+def test_attachment_secret_patterns_have_a_user_facing_setting(tmp_path: Path) -> None:
+    registry = FrontendRegistry(pack_root=tmp_path)
+    sections = registry._settings_sections([], [], template_catalog={}, lightweight=True)
+    privacy = next(section for section in sections if section["id"] == "privacy_security")
+    field = next(
+        field for field in privacy["fields"] if field["id"] == "attachment_secret_patterns"
+    )
+
+    assert field["type"] == "textarea"
+    assert field["default"] == ""
+    assert registry._default_settings()["privacy_security"]["attachment_secret_patterns"] == ""
+
+
+def test_attachment_secret_patterns_are_bounded_deduplicated_literals(tmp_path: Path) -> None:
+    registry = FrontendRegistry(pack_root=tmp_path)
+    values = registry._default_settings()
+    values["privacy_security"]["attachment_secret_patterns"] = [
+        "  Customer-Marker  ",
+        "customer-marker",
+        "xy",
+        "x" * 129,
+        *[f"pattern-{index}" for index in range(40)],
+    ]
+
+    refreshed = registry._refresh_derived_settings(values)
+    patterns = refreshed["privacy_security"]["attachment_secret_patterns"].splitlines()
+
+    assert patterns[0] == "Customer-Marker"
+    assert len(patterns) == 32
+    assert "xy" not in patterns
+    assert "x" * 129 not in patterns
+
+
 def test_concurrent_process_updates_preserve_disjoint_keys(tmp_path: Path) -> None:
     path = tmp_path / "frontend_settings.json"
     context = multiprocessing.get_context("spawn")
@@ -108,6 +143,99 @@ def test_reader_never_observes_partial_json(tmp_path: Path) -> None:
         futures.extend(pool.submit(read, index) for index in range(150))
         for future in futures:
             future.result()
+
+
+def test_state_mutation_is_revisioned_and_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "frontend_settings.json"
+    store = FrontendSettingsStore(path)
+
+    def enable(current):
+        current["models"] = {"deepthink_enabled": True}
+        return current, {"enabled": True}
+
+    first = store.mutate_state(
+        "defaultspack:models.deepthink_enabled",
+        enable,
+        expected_revision=0,
+        idempotency_key="deepthink-request-1",
+        request_fingerprint="enabled:true",
+    )
+    replay = store.mutate_state(
+        "defaultspack:models.deepthink_enabled",
+        enable,
+        expected_revision=0,
+        idempotency_key="deepthink-request-1",
+        request_fingerprint="enabled:true",
+    )
+
+    assert first["revision"] == 1
+    assert first["idempotent_replay"] is False
+    assert replay["revision"] == 1
+    assert replay["idempotent_replay"] is True
+    assert store.state_revision("defaultspack:models.deepthink_enabled") == 1
+
+
+def test_state_mutation_rejects_stale_revision_and_key_reuse(tmp_path: Path) -> None:
+    store = FrontendSettingsStore(tmp_path / "frontend_settings.json")
+
+    def enable(current):
+        current["models"] = {"deepthink_enabled": True}
+        return current, {"enabled": True}
+
+    store.mutate_state(
+        "defaultspack:models.deepthink_enabled",
+        enable,
+        idempotency_key="deepthink-request-1",
+        request_fingerprint="enabled:true",
+    )
+
+    with pytest.raises(FrontendSettingsRevisionConflict):
+        store.mutate_state(
+            "defaultspack:models.deepthink_enabled",
+            enable,
+            expected_revision=0,
+        )
+    with pytest.raises(FrontendSettingsIdempotencyConflict):
+        store.mutate_state(
+            "defaultspack:models.deepthink_enabled",
+            enable,
+            idempotency_key="deepthink-request-1",
+            request_fingerprint="enabled:false",
+        )
+
+
+def test_settings_endpoint_field_patch_preserves_unrelated_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_path = tmp_path / "frontend_settings.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", str(settings_path))
+    store = FrontendSettingsStore(settings_path)
+    store.mutate_state(
+        "defaultspack:models.deepthink_enabled",
+        lambda current: (
+            {
+                **current,
+                "models": {"deepthink_enabled": True},
+                "theme": {"font_size": 14},
+            },
+            {"enabled": True},
+        ),
+    )
+
+    from blocks.ui.settings import run
+
+    result = run(
+        {
+            "_method": "PUT",
+            "patches": [{"section": "theme", "field": "font_size", "value": 16}],
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["values"]["models"]["deepthink_enabled"] is True
+    assert result["data"]["values"]["theme"]["font_size"] == 16
+    assert store.state_revision("defaultspack:models.deepthink_enabled") == 1
 
 
 def test_corrupt_primary_recovers_from_valid_backup(tmp_path: Path) -> None:

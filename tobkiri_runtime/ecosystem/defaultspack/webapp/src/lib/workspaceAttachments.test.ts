@@ -16,6 +16,18 @@ test("workspaceFileToAttachment creates capped text workspace attachments", () =
   assert.equal(attachment.truncated, true);
 });
 
+test("workspace attachments use the same secret review boundary", () => {
+  const secret = ["xox", "b-123456789012-abcdefghijklmnopqrstuv"].join("");
+  const attachment = workspaceFileToAttachment(
+    "config/secrets.txt",
+    `SLACK_TOKEN=${secret}`,
+  );
+
+  assert.equal(attachment.source, "workspace");
+  assert.equal(attachment.securityReview?.status, "required");
+  assert.equal(JSON.stringify(attachment.securityReview).includes(secret), false);
+});
+
 test("hasWorkspaceAttachment detects existing workspace paths", () => {
   const attachment = workspaceFileToAttachment("docs/notes.md", "hello");
 

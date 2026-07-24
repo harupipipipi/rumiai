@@ -14,6 +14,17 @@ test("fileToAttachment reads text-like files and preserves truncate limit", asyn
   assert.match(buildAttachmentSnippet(attachment), /添付ファイル: notes\.md/);
 });
 
+test("picker and drop file ingestion marks secrets for explicit review without copying values", async () => {
+  const secret = "ghp_abcdefghijklmnopqrstuvwxyz123456";
+  const attachment = await fileToAttachment(
+    new File([`GITHUB_TOKEN=${secret}`], ".env", { type: "text/plain" }),
+  );
+
+  assert.equal(attachment.securityReview?.status, "required");
+  assert.ok(attachment.securityReview?.findings.some((finding) => finding.kind === "provider_token"));
+  assert.equal(JSON.stringify(attachment.securityReview).includes(secret), false);
+});
+
 test("fileToAttachment does not read binary files", async () => {
   const binaryFile = new File([new Uint8Array([0, 1, 2, 3])], "archive.zip", { type: "application/zip" });
   let textCalled = false;

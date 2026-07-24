@@ -107,8 +107,55 @@ test("flags hidden files, MIME-extension mismatches, and high-entropy candidates
   });
   assert.ok(spoofed.findings.some((finding) => finding.kind === "mime_mismatch"));
 
+  const reverseSpoofed = scanAttachmentSecurity({
+    ...attachment("notes.txt", "plain-looking"),
+    type: "application/octet-stream",
+  });
+  assert.ok(reverseSpoofed.findings.some((finding) => finding.kind === "mime_mismatch"));
+
+  const binaryControls = scanAttachmentSecurity(attachment("notes.txt", "prefix\u0000suffix"));
+  assert.ok(binaryControls.findings.some((finding) => finding.kind === "mime_mismatch"));
+
   const entropy = scanAttachmentSecurity(attachment("notes.txt", "q7Vn2Lk9Pz4Xa8Mc1Re6Ty3Ui5Oo0WbH"));
   assert.ok(entropy.findings.some((finding) => finding.kind === "high_entropy_candidate"));
+});
+
+test("detects provider-specific credentials beyond GitHub and generic sk tokens", () => {
+  const providerTokens = [
+    ["AI", "zaSyA1234567890_abcdefghijklmnopqr"].join(""),
+    ["xox", "b-123456789012-abcdefghijklmnopqrstuv"].join(""),
+    ["npm", "_abcdefghijklmnopqrstuvwxyz123456"].join(""),
+    ["sk_", "live_abcdefghijklmnopqrstuvwxyz"].join(""),
+    ["hf", "_abcdefghijklmnopqrstuvwxyz123456"].join(""),
+  ];
+  for (const token of providerTokens) {
+    const review = scanAttachmentSecurity(attachment("notes.txt", token));
+    assert.ok(review.findings.some((finding) => finding.kind === "provider_token"), token.slice(0, 4));
+    assert.equal(JSON.stringify(review).includes(token), false);
+  }
+});
+
+test("fingerprint changes when reviewed metadata or a data URL changes", () => {
+  const original = {
+    id: "image",
+    name: "scan.png",
+    size: 4,
+    type: "image/png",
+    dataUrl: "data:image/png;base64,AAAA",
+    truncated: false,
+    source: "local_file" as const,
+    sourcePath: "trusted/scan.png",
+  };
+  const fingerprint = scanAttachmentSecurity(original).fingerprint;
+  for (const changed of [
+    { ...original, name: "other.png" },
+    { ...original, size: 5 },
+    { ...original, type: "application/octet-stream" },
+    { ...original, sourcePath: "other/scan.png" },
+    { ...original, dataUrl: "data:image/png;base64,BBBB" },
+  ]) {
+    assert.notEqual(scanAttachmentSecurity(changed).fingerprint, fingerprint);
+  }
 });
 
 test("matches bounded user-configured literal patterns without exposing their values in findings", () => {
