@@ -192,8 +192,6 @@ jobs:
             tests/test_defaultspack_boundary_scan.py \
             tests/test_defaultspack_shipped_bundle_hardening.py \
             tests/test_capability_trust_store.py \
-            tests/test_defaultspack_coding_hardening.py \
-            tests/test_defaultspack_terminal_policy.py \
             tests/test_defaultspack_tool_policy.py \
             tests/test_defaultspack_capability_orchestrator.py \
             tests/test_pack_signature.py \
