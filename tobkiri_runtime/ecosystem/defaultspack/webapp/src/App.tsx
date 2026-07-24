@@ -48,7 +48,7 @@ import { ConversationShareLanding, ImportedConversationNotice } from "./pages/Co
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import { applyCommandStateSnapshots, createCommandInvocationId } from "./lib/commandState";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import {
@@ -65,7 +65,7 @@ import {
 } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
-import { browserApprovalViewModel, runtimeApprovalViewModel } from "./lib/approvalPresentation";
+import { browserApprovalViewModel, runtimeApprovalViewModel, type ApprovalViewModel } from "./lib/approvalPresentation";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
@@ -1664,6 +1664,46 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
+type PendingCommandApproval = {
+  requestId: string;
+  invocationId: string;
+  commandRef: string;
+  command: ComposerCommandItem;
+  args: Record<string, unknown>;
+  conversationId: string | null;
+  mode: ComposerCommandMode;
+  approvalKind: "authority" | "coding";
+  authorityRequestId?: string;
+  authorityToken?: string;
+  codingToken?: string;
+};
+
+function commandApprovalViewModel(
+  pending: PendingCommandApproval,
+): ApprovalViewModel {
+  return {
+    id: pending.requestId,
+    source: pending.approvalKind === "authority" ? "authority" : "coding",
+    title: `「${pending.command.label}」を実行`,
+    consequence: `${pending.command.label} はローカル環境を変更する可能性があります。`,
+    reason: "選択したコマンドを続行するために明示的な許可が必要です。",
+    target: pending.commandRef,
+    riskExplanation: "データの変更・送信を伴う可能性があります。対象と影響を確認してください。",
+    scope: "この1回のコマンド実行のみ",
+    persistence: "承認トークンは再利用できません。",
+    auditText: "判断、コマンド、引数ハッシュはローカルの監査記録に残ります。",
+    technicalDetails: {
+      request_id: pending.requestId,
+      invocation_id: pending.invocationId,
+      command_ref: pending.commandRef,
+      approved_arguments: pending.args,
+      cwd: "current workspace",
+      impact: pending.command.description || pending.command.label,
+    },
+    status: "pending",
+  };
+}
+
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
@@ -2431,6 +2471,7 @@ function ChatApp() {
   const [desktopSystemInfo, setDesktopSystemInfo] = useState<DesktopSystemInfo | null>(null);
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [usesResolvedCommandProtocol, setUsesResolvedCommandProtocol] = useState(false);
+  const [commandProtocolInfo, setCommandProtocolInfo] = useState<ResolvedCommandCatalog | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const widgetContext = useMemo(
@@ -2486,6 +2527,8 @@ function ChatApp() {
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [settledBrowserApprovalKeys, setSettledBrowserApprovalKeys] = useState<string[]>([]);
+  const [pendingCommandApproval, setPendingCommandApproval] = useState<PendingCommandApproval | null>(null);
+  const [commandProgressEvents, setCommandProgressEvents] = useState<Array<Record<string, unknown>>>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
   const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
@@ -2920,6 +2963,50 @@ function ChatApp() {
           registeredSlashCommandsFromSettings(settingsValues.commands?.registered_slash_commands),
         )
   ), [commandCatalog, settingsValues.commands?.registered_slash_commands, usesResolvedCommandProtocol]);
+
+  useEffect(() => {
+    if (!usesResolvedCommandProtocol || pendingCommandApproval || effectiveCommandCatalog.length === 0) return;
+    let cancelled = false;
+    void api.pendingCommandApprovals()
+      .then(({ pending_approvals: approvals }) => {
+        if (cancelled || approvals.length === 0) return;
+        const pending = approvals[0];
+        const result = pending.result;
+        const requestId = result?.approval?.request_id ?? pending.approval_request_id;
+        const commandRef = result?.command_ref;
+        const details = result?.approval?.details;
+        if (!requestId || !commandRef || !details) return;
+        const command = effectiveCommandCatalog.find((candidate) => (
+          candidate.canonical_id === commandRef
+          || candidate.id === commandRef
+          || candidate.name === commandRef
+        ));
+        if (!command) return;
+        const restoredMode = details.mode;
+        setPendingCommandApproval({
+          requestId,
+          invocationId: pending.invocation_id,
+          commandRef,
+          command,
+          args: details.approved_arguments ?? details.args ?? {},
+          conversationId: typeof details.conversation_id === "string"
+            ? details.conversation_id
+            : null,
+          mode: restoredMode === "chat" || restoredMode === "coding" || restoredMode === "agent"
+            ? restoredMode
+            : mode as ComposerCommandMode,
+          approvalKind: result?.approval?.kind === "authority"
+            ? "authority"
+            : "coding",
+        });
+      })
+      .catch((restoreError) => {
+        if (!cancelled) console.error("Failed to restore pending command approval", restoreError);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCommandCatalog, mode, pendingCommandApproval, usesResolvedCommandProtocol]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -3376,6 +3463,7 @@ function ChatApp() {
       ? commandsResult.value
       : null;
     const resolvedProtocol = resolvedCommandsResponse?.protocol ?? null;
+    setCommandProtocolInfo(resolvedProtocol);
     setUsesResolvedCommandProtocol(Boolean(resolvedProtocol));
     setCommandCatalog(
       resolvedProtocol
@@ -4472,6 +4560,130 @@ function ChatApp() {
         handleModeChange("coding");
         if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
         return;
+      case "open_history":
+        setIsHistoryMinimized(false);
+        return;
+      case "export_conversation":
+        if (!activeConversationId) {
+          setError("エクスポートする会話がありません。");
+          return;
+        }
+        void handlePanelAction(
+          {} as SidebarItem,
+          { id: "conversation.export" } as SidebarAction,
+        );
+        return;
+      case "fork_conversation":
+        if (!activeConversationId) {
+          setError("forkする会話がありません。");
+          return;
+        }
+        void api.createConversation({
+          model: preferredModel || "stub/default",
+          parent_conversation_id: activeConversationId,
+          metadata: { forked_from: activeConversationId },
+        }).then((conversation) => {
+          setActiveConversationId(conversation.id);
+          void loadConversation(conversation.id, false);
+          void refreshConversations(conversation.id);
+        }).catch((forkError) => {
+          setError(forkError instanceof Error ? forkError.message : "会話のforkに失敗しました。");
+        });
+        return;
+      case "resume_conversation":
+        if (activeConversationId) {
+          void loadConversation(activeConversationId, false);
+          return;
+        }
+        setIsHistoryMinimized(false);
+        setError("履歴から再開する会話を選択してください。");
+        return;
+      case "rename_conversation": {
+        const title = String(args.title ?? "").replace(/\s+/g, " ").trim();
+        if (!activeConversationId || !title) {
+          setError("現在の会話と新しいtitleを指定してください。");
+          return;
+        }
+        void api.updateConversation(activeConversationId, { title }).then((conversation) => {
+          setActiveConversation(conversation);
+          void refreshConversations(conversation.id);
+        }).catch((renameError) => {
+          setError(renameError instanceof Error ? renameError.message : "会話名の変更に失敗しました。");
+        });
+        return;
+      }
+      case "open_memory_inspector":
+        setActiveSidebarItemId("__context_usage__");
+        setSidebarSelectionTick((value) => value + 1);
+        return;
+      case "open_approvals":
+        setRequestedSettingsSectionId("permissions");
+        setIsSettingsOpen(true);
+        return;
+      case "open_debug":
+      case "open_logs":
+      case "show_raw":
+        pushActionPreview(
+          { id: `command.${action}`, label: command.label, icon: "terminal" },
+          command.label,
+          action === "show_raw"
+            ? activeConversation
+            : {
+                mode,
+                conversation_id: activeConversationId,
+                pending_request: activeConversationId ? pendingRequests[activeConversationId] ?? null : null,
+                error,
+              },
+        );
+        return;
+      case "run_doctor":
+        void api.health().then((health) => {
+          pushActionPreview(
+            { id: "command.doctor", label: "Doctor", icon: "activity" },
+            "Tobkiri diagnostics",
+            health,
+          );
+        }).catch((doctorError) => {
+          setError(doctorError instanceof Error ? doctorError.message : "diagnosticsの実行に失敗しました。");
+        });
+        return;
+      case "open_plugins":
+      case "open_mcp":
+      case "open_skills":
+      case "open_hooks": {
+        const keyword = action.replace(/^open_/, "").replace(/s$/, "");
+        const panel = composerExtensions.find((item) => (
+          `${item.id} ${item.label}`.toLowerCase().includes(keyword)
+        ));
+        if (panel) {
+          setActiveSidebarItemId(panel.id);
+          setSidebarSelectionTick((value) => value + 1);
+          return;
+        }
+        setActiveSidebarItemId("__tool_manager__");
+        setSidebarSelectionTick((value) => value + 1);
+        return;
+      }
+      case "request_commit_approval":
+        handleModeChange("coding");
+        setInput("Commit the reviewed workspace changes.");
+        return;
+      case "request_push_approval":
+        handleModeChange("coding");
+        setInput("Push the reviewed current branch.");
+        return;
+      case "request_terminal_approval":
+        handleModeChange("coding");
+        setInput("Run the approved terminal command.");
+        return;
+      case "request_patch_approval":
+        handleModeChange("coding");
+        setInput("Apply the approved workspace patch.");
+        return;
+      case "request_restore_approval":
+        handleModeChange("coding");
+        setInput("Restore the approved workspace checkpoint.");
+        return;
       default:
         if (command.risk === "high") {
           setError(`/${command.name} は high risk command のため approval center 経由で実行してください。`);
@@ -4495,6 +4707,17 @@ function ChatApp() {
       applySettingsValues(applied.values);
     }
     return applied.appliedPaths;
+  };
+
+  const followCommandProgress = async (invocationId: string) => {
+    try {
+      for await (const event of api.streamCommandInvocationEvents(invocationId)) {
+        setCommandProgressEvents((current) => [...current, event].slice(-12));
+      }
+    } catch (streamError) {
+      if (streamError instanceof DOMException && streamError.name === "AbortError") return;
+      setError(streamError instanceof Error ? streamError.message : "Command progress stream failed.");
+    }
   };
 
   const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
@@ -4531,6 +4754,7 @@ function ChatApp() {
         deepthinkDesiredStateRef.current = desired;
         commandArgs.enabled = desired;
         const invocationId = createCommandInvocationId("deepthink");
+        void followCommandProgress(invocationId);
         const clientSequence = ++commandClientSequenceRef.current;
         deepthinkPendingCountRef.current += 1;
         const executeMutation = () => {
@@ -4558,16 +4782,33 @@ function ChatApp() {
           deepthinkPendingCountRef.current = Math.max(0, deepthinkPendingCountRef.current - 1);
         }
       } else {
+        const invocationId = createCommandInvocationId(parsed.command.id);
+        void followCommandProgress(invocationId);
         result = await api.executeResolvedUiCommand({
           command: resolvedCommandName,
           args: commandArgs,
           conversation_id: activeConversationId,
           mode: mode as ComposerCommandMode,
+          invocation_id: invocationId,
         });
       }
       const appliedStatePaths = applyAuthoritativeCommandState(result);
       const feedbackMessage = composerCommandResultMessage(result);
       if (result.requires_approval) {
+        if (result.approval_request_id && result.operation_id) {
+          setPendingCommandApproval({
+            requestId: result.approval_request_id,
+            invocationId: result.operation_id,
+            commandRef: resolvedCommandName,
+            command: parsed.command,
+            args: commandArgs,
+            conversationId: activeConversationId,
+            mode: mode as ComposerCommandMode,
+            approvalKind: result.approval_kind === "authority"
+              ? "authority"
+              : "coding",
+          });
+        }
         setError(feedbackMessage ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
         return;
       }
@@ -5225,6 +5466,103 @@ function ChatApp() {
     } finally {
       activeRuntimeApprovalActionRef.current = null;
       setIsGenerating(false);
+    }
+  };
+
+  const approveCommandAction = async () => {
+    if (!pendingCommandApproval) return;
+    const pending = pendingCommandApproval;
+    setError(null);
+    try {
+      const decision = pending.approvalKind === "authority"
+        ? await api.approveAuthorityApproval(pending.requestId, { scope: "once" })
+        : await api.approveCodingApproval(pending.requestId);
+      if (!decision.approved || !decision.token) {
+        throw new Error(("reason" in decision ? decision.reason : undefined) || "approval failed");
+      }
+      const authorityToken = pending.approvalKind === "authority"
+        ? decision.token
+        : pending.authorityToken;
+      const authorityRequestId = pending.approvalKind === "authority"
+        ? pending.requestId
+        : pending.authorityRequestId;
+      const codingToken = pending.approvalKind === "coding"
+        ? decision.token
+        : pending.codingToken;
+      const resumed = await api.resumeResolvedUiCommand({
+        command: pending.commandRef,
+        approval_token: codingToken,
+        authority_request_id: authorityRequestId,
+        authority_approval_token: authorityToken,
+        args: pending.args,
+        conversation_id: pending.conversationId,
+        mode: pending.mode,
+        invocation_id: pending.invocationId,
+      });
+      if (resumed.status === "approval_required" && resumed.approval?.request_id) {
+        setPendingCommandApproval({
+          ...pending,
+          requestId: resumed.approval.request_id,
+          approvalKind: resumed.approval.kind === "authority"
+            ? "authority"
+            : "coding",
+          authorityRequestId,
+          authorityToken,
+          codingToken,
+        });
+        return;
+      }
+      if (resumed.status !== "succeeded" || !resumed.legacy_result) {
+        throw new Error(resumed.error?.message || "command resume failed");
+      }
+      applyAuthoritativeCommandState(resumed.legacy_result);
+      if (resumed.legacy_result.executed !== true) {
+        runFrontendCommandAction(
+          resumed.legacy_result.action,
+          pending.command,
+          resumed.legacy_result.args ?? pending.args,
+        );
+      }
+      setPendingCommandApproval(null);
+    } catch (approvalError) {
+      setError(
+        approvalError instanceof Error
+          ? approvalError.message
+          : "コマンドの承認再開に失敗しました。",
+      );
+    }
+  };
+
+  const denyCommandAction = async () => {
+    if (!pendingCommandApproval) return;
+    const pending = pendingCommandApproval;
+    try {
+      if (pending.approvalKind === "authority") {
+        await api.denyAuthorityApproval(
+          pending.requestId,
+          "Denied from the command approval card",
+        );
+      } else {
+        await api.denyCodingApproval(
+          pending.requestId,
+          "Denied from the command approval card",
+        );
+      }
+      await api.cancelResolvedUiCommand({
+        invocation_id: pending.invocationId,
+        command_ref: pending.commandRef,
+        conversation_id: pending.conversationId,
+        mode: pending.mode,
+        action: "deny",
+        reason: "Denied from the command approval card",
+      });
+      setPendingCommandApproval(null);
+    } catch (approvalError) {
+      setError(
+        approvalError instanceof Error
+          ? approvalError.message
+          : "コマンドの拒否に失敗しました。",
+      );
     }
   };
 
@@ -6688,14 +7026,48 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
-                {!visibleBrowserApproval && authorityApproval && (
+                {!visibleBrowserApproval && pendingCommandApproval && (
+                  <ApprovalDecisionSurface
+                    approval={commandApprovalViewModel(pendingCommandApproval)}
+                    onDeny={() => void denyCommandAction()}
+                    onApprove={() => void approveCommandAction()}
+                    keyboardShortcuts={{ deny: "2", approve: "3" }}
+                    className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
+                  />
+                )}
+                {commandProgressEvents.length > 0 && (
+                  <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3" aria-label="Command progress">
+                    <h3 className="text-xs font-semibold text-zinc-300">Command progress</h3>
+                    <ol className="mt-2 space-y-1 text-[11px] text-zinc-500">
+                      {commandProgressEvents.map((event, index) => (
+                        <li key={`${String(event.invocation_id ?? "invocation")}:${String(event.sequence ?? index)}`}>
+                          {String(event.sequence ?? "•")} · {String(event.type ?? "progress")}
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                )}
+                {commandProtocolInfo && (
+                  <details className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-zinc-300">
+                      Command catalog inspector · {commandProtocolInfo.commands.length} commands
+                    </summary>
+                    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+                      <dt>revision</dt><dd className="font-mono">{commandProtocolInfo.catalog_revision}</dd>
+                      <dt>rollout</dt><dd>{commandProtocolInfo.rollout.phase}</dd>
+                      <dt>diagnostics</dt><dd>{commandProtocolInfo.diagnostics.length}</dd>
+                      <dt>events</dt><dd>{commandProgressEvents.length}</dd>
+                    </dl>
+                  </details>
+                )}
+                {!visibleBrowserApproval && !pendingCommandApproval && authorityApproval && (
                   <AuthorityApprovalNotice
                     approval={authorityApproval}
                     title={authorityApprovalTitle(authorityApproval)}
                     onOpen={() => void openAuthorityApprovalWindowAction()}
                   />
                 )}
-                {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
+                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && runtimeApproval && (
                   <ApprovalDecisionSurface
                     approval={runtimeApprovalViewModel(runtimeApproval)}
                     onDeny={() => void denyCodingAction()}
@@ -6704,7 +7076,7 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
-                {!visibleBrowserApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">

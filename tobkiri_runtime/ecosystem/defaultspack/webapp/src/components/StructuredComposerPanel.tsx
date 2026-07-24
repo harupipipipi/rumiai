@@ -61,7 +61,7 @@ function StructuredSelect({
       </button>
 
       {open && (
-        <div role="listbox" aria-label={`${label}の選択肢`} className="absolute inset-x-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-white/[0.1] bg-[#202124]/[0.98] p-1 shadow-[0_18px_45px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+        <div role="listbox" aria-label={`${label}の選択肢`} className="absolute inset-x-0 top-[calc(100%+6px)] rumi-layer-local-popover overflow-hidden rounded-xl border border-white/[0.1] bg-[#202124]/[0.98] p-1 shadow-[0_18px_45px_rgba(0,0,0,0.45)] backdrop-blur-xl">
           {allOptions.map((option) => {
             const optionLabel = option.label || option.value;
             const selectedOption = option.value === value;

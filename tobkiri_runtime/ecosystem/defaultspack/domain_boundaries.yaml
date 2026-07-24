@@ -152,6 +152,7 @@ domains:
     - domain/dev
     - domain/extensions
     - domain/external
+    - domain/safety
     - domain/tool
     - domain/webhook
     path: domain/frontend

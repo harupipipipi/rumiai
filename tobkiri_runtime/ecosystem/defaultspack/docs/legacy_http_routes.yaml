@@ -3341,6 +3341,34 @@ legacy_routes:
   reason: resolved command protocol invocation served by the standalone HTTP compatibility transport
   remove_after: v2.4
 - method: POST
+  pattern: /api/command-protocol/v1/invocations/events/query
+  legacy_block_module: blocks.ui.command_protocol_events
+  replacement_function_id: ''
+  owner: ui
+  reason: resumable invocation events served by the standalone HTTP compatibility transport
+  remove_after: v2.4
+- method: GET
+  pattern: /api/command-protocol/v1/invocations/{invocation_id}/events
+  legacy_block_module: blocks.ui.command_protocol_stream
+  replacement_function_id: ''
+  owner: ui
+  reason: Last-Event-ID resumable SSE progress served by the standalone HTTP compatibility transport
+  remove_after: v2.4
+- method: POST
+  pattern: /api/command-protocol/v1/offline
+  legacy_block_module: blocks.ui.command_protocol_offline
+  replacement_function_id: ''
+  owner: ui
+  reason: explicit desired-state offline queue served by the standalone HTTP compatibility transport
+  remove_after: v2.4
+- method: POST
+  pattern: /api/command-protocol/v1/resume
+  legacy_block_module: blocks.ui.command_protocol_resume
+  replacement_function_id: ''
+  owner: ui
+  reason: one-shot approval-bound command resume served by the standalone HTTP compatibility transport
+  remove_after: v2.4
+- method: POST
   pattern: /api/command-protocol/v1/states/query
   legacy_block_module: blocks.ui.command_protocol_states
   replacement_function_id: ''

@@ -57,6 +57,12 @@ class SlashCommandRegistry:
         commands, _manifest_errors = self._commands_with_errors()
         return [self._public_command(command) for command in commands]
 
+    def registered_commands(self) -> list[dict[str, Any]]:
+        """Return internal registered bindings to the v1 operation broker."""
+
+        commands, _manifest_errors = self._commands_with_errors()
+        return [deepcopy(command) for command in commands]
+
     def manifest_errors(self) -> list[dict[str, Any]]:
         _commands, manifest_errors = self._commands_with_errors()
         return manifest_errors
@@ -975,3 +981,112 @@ class SlashCommandRegistry:
             "message": message,
             "source": str(source or ""),
         }
+    def coerce_operation_args(
+        self,
+        command: dict[str, Any],
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._coerce_args(command, args)
+
+    def public_command_contract(self, command: dict[str, Any]) -> dict[str, Any]:
+        return self._public_command(command)
+
+    def validate_operation_binding(self, command: dict[str, Any]) -> tuple[bool, str]:
+        """Probe the concrete adapter without executing its side effect."""
+
+        execution = (
+            command.get("execution")
+            if isinstance(command.get("execution"), dict)
+            else {}
+        )
+        execution_type = str(execution.get("type") or "frontend")
+        if execution_type == "frontend":
+            action = str(execution.get("action") or "").strip()
+            return (bool(action), f"frontend:{action}" if action else "")
+        if execution_type == "model_command":
+            action = str(execution.get("action") or "").strip()
+            return (
+                action == "select_or_suggest_model",
+                f"model_command:{action}",
+            )
+        if execution_type == "rumi_function":
+            qualified_name = str(execution.get("qualified_name") or "").strip()
+            function_id = self._rumi_function_id(qualified_name)
+            return (
+                function_id in ALLOWED_RUMI_FUNCTIONS,
+                f"rumi_function:{function_id}",
+            )
+        if execution_type == "chat_action":
+            action = str(execution.get("action") or "").strip()
+            return (action == "compact_conversation", f"chat_action:{action}")
+        if execution_type == "pack_block":
+            qualified_name = str(execution.get("qualified_name") or "").strip()
+            pack_id, separator, module_id = qualified_name.partition(":")
+            module_id = module_id.strip().lstrip(".")
+            module_path = (
+                module_id
+                if module_id.startswith("blocks.")
+                else f"blocks.{module_id}"
+            )
+            if (
+                not separator
+                or pack_id not in PACK_BLOCK_ALLOWED_PACK_IDS
+                or not module_id
+                or not any(
+                    module_path.startswith(prefix)
+                    for prefix in PACK_BLOCK_ALLOWED_MODULE_PREFIXES
+                )
+            ):
+                return False, f"pack_block:{qualified_name}"
+            try:
+                module = importlib.import_module(module_path)
+                module_file = Path(str(getattr(module, "__file__", ""))).resolve()
+                module_file.relative_to((self._pack_root / "blocks").resolve())
+            except (ImportError, OSError, ValueError):
+                return False, f"pack_block:{qualified_name}"
+            return (
+                callable(getattr(module, "run", None)),
+                f"pack_block:{qualified_name}",
+            )
+        return False, f"unsupported:{execution_type}"
+
+    def invoke_model_operation(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._execute_model_command(command, execution, args)
+
+    def invoke_builtin_operation(
+        self,
+        qualified_name: str,
+        args: dict[str, Any],
+        *,
+        invocation: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        return self._execute_builtin_rumi_function(
+            qualified_name,
+            args,
+            invocation=invocation,
+        )
+
+    def invoke_chat_operation(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._execute_chat_action(command, execution, args, payload, context)
+
+    def invoke_pack_operation(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._execute_pack_block(command, execution, args, payload, context)

@@ -184,6 +184,16 @@
               },
               "additionalProperties": false
             },
+            "offline": {
+              "type": "object",
+              "required": ["queueable", "semantics", "backend_authoritative"],
+              "properties": {
+                "queueable": { "type": "boolean" },
+                "semantics": { "const": "set" },
+                "backend_authoritative": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
             "legacy_type": { "type": "string" }
           },
           "additionalProperties": false
@@ -202,7 +212,7 @@
     },
     "resolvedCommand": {
       "type": "object",
-      "required": ["canonical_id", "pack_id", "pack_generation", "command_version", "identity", "presentation", "execution", "authorization", "constraints", "availability", "legacy"],
+      "required": ["canonical_id", "pack_id", "pack_generation", "command_version", "identity", "presentation", "execution", "authorization", "constraints", "availability"],
       "properties": {
         "canonical_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*:[a-z][a-z0-9._-]*$" },
         "pack_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
@@ -213,11 +223,13 @@
         "execution": { "$ref": "#/$defs/execution" },
         "authorization": {
           "type": "object",
-          "required": ["risk", "permissions", "approval_required"],
+          "required": ["risk", "permissions", "approval_required", "approval_policy", "executor_policy_ref"],
           "properties": {
             "risk": { "enum": ["low", "medium", "high"] },
             "permissions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-            "approval_required": { "type": "boolean" }
+            "approval_required": { "type": "boolean" },
+            "approval_policy": { "enum": ["never", "required"] },
+            "executor_policy_ref": { "type": "string", "minLength": 3 }
           },
           "additionalProperties": false
         },
@@ -239,7 +251,6 @@
           },
           "additionalProperties": false
         },
-        "legacy": { "type": "object" },
         "extensions": { "type": "object" }
       },
       "additionalProperties": false
@@ -267,9 +278,51 @@
       },
       "additionalProperties": false
     },
+    "commandInvocationRequest": {
+      "type": "object",
+      "required": ["command_ref", "args", "invocation_id", "mode"],
+      "properties": {
+        "command_ref": { "type": "string" },
+        "args": { "type": "object" },
+        "invocation_id": { "type": "string" },
+        "mode": { "enum": ["chat", "coding", "agent"] },
+        "conversation_id": { "type": "string" },
+        "profile_id": { "type": "string" },
+        "catalog_revision": { "type": "string" },
+        "expected_revision": { "type": "integer" },
+        "idempotency_key": { "type": "string" },
+        "client_sequence": { "type": "integer" },
+        "approval_token": { "type": "string" },
+        "authority_request_id": { "type": "string" },
+        "authority_approval_token": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "commandProtocolError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "commandInvocationResult": {
+      "type": "object",
+      "required": ["api_version", "operation_id", "status", "command_ref", "state_changes"],
+      "properties": {
+        "api_version": { "const": "tobkiri.commands/v1" },
+        "operation_id": { "type": "string" },
+        "status": { "enum": ["succeeded", "failed", "approval_required", "cancelled"] },
+        "command_ref": { "type": "string" },
+        "state_changes": { "type": "array", "items": { "type": "object" } },
+        "error": { "$ref": "#/$defs/commandProtocolError" }
+      },
+      "additionalProperties": true
+    },
     "resolvedCatalog": {
       "type": "object",
-      "required": ["api_version", "kind", "catalog_revision", "pack_generations", "commands", "states", "datasources", "state_snapshots", "diagnostics"],
+      "required": ["api_version", "kind", "catalog_revision", "pack_generations", "rollout", "commands", "states", "datasources", "state_snapshots", "diagnostics"],
       "properties": {
         "api_version": { "const": "tobkiri.commands/v1" },
         "kind": { "const": "ResolvedCommandCatalog" },
@@ -277,6 +330,16 @@
         "pack_generations": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "rollout": {
+          "type": "object",
+          "required": ["feature_flag", "phase", "legacy_execution_enabled"],
+          "properties": {
+            "feature_flag": { "const": "command_protocol_v1" },
+            "phase": { "const": "enforced" },
+            "legacy_execution_enabled": { "const": false }
+          },
+          "additionalProperties": false
         },
         "commands": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/resolvedCommand" } },
         "states": { "type": "array", "items": { "type": "object" } },

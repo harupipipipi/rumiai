@@ -1,4 +1,5 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
+import type { CommandInvocationRequest } from "../generated/commandProtocolModels";
 import type { AuthorityApprovalScope } from "./authorityApproval";
 import { defaultspackUrlWithLocalAuthToken } from "./defaultspackLocalAuth";
 
@@ -1785,6 +1786,8 @@ export type ComposerCommandExecuteResult = {
   operation_status?: "pending" | "succeeded" | "failed";
   client_sequence?: number;
   state_changes?: CommandStateSnapshot[];
+  approval_request_id?: string;
+  approval_kind?: "authority" | "coding";
 };
 
 export type CommandStateSnapshot = {
@@ -1818,14 +1821,26 @@ export type ResolvedCommandProtocolCommand = {
     kind: "state_mutation" | "host_operation" | "pack_operation";
     [key: string]: unknown;
   };
+  authorization: {
+    risk: ComposerCommandRisk;
+    permissions: string[];
+    approval_required: boolean;
+    approval_policy: "never" | "required";
+    executor_policy_ref: string;
+  };
+  constraints: { modes: ComposerCommandMode[] };
   availability: { status: "available" | "unavailable"; reason?: string; reason_code?: string };
-  legacy: ComposerCommandItem;
 };
 
 export type ResolvedCommandCatalog = {
   api_version: "tobkiri.commands/v1";
   kind: "ResolvedCommandCatalog";
   catalog_revision: string;
+  rollout: {
+    feature_flag: "command_protocol_v1";
+    phase: "enforced";
+    legacy_execution_enabled: false;
+  };
   commands: ResolvedCommandProtocolCommand[];
   states?: Array<Record<string, unknown>>;
   datasources?: Array<Record<string, unknown>>;
@@ -1836,12 +1851,26 @@ export type ResolvedCommandCatalog = {
 export type CommandProtocolInvocationResult = {
   api_version: "tobkiri.commands/v1";
   operation_id: string;
-  status: "succeeded" | "failed" | "approval_required";
+  status: "succeeded" | "failed" | "approval_required" | "cancelled";
   command_ref: string;
   client_sequence?: number;
   state_changes: CommandStateSnapshot[];
   message?: string;
-  approval?: { required: boolean; permission_ids?: string[] } | null;
+  approval?: {
+    required: boolean;
+    kind?: "authority" | "coding";
+    request_id?: string;
+    expires_at?: number;
+    permission_ids?: string[];
+    details?: {
+      approved_arguments?: Record<string, unknown>;
+      args?: Record<string, unknown>;
+      conversation_id?: string | null;
+      mode?: ComposerCommandMode;
+      operation_ref?: string;
+      [key: string]: unknown;
+    };
+  } | null;
   error?: { code?: string; message?: string };
   legacy_result?: ComposerCommandExecuteResult;
 };
@@ -2514,6 +2543,93 @@ export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit
   });
 }
 
+export async function* streamCommandInvocationEvents(
+  invocationId: string,
+  options: { afterSequence?: number; signal?: AbortSignal; waitSeconds?: number } = {},
+): AsyncGenerator<Record<string, unknown>> {
+  let lastSequence = options.afterSequence ?? 0;
+  let consecutiveFailures = 0;
+  while (!options.signal?.aborted) {
+    try {
+      const params = new URLSearchParams({
+        after_sequence: String(lastSequence),
+        wait_seconds: String(options.waitSeconds ?? 30),
+      });
+      const response = await defaultspackApiFetch(
+        `/api/command-protocol/v1/invocations/${encodeURIComponent(invocationId)}/events?${params}`,
+        {
+          headers: {
+            Accept: "text/event-stream",
+            ...(lastSequence > 0 ? { "Last-Event-ID": String(lastSequence) } : {}),
+          },
+          signal: options.signal,
+        },
+      );
+      if (!response.ok || !response.body) {
+        const failure = new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+        if (response.status < 500 && response.status !== 429) {
+          throw Object.assign(failure, { retryableCommandStream: false });
+        }
+        throw Object.assign(failure, { retryableCommandStream: true });
+      }
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          consecutiveFailures = 0;
+          buffer += value ?? "";
+          const frames = buffer.replace(/\r\n/g, "\n").split("\n\n");
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            const data = frame
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (!data) continue;
+            const event = JSON.parse(data) as Record<string, unknown>;
+            const sequence = Number(event.sequence ?? 0);
+            if (sequence && sequence !== lastSequence + 1) {
+              throw new Error(`command event sequence gap: expected ${lastSequence + 1}, got ${sequence}`);
+            }
+            if (sequence) lastSequence = sequence;
+            yield event;
+            if (["completed", "failed", "cancelled", "conflicted", "expired"].includes(String(event.type))) {
+              return;
+            }
+          }
+          if (done) break;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (streamError) {
+      if (options.signal?.aborted) return;
+      const message = streamError instanceof Error ? streamError.message : "";
+      const retryableFlag = streamError instanceof Error
+        ? (streamError as Error & { retryableCommandStream?: boolean }).retryableCommandStream
+        : undefined;
+      const protocolFailure = message.includes("sequence gap")
+        || streamError instanceof SyntaxError
+        || retryableFlag === false;
+      if (protocolFailure) throw streamError;
+      consecutiveFailures += 1;
+      const delayMs = Math.min(5000, 250 * (2 ** Math.min(consecutiveFailures, 5)));
+      await new Promise<void>((resolve, reject) => {
+        const timeout = globalThis.setTimeout(resolve, delayMs);
+        options.signal?.addEventListener("abort", () => {
+          globalThis.clearTimeout(timeout);
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }).catch((abortError) => {
+        if (options.signal?.aborted) return;
+        throw abortError;
+      });
+    }
+  }
+}
+
 function truncateApiErrorDetail(value: string, limit = 700): string {
   const text = value.trim().replace(/\s+/g, " ");
   if (text.length <= limit) return text;
@@ -3073,26 +3189,57 @@ export const api = {
   },
 
   async resolvedUiCommands() {
-    try {
-      const protocol = await request<ResolvedCommandCatalog>(
-        "/api/command-protocol/v1/catalog",
-        { cache: "no-store" },
-      );
-      return {
-        commands: protocol.commands.map((command) => ({
-          ...command.legacy,
+    const protocol = await request<ResolvedCommandCatalog>(
+      "/api/command-protocol/v1/catalog",
+      { cache: "no-store" },
+    );
+    return {
+      commands: protocol.commands.map((command) => {
+        const input = command.presentation.input;
+        const fields = Array.isArray(input.fields)
+          ? input.fields.filter((item): item is Record<string, unknown> => (
+              Boolean(item) && typeof item === "object"
+            ))
+          : [];
+        const argument = typeof input.argument === "string" ? input.argument : null;
+        const args: ComposerCommandArg[] = fields.map((field) => ({
+          name: String(field.argument ?? ""),
+          type: (field.control === "checkbox" ? "boolean" : "string") as ComposerCommandArg["type"],
+          required: field.required === true,
+        })).filter((field) => field.name);
+        if (argument && !args.some((item) => item.name === argument)) {
+          args.push({
+            name: argument,
+            type: input.kind === "toggle" ? "boolean" : "string",
+            required: false,
+          });
+        }
+        const operationRef = String(command.execution.operation_ref ?? "");
+        const execution: ComposerCommandExecution = command.execution.kind === "host_operation"
+          ? { type: "frontend", action: operationRef.replace(/^host:/, "") }
+          : command.execution.kind === "state_mutation"
+            ? { type: "settings_patch", section: "protocol", field: String(command.execution.state_ref ?? "") }
+            : { type: "rumi_function", qualified_name: operationRef };
+        return {
+          id: command.identity.id,
+          name: command.identity.name,
+          aliases: command.identity.aliases,
+          label: command.presentation.label.fallback,
+          description: command.presentation.description?.fallback,
+          category: command.presentation.category as ComposerCommandCategory,
+          visibility: command.presentation.visibility as ComposerCommandVisibility,
+          modes: command.constraints?.modes as ComposerCommandMode[] | undefined,
+          risk: command.authorization?.risk as ComposerCommandRisk,
+          args,
+          execution,
           canonical_id: command.canonical_id,
           protocol_presentation: command.presentation,
           protocol_execution: command.execution,
           availability: command.availability,
-        })),
-        protocol,
-      };
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("HTTP 404")) throw error;
-      const legacy = await request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
-      return { commands: legacy.commands, protocol: null };
-    }
+        };
+      }),
+      protocol,
+    };
   },
 
   queryCommandStates(stateRefs: string[]) {
@@ -3155,22 +3302,6 @@ export const api = {
     );
   },
 
-  executeUiCommand(payload: {
-    command: string;
-    args?: Record<string, unknown>;
-    conversation_id?: string | null;
-    mode?: ComposerCommandMode;
-    invocation_id?: string;
-    idempotency_key?: string;
-    client_sequence?: number;
-    expected_revision?: number;
-  }) {
-    return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-
   async executeResolvedUiCommand(payload: {
     command: string;
     args?: Record<string, unknown>;
@@ -3180,41 +3311,113 @@ export const api = {
     idempotency_key?: string;
     client_sequence?: number;
     expected_revision?: number;
-  }): Promise<ComposerCommandExecuteResult> {
-    try {
-      const result = await request<CommandProtocolInvocationResult>(
-        "/api/command-protocol/v1/invoke",
-        {
-          method: "POST",
-          body: JSON.stringify({ ...payload, command_ref: payload.command }),
-        },
-      );
-      if (result.status === "failed") {
-        throw new Error(result.error?.message || "command protocol invocation failed");
-      }
-      const legacy = result.legacy_result;
-      if (!legacy) throw new Error("command protocol returned no compatibility result");
-      return {
-        ...legacy,
-        operation_id: result.operation_id,
-        operation_status: result.status === "succeeded" ? "succeeded" : "pending",
-        client_sequence: result.client_sequence,
-        state_changes: result.state_changes,
-        requires_approval: result.status === "approval_required" || legacy.requires_approval,
-        message: result.message ?? legacy.message,
-      };
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("HTTP 404")) throw error;
-      return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
+  } & Partial<Omit<CommandInvocationRequest, "command_ref" | "args" | "conversation_id">>): Promise<ComposerCommandExecuteResult> {
+    const result = await request<CommandProtocolInvocationResult>(
+      "/api/command-protocol/v1/invoke",
+      {
         method: "POST",
-        body: JSON.stringify({
-          ...payload,
-          command: payload.command.includes(":")
-            ? payload.command.split(":").at(-1)
-            : payload.command,
-        }),
-      });
+        body: JSON.stringify({ ...payload, command_ref: payload.command }),
+      },
+    );
+    if (result.status === "failed") {
+      throw new Error(result.error?.message || "command protocol invocation failed");
     }
+    const legacy = result.legacy_result ?? {
+      command: {
+        id: payload.command,
+        name: payload.command,
+        label: payload.command,
+      } as ComposerCommandItem,
+      executed: false,
+      requires_approval: result.status === "approval_required",
+    };
+    return {
+      ...legacy,
+      operation_id: result.operation_id,
+      operation_status: result.status === "succeeded" ? "succeeded" : "pending",
+      client_sequence: result.client_sequence,
+      state_changes: result.state_changes,
+      requires_approval: result.status === "approval_required" || legacy.requires_approval,
+      approval_request_id: result.approval?.request_id ?? legacy.approval_request_id,
+      approval_kind: result.approval?.kind ?? "coding",
+      message: result.message ?? legacy.message,
+    };
+  },
+
+  resumeResolvedUiCommand(payload: {
+    command: string;
+    approval_token?: string;
+    args?: Record<string, unknown>;
+    conversation_id?: string | null;
+    mode?: ComposerCommandMode;
+    invocation_id?: string;
+  } & Partial<Omit<CommandInvocationRequest, "command_ref" | "args" | "approval_token" | "conversation_id">>) {
+    return request<CommandProtocolInvocationResult>(
+      "/api/command-protocol/v1/resume",
+      {
+        method: "POST",
+        body: JSON.stringify({ ...payload, command_ref: payload.command }),
+      },
+    );
+  },
+
+  cancelResolvedUiCommand(payload: {
+    invocation_id: string;
+    command_ref: string;
+    conversation_id?: string | null;
+    mode?: ComposerCommandMode;
+    action: "deny" | "cancel" | "expire";
+    reason?: string;
+  }) {
+    return request<CommandProtocolInvocationResult>(
+      "/api/command-protocol/v1/resume",
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  },
+
+  queryCommandInvocationEvents(payload: {
+    invocation_id: string;
+    after_sequence?: number;
+    limit?: number;
+  }) {
+    return request<{
+      api_version: string;
+      events: Array<Record<string, unknown>>;
+      snapshot: Record<string, unknown>;
+    }>("/api/command-protocol/v1/invocations/events/query", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  pendingCommandApprovals() {
+    return request<{
+      api_version: string;
+      pending_approvals: Array<{
+        invocation_id: string;
+        approval_request_id: string;
+        result?: CommandProtocolInvocationResult | null;
+      }>;
+    }>("/api/command-protocol/v1/invocations/events/query", {
+      method: "POST",
+      body: JSON.stringify({ action: "pending_approvals" }),
+    });
+  },
+
+  streamCommandInvocationEvents,
+
+  commandOfflineQueue(payload: {
+    action: "enqueue" | "pending" | "replay";
+    command_ref?: string;
+    args?: Record<string, unknown>;
+    idempotency_key?: string;
+    expected_revision?: number;
+    limit?: number;
+  }) {
+    return request<Record<string, unknown>>("/api/command-protocol/v1/offline", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   updateUiSettings(values: Record<string, Record<string, unknown>>) {

@@ -305,7 +305,7 @@
     "visibility": "hidden",
     "risk": "high",
     "modes": ["coding"],
-    "args": [{ "name": "message", "type": "string", "required": false }],
+    "args": [{ "name": "message", "type": "string", "required": true, "greedy": true }],
     "execution": { "type": "frontend", "action": "request_commit_approval" }
   },
   {
@@ -317,6 +317,10 @@
     "visibility": "hidden",
     "risk": "high",
     "modes": ["coding"],
+    "args": [
+      { "name": "remote", "type": "string", "required": false },
+      { "name": "branch", "type": "string", "required": false }
+    ],
     "execution": { "type": "frontend", "action": "request_push_approval" }
   },
   {
@@ -328,7 +332,7 @@
     "visibility": "hidden",
     "risk": "high",
     "modes": ["coding"],
-    "args": [{ "name": "cmd", "type": "string", "required": false }],
+    "args": [{ "name": "cmd", "type": "string", "required": true, "greedy": true }],
     "execution": { "type": "frontend", "action": "request_terminal_approval" }
   },
   {
@@ -340,6 +344,7 @@
     "visibility": "hidden",
     "risk": "high",
     "modes": ["coding"],
+    "args": [{ "name": "patch", "type": "string", "required": true, "greedy": true }],
     "execution": { "type": "frontend", "action": "request_patch_approval" }
   },
   {
@@ -351,6 +356,7 @@
     "visibility": "hidden",
     "risk": "high",
     "modes": ["coding"],
+    "args": [{ "name": "paths", "type": "string", "required": true, "greedy": true }],
     "execution": { "type": "frontend", "action": "request_restore_approval" }
   },
   {

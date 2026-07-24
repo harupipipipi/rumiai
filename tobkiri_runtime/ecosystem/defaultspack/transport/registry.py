@@ -2350,6 +2350,28 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     ),
     HttpRouteSpec(
         "POST",
+        "/api/command-protocol/v1/invocations/events/query",
+        block_module="blocks.ui.command_protocol_events",
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/command-protocol/v1/invocations/{invocation_id}/events",
+        block_module="blocks.ui.command_protocol_stream",
+        path_inject={"invocation_id": "invocation_id"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/command-protocol/v1/offline",
+        block_module="blocks.ui.command_protocol_offline",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/command-protocol/v1/resume",
+        block_module="blocks.ui.command_protocol_resume",
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
         "/api/command-protocol/v1/states/query",
         block_module="blocks.ui.command_protocol_states",
     ),

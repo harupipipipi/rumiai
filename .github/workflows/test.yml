@@ -182,6 +182,21 @@ jobs:
         working-directory: tobkiri_runtime
         run: python scripts/quality/check_defaultspack_http_fallbacks.py
 
+      - name: Guard command protocol and generated Pack SDK drift
+        working-directory: tobkiri_runtime
+        run: |
+          python scripts/quality/scan_command_protocol.py \
+            --inventory generated/pack_sdk/command_inventory.json \
+            --check-inventory
+          python scripts/tobkiri_pack.py generate generated/pack_sdk --check
+          pytest -q \
+            tests/test_defaultspack_command_protocol.py \
+            tests/test_defaultspack_command_protocol_stream.py \
+            tests/test_defaultspack_invocation_events.py \
+            tests/test_defaultspack_offline_queue.py \
+            tests/test_pack_sdk.py \
+            tests/test_pack_signature.py
+
   pack-architecture:
     name: Pack architecture
     runs-on: ubuntu-latest

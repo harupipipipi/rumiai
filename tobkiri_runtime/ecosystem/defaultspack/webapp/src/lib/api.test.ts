@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, streamCommandInvocationEvents, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { deleteCalendarScheduleBeforeLocalChange } from "./calendarScheduleDeletion";
@@ -25,6 +25,56 @@ import {
 import { shouldAutoCompactHistory } from "../App";
 import { ImportedConversationNotice, shareImportDestination, sharePreviewSummary, shareTokenFromPath } from "../pages/ConversationShareLanding";
 import type { ConversationShareRecord } from "./api";
+
+test("command event stream reconnects after fetch failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = (async () => {
+    attempts += 1;
+    if (attempts === 1) throw new TypeError("network unavailable");
+    return new Response(
+      'data: {"sequence":1,"type":"completed","payload":{}}\n\n',
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  }) as typeof fetch;
+  try {
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of streamCommandInvocationEvents("inv/retry", { waitSeconds: 0 })) {
+      events.push(event);
+    }
+    assert.equal(attempts, 2);
+    assert.deepEqual(events.map((event) => event.sequence), [1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("command event stream resumes clean EOF with Last-Event-ID", async () => {
+  const originalFetch = globalThis.fetch;
+  const headers: string[] = [];
+  let attempts = 0;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    attempts += 1;
+    headers.push(new Headers(init?.headers).get("Last-Event-ID") ?? "");
+    const body = attempts === 1
+      ? 'data: {"sequence":1,"type":"progress","payload":{}}\n\n'
+      : 'data: {"sequence":2,"type":"completed","payload":{}}\n\n';
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }) as typeof fetch;
+  try {
+    const sequences: number[] = [];
+    for await (const event of streamCommandInvocationEvents("inv/resume", { waitSeconds: 0 })) {
+      sequences.push(Number(event.sequence));
+    }
+    assert.deepEqual(sequences, [1, 2]);
+    assert.deepEqual(headers, ["", "1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("shareTokenFromPath accepts only a single landing path segment", () => {
   assert.equal(shareTokenFromPath("/share/local-token_123"), "local-token_123");
@@ -962,57 +1012,6 @@ test("history sidebar auto-compacts on narrow screens", () => {
   assert.equal(shouldAutoCompactHistory(390), true);
   assert.equal(shouldAutoCompactHistory(759), true);
   assert.equal(shouldAutoCompactHistory(760), false);
-});
-
-test("executeUiCommand preserves model candidate results", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(JSON.stringify({
-    status: "ok",
-    data: {
-      command: {
-        id: "model",
-        name: "model",
-        label: "Model",
-        category: "model",
-        visibility: "default",
-        risk: "low",
-        execution: { type: "model_command", action: "select_or_suggest_model" },
-      },
-      action: "show_model_candidates",
-      message: "Choose a model",
-      candidates: [
-        {
-          profile_id: "openai/gpt-5.1",
-          display_name: "GPT-5.1",
-          subtitle: "OpenAI / gpt-5.1",
-          requires_api_key: true,
-        },
-      ],
-      selected_model: {
-        profile_id: "google/gemini-2.5-flash",
-        display_name: "Gemini 2.5 Flash",
-        provider_id: "google",
-        model_id: "gemini-2.5-flash",
-        api_key_configured: true,
-      },
-    },
-  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
-
-  try {
-    const result = await api.executeUiCommand({ command: "model", args: { query: "gpt" } });
-    assert.equal(result.action, "show_model_candidates");
-    assert.equal(result.message, "Choose a model");
-    assert.equal(result.candidates?.[0]?.profile_id, "openai/gpt-5.1");
-    assert.equal(result.candidates?.[0]?.requires_api_key, true);
-    const selectedModel = result.selected_model as { profile_id?: string; api_key_configured?: boolean } | null | undefined;
-    if (!selectedModel) {
-      assert.fail("expected selected_model to be a model candidate object");
-    }
-    assert.equal(selectedModel.profile_id, "google/gemini-2.5-flash");
-    assert.equal(selectedModel.api_key_configured, true);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });
 
 test("command protocol catalog is authoritative and invocation preserves its envelope", async () => {

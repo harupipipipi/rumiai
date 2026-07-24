@@ -42,3 +42,8 @@ integrity:
 # Run the Wave 1 repository-wide pack architecture boundary gate.
 pack-architecture:
     python scripts/quality/scan_pack_architecture.py
+
+# Validate Command Protocol v1 coverage and generated multi-client Pack SDK.
+command-protocol:
+    cd tobkiri_runtime && python scripts/quality/scan_command_protocol.py --inventory generated/pack_sdk/command_inventory.json --check-inventory
+    cd tobkiri_runtime && python scripts/tobkiri_pack.py generate generated/pack_sdk --check

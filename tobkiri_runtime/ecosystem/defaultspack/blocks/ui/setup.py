@@ -79,6 +79,33 @@ def run(context):
         ("POST", "/api/ui/commands/execute", _lazy("blocks.ui.commands"), {}),
         ("GET", "/api/command-protocol/v1/catalog", _lazy("blocks.ui.command_protocol_catalog"), {}),
         ("POST", "/api/command-protocol/v1/invoke", _lazy("blocks.ui.command_protocol_invoke"), {}),
+        (
+            "POST",
+            "/api/command-protocol/v1/invocations/events/query",
+            _lazy("blocks.ui.command_protocol_events"),
+            {},
+        ),
+        (
+            "GET",
+            "/api/command-protocol/v1/invocations/{invocation_id}/events",
+            _lazy("blocks.ui.command_protocol_stream", sensitive=True),
+            {"invocation_id": "invocation_id"},
+        ),
+        (
+            "POST",
+            "/api/command-protocol/v1/offline",
+            _lazy("blocks.ui.command_protocol_offline"),
+            {},
+        ),
+        (
+            "POST",
+            "/api/command-protocol/v1/resume",
+            _lazy(
+                "blocks.ui.command_protocol_resume",
+                sensitive=True,
+            ),
+            {},
+        ),
         ("POST", "/api/command-protocol/v1/states/query", _lazy("blocks.ui.command_protocol_states"), {}),
         ("POST", "/api/command-protocol/v1/datasources/query", _lazy("blocks.ui.command_protocol_datasources"), {}),
         ("POST", "/api/ui/clipboard", _lazy("blocks.ui.clipboard"), {}),
