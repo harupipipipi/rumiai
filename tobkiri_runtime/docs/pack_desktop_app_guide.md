@@ -1,8 +1,8 @@
-# Rumi AI OS — Pack デスクトップアプリ開発ガイド
+# Tobkiri — Pack デスクトップアプリ開発ガイド
 
 最終更新: 2026-03-28
 
-本ドキュメントは Rumi AI OS の Pack に **デスクトップアプリ**（独立したデスクトップウィンドウで動作するアプリケーション）を組み込むための開発者向けガイドです。ecosystem.json の設定方法、pack-shell バイナリの使い方、セキュリティモデル、ショートカット生成までを網羅します。
+本ドキュメントは Tobkiri の Pack に **デスクトップアプリ**（独立したデスクトップウィンドウで動作するアプリケーション）を組み込むための開発者向けガイドです。ecosystem.json の設定方法、pack-shell バイナリの使い方、セキュリティモデル、ショートカット生成までを網羅します。
 
 ---
 
@@ -10,9 +10,9 @@
 
 ### 1.1 概要
 
-Pack デスクトップアプリは、Rumi AI OS の **capability ベースの権限システム** を通じて、独立したデスクトップウィンドウでアプリケーションを動作させる仕組みです。
+Pack デスクトップアプリは、Tobkiri の **capability ベースの権限システム** を通じて、独立したデスクトップウィンドウでアプリケーションを動作させる仕組みです。
 
-Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表示する `viewer:display` capability とは異なり、`desktop_app.execute` capability は **OS ネイティブのウィンドウ** でアプリを起動します。tkinter, Qt, Electron, Tauri など任意のGUIフレームワークが使えます。
+Tobkiri Viewer（Tauri ベースの WebView UI）内にフロントエンドを表示する `viewer:display` capability とは異なり、`desktop_app.execute` capability は **OS ネイティブのウィンドウ** でアプリを起動します。tkinter, Qt, Electron, Tauri など任意のGUIフレームワークが使えます。
 
 ### 1.2 アーキテクチャ
 
@@ -36,7 +36,7 @@ Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表�
   │               ▼
   │           Kernel API (localhost:8765) と通信
   │
-  └── Rumi AI OS Kernel
+  └── Tobkiri Kernel
           │
           ├── CapabilityGrantManager (Grant 検証)
           ├── DesktopAppManager (登録・ショートカット生成)
@@ -53,7 +53,7 @@ Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表�
 
 デスクトップアプリ Pack を開発・実行するには、以下が必要です:
 
-- **Rumi AI OS** がインストール・起動可能な環境
+- **Tobkiri** がインストール・起動可能な環境
 - **pack-shell バイナリ** がビルド済みであること（後述のビルド手順を参照）
 - **Python 3.11 以上**（サンプルアプリの場合。アプリ自体は任意の言語で実装可能）
 

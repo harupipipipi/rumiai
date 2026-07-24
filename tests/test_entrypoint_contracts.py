@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -45,14 +46,18 @@ def test_package_discovery_keeps_tobkiri_primary_and_legacy_temporarily():
     )
 
 
-def _module_help(module: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+def _module_command(
+    module: str,
+    cwd: Path,
+    *arguments: str,
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     runtime_root = str(ROOT / "tobkiri_runtime")
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (runtime_root, env.get("PYTHONPATH", "")) if part
     )
     return subprocess.run(
-        [sys.executable, "-m", module, "--help"],
+        [sys.executable, "-m", module, *arguments],
         cwd=cwd,
         env=env,
         text=True,
@@ -62,8 +67,8 @@ def _module_help(module: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_canonical_cli_works_outside_repository_and_legacy_help_matches(tmp_path):
-    canonical = _module_help("tobkiri", tmp_path)
-    legacy = _module_help("rumi_ai", tmp_path)
+    canonical = _module_command("tobkiri", tmp_path, "--help")
+    legacy = _module_command("rumi_ai", tmp_path, "--help")
 
     assert canonical.returncode == 0, canonical.stderr
     assert legacy.returncode == canonical.returncode, legacy.stderr
@@ -71,6 +76,34 @@ def test_canonical_cli_works_outside_repository_and_legacy_help_matches(tmp_path
     assert "Tobkiri" in canonical.stdout
     assert "--health" in canonical.stdout
     assert "migrate-hmac" in canonical.stdout
+
+
+def _normalized_health(result: subprocess.CompletedProcess[str]) -> dict:
+    payload = json.loads(result.stdout)
+    payload.pop("timestamp", None)
+    for probe in payload.get("probes", {}).values():
+        if isinstance(probe, dict):
+            probe.pop("duration_ms", None)
+    return payload
+
+
+def test_canonical_and_installed_legacy_health_are_semantically_equivalent(tmp_path):
+    canonical = _module_command("tobkiri", tmp_path, "--health")
+    legacy = _module_command("rumi_ai", tmp_path, "--health")
+
+    assert canonical.returncode in {0, 1}, canonical.stderr
+    assert legacy.returncode == canonical.returncode, legacy.stderr
+    assert canonical.stderr == legacy.stderr == ""
+    assert _normalized_health(canonical) == _normalized_health(legacy)
+
+
+def test_root_source_compatibility_shim_matches_canonical_help():
+    canonical = _module_command("tobkiri", ROOT, "--help")
+    root_legacy = _module_command("rumi_ai", ROOT, "--help")
+
+    assert canonical.returncode == root_legacy.returncode == 0
+    assert canonical.stdout == root_legacy.stdout
+    assert canonical.stderr == root_legacy.stderr == ""
 
 
 def test_active_callers_use_the_canonical_cli():
@@ -109,6 +142,51 @@ def test_launcher_does_not_depend_on_the_legacy_python_shim():
         assert "python -m rumi_ai" not in _read(path), path
 
 
+def test_remaining_legacy_cli_examples_are_explicit_compatibility_or_history():
+    allowed = {
+        Path("docs/tobkiri-internal-migration.md"),
+        Path("tests/test_entrypoint_contracts.py"),
+        Path("tobkiri_runtime/rumi_ai/__main__.py"),
+        Path("tobkiri_runtime/docs/rumi_viewer_start.md"),
+        Path("tobkiri_runtime/ecosystem/defaultspack/docs/competitive_agent_install_eval.md"),
+    }
+    matches = set()
+    excluded_parts = {"node_modules", "dist", "target", ".git", ".venv"}
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or any(part in excluded_parts for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "python -m rumi_ai" in text:
+            matches.add(path.relative_to(ROOT))
+
+    assert matches == allowed
+
+
+def test_active_guides_use_tobkiri_branding():
+    active_guides = (
+        ROOT / "tobkiri_runtime" / "README.md",
+        ROOT / "tobkiri_runtime" / "docs" / "README.md",
+        ROOT / "tobkiri_runtime" / "docs" / "architecture.md",
+        ROOT / "tobkiri_runtime" / "docs" / "ci_build_guide.md",
+        ROOT / "tobkiri_runtime" / "docs" / "concepts" / "system-mechanism.md",
+        ROOT / "tobkiri_runtime" / "docs" / "multilang_pack_guide.md",
+        ROOT / "tobkiri_runtime" / "docs" / "pack-development-guide.md",
+        ROOT / "tobkiri_runtime" / "docs" / "pack-development.md",
+        ROOT / "tobkiri_runtime" / "docs" / "pack_desktop_app_guide.md",
+        ROOT / "tobkiri_runtime" / "docs" / "pack_development_guide.md",
+        ROOT / "tobkiri_runtime" / "docs" / "examples" / "desktop_app_pack" / "README.md",
+        ROOT / "tobkiri_runtime" / "docs" / "examples" / "viewer_hello_pack" / "README.md",
+        ROOT / "tobkiri_runtime" / "docs" / "examples" / "viewer_pack" / "README.md",
+    )
+    for path in active_guides:
+        text = _read(path)
+        assert "Rumi AI" not in text, path
+        assert "Rumi Viewer" not in text, path
+
+
 def test_control_panel_bundle_uses_v3_startup_profile_contract():
     web_root = ROOT / "tobkiri_runtime" / "core_runtime" / "core_pack" / "core_control_panel" / "web"
     scripts = list((web_root / "assets").glob("*.js"))
@@ -118,3 +196,17 @@ def test_control_panel_bundle_uses_v3_startup_profile_contract():
     bundle_text = "\n".join(_read(script) for script in scripts)
     assert "base_pack" in bundle_text
     assert "standard_pack_id" not in bundle_text
+
+
+def test_pack_architecture_entrypoint_targets_canonical_runtime():
+    entrypoint = _read(ROOT / "scripts" / "quality" / "scan_pack_architecture.py")
+
+    assert '"tobkiri_runtime"' in entrypoint
+    assert '"rumi_ai_1_10"' not in entrypoint
+
+
+def test_just_windows_shell_supports_existing_command_chains():
+    justfile = _read(ROOT / "justfile")
+
+    assert 'set windows-shell := ["cmd.exe", "/C"]' in justfile
+    assert "powershell.exe" not in justfile

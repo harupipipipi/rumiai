@@ -1,11 +1,11 @@
-# Rumi AI OS Roadmap
+# Tobkiri Roadmap
 
 `roadmap.md` is the forward-looking document.
 Current implementation truth now lives under [`docs/status/`](status/current-status.md).
 
 ## North Star
 
-Rumi should behave like a local-first runtime OS for packs:
+Tobkiri should behave like a local-first runtime OS for packs:
 
 - core runtime owns approval, trust, grants, isolation, audit, and transport boundaries
 - ecosystem packs expose stable public boundaries through manifests, functions, and routed APIs

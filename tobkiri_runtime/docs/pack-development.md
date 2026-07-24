@@ -1,7 +1,7 @@
 
 
 > **クイックスタートガイド**: Pack 開発を始める方は [Pack 開発クイックスタートガイド](pack-development-guide.md) を参照してください。
-# Rumi AI OS — Pack Development Guide
+# Tobkiri — Pack Development Guide
 
 Pack 開発者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、運用手順は [operations.md](operations.md) を参照してください。
 

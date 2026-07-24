@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 # tobkiri_runtime/ を sys.path に追加して import app を可能にする
 _project_root = str(Path(__file__).resolve().parent.parent)
@@ -276,6 +276,23 @@ class TestHealthFlag(unittest.TestCase):
         )
         disk_probe()
         mock_pds.assert_called_with("D:\\")
+
+
+class TestHmacMigrationCommand(unittest.TestCase):
+    """The canonical CLI keeps the trust-store migration route intact."""
+
+    @patch("app._run_hmac_migration")
+    @patch("core_runtime.logging_utils.configure_logging")
+    def test_migrate_hmac_routes_to_migration_and_exits(
+        self, mock_configure, mock_migrate
+    ):
+        with patch("sys.argv", ["app.py", "migrate-hmac"]):
+            from app import main
+
+            main()
+
+        mock_configure.assert_called_once()
+        mock_migrate.assert_called_once_with()
 
 
 class TestExistingFlagsNotBroken(unittest.TestCase):

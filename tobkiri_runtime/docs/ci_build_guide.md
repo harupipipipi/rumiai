@@ -232,7 +232,7 @@ Tauri v2 には公式の updater プラグインがある。導入する場合�
 5. Rust 側で updater::Builder を初期化
 ```
 
-ただし、Rumi AI のアーキテクチャでは Rust ランチャーだけでなく Python Kernel と Packs のアップデートも必要なため、Tauri 標準の updater だけでは不十分。Phase U で独自のアップデートフローを設計する。
+ただし、Tobkiri のアーキテクチャでは Rust ランチャーだけでなく Python Kernel と Packs のアップデートも必要なため、Tauri 標準の updater だけでは不十分。Phase U で独自のアップデートフローを設計する。
 
 ---
 

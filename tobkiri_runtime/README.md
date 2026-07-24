@@ -64,11 +64,11 @@ python -m pytest tests/test_defaultspack_modules.py
 
 ### 贔屓なし（No Favoritism）
 
-Rumi AI の公式コードは「チャット」「ツール」「プロンプト」「AIクライアント」「フロントエンド」といったドメイン概念を**一切知りません**。これらは全て ecosystem 内の Pack が定義します。公式が提供するのは**実行の仕組み**だけです。
+Tobkiri の公式コードは「チャット」「ツール」「プロンプト」「AIクライアント」「フロントエンド」といったドメイン概念を**一切知りません**。これらは全て ecosystem 内の Pack が定義します。公式が提供するのは**実行の仕組み**だけです。
 
 ### 基盤のない基盤
 
-Minecraft の mod は「Minecraft」という基盤を改造します。しかし Rumi AI には改造される「本体」がありません。全てのアプリケーション機能は Pack として実装され、Flow で結線されます。
+Minecraft の mod は「Minecraft」という基盤を改造します。しかし Tobkiri には改造される「本体」がありません。全てのアプリケーション機能は Pack として実装され、Flow で結線されます。
 
 ### Flow 中心アーキテクチャ
 
@@ -332,7 +332,7 @@ Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/
 
 ## Basepack
 
-`ecosystem/setup_pack/basepack/pack.json` を追加し、Rumi AI が graph-first のベース起動プロファイルとして `basepack` を選べるようにしました。現時点では既存の `defaultspack` を起動対象にする薄い bootstrap profile として扱い、巨大な複製 Pack を増やさず安全に導入しています。
+`ecosystem/setup_pack/basepack/pack.json` を追加し、Tobkiri が graph-first のベース起動プロファイルとして `basepack` を選べるようにしました。現時点では既存の `defaultspack` を起動対象にする薄い bootstrap profile として扱い、巨大な複製 Pack を増やさず安全に導入しています。
 
 ---
 

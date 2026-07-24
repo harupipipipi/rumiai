@@ -1,16 +1,16 @@
-# Rumi AI OS — Pack 開発ガイド
+# Tobkiri — Pack 開発ガイド
 
 > **Legacy ドキュメント**: 互換参照のため残しています。新規参照は [pack-development.md](./pack-development.md) と [pack-development-guide.md](./pack-development-guide.md) を優先してください。
 
 最終更新: 2026-03-23
 
-本ドキュメントは Rumi AI OS の Pack を開発するための総合ガイドです。Pack の概要から構造、ライフサイクル、権限システム、Docker 隔離、開発ワークフローまでを網羅します。
+本ドキュメントは Tobkiri の Pack を開発するための総合ガイドです。Pack の概要から構造、ライフサイクル、権限システム、Docker 隔離、開発ワークフローまでを網羅します。
 
 ---
 
 ## 1. Pack とは何か
 
-Pack は Rumi AI OS の機能拡張単位です。OS 本体（Kernel）が提供するコア機能の上に、Pack が独自の機能を追加します。
+Pack は Tobkiri の機能拡張単位です。OS 本体（Kernel）が提供するコア機能の上に、Pack が独自の機能を追加します。
 
 Pack には以下の要素を含めることができます:
 
@@ -192,7 +192,7 @@ HTTP エンドポイントの定義です。pack_api_server に登録され、�
 
 ## 6. Capability（権限）の仕組み
 
-Rumi AI OS は 3 層の権限システムを持ちます:
+Tobkiri は 3 層の権限システムを持ちます:
 
 ### 6.1 Trust（信頼）
 
@@ -345,4 +345,4 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 
 - [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
 - [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
-- [ロードマップ](roadmap.md) — Rumi AI OS の全体計画
+- [ロードマップ](roadmap.md) — Tobkiri の全体計画
