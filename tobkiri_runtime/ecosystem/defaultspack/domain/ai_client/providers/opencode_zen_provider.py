@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List
 
+from ..api_key_store import read_provider_api_key
 from .anthropic_provider import AnthropicProvider
 from .openai_provider import OpenAIProvider
 
@@ -94,10 +96,12 @@ class OpencodeZenProvider(AnthropicProvider):
     provider_name = "opencode-zen"
     display_name = "OpenCode Zen"
     DEFAULT_BASE_URL = "https://opencode.ai/zen"
+    MODEL_INVENTORY_TTL_SECONDS = 300
     ANTHROPIC_MESSAGES_MODELS = {"minimax-m3-free"}
     OPENAI_CHAT_MODELS = {"mimo-v2.5-free"}
     MODEL_IDS = ANTHROPIC_MESSAGES_MODELS | OPENAI_CHAT_MODELS
-    KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    CURATED_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    KNOWN_MODELS: List[Dict[str, Any]] = []
     _OPENAI_CHAT_PARAM_KEYS = {
         "temperature",
         "top_p",
@@ -109,9 +113,13 @@ class OpencodeZenProvider(AnthropicProvider):
     _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
     def __init__(self) -> None:
-        self._api_key = os.environ.get("OPENCODE_ZEN_API_KEY", "")
+        self._api_key = str(
+            read_provider_api_key("opencode-zen", "default") or ""
+        )
         self._ssl_ctx = ssl.create_default_context()
         self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
+        self._model_inventory_cache: List[Dict[str, Any]] = []
+        self._model_inventory_expires_at = 0.0
 
     @classmethod
     def _normalize_model_id(cls, model: str) -> str:
@@ -122,15 +130,15 @@ class OpencodeZenProvider(AnthropicProvider):
             model_id = model_id.split("/", 1)[1]
         return model_id
 
-    @classmethod
-    def _assert_supported_model(cls, model: str) -> str:
-        model_id = cls._normalize_model_id(model)
-        if model_id not in cls.MODEL_IDS:
-            supported = ", ".join(sorted(cls.MODEL_IDS))
-            raise RuntimeError(
-                "opencode-zen: unsupported model. "
-                f"defaultspack supports only: {supported}"
-            )
+    def _assert_supported_model(self, model: str) -> str:
+        model_id = self._normalize_model_id(model)
+        discovered = {
+            str(item.get("model_id") or "").strip()
+            for item in self._model_inventory_cache
+            if isinstance(item, dict)
+        }
+        if model_id not in self.MODEL_IDS | discovered:
+            raise RuntimeError(f"unsupported model: {model_id}")
         return model_id
 
     def _headers(self) -> Dict[str, str]:
@@ -183,7 +191,110 @@ class OpencodeZenProvider(AnthropicProvider):
             raise RuntimeError("OpenCode Zen API connection error: {}".format(exc.reason))
 
     def list_models(self) -> List[Dict[str, Any]]:
-        return [dict(model) for model in self.KNOWN_MODELS]
+        now = time.monotonic()
+        if self._model_inventory_cache and now < self._model_inventory_expires_at:
+            return [dict(model) for model in self._model_inventory_cache]
+        fallback_reason = "missing_credential"
+        if not self._api_key:
+            return self._curated_model_fallback(fallback_reason)
+        request = urllib.request.Request(
+            self.BASE_URL + "/v1/models",
+            headers=self._openai_headers(),
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, context=self._ssl_ctx, timeout=12) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError:
+            return self._inventory_fallback("http_error")
+        except urllib.error.URLError:
+            return self._inventory_fallback("connection_error")
+        except TimeoutError:
+            return self._inventory_fallback("timeout")
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            return self._inventory_fallback("invalid_response")
+        records = payload.get("data") if isinstance(payload, dict) else []
+        models = []
+        curated_by_id = {model["model_id"]: model for model in self.CURATED_MODELS}
+        for raw in records if isinstance(records, list) else []:
+            item = raw if isinstance(raw, dict) else {"id": raw}
+            model_id = str(item.get("id") or item.get("model_id") or item.get("name") or "").strip()
+            if not model_id or any(model["model_id"] == model_id for model in models):
+                continue
+            display_name = str(item.get("display_name") or item.get("displayName") or model_id)
+            model = dict(curated_by_id.get(model_id) or {})
+            metadata = dict(model.get("metadata") or {})
+            metadata.update(
+                {
+                    "source": "openai_models_endpoint",
+                    "source_endpoint": "/v1/models",
+                    "inventory_source": "live",
+                    "visibility_scope": "account",
+                }
+            )
+            model.update(
+                {
+                    "id": f"opencode-zen/{model_id}",
+                    "model_id": model_id,
+                    "provider_id": "opencode-zen",
+                    "provider": "opencode-zen",
+                    "name": display_name,
+                    "display_name": display_name,
+                    "type": "chat",
+                    "capabilities": dict(
+                        model.get("capabilities")
+                        or {
+                            "chat": True,
+                            "text_input": True,
+                            "text_output": True,
+                            "streaming": True,
+                        }
+                    ),
+                    "metadata": metadata,
+                }
+            )
+            models.append(model)
+        if models:
+            self._model_inventory_cache = [dict(model) for model in models]
+            self._model_inventory_expires_at = now + self.MODEL_INVENTORY_TTL_SECONDS
+            return [dict(model) for model in models]
+        return self._inventory_fallback("empty_inventory")
+
+    def _inventory_fallback(self, reason: str) -> List[Dict[str, Any]]:
+        if self._model_inventory_cache:
+            models: List[Dict[str, Any]] = []
+            for raw in self._model_inventory_cache:
+                model = dict(raw)
+                metadata = dict(model.get("metadata") or {})
+                metadata.update(
+                    {
+                        "inventory_source": "last_known_good",
+                        "inventory_fallback_reason": reason,
+                        "inventory_stale": True,
+                    }
+                )
+                model["metadata"] = metadata
+                models.append(model)
+            return models
+        return self._curated_model_fallback(reason)
+
+    @classmethod
+    def _curated_model_fallback(cls, reason: str) -> List[Dict[str, Any]]:
+        models: List[Dict[str, Any]] = []
+        for raw in cls.CURATED_MODELS:
+            model = dict(raw)
+            metadata = dict(model.get("metadata") or {})
+            metadata.update(
+                {
+                    "source": "curated_fallback",
+                    "inventory_source": "curated_fallback",
+                    "inventory_fallback_reason": reason,
+                    "visibility_scope": "curated",
+                }
+            )
+            model["metadata"] = metadata
+            models.append(model)
+        return models
 
     @staticmethod
     def _params_with_token_floor(params: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -320,15 +431,15 @@ class OpencodeZenProvider(AnthropicProvider):
 
     def complete(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
-        if model_id in self.OPENAI_CHAT_MODELS:
-            return self._complete_openai_chat(model_id, messages, params)
-        del tools
-        return super().complete(model_id, messages, [], self._params_with_token_floor(params))
+        if model_id in self.ANTHROPIC_MESSAGES_MODELS:
+            del tools
+            return super().complete(model_id, messages, [], self._params_with_token_floor(params))
+        return self._complete_openai_chat(model_id, messages, params)
 
     def stream(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
-        if model_id in self.OPENAI_CHAT_MODELS:
-            yield from self._stream_openai_chat(model_id, messages, params)
+        if model_id in self.ANTHROPIC_MESSAGES_MODELS:
+            del tools
+            yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
             return
-        del tools
-        yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
+        yield from self._stream_openai_chat(model_id, messages, params)

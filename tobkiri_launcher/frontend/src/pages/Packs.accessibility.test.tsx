@@ -45,6 +45,7 @@ test('Packs provides independent semantic detail and switch actions', async () =
     loadPacks: async () => {},
     togglePack: async () => {
       toggleCount += 1;
+      return true;
     },
   });
   const container = document.querySelector<HTMLElement>('#root');

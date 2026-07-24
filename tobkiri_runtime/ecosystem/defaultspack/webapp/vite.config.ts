@@ -3,6 +3,8 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const compatibilitySurfacePath = path.resolve(__dirname, "src/App.tsx");
+
 function staticShellChunkUrls(): Plugin {
   return {
     name: "defaultspack-static-shell-chunk-urls",
@@ -43,6 +45,9 @@ export default defineConfig({
         entryFileNames: "shell-app.js",
         chunkFileNames: "shell-[name].js",
         manualChunks(id) {
+          if (id.split("?")[0] === compatibilitySurfacePath) {
+            return "defaultspack-app";
+          }
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("react-markdown") || id.includes("micromark") || id.includes("remark") || id.includes("mdast") || id.includes("hast")) {
             return "markdown";
