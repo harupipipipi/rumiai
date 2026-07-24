@@ -9,6 +9,10 @@ import {
   hasSelectedSetupPack,
   setupPackSelectionUrl,
 } from '@/src/lib/setupPacks';
+import {
+  resolveSetupCompletion,
+  type SetupCompletion,
+} from '@/src/lib/setupCompletion';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
 import { motion } from 'motion/react';
@@ -25,7 +29,7 @@ export function Setup() {
   const addToast = useAppStore(state => state.addToast);
   const t = useT();
   const [loading, setLoading] = useState(false);
-  const [linked, setLinked] = useState(false);
+  const [completion, setCompletion] = useState<SetupCompletion | null>(null);
   const [setupPackError, setSetupPackError] = useState<string | null>(null);
 
   const finalizeSetup = async (): Promise<boolean> => {
@@ -72,15 +76,26 @@ export function Setup() {
       let alive = true;
       let timer: ReturnType<typeof setTimeout> | null = null;
       setLoading(true);
-      void finalizeSetup()
-        .then((completed) => {
+      void Promise.all([loadProfile(), hasSelectedSetupPack()])
+        .then(([, packSelected]) => {
           if (!alive) return;
-          if (!completed) {
+          const nextCompletion = resolveSetupCompletion({
+            source: 'oauth',
+            accountConnected: useAppStore.getState().profile.connected,
+            packSelected,
+          });
+          if (nextCompletion.kind === 'pack-selection-error') {
             openSetupPackSelection();
             return;
           }
-          setLinked(true);
-          addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+          if (!nextCompletion.canRedirect) {
+            setSetupPackError(nextCompletion.description);
+            setLoading(false);
+            return;
+          }
+          setSetupDone(true);
+          setCompletion(nextCompletion);
+          if (nextCompletion.toast) addToast(nextCompletion.toast, 'success');
           timer = setTimeout(() => {
             navigate(panelRoutes.home);
           }, 1500);
@@ -97,9 +112,16 @@ export function Setup() {
     }
 
     if (error) {
-      addToast(`OAuth error: ${error}`, 'error');
+      const oauthFailure = resolveSetupCompletion({
+        source: 'oauth',
+        accountConnected: false,
+        packSelected: false,
+        oauthError: error,
+      });
+      setSetupPackError(oauthFailure.description);
+      addToast(oauthFailure.description, 'error');
     }
-  }, [searchParams, addToast, navigate, t]);
+  }, [searchParams, addToast, loadProfile, navigate, setSetupDone]);
 
   useEffect(() => {
     if (searchParams.get(SETUP_PACK_RETURN_PARAM) !== '1') {
@@ -109,16 +131,22 @@ export function Setup() {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
-    void finalizeSetup()
-      .then((completed) => {
+    void Promise.all([loadProfile(), hasSelectedSetupPack()])
+      .then(([, packSelected]) => {
         if (!alive) return;
-        if (!completed) {
-          setSetupPackError('Choose and install a setup pack before opening the panel.');
+        const nextCompletion = resolveSetupCompletion({
+          source: 'setup-pack',
+          accountConnected: useAppStore.getState().profile.connected,
+          packSelected,
+        });
+        if (!nextCompletion.canRedirect) {
+          setSetupPackError(nextCompletion.description);
           setLoading(false);
           return;
         }
-        setLinked(true);
-        addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+        setSetupDone(true);
+        setCompletion(nextCompletion);
+        if (nextCompletion.toast) addToast(nextCompletion.toast, 'success');
         timer = setTimeout(() => {
           navigate(panelRoutes.home);
         }, 800);
@@ -133,10 +161,16 @@ export function Setup() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [searchParams, addToast, navigate, t]);
+  }, [searchParams, addToast, loadProfile, navigate, setSetupDone]);
 
   useEffect(() => {
-    if (!profile.connected || linked || searchParams.get(SETUP_PACK_RETURN_PARAM) === '1') {
+    if (
+      !profile.connected
+      || completion
+      || searchParams.get(SETUP_PACK_RETURN_PARAM) === '1'
+      || searchParams.get('linked') === 'true'
+      || searchParams.has('error')
+    ) {
       return;
     }
 
@@ -150,8 +184,13 @@ export function Setup() {
           openSetupPackSelection();
           return;
         }
-        setLinked(true);
-        addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+        const nextCompletion = resolveSetupCompletion({
+          source: 'existing-account',
+          accountConnected: true,
+          packSelected: true,
+        });
+        setCompletion(nextCompletion);
+        if (nextCompletion.toast) addToast(nextCompletion.toast, 'success');
         timer = setTimeout(() => {
           navigate(panelRoutes.home);
         }, 1500);
@@ -166,7 +205,7 @@ export function Setup() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [profile.connected, linked, searchParams, addToast, navigate, t]);
+  }, [profile.connected, completion, searchParams, addToast, navigate, t]);
 
   const handleConnect = async () => {
     setLoading(true);
@@ -188,16 +227,20 @@ export function Setup() {
     openSetupPackSelection();
   };
 
-  if (linked) {
+  if (completion) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-main p-6">
+      <div
+        className="flex min-h-screen items-center justify-center bg-bg-main p-6"
+        data-setup-outcome={completion.kind}
+      >
         <motion.div initial={{opacity: 0, scale: .96}} animate={{opacity: 1, scale: 1}} className="relative flex w-full max-w-sm flex-col items-center gap-6 text-center">
           <motion.div initial={{scale: .8}} animate={{scale: 1}} transition={{type: 'spring', stiffness: 260, damping: 22}} className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-bg-card">
             <CheckCircle2 className="h-8 w-8 text-emerald-500" />
           </motion.div>
           <div>
-            <h1 className="text-xl font-semibold text-text-main">{t('setup.linked_title') || 'Account Linked!'}</h1>
-            <p className="mt-2 text-sm text-text-muted">{t('setup.redirecting') || 'Redirecting to dashboard...'}</p>
+            <h1 className="text-xl font-semibold text-text-main">{completion.title}</h1>
+            <p className="mt-2 text-sm text-text-muted">{completion.description}</p>
+            <p className="mt-3 text-xs text-text-muted">Redirecting to dashboard...</p>
           </div>
           <TobkiriLoadingMark scene="startup" />
         </motion.div>
