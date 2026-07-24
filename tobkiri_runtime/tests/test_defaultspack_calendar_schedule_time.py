@@ -91,6 +91,11 @@ def test_fall_back_duplicate_resolves_earlier_and_later():
     assert later["run_at"] == "2026-11-01T06:30:00Z"
 
 
+def test_unambiguous_wall_time_rejects_stale_dst_resolution():
+    with pytest.raises(ValueError, match="dst_resolution must be exact"):
+        normalize_once_calendar_config(_config(dst_resolution="earlier"))
+
+
 def test_rejects_invalid_iana_zone():
     with pytest.raises(ValueError, match="valid IANA"):
         normalize_once_calendar_config(_config(time_zone="Local/Guess"))
@@ -188,3 +193,13 @@ def test_calendar_time_revision_rejects_stale_update():
     )
     assert accepted["time_revision"] == current["time_revision"]
     assert "expected_time_revision" not in accepted
+
+
+def test_calendar_time_revision_is_required_for_existing_contract_update():
+    current = normalize_once_calendar_config(_config())
+
+    with pytest.raises(ValueError, match="expected_time_revision is required"):
+        normalize_once_calendar_config(
+            _config(local_time="00:01", run_at="2026-02-28T15:01:00Z"),
+            current_config=current,
+        )

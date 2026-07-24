@@ -33,7 +33,12 @@ def normalize_once_calendar_config(
     normalized = dict(config)
     expected_revision = str(normalized.pop("expected_time_revision", "") or "").strip()
     current_revision = str((current_config or {}).get("time_revision") or "").strip()
-    if expected_revision and current_revision and expected_revision != current_revision:
+    if current_revision and not expected_revision:
+        raise ValueError(
+            "schedule_config.expected_time_revision is required when changing "
+            "an existing calendar schedule"
+        )
+    if expected_revision and expected_revision != current_revision:
         raise ValueError("calendar time revision is stale; reload before changing the schedule")
     if not any(key in normalized for key in CALENDAR_TIME_CONFIG_KEYS):
         return normalized
@@ -72,7 +77,7 @@ def normalize_once_calendar_config(
 
     requested_resolution = _required_string(normalized, "dst_resolution")
     if len(candidates) == 1:
-        if requested_resolution not in {"exact", "earlier", "later"}:
+        if requested_resolution != "exact":
             raise ValueError("schedule_config.dst_resolution must be exact")
         selected = candidates[0]
         resolved_resolution = "exact"
