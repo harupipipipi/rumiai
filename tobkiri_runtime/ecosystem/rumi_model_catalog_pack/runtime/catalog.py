@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from typing import Any, Mapping
 
-CATALOG_REVISION = "sha256:101db736ae042cd325adc278cece73a96d0867b75007c1252748aa59647f98af"
+CATALOG_REVISION = "sha256:b00281c74c5732db8dea3b7e211a1b64a93575b65da12daa6b1676d6de6d4dea"
 _ROOT = Path(__file__).resolve().parents[1] / "catalog" / "providers"
 _EXTENSION_ROOT = Path(__file__).resolve().parents[1] / "extensions" / "llm" / "providers"
 _OPENROUTER_PROVIDER_ID = "openrouter"

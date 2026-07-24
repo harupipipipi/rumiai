@@ -13,94 +13,16 @@ from .anthropic_provider import AnthropicProvider
 from .openai_provider import OpenAIProvider
 
 
-_OPENCODE_ZEN_MODEL_SPECS: List[Dict[str, Any]] = [
-    {
-        "model_id": "minimax-m3-free",
-        "display_name": "MiniMax M3 Free via OpenCode Zen",
-        "priority": 1,
-        "defaults": {"chat": True, "coding": True, "reasoning": True},
-        "context_window": 200000,
-        "max_tokens": 32000,
-        "min_output_tokens": 96,
-        "transport": "anthropic_messages",
-        "endpoint_path": "/v1/messages",
-        "source": "opencode_zen_minimax_m3_free",
-    },
-    {
-        "model_id": "mimo-v2.5-free",
-        "display_name": "MiMo V2.5 Free via OpenCode Zen",
-        "priority": 2,
-        "defaults": {"chat": True, "cheap": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/v1/chat/completions",
-        "source": "opencode_zen_mimo_v2_5_free",
-        "free_tier": True,
-    },
-]
-
-
-def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
-    reasoning = bool(spec.get("reasoning", spec["transport"] == "anthropic_messages"))
-    vision = bool(spec.get("vision", spec["transport"] == "anthropic_messages"))
-    metadata = {
-        "transport": spec["transport"],
-        "endpoint_path": spec["endpoint_path"],
-        "source": spec["source"],
-        "pricing": "free_promotion_or_account_policy",
-    }
-    if "min_output_tokens" in spec:
-        metadata["min_output_tokens"] = spec["min_output_tokens"]
-        metadata["token_floor_reason"] = (
-            "MiniMax M3 can emit reasoning before final text; "
-            "short caps may return thinking-only output."
-        )
-    if "free_tier" in spec:
-        metadata["free_tier"] = bool(spec["free_tier"])
-    entry = {
-        "id": f"opencode-zen/{spec['model_id']}",
-        "category": "llm_model",
-        "version": "1",
-        "provider": "opencode-zen",
-        "provider_id": "opencode-zen",
-        "model_id": spec["model_id"],
-        "name": spec["display_name"],
-        "display_name": spec["display_name"],
-        "type": "chat",
-        "enabled": True,
-        "priority": spec["priority"],
-        "defaults": dict(spec.get("defaults", {})),
-        "capabilities": {
-            "chat": True,
-            "streaming": True,
-            "tool_calls": False,
-            "vision": vision,
-            "reasoning": reasoning,
-        },
-        "metadata": metadata,
-    }
-    if "context_window" in spec:
-        entry["context_window"] = spec["context_window"]
-        entry["max_context_tokens"] = spec["context_window"]
-    if "max_tokens" in spec:
-        entry["max_tokens"] = spec["max_tokens"]
-    if reasoning:
-        entry["supports_thinking"] = True
-        entry["thinking_levels"] = ["low", "medium", "high", "xhigh"]
-        entry["default_thinking_level"] = "medium"
-    return entry
-
-
 class OpencodeZenProvider(AnthropicProvider):
-    """OpenCode Zen provider for curated Anthropic and OpenAI-compatible models."""
+    """OpenCode Zen provider backed by the account-visible live inventory."""
 
     provider_name = "opencode-zen"
     display_name = "OpenCode Zen"
     DEFAULT_BASE_URL = "https://opencode.ai/zen"
     MODEL_INVENTORY_TTL_SECONDS = 300
-    ANTHROPIC_MESSAGES_MODELS = {"minimax-m3-free"}
-    OPENAI_CHAT_MODELS = {"mimo-v2.5-free"}
+    ANTHROPIC_MESSAGES_MODELS: set[str] = set()
+    OPENAI_CHAT_MODELS: set[str] = set()
     MODEL_IDS = ANTHROPIC_MESSAGES_MODELS | OPENAI_CHAT_MODELS
-    CURATED_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
     KNOWN_MODELS: List[Dict[str, Any]] = []
     _OPENAI_CHAT_PARAM_KEYS = {
         "temperature",
@@ -132,6 +54,8 @@ class OpencodeZenProvider(AnthropicProvider):
 
     def _assert_supported_model(self, model: str) -> str:
         model_id = self._normalize_model_id(model)
+        if not self._model_inventory_cache and self._api_key:
+            self.list_models()
         discovered = {
             str(item.get("model_id") or "").strip()
             for item in self._model_inventory_cache
@@ -194,9 +118,8 @@ class OpencodeZenProvider(AnthropicProvider):
         now = time.monotonic()
         if self._model_inventory_cache and now < self._model_inventory_expires_at:
             return [dict(model) for model in self._model_inventory_cache]
-        fallback_reason = "missing_credential"
         if not self._api_key:
-            return self._curated_model_fallback(fallback_reason)
+            return []
         request = urllib.request.Request(
             self.BASE_URL + "/v1/models",
             headers=self._openai_headers(),
@@ -215,44 +138,35 @@ class OpencodeZenProvider(AnthropicProvider):
             return self._inventory_fallback("invalid_response")
         records = payload.get("data") if isinstance(payload, dict) else []
         models = []
-        curated_by_id = {model["model_id"]: model for model in self.CURATED_MODELS}
         for raw in records if isinstance(records, list) else []:
             item = raw if isinstance(raw, dict) else {"id": raw}
             model_id = str(item.get("id") or item.get("model_id") or item.get("name") or "").strip()
             if not model_id or any(model["model_id"] == model_id for model in models):
                 continue
             display_name = str(item.get("display_name") or item.get("displayName") or model_id)
-            model = dict(curated_by_id.get(model_id) or {})
-            metadata = dict(model.get("metadata") or {})
-            metadata.update(
-                {
+            model = {
+                "id": f"opencode-zen/{model_id}",
+                "model_id": model_id,
+                "provider_id": "opencode-zen",
+                "provider": "opencode-zen",
+                "name": display_name,
+                "display_name": display_name,
+                "type": "chat",
+                "capabilities": {
+                    "chat": True,
+                    "text_input": True,
+                    "text_output": True,
+                    "streaming": True,
+                },
+                "metadata": {
+                    "transport": "openai_chat_completions",
+                    "endpoint_path": "/v1/chat/completions",
                     "source": "openai_models_endpoint",
                     "source_endpoint": "/v1/models",
                     "inventory_source": "live",
                     "visibility_scope": "account",
-                }
-            )
-            model.update(
-                {
-                    "id": f"opencode-zen/{model_id}",
-                    "model_id": model_id,
-                    "provider_id": "opencode-zen",
-                    "provider": "opencode-zen",
-                    "name": display_name,
-                    "display_name": display_name,
-                    "type": "chat",
-                    "capabilities": dict(
-                        model.get("capabilities")
-                        or {
-                            "chat": True,
-                            "text_input": True,
-                            "text_output": True,
-                            "streaming": True,
-                        }
-                    ),
-                    "metadata": metadata,
-                }
-            )
+                },
+            }
             models.append(model)
         if models:
             self._model_inventory_cache = [dict(model) for model in models]
@@ -276,25 +190,7 @@ class OpencodeZenProvider(AnthropicProvider):
                 model["metadata"] = metadata
                 models.append(model)
             return models
-        return self._curated_model_fallback(reason)
-
-    @classmethod
-    def _curated_model_fallback(cls, reason: str) -> List[Dict[str, Any]]:
-        models: List[Dict[str, Any]] = []
-        for raw in cls.CURATED_MODELS:
-            model = dict(raw)
-            metadata = dict(model.get("metadata") or {})
-            metadata.update(
-                {
-                    "source": "curated_fallback",
-                    "inventory_source": "curated_fallback",
-                    "inventory_fallback_reason": reason,
-                    "visibility_scope": "curated",
-                }
-            )
-            model["metadata"] = metadata
-            models.append(model)
-        return models
+        return []
 
     @staticmethod
     def _params_with_token_floor(params: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -305,6 +201,11 @@ class OpencodeZenProvider(AnthropicProvider):
             requested = 4096
         next_params["max_tokens"] = max(requested, 96)
         return next_params
+
+    @staticmethod
+    def _model_needs_token_floor(model_id: str) -> bool:
+        token = str(model_id or "").strip().lower()
+        return token.startswith(("deepseek-", "minimax-"))
 
     @classmethod
     def _openai_params(cls, params: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -361,6 +262,7 @@ class OpencodeZenProvider(AnthropicProvider):
         tool_call_state = {}
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         saw_stream_end = False
+        finish_reason = "stop"
         try:
             for payload in OpenAIProvider._parse_sse_lines(resp):
                 payload = str(payload or "").strip()
@@ -370,7 +272,7 @@ class OpencodeZenProvider(AnthropicProvider):
                     if not saw_stream_end:
                         yield {
                             "type": "stream_end",
-                            "finish_reason": "stop",
+                            "finish_reason": finish_reason,
                             "usage": usage,
                         }
                         saw_stream_end = True
@@ -406,6 +308,7 @@ class OpencodeZenProvider(AnthropicProvider):
                 yield from OpenAIProvider._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
+                    finish_reason = str(finish)
                     for current in tool_call_state.values():
                         if current.get("started") and not current.get("ended"):
                             current["ended"] = True
@@ -414,16 +317,10 @@ class OpencodeZenProvider(AnthropicProvider):
                                 "id": current.get("id", ""),
                                 "name": current.get("name", ""),
                             }
-                    yield {
-                        "type": "stream_end",
-                        "finish_reason": finish,
-                        "usage": usage,
-                    }
-                    saw_stream_end = True
             if not saw_stream_end:
                 yield {
                     "type": "stream_end",
-                    "finish_reason": "stop",
+                    "finish_reason": finish_reason,
                     "usage": usage,
                 }
         finally:
@@ -434,7 +331,13 @@ class OpencodeZenProvider(AnthropicProvider):
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             del tools
             return super().complete(model_id, messages, [], self._params_with_token_floor(params))
-        return self._complete_openai_chat(model_id, messages, params)
+        del tools
+        next_params = (
+            self._params_with_token_floor(params)
+            if self._model_needs_token_floor(model_id)
+            else params
+        )
+        return self._complete_openai_chat(model_id, messages, next_params)
 
     def stream(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
@@ -442,4 +345,10 @@ class OpencodeZenProvider(AnthropicProvider):
             del tools
             yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
             return
-        yield from self._stream_openai_chat(model_id, messages, params)
+        del tools
+        next_params = (
+            self._params_with_token_floor(params)
+            if self._model_needs_token_floor(model_id)
+            else params
+        )
+        yield from self._stream_openai_chat(model_id, messages, next_params)
