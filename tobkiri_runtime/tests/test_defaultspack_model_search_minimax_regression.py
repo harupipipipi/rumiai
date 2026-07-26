@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-MINIMAX_PROFILE_ID = "opencode-zen/minimax-m3-free"
+ZEN_REASONING_PROFILE_ID = "opencode-zen/deepseek-v4-flash-free"
 
 
 def test_dynamic_catalog_models_are_projected_into_profile_picker():
@@ -27,11 +27,11 @@ def test_dynamic_catalog_models_are_projected_into_profile_picker():
     ]
     models = [
         {
-            "id": MINIMAX_PROFILE_ID,
-            "qualified_model_id": MINIMAX_PROFILE_ID,
+            "id": ZEN_REASONING_PROFILE_ID,
+            "qualified_model_id": ZEN_REASONING_PROFILE_ID,
             "provider_id": "opencode-zen",
-            "model_id": "minimax-m3-free",
-            "display_name": "MiniMax M3 Free via OpenCode Zen",
+            "model_id": "deepseek-v4-flash-free",
+            "display_name": "DeepSeek V4 Flash Free via OpenCode Zen",
             "metadata": {"inventory_source": "curated_fallback"},
         }
     ]
@@ -39,11 +39,10 @@ def test_dynamic_catalog_models_are_projected_into_profile_picker():
     merged = _merge_model_profiles(profiles, models)
 
     assert [profile["profile_id"] for profile in merged] == [
-        "openrouter/free",
-        MINIMAX_PROFILE_ID,
+        ZEN_REASONING_PROFILE_ID,
     ]
-    assert merged[1]["provider_id"] == "opencode-zen"
-    assert merged[1]["metadata"]["inventory_source"] == "curated_fallback"
+    assert merged[0]["provider_id"] == "opencode-zen"
+    assert merged[0]["metadata"]["inventory_source"] == "curated_fallback"
 
 
 def test_configured_zen_fallback_joins_nonempty_global_catalog(monkeypatch):
@@ -57,12 +56,12 @@ def test_configured_zen_fallback_joins_nonempty_global_catalog(monkeypatch):
         "display_name": "Free Models Router",
     }
     zen_model = {
-        "id": MINIMAX_PROFILE_ID,
-        "qualified_model_id": MINIMAX_PROFILE_ID,
+        "id": ZEN_REASONING_PROFILE_ID,
+        "qualified_model_id": ZEN_REASONING_PROFILE_ID,
         "provider_id": "opencode-zen",
         "provider": "opencode-zen",
-        "model_id": "minimax-m3-free",
-        "display_name": "MiniMax M3 Free via OpenCode Zen",
+        "model_id": "deepseek-v4-flash-free",
+        "display_name": "DeepSeek V4 Flash Free via OpenCode Zen",
         "metadata": {"inventory_source": "curated_fallback"},
     }
 
@@ -78,6 +77,8 @@ def test_configured_zen_fallback_joins_nonempty_global_catalog(monkeypatch):
             return {"models": [openrouter_model]}
         if contract_id == provider_catalog._MODEL_PROFILE_CONTRACT:
             return {"profiles": [openrouter_model]}
+        if contract_id == provider_catalog._PROVIDER_REGISTRY_CONTRACT:
+            return {"providers": []}
         raise AssertionError(contract_id)
 
     monkeypatch.setattr(provider_catalog, "_runtime_client", lambda: _RuntimeClient())
@@ -86,59 +87,71 @@ def test_configured_zen_fallback_joins_nonempty_global_catalog(monkeypatch):
     model_ids = {item["id"] for item in provider_catalog.list_model_catalog()}
     profile_ids = {item["profile_id"] for item in provider_catalog.list_profile_catalog()}
 
-    assert MINIMAX_PROFILE_ID in model_ids
-    assert MINIMAX_PROFILE_ID in profile_ids
+    assert ZEN_REASONING_PROFILE_ID in model_ids
+    assert ZEN_REASONING_PROFILE_ID in profile_ids
 
 
 def _catalog_model() -> dict:
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
-    return next(item for item in list_model_catalog(provider="opencode-zen") if item["id"] == MINIMAX_PROFILE_ID)
+    return next(
+        item
+        for item in list_model_catalog(provider="opencode-zen")
+        if item["id"] == ZEN_REASONING_PROFILE_ID
+    )
 
 
 def _catalog_profile() -> dict:
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 
-    return next(item for item in list_profile_catalog() if item["profile_id"] == MINIMAX_PROFILE_ID)
+    return next(
+        item
+        for item in list_profile_catalog()
+        if item["profile_id"] == ZEN_REASONING_PROFILE_ID
+    )
 
 
-def test_defaultspack_catalog_exposes_minimax_m3_free_capability_metadata():
+def test_defaultspack_catalog_exposes_deepseek_v4_flash_free_capability_metadata():
     model = _catalog_model()
     profile = _catalog_profile()
 
-    assert model["model_id"] == "minimax-m3-free"
-    assert profile["qualified_model_id"] == MINIMAX_PROFILE_ID
+    assert model["model_id"] == "deepseek-v4-flash-free"
+    assert profile["qualified_model_id"] == ZEN_REASONING_PROFILE_ID
 
     for item in (model, profile):
         assert item["supports_tool_calling"] is False
         assert item["supports_thinking"] is True
-        assert item["supports_vision"] is True
+        assert item["supports_vision"] is False
         assert item["metadata"]["supports_tool_calling"] is False
         assert item["metadata"]["supports_thinking"] is True
-        assert item["metadata"]["supports_vision"] is True
-        assert item["model_capabilities"]["capabilities"]["tool_calling"] is False
-        assert item["model_capabilities"]["capabilities"]["thinking"] is True
-        assert item["model_capabilities"]["capabilities"]["vision"] is True
+        assert item["metadata"]["supports_vision"] is False
+        assert item["model_capabilities"].get("tool_calling", False) is False
+        assert item["model_capabilities"]["thinking"] is True
+        assert item["model_capabilities"].get("vision", False) is False
 
-    assert {"thinking", "vision"}.issubset(model["capability_tags"])
-    assert {"deep_reasoning", "vision_ocr"}.issubset(profile["recommended_roles"])
+    assert "thinking" in model["capability_tags"]
+    assert "vision" not in model["capability_tags"]
+    assert "primary_chat" in profile["recommended_roles"]
+    assert "vision_ocr" not in profile["recommended_roles"]
 
 
-def test_defaultspack_model_search_returns_minimax_m3_free_for_capability_query():
+def test_defaultspack_model_search_returns_deepseek_free_for_capability_query():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
     from domain.ai_client.model_search import search_models
 
     result = search_models(
         {
-            "query": "minimax m3 free",
+            "query": "deepseek v4 flash free",
             "provider_id": "opencode-zen",
-            "requires": {"thinking": True, "vision": True},
+            "requires": {"thinking": True},
             "max_results": 10,
         },
         profiles=list_profile_catalog(),
     )
 
-    assert [item["profile_id"] for item in result["models"]] == [MINIMAX_PROFILE_ID]
+    assert [item["profile_id"] for item in result["models"]] == [
+        ZEN_REASONING_PROFILE_ID
+    ]
     assert result["models"][0]["supports_tool_calling"] is False
     assert result["models"][0]["supports_thinking"] is True
-    assert result["models"][0]["supports_vision"] is True
+    assert result["models"][0]["supports_vision"] is False

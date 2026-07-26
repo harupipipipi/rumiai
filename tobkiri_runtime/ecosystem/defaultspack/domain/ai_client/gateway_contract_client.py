@@ -6,6 +6,7 @@ from typing import Any, Iterator, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import (
+    GlobalContractInvocationError,
     GlobalContractUnavailable,
     invoke_global_contract,
 )
@@ -44,12 +45,44 @@ def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any
     profile_id = str(request.get("profile_id") or active_profile_id() or "").strip()
     if profile_id:
         request["profile_id"] = profile_id
-    return invoke_global_contract(
-        registry,
-        contract_id,
-        operation,
-        request,
-    )
+    try:
+        return invoke_global_contract(
+            registry,
+            contract_id,
+            operation,
+            request,
+        )
+    except GlobalContractInvocationError as exc:
+        if exc.code != "not_configured" or not _migrate_legacy_connection(request):
+            raise
+        return invoke_global_contract(
+            registry,
+            contract_id,
+            operation,
+            request,
+        )
+
+
+def _migrate_legacy_connection(payload: Mapping[str, Any]) -> bool:
+    """Move one encrypted compatibility key into the contract-owned stores."""
+    model_reference = str(payload.get("model_reference") or "").strip()
+    provider_id = model_reference.split("/", 1)[0].strip()
+    if not provider_id:
+        return False
+    secret = None
+    try:
+        from blocks.ai.provider_key import _upsert
+        from domain.ai_client.api_key_store import read_provider_api_key
+
+        secret = read_provider_api_key(provider_id, "default")
+        if not secret:
+            return False
+        _upsert(provider_id, {"value": secret, "api_id": "default"})
+        return True
+    except (KeyError, RuntimeError, ValueError):
+        return False
+    finally:
+        secret = None
 
 
 class ContractLLMGateway:

@@ -4,6 +4,7 @@ import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, previewableToolActivityKeys, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, taskDurationForMessage, toolActivityPreviewId, visibleChatMessages } from "./ChatMessagesRenderer";
+import { conversationPresentationForEvents } from "../features/chat/presentation/conversationPresentation";
 import type { ChatUiMessage } from "./types";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -813,4 +814,189 @@ test("chat send error exposes retry and dismiss actions without truncating the m
   assert.match(html, />再試行</);
   assert.match(html, /aria-label="エラーを閉じる"/);
   assert.match(html, /Network connection failed/);
+});
+
+test("declarative conversation activity renders a clear phase timeline without private output", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "deepthink-result",
+      rawText: "Final answer",
+      content: [{ type: "markdown", text: "Final answer" }],
+      events: [
+        {
+          type: "status",
+          phase: "deepthink_planning",
+          deepthink_phase: "planning",
+          message: "計画を作成しました",
+          private_output: "must-not-render",
+        },
+        {
+          type: "status",
+          phase: "deepthink_reviewing",
+          deepthink_phase: "reviewing",
+          message: "回答をレビューしました",
+          review_round: 1,
+          approved: false,
+        },
+      ],
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /aria-label="DeepThink progress"/);
+  assert.match(html, /data-presentation-id="defaultspack\.deepthink\.v1"/);
+  assert.match(html, /data-presentation-status="running"/);
+  assert.match(html, /data-motion-surface="aurora"/);
+  assert.match(html, />DeepThink</);
+  assert.match(html, />実行中</);
+  assert.match(html, /2 \/ 8 phases/);
+  assert.match(html, /Review 1/);
+  assert.match(html, /改善点が見つかった/);
+  assert.doesNotMatch(html, /must-not-render/);
+});
+
+test("DeepThink activity exposes completed and paused states", () => {
+  const render = (deepthinkPhase: "completed" | "paused", approved?: boolean) => (
+    renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+      error: null,
+      isMessagesRegionVisible: true,
+      isLoading: false,
+      isNewConversation: false,
+      isGenerating: false,
+      messages: [message({
+        id: `deepthink-${deepthinkPhase}`,
+        rawText: "Final answer",
+        content: [{ type: "markdown", text: "Final answer" }],
+        events: [
+          {
+            type: "status",
+            phase: "deepthink_reviewing",
+            deepthink_phase: "reviewing",
+            message: "回答をレビューしました",
+            approved,
+          },
+          {
+            type: "status",
+            phase: `deepthink_${deepthinkPhase}`,
+            deepthink_phase: deepthinkPhase,
+            message: deepthinkPhase === "completed" ? "DeepThinkが完了しました" : "DeepThinkを一時停止しました",
+            approved,
+          },
+        ],
+      })],
+      messagesEndRef: { current: null },
+      unknownBlockStrategy: "hidden",
+      showActivityInMessages: true,
+      showWidgets: true,
+      onSuggestionClick: () => undefined,
+    }))
+  );
+
+  const completedHtml = render("completed", true);
+  assert.match(completedHtml, /data-presentation-status="completed"/);
+  assert.match(completedHtml, />完了</);
+  assert.match(completedHtml, /レビューを通過した回答です/);
+
+  const pausedHtml = render("paused");
+  assert.match(pausedHtml, /data-presentation-status="paused"/);
+  assert.match(pausedHtml, />一時停止</);
+  assert.doesNotMatch(pausedHtml, /レビューを通過した回答です/);
+});
+
+test("DeepThink activity renders profile-defined phases without exposing output", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "deepthink-profile-phase",
+      content: [{ type: "markdown", text: "Final answer" }],
+      rawText: "Final answer",
+      events: [
+        {
+          type: "status",
+          phase: "deepthink_integrations",
+          deepthink_phase: "integrations",
+          message: "toolとskillを選択しました",
+        },
+        {
+          type: "status",
+          phase: "deepthink_legal_review",
+          deepthink_phase: "legal_review",
+          phase_label: "法務確認",
+          message: "法務確認を実行しています",
+          private_output: "must-not-render",
+        },
+      ],
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, />連携</);
+  assert.match(html, />法務確認</);
+  assert.doesNotMatch(html, /must-not-render/);
+});
+
+test("conversation presentation accepts a safe JSON declaration and rejects unsafe tokens", () => {
+  const view = conversationPresentationForEvents([
+    {
+      type: "status",
+      phase: "custom_prepare",
+      presentation_template_id: "example.custom.v1",
+      custom_phase: "prepare",
+      presentation: {
+        schema_version: 1,
+        id: "example.custom.v1",
+        title: "Custom run",
+        aria_label: "Custom run progress",
+        icon: "<svg onload=alert(1)>",
+        tone: "url(javascript:alert(1))",
+        motion: {
+          entry: "spin-forever",
+          surface: "aurora",
+          indicator: "pulse",
+          active_phase: "signal",
+        },
+        event: {
+          template_id_field: "presentation_template_id",
+          phase_field: "custom_phase",
+          phase_prefix: "custom_",
+        },
+        phases: [{ id: "prepare", label: "準備", description: "入力を確認" }],
+        dynamic_phases: { insert_after: "prepare", excluded: [] },
+        statuses: {
+          running: "進行中",
+          completed: "完了",
+          paused: "停止",
+          failed: "失敗",
+        },
+        feedback: {},
+        unsafe_html: "<img src=x onerror=alert(1)>",
+      },
+      message: "準備しています",
+    },
+  ]);
+
+  assert.equal(view?.template.id, "example.custom.v1");
+  assert.equal(view?.template.title, "Custom run");
+  assert.equal(view?.template.icon, "brain-circuit");
+  assert.equal(view?.template.tone, "violet-sky");
+  assert.equal(view?.template.motion.entry, "rise");
+  assert.equal(view?.template.motion.surface, "aurora");
+  assert.equal(view?.latestPhaseId, "prepare");
 });

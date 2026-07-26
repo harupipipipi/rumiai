@@ -2778,6 +2778,9 @@ function messageRequestBody(
       ...(options?.params ?? {}),
       thinking_level: options?.thinking_level ?? undefined,
       deepthink_enabled: options?.deepthink_enabled ?? undefined,
+      deepthink_activation_source: options?.deepthink_enabled
+        ? "slash_command"
+        : undefined,
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,

@@ -29,6 +29,20 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
     if not task:
         return {"status": "error", "code": "MISSING_INPUT", "error": "task is required", "assistant_text": ""}
     from blocks.agent.execute import run as execute_agent
+    from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+    raw_params = dict(
+        payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    )
+    deepthink_requested = bool(
+        payload.get("deepthink") or raw_params.get("deepthink_enabled")
+    )
+    delegated_params, deepthink_policy = (
+        ModelRuntimeSettingsService().authorize_delegated_deepthink(
+            raw_params,
+            requested=deepthink_requested,
+        )
+    )
 
     result = execute_agent(
         {
@@ -39,7 +53,7 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
             "runtime_profile_key": payload.get("runtime_profile_key"),
             "capability_profile": payload.get("capability_profile"),
             "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
-            "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+            "params": delegated_params,
             "attachments": list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else envelope.attachments),
             "target": dict(envelope.target if isinstance(envelope.target, dict) else {}),
             "delivery": dict(envelope.delivery if isinstance(envelope.delivery, dict) else {}),
@@ -50,6 +64,7 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
     if isinstance(result, dict) and result.get("status") == "ok":
         data = result.get("data") if isinstance(result.get("data"), dict) else {}
         delegate = _delegate_summary(data, payload, envelope)
+        delegate["deepthink"] = deepthink_policy
         authority_approval = _find_authority_approval(data)
         if authority_approval is not None:
             assistant_text = _authority_approval_text(authority_approval)

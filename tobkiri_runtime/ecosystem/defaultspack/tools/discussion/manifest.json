@@ -1,0 +1,49 @@
+{
+  "id": "discussion",
+  "loading": "always",
+  "description": "Run a lightweight, bounded multi-perspective discussion and return a consensus report.",
+  "metadata": {
+    "aliases": ["discuss", "multi perspective discussion", "debate"],
+    "keywords": ["discussion", "perspectives", "consensus", "review"]
+  },
+  "config": {
+    "tool_id": "discussion",
+    "name": "Discussion",
+    "loading": "always",
+    "summary": "Collect multiple perspectives, synthesize them, and revise until unanimous or bounded.",
+    "tool_category": "reasoning",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": ["reasoning", "discussion", "multi_agent"],
+    "ui": {
+      "group_id": "reasoning",
+      "group_label": "Reasoning",
+      "group_icon": "brain",
+      "item_icon": "messages-square",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Discussion",
+      "composer_description": "複数の視点で議論し、全視点が納得するまで要約を改善します。",
+      "composer_icon": "messages-square"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The theme or question to discuss."
+          }
+        },
+        "required": ["topic"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.discussion:run_discussion"
+    }
+  }
+}

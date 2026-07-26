@@ -9,6 +9,11 @@ from typing import Any, Dict, List
 
 from .oauth_store import provider_has_oauth_connection, provider_oauth_status
 from .provider_program import provider_program_manifests
+from .provider_endpoint import normalize_provider_base_url
+from .provider_identity import (
+    canonical_provider_id,
+    provider_id_aliases,
+)
 
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
@@ -17,6 +22,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "assemblyai": ["ASSEMBLYAI_API_KEY"],
     "avian": ["AVIAN_API_KEY"],
     "azure-openai": ["AZURE_OPENAI_API_KEY"],
+    "azure-ai-foundry": ["AZURE_AI_FOUNDRY_API_KEY"],
     "baidu-qianfan": ["QIANFAN_API_KEY"],
     "black-forest-labs": ["BFL_API_KEY"],
     "alibaba-dashscope": ["DASHSCOPE_API_KEY"],
@@ -43,7 +49,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "google-vertex-ai": ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_VERTEX_AI_ACCESS_TOKEN"],
     "gitlawb-opengateway": ["GITLAWB_OPENGATEWAY_API_KEY"],
     "genspark": ["GENSPARK_API_KEY"],
-    "llama_cpp": ["LLAMACPP_API_KEY"],
+    "llamacpp": ["LLAMACPP_API_KEY"],
     "litellm-proxy": ["LITELLM_API_KEY"],
     "lmstudio": ["LMSTUDIO_API_KEY"],
     "longcat": ["LONGCAT_API_KEY"],
@@ -84,6 +90,75 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     ],
     "xiaomi-mimo-global": ["XIAOMI_MIMO_GLOBAL_API_KEY", "MIMO_API_KEY"],
 }
+
+
+def _provider_descriptor_secret_keys(
+    migration_fallback: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
+    """Generate credential env mappings from bundled provider descriptors.
+
+    The hand-written table remains only as a migration source for provider
+    program placeholders that do not yet have an executable descriptor.
+    Whenever a descriptor exists, its ``api_key_env``/``env_vars`` declaration
+    is authoritative.
+    """
+    ecosystem_root = Path(__file__).resolve().parents[3]
+    roots = (
+        ecosystem_root / "rumi_model_catalog_pack" / "catalog" / "providers",
+        ecosystem_root / "rumi_model_catalog_pack" / "extensions" / "llm" / "providers",
+    )
+    generated: Dict[str, List[str]] = {
+        canonical_provider_id(provider_id): list(keys)
+        for provider_id, keys in migration_fallback.items()
+    }
+    descriptor_keys: Dict[str, List[str]] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*/manifest.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            descriptor = (
+                raw.get("provider_manifest")
+                if isinstance(raw.get("provider_manifest"), dict)
+                else raw
+            )
+            provider_id = canonical_provider_id(
+                descriptor.get("id") or raw.get("provider_id") or raw.get("id")
+            )
+            if not provider_id:
+                continue
+            declared = descriptor.get("api_key_env")
+            if declared in (None, "", []):
+                metadata = (
+                    raw.get("provider_metadata")
+                    if isinstance(raw.get("provider_metadata"), dict)
+                    else {}
+                )
+                declared = metadata.get("env_vars")
+            values = declared if isinstance(declared, list) else [declared]
+            keys = [
+                str(value).strip()
+                for value in values
+                if str(value or "").strip()
+            ]
+            if keys:
+                existing = descriptor_keys.setdefault(provider_id, [])
+                for key in keys:
+                    if key not in existing:
+                        existing.append(key)
+    generated.update(descriptor_keys)
+    return generated
+
+
+# Public compatibility name. Values for executable bundled providers are
+# generated from their descriptors; legacy entries only cover migration-only
+# program placeholders without one.
+PROVIDER_SECRET_KEYS = _provider_descriptor_secret_keys(PROVIDER_SECRET_KEYS)
 
 _NAMED_API_PREFIX = "RUMIAPI"
 _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
@@ -181,7 +256,9 @@ def register_custom_provider(
     kind: str | None = None,
     pack_root: Path | None = None,
 ) -> dict[str, Any]:
-    cleaned_id = _slug(provider_id, fallback="", max_length=18).lower()
+    cleaned_id = canonical_provider_id(
+        _slug(provider_id, fallback="", max_length=18).lower()
+    )
     if not cleaned_id:
         return {"success": False, "error": "provider_id is required"}
     if cleaned_id in PROVIDER_SECRET_KEYS:
@@ -354,6 +431,7 @@ def _slug(value: str, *, fallback: str = "DEFAULT", max_length: int = 32) -> str
 
 
 def named_provider_secret_key(provider_id: str, api_id: str | None = None, name: str | None = None) -> str:
+    provider_id = canonical_provider_id(provider_id)
     provider_slug = _slug(provider_id, fallback="PROVIDER", max_length=18)
     api_slug = _slug(api_id or name or "DEFAULT", fallback="DEFAULT", max_length=36)
     key = f"{_NAMED_API_PREFIX}_{provider_slug}_{api_slug}"
@@ -383,8 +461,8 @@ def _provider_from_named_key(key: str) -> str:
     upper_remainder = remainder.upper()
     for provider_slug, provider_id in candidates:
         if upper_remainder == provider_slug or upper_remainder.startswith(provider_slug + "_"):
-            return provider_id
-    return remainder.split("_", 1)[0].lower()
+            return canonical_provider_id(provider_id)
+    return canonical_provider_id(remainder.split("_", 1)[0].lower())
 
 
 def _api_id_from_named_key(key: str, provider_id: str) -> str:
@@ -396,12 +474,12 @@ def _api_id_from_named_key(key: str, provider_id: str) -> str:
 
 
 def provider_secret_key(provider_id: str) -> str:
-    keys = PROVIDER_SECRET_KEYS.get(str(provider_id or "").strip(), [])
+    keys = PROVIDER_SECRET_KEYS.get(canonical_provider_id(provider_id), [])
     return keys[0] if keys else ""
 
 
 def provider_secret_keys(provider_id: str) -> List[str]:
-    return list(PROVIDER_SECRET_KEYS.get(str(provider_id or "").strip(), []))
+    return list(PROVIDER_SECRET_KEYS.get(canonical_provider_id(provider_id), []))
 
 
 def _read_secret_value(key: str, caller_id: str, *, pack_root: Path | None = None) -> str:
@@ -418,7 +496,7 @@ def _read_secret_value(key: str, caller_id: str, *, pack_root: Path | None = Non
 
 
 def _refresh_provider_env(provider_id: str, *, pack_root: Path | None = None) -> bool:
-    provider_id = str(provider_id or "").strip()
+    provider_id = canonical_provider_id(provider_id)
     keys = provider_secret_keys(provider_id)
     for key in keys:
         os.environ.pop(key, None)
@@ -447,6 +525,7 @@ def _refresh_provider_env(provider_id: str, *, pack_root: Path | None = None) ->
 
 
 def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> bool:
+    provider_id = canonical_provider_id(provider_id)
     keys = provider_secret_keys(provider_id)
     for key in keys:
         if os.environ.get(key, "").strip():
@@ -454,7 +533,6 @@ def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> 
         secret_path = _secrets_dir(pack_root) / f"{key}.json"
         if secret_path.exists() and _get_store(pack_root).has_secret(key):
             return True
-    provider_id = str(provider_id or "").strip()
     for item in provider_named_api_keys(provider_id, pack_root=pack_root):
         if item.get("configured"):
             return True
@@ -478,7 +556,7 @@ def set_provider_api_key(
     kind: str | None = None,
     credential_mode: str | None = None,
 ) -> dict[str, Any]:
-    normalized_provider = str(provider_id or "").strip()
+    normalized_provider = canonical_provider_id(provider_id)
     # Program providers without a legacy ENV variable still need a durable
     # default connection.  Store it as an explicit named connection rather
     # than rejecting the provider as "unsupported".
@@ -490,7 +568,7 @@ def set_provider_api_key(
         else provider_secret_key(normalized_provider)
     )
     if not key:
-        return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
+        return {"success": False, "provider_id": normalized_provider, "error": "unsupported provider"}
     is_builtin = normalized_provider in PROVIDER_SECRET_KEYS or program_provider
     resolved_kind = _normalize_kind(kind) if kind is not None else None
     if resolved_kind is None:
@@ -508,18 +586,27 @@ def set_provider_api_key(
             kind=resolved_kind,
             pack_root=pack_root,
         )
-    normalized_api_id = str(api_id or _api_id_from_named_key(key, provider_id)).strip()
-    display_name = str(name or normalized_api_id or provider_id).strip()
+    normalized_api_id = str(api_id or _api_id_from_named_key(key, normalized_provider)).strip()
+    display_name = str(name or normalized_api_id or normalized_provider).strip()
+    try:
+        base_url = normalize_provider_base_url(base_url or "", allow_empty=True)
+    except ValueError as exc:
+        return {
+            "success": False,
+            "provider_id": normalized_provider,
+            "api_id": normalized_api_id,
+            "error": str(exc),
+        }
 
     cleaned = str(value or "").strip()
     resolved_credential_mode = _normalize_credential_mode(credential_mode)
     if resolved_credential_mode == _CREDENTIAL_MODE_NONE:
         if not named:
-            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection needs a named API entry"}
+            return {"success": False, "provider_id": normalized_provider, "error": "an unauthenticated connection needs a named API entry"}
         if cleaned:
-            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection cannot include an API key"}
+            return {"success": False, "provider_id": normalized_provider, "error": "an unauthenticated connection cannot include an API key"}
         if not _is_loopback_endpoint(base_url):
-            return {"success": False, "provider_id": provider_id, "error": "an unauthenticated connection must use a loopback base URL"}
+            return {"success": False, "provider_id": normalized_provider, "error": "an unauthenticated connection must use a loopback base URL"}
         store = _get_store(pack_root)
         # First-time endpoint connections have nothing to delete.  Clearing a
         # prior key is still required when converting an existing entry.
@@ -527,14 +614,14 @@ def set_provider_api_key(
             deleted = store.delete_secret(
                 key,
                 actor="defaultspack",
-                reason=f"save unauthenticated {provider_id} connection",
+                reason=f"save unauthenticated {normalized_provider} connection",
             )
             if not deleted.success:
-                return {"success": False, "provider_id": provider_id, "error": deleted.error}
+                return {"success": False, "provider_id": normalized_provider, "error": deleted.error}
         os.environ.pop(key, None)
         metadata = _read_api_metadata(pack_root)
         metadata[key] = _metadata_patch(
-            provider_id=provider_id,
+            provider_id=normalized_provider,
             api_id=normalized_api_id,
             name=display_name,
             existing=metadata.get(key, {}),
@@ -549,10 +636,10 @@ def set_provider_api_key(
             credential_mode=resolved_credential_mode,
         )
         _write_api_metadata(metadata, pack_root)
-        _refresh_provider_env(provider_id, pack_root=pack_root)
+        _refresh_provider_env(normalized_provider, pack_root=pack_root)
         return {
             "success": True,
-            "provider_id": provider_id,
+            "provider_id": normalized_provider,
             "api_id": normalized_api_id,
             "name": display_name,
             "key": key,
@@ -573,7 +660,7 @@ def set_provider_api_key(
         result = _get_store(pack_root).delete_secret(
             key,
             actor="defaultspack",
-            reason=f"clear {provider_id} api key",
+            reason=f"clear {normalized_provider} api key",
         )
         os.environ.pop(key, None)
         if result.success:
@@ -581,11 +668,11 @@ def set_provider_api_key(
                 metadata = _read_api_metadata(pack_root)
                 metadata.pop(key, None)
                 _write_api_metadata(metadata, pack_root)
-                _refresh_provider_env(provider_id, pack_root=pack_root)
+                _refresh_provider_env(normalized_provider, pack_root=pack_root)
             _reset_ai_client()
         return {
             "success": bool(result.success),
-            "provider_id": provider_id,
+            "provider_id": normalized_provider,
             "api_id": normalized_api_id,
             "name": display_name,
             "key": key,
@@ -598,13 +685,13 @@ def set_provider_api_key(
         key,
         cleaned,
         actor="defaultspack",
-        reason=f"set {provider_id} api key",
+        reason=f"set {normalized_provider} api key",
     )
     if result.success:
         if named:
             metadata = _read_api_metadata(pack_root)
             metadata[key] = _metadata_patch(
-                provider_id=provider_id,
+                provider_id=normalized_provider,
                 api_id=normalized_api_id,
                 name=display_name,
                 existing=metadata.get(key, {}),
@@ -621,14 +708,14 @@ def set_provider_api_key(
             _write_api_metadata(metadata, pack_root)
         if not named:
             os.environ[key] = cleaned
-        elif resolved_kind == _KIND_LLM and not os.environ.get(provider_secret_key(provider_id), "").strip():
-            canonical_key = provider_secret_key(provider_id)
+        elif resolved_kind == _KIND_LLM and not os.environ.get(provider_secret_key(normalized_provider), "").strip():
+            canonical_key = provider_secret_key(normalized_provider)
             if canonical_key:
                 os.environ[canonical_key] = cleaned
         _reset_ai_client()
     return {
         "success": bool(result.success),
-        "provider_id": provider_id,
+        "provider_id": normalized_provider,
         "api_id": normalized_api_id,
         "name": display_name,
         "key": key,
@@ -803,7 +890,7 @@ def load_provider_api_keys_into_env(*, pack_root: Path | None = None) -> dict[st
 
 
 def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = None) -> list[dict[str, Any]]:
-    requested_provider = str(provider_id or "").strip()
+    requested_provider = canonical_provider_id(provider_id)
     if not _secrets_dir(pack_root).exists():
         return []
     store = _get_store(pack_root)
@@ -821,7 +908,9 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
             and _normalize_credential_mode(stored_meta.get("credential_mode")) != _CREDENTIAL_MODE_NONE
         ):
             continue
-        key_provider = str(stored_meta.get("provider_id") or _provider_from_named_key(key)).strip()
+        key_provider = canonical_provider_id(
+            stored_meta.get("provider_id") or _provider_from_named_key(key)
+        )
         if requested_provider and key_provider != requested_provider:
             continue
         api_id = str(stored_meta.get("api_id") or _api_id_from_named_key(key, key_provider)).strip()
@@ -850,12 +939,19 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
 
 
 def provider_api_metadata(provider_id: str, api_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
-    provider_id = str(provider_id or "").strip()
+    provider_id = canonical_provider_id(provider_id)
     api_id = str(api_id or "").strip()
     if not provider_id or not api_id:
         return {}
+    all_metadata = _read_api_metadata(pack_root)
     key = named_provider_secret_key(provider_id, api_id=api_id)
-    metadata = _read_api_metadata(pack_root).get(key, {})
+    metadata = all_metadata.get(key, {})
+    if not metadata:
+        for alias in provider_id_aliases(provider_id):
+            legacy_key = f"{_NAMED_API_PREFIX}_{_slug(alias, fallback='PROVIDER', max_length=18)}_{_slug(api_id, fallback='DEFAULT', max_length=36)}"
+            if legacy_key in all_metadata:
+                metadata = all_metadata[legacy_key]
+                break
     if not isinstance(metadata, dict):
         return {}
     result = dict(metadata)
@@ -864,6 +960,7 @@ def provider_api_metadata(provider_id: str, api_id: str, *, pack_root: Path | No
 
 
 def read_provider_api_key(provider_id: str, api_id: str, *, pack_root: Path | None = None) -> str | None:
+    provider_id = canonical_provider_id(provider_id)
     key = named_provider_secret_key(provider_id, api_id=api_id)
     value = _get_store(pack_root)._internal_read_value(
         key,

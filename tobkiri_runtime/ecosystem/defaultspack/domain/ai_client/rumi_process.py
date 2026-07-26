@@ -22,9 +22,7 @@ RUMI_DEEPTHINK_WARNING = "DeepThink is enabled. This task may take several hours
 RUMI_DEEPTHINK_WARNING_JA = "DeepThinkが有効です。タスクには数時間かかる可能性があります。"
 RUMI_DEEPTHINK_SOURCE = "harupipipipi/thinker"
 RUMI_DEEPTHINK_MAX_SECTIONS = 3
-RUMI_QUARANTINE_MESSAGE = (
-    "Rumi quarantined this draft before delivery because the review chain could not verify a marked final response."
-)
+RUMI_QUARANTINE_MESSAGE = "Rumi quarantined this draft before delivery because the review chain could not verify a marked final response."
 RUMI_BASE_MODEL_CANDIDATES = [
     RUMI_INTENDED_BASE_MODEL,
     "anthropic/claude-sonnet-4-0",
@@ -79,7 +77,9 @@ def resolve_rumi_base_model(
     }
     provider_ids = {
         str(item or "").strip()
-        for item in (available_providers if isinstance(available_providers, (list, tuple, set)) else [])
+        for item in (
+            available_providers if isinstance(available_providers, (list, tuple, set)) else []
+        )
         if str(item or "").strip()
     }
     default_base = str(default_profile_base_model or "").strip()
@@ -102,7 +102,9 @@ def resolve_rumi_base_model(
 
 
 def rumi_base_model_metadata(resolved_base_model: str | None = None) -> dict[str, Any]:
-    resolved = str(resolved_base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
+    resolved = (
+        str(resolved_base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
+    )
     fallback_reason = ""
     if resolved != RUMI_INTENDED_BASE_MODEL:
         fallback_reason = "intended_base_model_unavailable_using_active_provider_fallback"
@@ -114,7 +116,9 @@ def rumi_base_model_metadata(resolved_base_model: str | None = None) -> dict[str
 
 
 def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
-    resolved_base_model = str(base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
+    resolved_base_model = (
+        str(base_model or RUMI_INTENDED_BASE_MODEL).strip() or RUMI_INTENDED_BASE_MODEL
+    )
     base_model_metadata = rumi_base_model_metadata(resolved_base_model)
     return {
         "id": RUMI_MODEL_PACK_ID,
@@ -149,6 +153,7 @@ def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
             "deepthink_max_review_iterations": 8,
             "deepthink_user_rejection_review_cycles": 2,
             "deepthink_max_sections": RUMI_DEEPTHINK_MAX_SECTIONS,
+            "deepthink_timeout_seconds": 21600,
             "max_review_rounds": 2,
             "max_retries": 2,
             "timeout_seconds": 600,
@@ -173,7 +178,12 @@ def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
             "tooling": {
                 "todo_tool": "todo",
                 "search_tool": "web_search",
-                "runtime_tools": ["coding_file_create", "coding_terminal_exec", "html_preview", "image_render"],
+                "runtime_tools": [
+                    "coding_file_create",
+                    "coding_terminal_exec",
+                    "html_preview",
+                    "image_render",
+                ],
             },
             "freshness": {
                 "proper_nouns_force_search": True,
@@ -181,7 +191,12 @@ def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
                 "reviewer_checks_stale_data": True,
             },
             "review": {
-                "reviewer_receives": ["user_input", "draft_answer", "criteria", "freshness_summary"],
+                "reviewer_receives": [
+                    "user_input",
+                    "draft_answer",
+                    "criteria",
+                    "freshness_summary",
+                ],
                 "reviewer_excludes": ["personalization", "private user background hypotheses"],
             },
             "deepthink": {
@@ -205,8 +220,14 @@ def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
     }
 
 
-def ensure_default_rumi_model_pack(model_packs: Any, *, base_model: str | None = None) -> list[dict[str, Any]]:
-    packs = [dict(pack) for pack in model_packs if isinstance(pack, dict)] if isinstance(model_packs, list) else []
+def ensure_default_rumi_model_pack(
+    model_packs: Any, *, base_model: str | None = None
+) -> list[dict[str, Any]]:
+    packs = (
+        [dict(pack) for pack in model_packs if isinstance(pack, dict)]
+        if isinstance(model_packs, list)
+        else []
+    )
     materialized = default_rumi_model_pack(base_model=base_model)
     replaced = False
     for index, pack in enumerate(packs):
@@ -215,7 +236,11 @@ def ensure_default_rumi_model_pack(model_packs: Any, *, base_model: str | None =
             continue
         metadata = pack.get("metadata") if isinstance(pack.get("metadata"), dict) else {}
         aliases = pack.get("aliases") if isinstance(pack.get("aliases"), list) else []
-        if metadata.get("builtin") or RUMI_MODEL_PACK_REF in aliases or RUMI_MODEL_PACK_ID in aliases:
+        if (
+            metadata.get("builtin")
+            or RUMI_MODEL_PACK_REF in aliases
+            or RUMI_MODEL_PACK_ID in aliases
+        ):
             packs[index] = materialized
         replaced = True
         break
@@ -228,10 +253,16 @@ def trace_id() -> str:
     return "rumi-" + uuid.uuid4().hex[:12]
 
 
-def request_mode(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, params: dict[str, Any] | None = None) -> str:
+def request_mode(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    params: dict[str, Any] | None = None,
+) -> str:
     if deepthink_enabled(params):
         return "deep"
-    raw_mode = str((params or {}).get("rumi_mode") or (params or {}).get("mode") or "").strip().lower()
+    raw_mode = (
+        str((params or {}).get("rumi_mode") or (params or {}).get("mode") or "").strip().lower()
+    )
     if raw_mode in {"simple", "deep"}:
         return raw_mode
     text = messages_text(messages)
@@ -281,20 +312,24 @@ def select_harness_tools(
             "purpose": "detect repeated reviewer feedback and stop loops",
         },
     ]
-    vision_tools = [
-        {
-            "id": "vision_zoom",
-            "purpose": "inspect enlarged image regions before judging details",
-        },
-        {
-            "id": "vision_crop",
-            "purpose": "focus on a region of an image or screenshot",
-        },
-        {
-            "id": "vision_region_compare",
-            "purpose": "compare separated visual regions for UI and image tasks",
-        },
-    ] if vision_enabled else []
+    vision_tools = (
+        [
+            {
+                "id": "vision_zoom",
+                "purpose": "inspect enlarged image regions before judging details",
+            },
+            {
+                "id": "vision_crop",
+                "purpose": "focus on a region of an image or screenshot",
+            },
+            {
+                "id": "vision_region_compare",
+                "purpose": "compare separated visual regions for UI and image tasks",
+            },
+        ]
+        if vision_enabled
+        else []
+    )
     selected = [*base_tools, *vision_tools]
     return {
         "source": "rumi_harness",
@@ -312,14 +347,18 @@ def select_harness_tools(
     }
 
 
-def build_simple_messages(original_messages: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+def build_simple_messages(
+    original_messages: list[dict[str, Any]], context: dict[str, Any]
+) -> list[dict[str, Any]]:
     return [
         {"role": "system", "content": _simple_system_prompt()},
         {"role": "user", "content": _payload("simple_input", original_messages, context)},
     ]
 
 
-def build_generator_messages(original_messages: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+def build_generator_messages(
+    original_messages: list[dict[str, Any]], context: dict[str, Any]
+) -> list[dict[str, Any]]:
     return [
         {"role": "system", "content": _generator_system_prompt()},
         {"role": "user", "content": _payload("deep_input", original_messages, context)},
@@ -390,7 +429,8 @@ def build_deepthink_planner_messages(
             "Also decide 5 useful perspectives/agents implied by the input.",
             "No filler. Dense but concise.",
         ],
-        "Rumi harness context:\n" + json.dumps(context.get("harness_tool_selection", {}), ensure_ascii=False),
+        "Rumi harness context:\n"
+        + json.dumps(context.get("harness_tool_selection", {}), ensure_ascii=False),
         'Return this exact shape: {"structure": string[], "key_points": string[], "risks": string[]}.',
     ]
     return [
@@ -437,7 +477,10 @@ def build_deepthink_public_notes_messages(
             "Previous visible reviews:\n" + json.dumps(reviews or [], ensure_ascii=False),
             f"Existing visible thinking-process count: {len(existing_notes or [])}.",
         ]
-    context_sections.append("Rumi harness tool selection:\n" + json.dumps(context.get("harness_tool_selection", {}), ensure_ascii=False))
+    context_sections.append(
+        "Rumi harness tool selection:\n"
+        + json.dumps(context.get("harness_tool_selection", {}), ensure_ascii=False)
+    )
     return [
         {
             "role": "system",
@@ -488,7 +531,8 @@ def build_deepthink_writer_messages(
         f"Draft number:\n{draft_number}",
         f"Stage:\n{stage_title or ('section draft' if is_section else 'final candidate')}",
         f"Section:\n{section_title or '(final merge)'}",
-        "Section position:\n" + (f"{section_index}/{total_sections}" if section_index and total_sections else "(none)"),
+        "Section position:\n"
+        + (f"{section_index}/{total_sections}" if section_index and total_sections else "(none)"),
         "Section drafts:\n" + json.dumps(section_drafts or [], ensure_ascii=False),
     ]
     if loop_breaker:
@@ -514,14 +558,28 @@ def build_deepthink_writer_messages(
     ]
 
 
-def build_deepthink_reviewer_messages(original_messages: list[dict[str, Any]], answer: str) -> list[dict[str, Any]]:
+def build_deepthink_reviewer_messages(
+    original_messages: list[dict[str, Any]],
+    answer: str,
+    grounding_context: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    context_section = ""
+    if grounding_context:
+        context_section = (
+            "\n\nPublic grounding context:\n"
+            + json.dumps(grounding_context, ensure_ascii=False)[:32_000]
+        )
     return [
         {
             "role": "system",
             "content": (
                 "You are a stateless third-party reviewer. Judge only the user input and the output you are shown. "
                 "Do not assume access to notes, plans, drafts, or past reviews. Also check whether the output is trapped by probability estimates, "
-                "false precision, or majority-likely readings instead of serving the user. Return only valid JSON. No markdown."
+                "false precision, or majority-likely readings instead of serving the user. For requests about an existing codebase or system, "
+                "reject unsupported claims presented as verified facts and reject answers that substitute an invented architecture for inspectable "
+                "current implementation. Set pass=true only when the output is safe to deliver unchanged and required_changes is empty. "
+                "Scores use a 0-to-100 scale. If any required change remains or score is below 80, pass must be false. "
+                "Return only valid JSON. No markdown."
             ),
         },
         {
@@ -529,15 +587,17 @@ def build_deepthink_reviewer_messages(original_messages: list[dict[str, Any]], a
             "content": "\n\n".join(
                 [
                     f"Task:\n{messages_text(original_messages)}",
-                    f"Output under review:\n{answer}",
-                    'Return this exact shape: {"pass": boolean, "score": number, "issues": string[], "required_changes": string[]}.',
+                    f"Output under review:\n{answer}{context_section}",
+                    'Return this exact shape: {"pass": boolean, "score": number from 0 to 100, "issues": string[], "required_changes": string[]}.',
                 ]
             ),
         },
     ]
 
 
-def build_deepthink_user_rejection_review_messages(original_messages: list[dict[str, Any]], answer: str) -> list[dict[str, Any]]:
+def build_deepthink_user_rejection_review_messages(
+    original_messages: list[dict[str, Any]], answer: str
+) -> list[dict[str, Any]]:
     return [
         {
             "role": "system",
@@ -564,8 +624,14 @@ def build_deepthink_user_rejection_review_messages(original_messages: list[dict[
 
 def build_json_repair_messages(schema_hint: str, broken_text: str) -> list[dict[str, Any]]:
     return [
-        {"role": "system", "content": f"Repair malformed JSON without adding commentary. {_json_only()}"},
-        {"role": "user", "content": f"Expected JSON shape: {schema_hint}\n\nBroken text:\n{broken_text}"},
+        {
+            "role": "system",
+            "content": f"Repair malformed JSON without adding commentary. {_json_only()}",
+        },
+        {
+            "role": "user",
+            "content": f"Expected JSON shape: {schema_hint}\n\nBroken text:\n{broken_text}",
+        },
     ]
 
 
@@ -579,7 +645,7 @@ def extract_draft_response(text: str) -> str | None:
     for marker in ("FINAL_RESPONSE:", "DRAFT_RESPONSE:", "ANSWER:"):
         index = raw.find(marker)
         if index >= 0:
-            return raw[index + len(marker):].strip()
+            return raw[index + len(marker) :].strip()
     return None
 
 
@@ -624,20 +690,35 @@ def context_for_request(
     tool_ids = [_tool_id(tool) for tool in (tools or [])]
     tool_ids = [tool_id for tool_id in tool_ids if tool_id]
     text = messages_text(messages)
-    return {
+    result = {
         "process_version": RUMI_PROCESS_VERSION,
         "created_at_ms": int(time.time() * 1000),
         "mode": request_mode(messages, tools, params),
         "default_thinking_level": RUMI_DEFAULT_THINKING_LEVEL,
         "available_tool_ids": tool_ids,
         "action_preflight_required": _action_preflight_required(text, tool_ids),
-        "freshness_summary": deepcopy(params.get("freshness_summary") if isinstance(params.get("freshness_summary"), dict) else {}),
-        "tool_result_summary": deepcopy(params.get("tool_result_summary") if isinstance(params.get("tool_result_summary"), dict) else {}),
+        "freshness_summary": deepcopy(
+            params.get("freshness_summary")
+            if isinstance(params.get("freshness_summary"), dict)
+            else {}
+        ),
+        "tool_result_summary": deepcopy(
+            params.get("tool_result_summary")
+            if isinstance(params.get("tool_result_summary"), dict)
+            else {}
+        ),
         "criteria": list(RUMI_CRITERIA),
     }
+    if callable(params.get("_is_cancelled")):
+        result["is_cancelled"] = params["_is_cancelled"]
+    if callable(params.get("_activity_event_callback")):
+        result["activity_event_callback"] = params["_activity_event_callback"]
+    return result
 
 
-def phase_event(phase: str, model: str, *, output: str = "", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def phase_event(
+    phase: str, model: str, *, output: str = "", metadata: dict[str, Any] | None = None
+) -> dict[str, Any]:
     event = {
         "id": f"{phase}-{uuid.uuid4().hex[:8]}",
         "phase": phase,
@@ -712,7 +793,13 @@ def sanitize_deepthink_plan(value: Any) -> dict[str, Any]:
 
 def sanitize_deepthink_notes(value: Any) -> list[dict[str, str]]:
     if isinstance(value, dict):
-        raw_items = value.get("notes") if isinstance(value.get("notes"), list) else value.get("items") if isinstance(value.get("items"), list) else [value]
+        raw_items = (
+            value.get("notes")
+            if isinstance(value.get("notes"), list)
+            else value.get("items")
+            if isinstance(value.get("items"), list)
+            else [value]
+        )
     elif isinstance(value, list):
         raw_items = value
     else:
@@ -735,11 +822,15 @@ def sanitize_deepthink_review(value: Any) -> dict[str, Any]:
         score = float(record.get("score") or 0)
     except (TypeError, ValueError):
         score = 0
+    score = max(0.0, min(100.0, score))
+    required_changes = _string_list(record.get("required_changes"))
     return {
-        "pass": _coerce_bool(record.get("pass"), default=False),
+        "pass": _coerce_bool(record.get("pass"), default=False)
+        and not required_changes
+        and score >= 80,
         "score": score,
         "issues": _string_list(record.get("issues")),
-        "required_changes": _string_list(record.get("required_changes")),
+        "required_changes": required_changes,
     }
 
 
@@ -764,11 +855,26 @@ def enforce_user_rejection_review(review: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def deepthink_plan_segments(plan: dict[str, Any], *, max_sections: int = RUMI_DEEPTHINK_MAX_SECTIONS) -> list[str]:
+def deepthink_plan_segments(
+    plan: dict[str, Any], *, max_sections: int = RUMI_DEEPTHINK_MAX_SECTIONS
+) -> list[str]:
     fallback = ["意図の読み取り", "回答本体", "抜け漏れ補強"]
     raw_segments = _string_list((plan or {}).get("structure"))
     segments = raw_segments or fallback
-    return segments[: max(1, int(max_sections or RUMI_DEEPTHINK_MAX_SECTIONS))]
+    limit = max(1, int(max_sections or RUMI_DEEPTHINK_MAX_SECTIONS))
+    if len(segments) <= limit:
+        return segments
+
+    grouped: list[str] = []
+    start = 0
+    for index in range(limit):
+        remaining_items = len(segments) - start
+        remaining_groups = limit - index
+        group_size = (remaining_items + remaining_groups - 1) // remaining_groups
+        group = segments[start : start + group_size]
+        start += group_size
+        grouped.append(group[0] if len(group) == 1 else "\n".join(f"- {item}" for item in group))
+    return grouped
 
 
 def hash_required_changes(required_changes: list[str]) -> str:
@@ -861,7 +967,20 @@ def _action_preflight_required(text: str, tool_ids: list[str]) -> bool:
     if any(tool_id in _ACTION_TOOL_IDS for tool_id in tool_ids):
         return True
     lowered = str(text or "").casefold()
-    return any(token in lowered for token in ("write", "create", "delete", "run", "execute", "commit", "push", "deploy", "open pr"))
+    return any(
+        token in lowered
+        for token in (
+            "write",
+            "create",
+            "delete",
+            "run",
+            "execute",
+            "commit",
+            "push",
+            "deploy",
+            "open pr",
+        )
+    )
 
 
 def _looks_like_large_task(text: str) -> bool:
@@ -926,8 +1045,9 @@ def _reviewer_system_prompt() -> str:
         "Do not use personalization or private background hypotheses. "
         "Check intent fit, level fit, latest-information handling, action assumptions, todo quality, tool failure awareness, "
         "confidence/escalation, and whether the answer should be quarantined. "
-        'Return only valid JSON with this exact shape: {"pass": boolean, "score": number, "issues": string[], "required_changes": string[]}. '
-        "Set pass=true only when the draft is safe to deliver unchanged."
+        'Return only valid JSON with this exact shape: {"pass": boolean, "score": number from 0 to 100, "issues": string[], "required_changes": string[]}. '
+        "Set pass=true only when the draft is safe to deliver unchanged and required_changes is empty. "
+        "If any required change remains or score is below 80, pass must be false."
     )
 
 

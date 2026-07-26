@@ -9,6 +9,8 @@ import urllib.request
 from typing import Any, Dict, List
 
 from ..api_key_store import read_provider_api_key
+from ..provider_endpoint import normalize_provider_base_url, provider_endpoint_url
+from ..provider_error import ProviderError
 from .anthropic_provider import AnthropicProvider
 from .openai_provider import OpenAIProvider
 
@@ -19,6 +21,11 @@ class OpencodeZenProvider(AnthropicProvider):
     provider_name = "opencode-zen"
     display_name = "OpenCode Zen"
     DEFAULT_BASE_URL = "https://opencode.ai/zen"
+    DEFAULT_REQUEST_TIMEOUT_SECONDS = 1800.0
+    MAX_REQUEST_TIMEOUT_SECONDS = 21600.0
+    DEFAULT_REQUEST_RETRIES = 3
+    MAX_REQUEST_RETRIES = 6
+    RETRYABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
     MODEL_INVENTORY_TTL_SECONDS = 300
     ANTHROPIC_MESSAGES_MODELS: set[str] = set()
     OPENAI_CHAT_MODELS: set[str] = set()
@@ -31,6 +38,7 @@ class OpencodeZenProvider(AnthropicProvider):
         "max_completion_tokens",
         "stop",
         "stream_options",
+        "response_format",
     }
     _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
@@ -39,9 +47,24 @@ class OpencodeZenProvider(AnthropicProvider):
             read_provider_api_key("opencode-zen", "default") or ""
         )
         self._ssl_ctx = ssl.create_default_context()
-        self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
+        self.BASE_URL = normalize_provider_base_url(
+            os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL)
+        )
+        self._base_url = self.BASE_URL
         self._model_inventory_cache: List[Dict[str, Any]] = []
         self._model_inventory_expires_at = 0.0
+        self._default_request_timeout = self._bounded_float(
+            os.environ.get("OPENCODE_ZEN_REQUEST_TIMEOUT_SECONDS"),
+            default=self.DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            minimum=30.0,
+            maximum=self.MAX_REQUEST_TIMEOUT_SECONDS,
+        )
+        self._default_request_retries = self._bounded_int(
+            os.environ.get("OPENCODE_ZEN_REQUEST_RETRIES"),
+            default=self.DEFAULT_REQUEST_RETRIES,
+            minimum=0,
+            maximum=self.MAX_REQUEST_RETRIES,
+        )
 
     @classmethod
     def _normalize_model_id(cls, model: str) -> str:
@@ -84,35 +107,187 @@ class OpencodeZenProvider(AnthropicProvider):
             "User-Agent": "RumiAI/1.0",
         }
 
-    def _request_openai_json(self, path, body, *, timeout=120.0):
-        url = self.BASE_URL + path
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=self._openai_headers(), method="POST")
+    @staticmethod
+    def _bounded_float(value, *, default, minimum, maximum):
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
-                raw_bytes = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenCode Zen API error {}: {}".format(exc.code, err_body))
-        except urllib.error.URLError as exc:
-            raise RuntimeError("OpenCode Zen API connection error: {}".format(exc.reason))
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = float(default)
+        return max(float(minimum), min(float(maximum), parsed))
+
+    @staticmethod
+    def _bounded_int(value, *, default, minimum, maximum):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = int(default)
+        return max(int(minimum), min(int(maximum), parsed))
+
+    @staticmethod
+    def _retry_delay(attempt, retry_after=""):
+        try:
+            requested = float(retry_after)
+        except (TypeError, ValueError):
+            requested = 0.0
+        if requested > 0:
+            return min(requested, 30.0)
+        return min(2.0**attempt, 15.0)
+
+    @staticmethod
+    def _is_timeout_reason(reason):
+        return isinstance(reason, TimeoutError) or "timed out" in str(reason).casefold()
+
+    def _request_openai_json(
+        self,
+        path,
+        body,
+        *,
+        timeout=None,
+        max_retries=None,
+    ):
+        url = provider_endpoint_url(self.BASE_URL, path)
+        data = json.dumps(body).encode("utf-8")
+        request_timeout = self._bounded_float(
+            timeout,
+            default=self._default_request_timeout,
+            minimum=30.0,
+            maximum=self.MAX_REQUEST_TIMEOUT_SECONDS,
+        )
+        request_retries = self._bounded_int(
+            max_retries,
+            default=self._default_request_retries,
+            minimum=0,
+            maximum=self.MAX_REQUEST_RETRIES,
+        )
+        raw_bytes = ""
+        for attempt in range(request_retries + 1):
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers=self._openai_headers(),
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(
+                    req,
+                    context=self._ssl_ctx,
+                    timeout=request_timeout,
+                ) as resp:
+                    raw_bytes = resp.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                err_body = exc.read().decode("utf-8", errors="replace")
+                error = ProviderError.from_http_error(
+                    self.provider_name,
+                    exc,
+                    err_body,
+                )
+                if exc.code not in self.RETRYABLE_HTTP_STATUSES or attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt, error.retry_after))
+            except urllib.error.URLError as exc:
+                error = ProviderError.connection(
+                    self.provider_name,
+                    exc.reason,
+                    timeout=self._is_timeout_reason(exc.reason),
+                )
+                if attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt))
+            except TimeoutError as exc:
+                error = ProviderError.connection(
+                    self.provider_name,
+                    exc,
+                    timeout=True,
+                )
+                if attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt))
         try:
             return json.loads(raw_bytes)
         except (json.JSONDecodeError, ValueError):
             raise RuntimeError("OpenCode Zen API returned invalid JSON: {}".format(raw_bytes[:500]))
 
-    def _request_openai_stream(self, path, body, *, timeout=120.0):
-        url = self.BASE_URL + path
+    def _request_json(self, path, body, **kwargs):
+        """Keep compiler-driven OpenAI requests on Zen's versioned API."""
+        if path == "/chat/completions":
+            path = "/v1/chat/completions"
+        return self._request_openai_json(path, body, **kwargs)
+
+    def _request_openai_stream(
+        self,
+        path,
+        body,
+        *,
+        timeout=None,
+        max_retries=None,
+    ):
+        url = provider_endpoint_url(self.BASE_URL, path)
         body["stream"] = True
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=self._openai_headers(), method="POST")
-        try:
-            return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenCode Zen API error {}: {}".format(exc.code, err_body))
-        except urllib.error.URLError as exc:
-            raise RuntimeError("OpenCode Zen API connection error: {}".format(exc.reason))
+        request_timeout = self._bounded_float(
+            timeout,
+            default=self._default_request_timeout,
+            minimum=30.0,
+            maximum=self.MAX_REQUEST_TIMEOUT_SECONDS,
+        )
+        request_retries = self._bounded_int(
+            max_retries,
+            default=self._default_request_retries,
+            minimum=0,
+            maximum=self.MAX_REQUEST_RETRIES,
+        )
+        for attempt in range(request_retries + 1):
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers=self._openai_headers(),
+                method="POST",
+            )
+            try:
+                return urllib.request.urlopen(
+                    req,
+                    context=self._ssl_ctx,
+                    timeout=request_timeout,
+                )
+            except urllib.error.HTTPError as exc:
+                err_body = exc.read().decode("utf-8", errors="replace")
+                error = ProviderError.from_http_error(
+                    self.provider_name,
+                    exc,
+                    err_body,
+                )
+                if exc.code not in self.RETRYABLE_HTTP_STATUSES or attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt, error.retry_after))
+            except urllib.error.URLError as exc:
+                error = ProviderError.connection(
+                    self.provider_name,
+                    exc.reason,
+                    timeout=self._is_timeout_reason(exc.reason),
+                )
+                if attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt))
+            except TimeoutError as exc:
+                error = ProviderError.connection(
+                    self.provider_name,
+                    exc,
+                    timeout=True,
+                )
+                if attempt >= request_retries:
+                    raise error from exc
+                time.sleep(self._retry_delay(attempt))
+
+    def _request_stream(self, path, body, **kwargs):
+        """Keep compiler-driven OpenAI streams on Zen's versioned API."""
+        if path == "/chat/completions":
+            path = "/v1/chat/completions"
+        return self._request_openai_stream(path, body, **kwargs)
+        raise ProviderError.connection(
+            self.provider_name,
+            "request retries exhausted",
+        )
 
     def list_models(self) -> List[Dict[str, Any]]:
         now = time.monotonic()
@@ -121,7 +296,7 @@ class OpencodeZenProvider(AnthropicProvider):
         if not self._api_key:
             return []
         request = urllib.request.Request(
-            self.BASE_URL + "/v1/models",
+            provider_endpoint_url(self.BASE_URL, "/v1/models"),
             headers=self._openai_headers(),
             method="GET",
         )
@@ -211,26 +386,35 @@ class OpencodeZenProvider(AnthropicProvider):
     def _openai_params(cls, params: Dict[str, Any] | None) -> Dict[str, Any]:
         raw = dict(params or {})
         translated = {key: raw[key] for key in cls._OPENAI_CHAT_PARAM_KEYS if key in raw}
-        for key in ("request_timeout", "timeout"):
+        for key in ("request_timeout", "timeout", "request_retries"):
             if key in raw:
                 translated[key] = raw[key]
         return translated
 
-    @staticmethod
-    def _request_timeout(params: Dict[str, Any] | None) -> float:
+    def _request_timeout(self, params: Dict[str, Any] | None) -> float:
         raw = dict(params or {})
-        value = raw.get("request_timeout", raw.get("timeout", 120))
-        try:
-            timeout = float(value)
-        except (TypeError, ValueError):
-            timeout = 120.0
-        return max(2.0, min(timeout, 120.0))
+        value = raw.get(
+            "request_timeout",
+            raw.get("timeout", self._default_request_timeout),
+        )
+        return self._bounded_float(
+            value,
+            default=self._default_request_timeout,
+            minimum=30.0,
+            maximum=self.MAX_REQUEST_TIMEOUT_SECONDS,
+        )
 
-    def _request_timeout_kwargs(self, params: Dict[str, Any] | None) -> Dict[str, float]:
+    def _request_policy_kwargs(self, params: Dict[str, Any] | None) -> Dict[str, float]:
         raw = dict(params or {})
-        if "request_timeout" not in raw and "timeout" not in raw:
-            return {}
-        return {"timeout": self._request_timeout(raw)}
+        return {
+            "timeout": self._request_timeout(raw),
+            "max_retries": self._bounded_int(
+                raw.get("request_retries"),
+                default=self._default_request_retries,
+                minimum=0,
+                maximum=self.MAX_REQUEST_RETRIES,
+            ),
+        }
 
     @classmethod
     def _copy_openai_chat_params(cls, body: Dict[str, Any], params: Dict[str, Any]) -> None:
@@ -238,26 +422,30 @@ class OpencodeZenProvider(AnthropicProvider):
             if key in params:
                 body[key] = params[key]
 
-    def _complete_openai_chat(self, model_id, messages, params):
+    def _complete_openai_chat(self, model_id, messages, tools, params):
         params = self._openai_params(params)
         body = {"model": model_id, "messages": OpenAIProvider.build_request(self, messages)}
+        if tools:
+            body["tools"] = tools
         self._copy_openai_chat_params(body, params)
         raw = self._request_openai_json(
             "/v1/chat/completions",
             body,
-            **self._request_timeout_kwargs(params),
+            **self._request_policy_kwargs(params),
         )
         return OpenAIProvider.parse_response(self, raw)
 
-    def _stream_openai_chat(self, model_id, messages, params):
+    def _stream_openai_chat(self, model_id, messages, tools, params):
         params = self._openai_params(params)
         body = {"model": model_id, "messages": OpenAIProvider.build_request(self, messages)}
+        if tools:
+            body["tools"] = tools
         self._copy_openai_chat_params(body, params)
         body.setdefault("stream_options", {"include_usage": True})
         resp = self._request_openai_stream(
             "/v1/chat/completions",
             body,
-            **self._request_timeout_kwargs(params),
+            **self._request_policy_kwargs(params),
         )
         tool_call_state = {}
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -337,13 +525,17 @@ class OpencodeZenProvider(AnthropicProvider):
             if self._model_needs_token_floor(model_id)
             else params
         )
-        return self._complete_openai_chat(model_id, messages, next_params)
+        return self._complete_openai_chat(model_id, messages, [], next_params)
 
     def stream(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
-            del tools
-            yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
+            yield from super().stream(
+                model_id,
+                messages,
+                tools,
+                self._params_with_token_floor(params),
+            )
             return
         del tools
         next_params = (
@@ -351,4 +543,4 @@ class OpencodeZenProvider(AnthropicProvider):
             if self._model_needs_token_floor(model_id)
             else params
         )
-        yield from self._stream_openai_chat(model_id, messages, next_params)
+        yield from self._stream_openai_chat(model_id, messages, [], next_params)

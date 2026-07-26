@@ -10,13 +10,14 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from domain.chat.store import ChatStore
-from domain.chat.subagent_durability import (
+from domain.chat.store import ChatStore  # noqa: E402
+from domain.chat.subagent_durability import (  # noqa: E402
     ensure_subagent_child_has_assistant_response,
     mark_subagent_child_failed,
 )
-from domain.agent.subagent_orchestrator import extract_assistant_text_from_result
-from domain.input import RumiInputEnvelope, dispatch_input
+from domain.agent.subagent_orchestrator import extract_assistant_text_from_result  # noqa: E402
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
+from domain.input import RumiInputEnvelope, dispatch_input  # noqa: E402
 
 
 class SubagentController:
@@ -98,6 +99,21 @@ class SubagentController:
         child = store.update_conversation(child["id"], {"metadata": child_metadata}) or child
         child = store.update_conversation(child["id"], {"title": title}) or child
         params = dict(arguments.get("params") if isinstance(arguments.get("params"), dict) else {})
+        deepthink_requested = bool(
+            arguments.get("deepthink")
+            or params.get("deepthink_enabled")
+        )
+        params, deepthink_policy = (
+            ModelRuntimeSettingsService().authorize_delegated_deepthink(
+                params,
+                requested=deepthink_requested,
+            )
+        )
+        subagent_metadata["deepthink"] = dict(deepthink_policy)
+        child_metadata["subagent"] = subagent_metadata
+        child = store.update_conversation(
+            child["id"], {"metadata": child_metadata}
+        ) or child
         if "tool_policy" not in params and isinstance(context.get("profile_policy"), dict):
             params["tool_policy"] = dict(context.get("profile_policy") or {})
         inherited_tools = list(arguments.get("tools") if isinstance(arguments.get("tools"), list) else self._connected_tools(context))
@@ -141,6 +157,7 @@ class SubagentController:
                 task=task,
                 workspace=workspace_contract,
                 code=code,
+                deepthink=deepthink_policy,
             )
         if result.get("status") != "ok":
             self._mark_child_failed(store, child["id"], child_metadata, code="SUBAGENT_DISPATCH_FAILED")
@@ -151,6 +168,7 @@ class SubagentController:
                 task=task,
                 workspace=workspace_contract,
                 code="SUBAGENT_DISPATCH_FAILED",
+                deepthink=deepthink_policy,
             )
         assistant_text = extract_assistant_text_from_result(result)
         summary = str(assistant_text or "Subagent completed.").strip()
@@ -168,6 +186,7 @@ class SubagentController:
             "task": task,
             "summary": summary,
             "workspace": workspace_contract,
+            "deepthink": deepthink_policy,
         }
 
     @staticmethod
@@ -192,6 +211,7 @@ class SubagentController:
         task: str,
         workspace: dict[str, Any],
         code: str,
+        deepthink: dict[str, Any],
     ) -> dict[str, Any]:
         summary = "The delegated agent could not complete before producing a response."
         return {
@@ -202,6 +222,7 @@ class SubagentController:
             "task": task,
             "summary": summary,
             "workspace": workspace,
+            "deepthink": deepthink,
             "status": "error",
             "is_error": True,
             "error_type": "timeout" if "TIMEOUT" in code else "error",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -90,9 +91,7 @@ def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
 
 
 @pytest.mark.parametrize("payload", [{"data": []}, {"unexpected": []}])
-def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(
-    monkeypatch, payload
-):
+def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(monkeypatch, payload):
     provider = _provider(monkeypatch)
 
     with patch.object(
@@ -141,10 +140,11 @@ def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure
 
 def test_opencode_zen_catalog_uses_live_inventory_not_bundled_models():
     from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
+    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
 
     catalog = get_provider_catalog_map()
     provider = catalog["opencode-zen"]
-    models = {item["id"]: item for item in get_all_known_models("opencode-zen")}
+    models = {item["id"]: item for item in OpencodeZenProvider.KNOWN_MODELS}
 
     assert provider["metadata"]["adapter"] == "python_entrypoint"
     assert provider["metadata"]["default_base_url"] == "https://opencode.ai/zen"
@@ -185,7 +185,7 @@ def test_opencode_zen_reasoning_complete_uses_live_openai_model_and_token_floor(
                 {"role": "system", "content": "Be terse."},
                 {"role": "user", "content": "Say OK"},
             ],
-            [{"name": "noop", "input_schema": {"type": "object"}}],
+            [{"type": "function", "function": {"name": "noop"}}],
             {"max_tokens": 8, "temperature": 0},
         )
 
@@ -195,6 +195,140 @@ def test_opencode_zen_reasoning_complete_uses_live_openai_model_and_token_floor(
     assert captured["body"]["temperature"] == 0
     assert "tools" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_reasoning_request_uses_long_timeout_and_retries(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
+    provider_module = sys.modules[provider.__class__.__module__]
+    calls = []
+
+    def fake_urlopen(request, **kwargs):
+        del request
+        calls.append(kwargs["timeout"])
+        if len(calls) < 4:
+            raise TimeoutError("model is still thinking")
+        return _FakeJsonResponse(
+            {
+                "id": "chatcmpl_retry",
+                "model": "deepseek-v4-flash-free",
+                "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
+    monkeypatch.setattr(provider_module.time, "sleep", lambda _delay: None)
+    with patch.object(
+        provider_module.urllib.request,
+        "urlopen",
+        side_effect=fake_urlopen,
+    ):
+        result = provider.complete(
+            "opencode-zen/deepseek-v4-flash-free",
+            [{"role": "user", "content": "Think carefully"}],
+            [],
+            {},
+        )
+
+    assert calls == [1800.0, 1800.0, 1800.0, 1800.0]
+    assert result["content"] == [{"type": "text", "text": "Done"}]
+
+
+def test_opencode_zen_retries_retryable_http_errors(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
+    provider_module = sys.modules[provider.__class__.__module__]
+    responses = [
+        urllib.error.HTTPError(
+            "https://opencode.ai/zen/v1/chat/completions",
+            503,
+            "busy",
+            {},
+            None,
+        ),
+        _FakeJsonResponse(
+            {
+                "id": "chatcmpl_retry",
+                "model": "deepseek-v4-flash-free",
+                "choices": [{"message": {"content": "Recovered"}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        ),
+    ]
+
+    monkeypatch.setattr(provider_module.time, "sleep", lambda _delay: None)
+    with patch.object(
+        provider_module.urllib.request,
+        "urlopen",
+        side_effect=responses,
+    ) as request:
+        result = provider.complete(
+            "opencode-zen/deepseek-v4-flash-free",
+            [{"role": "user", "content": "Try again"}],
+            [],
+            {"request_timeout": 900, "request_retries": 1},
+        )
+
+    assert request.call_count == 2
+    assert result["content"] == [{"type": "text", "text": "Recovered"}]
+
+
+def test_opencode_zen_compiler_transport_uses_versioned_chat_endpoint(monkeypatch):
+    provider = _provider(monkeypatch)
+    calls = []
+
+    monkeypatch.setattr(
+        provider,
+        "_request_openai_json",
+        lambda path, body, **kwargs: calls.append((path, body, kwargs))
+        or {"choices": []},
+    )
+
+    provider._request_json(
+        "/chat/completions",
+        {"model": "deepseek-v4-flash-free"},
+    )
+
+    assert calls == [
+        (
+            "/v1/chat/completions",
+            {"model": "deepseek-v4-flash-free"},
+            {},
+        )
+    ]
+
+
+def test_opencode_zen_compiler_stream_uses_versioned_chat_endpoint(monkeypatch):
+    provider = _provider(monkeypatch)
+    calls = []
+
+    monkeypatch.setattr(
+        provider,
+        "_request_openai_stream",
+        lambda path, body, **kwargs: calls.append((path, body, kwargs))
+        or object(),
+    )
+
+    provider._request_stream(
+        "/chat/completions",
+        {"model": "deepseek-v4-flash-free"},
+    )
+
+    assert calls == [
+        (
+            "/v1/chat/completions",
+            {"model": "deepseek-v4-flash-free"},
+            {},
+        )
+    ]
 
 
 def test_opencode_zen_mimo_free_uses_openai_chat_completions(monkeypatch):
@@ -222,6 +356,7 @@ def test_opencode_zen_mimo_free_uses_openai_chat_completions(monkeypatch):
                 "temperature": 0,
                 "reasoning_effort": "high",
                 "tool_choice": "auto",
+                "response_format": {"type": "json_object"},
             },
         )
 
@@ -232,6 +367,7 @@ def test_opencode_zen_mimo_free_uses_openai_chat_completions(monkeypatch):
     assert "tools" not in captured["body"]
     assert "tool_choice" not in captured["body"]
     assert "reasoning_effort" not in captured["body"]
+    assert captured["body"]["response_format"] == {"type": "json_object"}
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
@@ -312,7 +448,7 @@ def test_opencode_zen_reasoning_stream_omits_tools_and_applies_token_floor(
             provider.stream(
                 "opencode-zen/deepseek-v4-flash-free",
                 [{"role": "user", "content": "Say OK"}],
-                [{"name": "noop", "input_schema": {"type": "object"}}],
+                [{"type": "function", "function": {"name": "noop"}}],
                 {"max_tokens": 8},
             )
         )
@@ -420,11 +556,15 @@ def test_opencode_zen_rejects_unknown_model(monkeypatch):
     provider = _provider(monkeypatch)
 
     with pytest.raises(RuntimeError, match="unsupported model"):
-        provider.complete("opencode-zen/not-a-real-model", [{"role": "user", "content": "hi"}], [], {})
+        provider.complete(
+            "opencode-zen/not-a-real-model", [{"role": "user", "content": "hi"}], [], {}
+        )
 
 
 def _live_enabled():
-    return os.environ.get("RUMI_OPENCODE_ZEN_LIVE_TEST") == "1" and bool(os.environ.get("OPENCODE_ZEN_API_KEY"))
+    return os.environ.get("RUMI_OPENCODE_ZEN_LIVE_TEST") == "1" and bool(
+        os.environ.get("OPENCODE_ZEN_API_KEY")
+    )
 
 
 @pytest.mark.live

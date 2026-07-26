@@ -1,0 +1,69 @@
+flow_id: defaultspack.discussion
+name: Discussion
+version: 1.0.0
+description: Lightweight multi-perspective deliberation with unanimous review.
+durable: false
+inputs:
+  topic: string
+steps:
+  - id: perspectives
+    phase: planning
+    type: function
+    function: discussion.perspectives
+    input:
+      topic: "{{input.topic}}"
+    output: perspectives
+  - id: discussion_loop
+    phase: discussing
+    type: loop
+    max_iterations: 4
+    until: "{{consensus.perfect}}"
+    dedupe_key: "{{consensus.report_hash}}"
+    checkpoint_each_iteration: false
+    on_exhausted: return_last
+    steps:
+      - id: opinions
+        phase: discussing
+        type: function
+        function: discussion.opinions
+        input:
+          topic: "{{input.topic}}"
+          perspectives: "{{perspectives}}"
+          iteration: "{{loop.iteration}}"
+        output: opinions
+      - id: synthesis
+        phase: summarizing
+        type: function
+        function: discussion.synthesize
+        input:
+          topic: "{{input.topic}}"
+          perspectives: "{{perspectives}}"
+          opinions: "{{opinions}}"
+          iteration: "{{loop.iteration}}"
+        output: synthesis
+      - id: consensus
+        phase: reviewing
+        type: function
+        function: discussion.review
+        input:
+          topic: "{{input.topic}}"
+          perspectives: "{{perspectives}}"
+          opinions: "{{opinions}}"
+          synthesis: "{{synthesis}}"
+          iteration: "{{loop.iteration}}"
+        output: consensus
+    output: loop_result
+  - id: final
+    phase: completed
+    type: function
+    function: discussion.finalize
+    input:
+      topic: "{{input.topic}}"
+      perspectives: "{{perspectives}}"
+      opinions: "{{opinions}}"
+      synthesis: "{{synthesis}}"
+      consensus: "{{consensus}}"
+      loop: "{{loop_result}}"
+    output: final_report
+result:
+  value: "{{final_report}}"

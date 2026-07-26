@@ -4,6 +4,7 @@ import json
 
 from domain.ai_client.bridge_plan import PlannedProviderRequest
 from domain.ai_client.provider_compiler.base import CompiledProviderRequest, ProviderCompiler, standard_response_to_ir
+from domain.chat.ir import RumiStreamEventIR
 from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages
 
 
@@ -71,6 +72,82 @@ class AnthropicMessagesCompiler(ProviderCompiler):
                 "metadata": {"api_family": compiled.api_family, "tool_runtime": compiled.metadata.get("tool_runtime")},
             }
         )
+
+    def parse_stream_chunk(self, raw, compiled):
+        del compiled
+        if not isinstance(raw, dict):
+            return []
+        event_type = str(raw.get("type") or "")
+        events = []
+        state = raw.setdefault("_compiler_state", {})
+        if event_type == "content_block_start":
+            block = raw.get("content_block") if isinstance(raw.get("content_block"), dict) else {}
+            if block.get("type") == "tool_use":
+                events.append(
+                    RumiStreamEventIR(
+                        type="tool_call_start",
+                        metadata={
+                            "id": str(block.get("id") or raw.get("index") or ""),
+                            "name": str(block.get("name") or ""),
+                        },
+                    )
+                )
+        elif event_type == "content_block_delta":
+            delta = raw.get("delta") if isinstance(raw.get("delta"), dict) else {}
+            if delta.get("type") == "text_delta" and delta.get("text"):
+                events.append(
+                    RumiStreamEventIR(
+                        type="content_delta",
+                        delta={"type": "text", "text": str(delta["text"])},
+                    )
+                )
+            elif delta.get("type") in {"thinking_delta", "signature_delta"}:
+                text = delta.get("thinking") or delta.get("text")
+                if text:
+                    events.append(
+                        RumiStreamEventIR(
+                            type="reasoning_delta",
+                            delta={"type": "text", "text": str(text)},
+                        )
+                    )
+            elif delta.get("type") == "input_json_delta":
+                events.append(
+                    RumiStreamEventIR(
+                        type="tool_call_delta",
+                        metadata={
+                            "id": str(state.get("id") or raw.get("index") or ""),
+                            "name": str(state.get("name") or ""),
+                            "arguments_chunk": str(delta.get("partial_json") or ""),
+                        },
+                    )
+                )
+        elif event_type == "content_block_stop":
+            if state.get("id") or state.get("name"):
+                events.append(
+                    RumiStreamEventIR(
+                        type="tool_call_end",
+                        metadata={
+                            "id": str(state.get("id") or raw.get("index") or ""),
+                            "name": str(state.get("name") or ""),
+                        },
+                    )
+                )
+        elif event_type == "message_delta":
+            delta = raw.get("delta") if isinstance(raw.get("delta"), dict) else {}
+            usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+            events.append(
+                RumiStreamEventIR(
+                    type="stream_end",
+                    finish_reason=str(delta.get("stop_reason") or "stop"),
+                    usage={
+                        "input_tokens": int(usage.get("input_tokens") or 0),
+                        "output_tokens": int(usage.get("output_tokens") or 0),
+                        "total_tokens": int(usage.get("input_tokens") or 0)
+                        + int(usage.get("output_tokens") or 0),
+                    },
+                )
+            )
+        return events
 
 
 def _anthropic_content(message):

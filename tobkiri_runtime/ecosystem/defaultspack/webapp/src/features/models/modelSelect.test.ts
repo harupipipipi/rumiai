@@ -24,11 +24,11 @@ function makeModelOption(index: number): ModelSelectOption {
 test("buildVisibleModelOptions keeps configured models beyond the old first-40 cutoff", () => {
   const filler = Array.from({ length: 45 }, (_, index) => makeModelOption(index));
   const configuredOption: ModelSelectOption = {
-    value: "opencode-zen/minimax-m3-free",
-    label: "OpenCode Zen / MiniMax M3 Free via OpenCode Zen",
+    value: "opencode-zen/deepseek-v4-flash-free",
+    label: "OpenCode Zen / DeepSeek V4 Flash Free via OpenCode Zen",
     provider_id: "opencode-zen",
     provider_display_name: "OpenCode Zen",
-    model_id: "minimax-m3-free",
+    model_id: "deepseek-v4-flash-free",
     configured: true,
     supports_tool_calling: true,
     supports_thinking: true,

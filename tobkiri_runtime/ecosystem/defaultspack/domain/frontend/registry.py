@@ -1323,13 +1323,6 @@ class FrontendRegistry:
                         "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
                     },
                     {
-                        "id": "deepthink_enabled",
-                        "label": "DeepThink",
-                        "type": "toggle",
-                        "default": False,
-                        "help": "thinker型のDeepThink loopを有効にします。タスクには数時間かかる可能性があります。",
-                    },
-                    {
                         "id": "favorite_profiles",
                         "label": "Composer Model Pins",
                         "type": "textarea",
@@ -1344,6 +1337,48 @@ class FrontendRegistry:
                         "default": '{"stub/default":"medium"}',
                         "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
                         "advanced": True,
+                    },
+                ],
+            },
+            {
+                "id": "deepthink",
+                "label": "DeepThink",
+                "description": "明示的なDeepThinkモードの設定。ON/OFFは /deepthink で切り替えます。",
+                "fields": [
+                    {
+                        "id": "model_source",
+                        "label": "DeepThink Model Source",
+                        "type": "select",
+                        "default": "conversation",
+                        "options": [
+                            {"value": "conversation", "label": "Conversation model"},
+                            {"value": "selected", "label": "Model selected below"},
+                        ],
+                    },
+                    {
+                        "id": "model",
+                        "label": "DeepThink Model",
+                        "type": "model_select",
+                        "default": "",
+                        "options": self._model_options(lightweight=lightweight),
+                        "visible_when": {
+                            "field": "model_source",
+                            "equals": "selected",
+                        },
+                    },
+                    {
+                        "id": "allow_delegated_agents",
+                        "label": "Allow DeepThink for delegated agents",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Delegationが明示要求した場合だけ許可します。親から自動継承しません。",
+                    },
+                    {
+                        "id": "allow_background_continuations",
+                        "label": "Allow DeepThink for background continuations",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "CI完了後やmonitor・automationの継続でも再実行を許可します。",
                     },
                 ],
             },

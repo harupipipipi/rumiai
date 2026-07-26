@@ -307,6 +307,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
         models_field_ids = {field["id"] for field in models_section["fields"]}
         self.assertEqual(len(models_field_ids), len(models_section["fields"]))
+        self.assertNotIn("deepthink_enabled", models_field_ids)
+        deepthink_section = next(
+            section
+            for section in catalog["settings"]["sections"]
+            if section["id"] == "deepthink"
+        )
+        self.assertEqual(
+            {field["id"] for field in deepthink_section["fields"]},
+            {
+                "model_source",
+                "model",
+                "allow_delegated_agents",
+                "allow_background_continuations",
+            },
+        )
         preferred_model_field = next(
             field for field in models_section["fields"] if field["id"] == "preferred_model"
         )

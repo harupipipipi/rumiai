@@ -440,11 +440,11 @@ test("composer runtime state updates the DeepThink SVG indicator when enabled", 
     onThinkingLevelChange: () => undefined,
   }));
 
-  assert.match(html, /aria-label="DeepThink: オン"/);
+  assert.match(html, /aria-label="DeepThink: ON"/);
   assert.match(html, /data-state="on"/);
   assert.match(html, /lucide-brain-circuit/);
   assert.match(html, /drop-shadow-/);
-  assert.match(html, /role="tooltip"[^>]*>DeepThink: オン</);
+  assert.match(html, /role="tooltip"[^>]*>DeepThink: ON</);
   assert.match(html, /group-focus\/runtime:opacity-100/);
 });
 

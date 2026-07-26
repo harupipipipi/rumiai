@@ -1147,7 +1147,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
                 self.assertIn("google", client._active_provider_ids())
 
-    def test_google_provider_loads_profile_models_from_user_data(self):
+    def test_google_profile_files_are_migration_data_not_runtime_inventory(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1166,46 +1166,52 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.object(GoogleProvider, "PROFILE_DIR", profile_dir):
+            with (
+                patch.object(GoogleProvider, "PROFILE_DIR", profile_dir),
+                patch.object(GoogleProvider, "_MODEL_INVENTORY_CACHE", {}),
+            ):
                 provider = GoogleProvider()
+                migrated_ids = {
+                    item["id"] for item in GoogleProvider._load_profile_models()
+                }
                 model_ids = {item["id"] for item in provider.list_models()}
 
-        self.assertIn("google/gemma-3-12b-it", model_ids)
-        self.assertIn("google/gemini-2.5-pro", model_ids)
+        self.assertIn("google/gemma-3-12b-it", migrated_ids)
+        self.assertNotIn("google/gemma-3-12b-it", model_ids)
 
-    def test_google_catalog_includes_gemini_and_gemma_models(self):
+    def test_google_catalog_uses_native_account_inventory_without_static_models(self):
         from domain.ai_client.providers import get_all_known_models
-
-        model_ids = {item["id"] for item in get_all_known_models(provider_id="google")}
-
-        self.assertIn("google/gemini-3-pro-preview", model_ids)
-        self.assertIn("google/gemini-3-flash-preview", model_ids)
-        self.assertIn("google/gemini-2.5-flash-lite", model_ids)
-        self.assertNotIn("google/gemini-2.0-flash-lite", model_ids)
-        self.assertIn("google/gemma-4-31b-it", model_ids)
-        self.assertIn("google/gemma-4-26b-a4b-it", model_ids)
-        self.assertIn("google/gemma-3-27b-it", model_ids)
-        self.assertIn("google/gemma-3n-e4b-it", model_ids)
-
-    def test_google_catalog_does_not_expose_xhigh_for_gemini(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
-        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
+        provider = GoogleProvider()
+        with (
+            patch.object(GoogleProvider, "_MODEL_INVENTORY_CACHE", {}),
+            patch.object(
+                provider,
+                "_fetch_native_models_page",
+                return_value={
+                    "models": [
+                        {
+                            "name": "models/account-visible",
+                            "displayName": "Account Visible",
+                            "supportedGenerationMethods": [
+                                "generateContent",
+                                "streamGenerateContent",
+                            ],
+                        }
+                    ]
+                },
+            ),
+        ):
+            profiles = {item["id"]: item for item in provider.list_models()}
 
-        self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
-        self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
-        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["minimal", "high"])
-        self.assertEqual(profiles["google/gemma-4-31b-it"]["thinking_levels"], ["minimal", "high"])
-
-    def test_google_catalog_marks_gemma_4_as_tool_and_vision_capable(self):
-        from domain.ai_client.providers.google_provider import GoogleProvider
-
-        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
-
-        self.assertIn("tool_calls", profiles["google/gemma-4-31b-it"]["capabilities"])
-        self.assertIn("vision", profiles["google/gemma-4-31b-it"]["capabilities"])
-        self.assertIn("tool_calls", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
-        self.assertIn("vision", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
+        self.assertEqual(set(profiles), {"google/account-visible"})
+        self.assertTrue(profiles["google/account-visible"]["capabilities"]["vision"])
+        self.assertEqual(
+            get_all_known_models(provider_id="google"),
+            [],
+            "external provider snapshots must not re-enter the runtime catalog",
+        )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from ..model_metadata_schema import (
     normalize_request_features,
     normalize_routing_defaults,
 )
+from ..provider_error import ProviderError
 
 from .openai_provider import OpenAIProvider
 from .profile_catalog import merge_curated_and_profiles, profile_dir_for
@@ -94,6 +95,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         self._remote_model_list_path = str(remote_model_list_path or "/models").strip() or "/models"
         self._remote_model_base_url = str(remote_model_base_url or "").strip().rstrip("/")
         self._remote_model_pagination = dict(remote_model_pagination or {})
+        self.model_sync_diagnostic: Dict[str, Any] | None = None
         try:
             self._remote_model_cache_ttl_seconds = max(60, int(remote_model_cache_ttl_seconds))
         except (TypeError, ValueError):
@@ -540,11 +542,23 @@ class OpenAICompatibleProvider(OpenAIProvider):
             return self._normalize_remote_models(cache.get("models"))
         try:
             fetched = self._fetch_remote_models()
-        except Exception:
+        except Exception as exc:
+            self.model_sync_diagnostic = {
+                "kind": "model_sync_error",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            }
             fetched = []
         if fetched:
+            self.model_sync_diagnostic = None
             self._save_remote_model_cache(fetched, now=now)
             return fetched
+        if self.model_sync_diagnostic is None:
+            self.model_sync_diagnostic = {
+                "kind": "model_sync_error",
+                "error_type": "EmptyInventory",
+                "message": "The provider model endpoint returned no usable models.",
+            }
         return self._normalize_remote_models(cache.get("models")) if cache else []
 
     def _remote_model_cache_path(self) -> Path:
@@ -632,12 +646,24 @@ class OpenAICompatibleProvider(OpenAIProvider):
                     req, context=self._ssl_ctx, timeout=timeout_seconds
                 ) as resp:
                     raw_bytes = resp.read().decode("utf-8")
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError):
-                break
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                raise ProviderError.from_http_error(
+                    self.provider_id, exc, body
+                ) from exc
+            except (urllib.error.URLError, TimeoutError) as exc:
+                reason = getattr(exc, "reason", exc)
+                raise ProviderError.connection(
+                    self.provider_id,
+                    reason,
+                    timeout=isinstance(exc, TimeoutError),
+                ) from exc
             try:
                 payload = json.loads(raw_bytes)
-            except (json.JSONDecodeError, ValueError):
-                break
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(
+                    f"{self.provider_id}: model endpoint returned invalid JSON"
+                ) from exc
             page_models, next_cursor = self._remote_models_page(payload)
             raw_models.extend(page_models)
             if not next_cursor or next_cursor in seen_cursors:

@@ -657,6 +657,9 @@ def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, mo
     assert "For LINE group chats" in combined
     assert "portfolio-rebalance" not in combined
     assert prepared.matched_skills[0]["id"] == "feedback/line-mention"
+    assert prepared.params["deepthink_selected_skill_ids"] == [
+        "feedback/line-mention"
+    ]
     assert prepared.chat_references["history_json_path"].endswith("history.json")
     assert prepared.chat_references["references"][0]["conversation_id"] == reference["id"]
     assert prepared.chat_references["references"][0]["title"] == "Reference planning chat"
@@ -2980,14 +2983,26 @@ def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_stream_engine_legacy_flag_uses_legacy_messages(monkeypatch):
+def test_stream_engine_provider_compiler_is_default_and_legacy_flag_opts_out(monkeypatch):
     from domain.chat.stream_engine import ChatRunEngine
     from domain.chat.run_request import PreparedChatRun
 
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", "1")
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", "1")
+    prepared = PreparedChatRun(conversation_id="c", conversation={}, input_data={}, request_id="r", content=[], metadata={}, user_message={}, model="m", params={}, request_context={}, tool_context={}, standard_messages=[], user_text="", system_prompt="", enrich_info={}, raw_tools=[], provider_tools=[], tools_called=[], connected_tool_names=set(), call_handler=None, model_routing={})
 
-    assert ChatRunEngine._use_provider_compiler(PreparedChatRun(conversation_id="c", conversation={}, input_data={}, request_id="r", content=[], metadata={}, user_message={}, model="m", params={}, request_context={}, tool_context={}, standard_messages=[], user_text="", system_prompt="", enrich_info={}, raw_tools=[], provider_tools=[], tools_called=[], connected_tool_names=set(), call_handler=None, model_routing={})) is False
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", raising=False)
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", raising=False)
+    assert ChatRunEngine._use_provider_compiler(prepared) is True
+    assert ChatRunEngine._use_provider_compiler(
+        prepared,
+        SimpleNamespace(complete=lambda _request: {}),
+    ) is False
+    assert ChatRunEngine._use_provider_compiler(
+        prepared,
+        SimpleNamespace(resolve_provider=lambda _model: (object(), "model")),
+    ) is True
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", "1")
+    assert ChatRunEngine._use_provider_compiler(prepared) is False
 
 
 def test_stream_engine_ir_handles_streaming_tool_delta():

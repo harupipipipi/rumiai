@@ -11,6 +11,7 @@ import ssl
 from typing import Any, Dict, List
 
 from domain.ai_client.base_provider import BaseProvider
+from domain.ai_client.provider_error import ProviderError
 
 
 class GensparkProvider(BaseProvider):
@@ -187,8 +188,10 @@ class GensparkProvider(BaseProvider):
     def _request_json(self, path, body):
         """POST して JSON をパースして返す"""
         if not self._api_key:
-            raise RuntimeError(
-                "Genspark API key is not set. Set GENSPARK_API_KEY environment variable."
+            raise ProviderError(
+                provider_id="genspark",
+                kind="unauthorized",
+                safe_message="Genspark API key is not configured.",
             )
         url = self._base_url + path
         data = json.dumps(body).encode("utf-8")
@@ -198,29 +201,25 @@ class GensparkProvider(BaseProvider):
                 raw_bytes = resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            if e.code == 401:
-                raise RuntimeError(
-                    "Genspark API authentication error (401): Invalid API key. err={}".format(
-                        err_body
-                    )
-                )
-            elif e.code == 429:
-                raise RuntimeError("Genspark API rate limit exceeded (429): {}".format(err_body))
-            elif e.code == 400:
-                raise RuntimeError("Genspark API bad request (400): {}".format(err_body))
-            raise RuntimeError("Genspark API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error("genspark", e, err_body) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("Genspark API connection error: {}".format(e.reason))
+            raise ProviderError.connection("genspark", e.reason) from e
         try:
             return json.loads(raw_bytes)
-        except (json.JSONDecodeError, ValueError):
-            raise RuntimeError("Genspark API returned invalid JSON: {}".format(raw_bytes[:500]))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ProviderError(
+                provider_id="genspark",
+                kind="provider_error",
+                safe_message="Genspark API returned invalid JSON.",
+            ) from exc
 
     def _request_stream(self, path, body):
         """POST して SSE ストリームレスポンスを返す"""
         if not self._api_key:
-            raise RuntimeError(
-                "Genspark API key is not set. Set GENSPARK_API_KEY environment variable."
+            raise ProviderError(
+                provider_id="genspark",
+                kind="unauthorized",
+                safe_message="Genspark API key is not configured.",
             )
         url = self._base_url + path
         body["stream"] = True
@@ -230,13 +229,9 @@ class GensparkProvider(BaseProvider):
             resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            if e.code == 401:
-                raise RuntimeError("Genspark API authentication error (401): {}".format(err_body))
-            elif e.code == 429:
-                raise RuntimeError("Genspark API rate limit exceeded (429): {}".format(err_body))
-            raise RuntimeError("Genspark API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error("genspark", e, err_body) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("Genspark API connection error: {}".format(e.reason))
+            raise ProviderError.connection("genspark", e.reason) from e
         return resp
 
     @staticmethod

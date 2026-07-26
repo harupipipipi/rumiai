@@ -11,6 +11,25 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+def test_stream_tool_support_uses_provider_capability_not_class_name():
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class CustomGateway:
+        @staticmethod
+        def resolve_provider(_model):
+            return object(), "model"
+
+    engine = object.__new__(ChatRunEngine)
+    engine._gateway = CustomGateway()
+
+    assert engine._provider_supports_stream_tool_calls(
+        "openrouter/account-visible-model"
+    )
+    assert engine._provider_supports_stream_tool_calls(
+        "openai_compatible/custom-model"
+    )
+
+
 def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine

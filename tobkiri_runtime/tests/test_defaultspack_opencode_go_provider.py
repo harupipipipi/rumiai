@@ -90,12 +90,12 @@ class _FakeJsonResponse:
         return self.payload
 
 
-def test_opencode_go_catalog_includes_all_models():
+def test_opencode_go_catalog_exposes_connection_without_static_runtime_models():
     from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
 
     catalog = get_provider_catalog_map()
     provider = catalog["opencode-go"]
-    models = {item["id"]: item for item in get_all_known_models("opencode-go")}
+    models = get_all_known_models("opencode-go")
 
     assert provider["metadata"]["adapter"] == "python_entrypoint"
     assert provider["metadata"]["default_base_url"] == "https://opencode.ai/zen/go/v1"
@@ -106,87 +106,7 @@ def test_opencode_go_catalog_includes_all_models():
     assert provider["default_model_for"]["cheap"] == "deepseek-v4-flash"
     assert provider["default_model_for"]["vision"] == "qwen3.7-plus"
     assert "vision" in provider["capabilities"]
-    assert {f"opencode-go/{model}" for model in ALL_MODELS}.issubset(models)
-
-    minimax_m3 = models["opencode-go/minimax-m3"]
-    assert minimax_m3["metadata"]["transport"] == "anthropic_messages"
-    assert minimax_m3["metadata"]["endpoint_path"] == "/messages"
-    assert minimax_m3["metadata"]["source"] == "opencode_go_docs"
-
-    k27 = models["opencode-go/kimi-k2.7-code"]
-    assert k27["metadata"]["transport"] == "openai_chat_completions"
-    assert k27["metadata"]["endpoint_path"] == "/chat/completions"
-    assert k27["metadata"]["source"] == "opencode_go_docs"
-
-    kimi = models["opencode-go/kimi-k2.6"]
-    assert kimi["metadata"]["transport"] == "openai_chat_completions"
-    assert {"vision", "reasoning", "tool_calls"}.issubset(set(kimi["capabilities"]))
-    assert kimi["metadata"]["capabilities"]["vision"] is True
-    assert kimi["metadata"]["capabilities"]["tool_calls"] is True
-    assert kimi["metadata"]["capabilities"]["reasoning"] is True
-    assert kimi["metadata"]["tool_calls_verified"] is True
-    assert kimi["metadata"]["vision_verified"] is True
-    assert kimi["metadata"]["thinking_disabled_for_tool_calls"] is True
-
-    qwen_max = models["opencode-go/qwen3.7-max"]
-    assert qwen_max["defaults"]["reasoning"] is True
-    assert qwen_max["metadata"]["transport"] == "anthropic_messages"
-    assert qwen_max["metadata"]["endpoint_path"] == "/messages"
-    assert "reasoning" in qwen_max["capabilities"]
-    assert qwen_max["metadata"]["capabilities"]["reasoning"] is True
-
-    minimax = models["opencode-go/minimax-m2.7"]
-    assert minimax["metadata"]["transport"] == "anthropic_messages"
-    assert minimax["metadata"]["endpoint_path"] == "/messages"
-
-    qwen37 = models["opencode-go/qwen3.7-plus"]
-    assert qwen37["metadata"]["transport"] == "anthropic_messages"
-    assert {"vision", "reasoning"}.issubset(set(qwen37["capabilities"]))
-    assert qwen37["metadata"]["capabilities"]["vision"] is True
-    assert qwen37["metadata"]["capabilities"]["reasoning"] is True
-
-    qwen36 = models["opencode-go/qwen3.6-plus"]
-    assert qwen36["metadata"]["transport"] == "anthropic_messages"
-    assert qwen36["metadata"]["endpoint_path"] == "/messages"
-
-    mimo_free = models["opencode-go/mimo-v2.5-free"]
-    assert mimo_free["model_id"] == "mimo-v2.5-free"
-    assert mimo_free["defaults"] == {"chat": True}
-    assert "mimo-v2.5-free" not in provider["default_model_for"].values()
-    assert mimo_free["metadata"]["transport"] == "openai_chat_completions"
-    assert mimo_free["metadata"]["endpoint_path"] == "/chat/completions"
-    assert mimo_free["metadata"]["source"] == "opencode_go_compatibility_alias"
-    assert mimo_free["metadata"]["alias_of"] == "opencode-go/mimo-v2.5"
-    assert mimo_free["metadata"]["openai_model"] == "mimo-v2.5"
-    assert "opencode-zen/mimo-v2.5-free" in mimo_free["metadata"]["compatibility_note"]
-    assert "free_tier" not in mimo_free["metadata"]
-    assert mimo_free["metadata"]["capabilities"]["tool_calls"] is True
-    assert mimo_free["metadata"]["capabilities"]["reasoning"] is True
-    assert mimo_free["metadata"]["reasoning_effort_verified"] is True
-
-    for model_id in TOOL_CALL_MODELS:
-        model_entry = models[f"opencode-go/{model_id}"]
-        assert "tool_calls" in model_entry["capabilities"]
-        assert model_entry["metadata"]["capabilities"]["tool_calls"] is True
-        assert model_entry["metadata"]["tool_calls_verified"] is True
-        assert model_entry["supports_thinking"] is True
-        assert model_entry["metadata"]["capabilities"]["reasoning"] is True
-        if model_id in REASONING_EFFORT_MODELS:
-            assert model_entry["metadata"]["reasoning_effort_verified"] is True
-        else:
-            assert "reasoning_effort_verified" not in model_entry["metadata"]
-
-    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
-
-    legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
-    legacy_kimi = legacy_models["opencode-go/kimi-k2.6"]
-    assert legacy_kimi["supports_vision"] is True
-    assert legacy_kimi["supports_image_input"] is True
-    assert legacy_kimi["supports_tool_calling"] is True
-    assert legacy_kimi["supports_thinking"] is True
-    legacy_qwen37 = legacy_models["opencode-go/qwen3.7-plus"]
-    assert legacy_qwen37["supports_vision"] is True
-    assert legacy_qwen37["supports_image_input"] is True
+    assert models == []
 
 
 def test_opencode_go_openai_transport_respects_request_timeout(monkeypatch):

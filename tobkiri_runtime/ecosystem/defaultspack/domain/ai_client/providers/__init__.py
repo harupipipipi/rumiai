@@ -76,6 +76,8 @@ _LEGACY_PROVIDER_REGISTRY = [
     ),
 ]
 
+_PROVIDER_RUNTIME_DIAGNOSTICS: Dict[str, Dict[str, str]] = {}
+
 # Legacy compatibility fallback: new provider metadata should live in
 # domain/providers/<provider_id>/manifest.json and models.json. Keep these
 # hardcoded curated tables only to preserve existing catalog behavior, and
@@ -137,8 +139,8 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "display_name": "Genspark",
         "kind": "cloud",
         "description": "Genspark OpenAI-compatible hosted models.",
-        "env_vars": ["GENSPARK_API_KEY", "OPENAI_API_KEY"],
-        "base_url_envs": ["GENSPARK_LLM_BASE_URL", "OPENAI_BASE_URL"],
+        "env_vars": ["GENSPARK_API_KEY"],
+        "base_url_envs": ["GENSPARK_LLM_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,
         "default_model": "gpt-5-mini",
@@ -616,7 +618,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "openrouter": "cohere/north-mini-code:free",
     "gitlawb-opengateway": "mimo-v2.5-pro",
     "opencode-go": "kimi-k2.6",
-    "opencode-zen": "minimax-m3-free",
+    "opencode-zen": "deepseek-v4-flash-free",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",
@@ -777,6 +779,20 @@ def _bundled_model_catalog_provider_manifests() -> Dict[str, Dict[str, Any]]:
             candidate = raw.get("provider_manifest")
             if not isinstance(candidate, dict):
                 candidate = raw
+            else:
+                provider_metadata = (
+                    raw.get("provider_metadata")
+                    if isinstance(raw.get("provider_metadata"), dict)
+                    else {}
+                )
+                metadata_defaults = dict(provider_metadata)
+                if "env_vars" in metadata_defaults:
+                    metadata_defaults["api_key_env"] = metadata_defaults.pop("env_vars")
+                if "base_url_envs" in metadata_defaults:
+                    metadata_defaults["base_url_env"] = metadata_defaults.pop(
+                        "base_url_envs"
+                    )
+                candidate = {**metadata_defaults, **candidate}
             provider_id = str(candidate.get("id") or raw.get("provider_id") or "").strip()
             if (
                 not provider_id
@@ -1490,19 +1506,24 @@ def _merge_provider_entry(
     base_url_envs = _manifest_env_list(
         manifest.get("base_url_env"), curated.get("base_url_envs", [])
     )
-    default_model = str(
-        manifest.get("default_model")
-        or (manifest.get("default_model_for", {}) or {}).get("chat")
-        or curated.get("default_model")
-        or ""
-    )
-    default_base_url = str(
-        manifest.get("default_base_url") or curated.get("default_base_url") or ""
-    ).strip()
-    default_model_for = manifest.get("default_model_for", {})
+    manifest_defaults = manifest.get("default_model_for", {})
+    if not isinstance(manifest_defaults, dict):
+        manifest_defaults = {}
+    if "default_model" in manifest:
+        default_model = str(manifest.get("default_model") or "")
+    elif "default_model_for" in manifest:
+        default_model = str(manifest_defaults.get("chat") or "")
+    else:
+        default_model = str(curated.get("default_model") or "")
+    if "default_base_url" in manifest:
+        default_base_url = str(manifest.get("default_base_url") or "").strip()
+    else:
+        default_base_url = str(curated.get("default_base_url") or "").strip()
+    default_model_for = manifest_defaults
     if not isinstance(default_model_for, dict):
         default_model_for = {}
-    default_model_for = {**dict(curated.get("default_model_for", {})), **default_model_for}
+    if "default_model_for" not in manifest:
+        default_model_for = dict(curated.get("default_model_for", {}))
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     subscription_plans = _subscription_plans(manifest, curated)
@@ -1584,13 +1605,19 @@ def get_provider_catalog(active_provider_ids=None):
     for entry in entries:
         configured, configuration_source = _provider_is_configured(entry)
         active = entry["provider_id"] in active_ids
+        runtime_diagnostic = dict(
+            _PROVIDER_RUNTIME_DIAGNOSTICS.get(entry["provider_id"], {})
+        )
+        status = _provider_status(entry, active, configured)
+        if runtime_diagnostic and not active:
+            status = str(runtime_diagnostic.get("kind") or "registration_error")
         availability = {
             "active": active,
             "available": active,
             "configured": configured,
             "catalog_only": bool(entry.get("catalog_only") and not active),
             "supports_invoke": bool(entry.get("supports_invoke_base") or active),
-            "status": _provider_status(entry, active, configured),
+            "status": status,
             "configuration_source": configuration_source,
             "base_url_hint": entry.get("default_base_url", ""),
         }
@@ -1625,6 +1652,7 @@ def get_provider_catalog(active_provider_ids=None):
                     "manifest_path": entry.get("manifest", {}).get("source_path")
                     or entry.get("manifest", {}).get("component_manifest_path", ""),
                     "oauth": provider_oauth_status(entry["provider_id"]),
+                    "runtime_diagnostic": runtime_diagnostic,
                 },
             }
         )
@@ -1646,6 +1674,30 @@ def get_provider_availability(provider_id=None, active_provider_ids=None):
                 return dict(entry["availability"])
         return None
     return {entry["provider_id"]: dict(entry["availability"]) for entry in catalog}
+
+
+def get_provider_runtime_diagnostics() -> Dict[str, Dict[str, str]]:
+    return {
+        provider_id: dict(diagnostic)
+        for provider_id, diagnostic in _PROVIDER_RUNTIME_DIAGNOSTICS.items()
+    }
+
+
+def record_provider_runtime_diagnostic(
+    provider_id: str,
+    diagnostic: Dict[str, Any] | None,
+) -> None:
+    provider_id = str(provider_id or "").strip()
+    if not provider_id:
+        return
+    if not diagnostic:
+        _PROVIDER_RUNTIME_DIAGNOSTICS.pop(provider_id, None)
+        return
+    _PROVIDER_RUNTIME_DIAGNOSTICS[provider_id] = {
+        str(key): str(value)[:500]
+        for key, value in diagnostic.items()
+        if value not in (None, "")
+    }
 
 
 def _load_known_models_from_entry(entrypoint: str) -> List[Dict[str, Any]]:
@@ -2084,12 +2136,18 @@ def detect_available_providers():
     load_provider_api_keys_into_env()
     available = {}
     manifests = _provider_manifest_map()
+    _PROVIDER_RUNTIME_DIAGNOSTICS.clear()
     for provider_id, manifest in manifests.items():
         if not _credentials_ready(manifest, provider_id):
             continue
         try:
             provider = _instantiate_manifest_provider(manifest)
-        except Exception:
+        except Exception as exc:
+            _PROVIDER_RUNTIME_DIAGNOSTICS[provider_id] = {
+                "kind": "registration_error",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc)[:500],
+            }
             provider = None
         if provider is not None:
             available[provider_id] = provider

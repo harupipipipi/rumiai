@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from typing import Any, Callable
@@ -132,7 +133,9 @@ class RumiProcessRunner:
                 self._review_chain_params(generator_member, params, context),
             )
             generated_text = self._response_text(response)
-            process["events"].append(rumi_process.phase_event(phase, generator_model, output=generated_text))
+            process["events"].append(
+                rumi_process.phase_event(phase, generator_model, output=generated_text)
+            )
             if rumi_process.response_has_tool_calls(response):
                 process["review"] = {
                     "deferred": True,
@@ -142,7 +145,9 @@ class RumiProcessRunner:
                 return rumi_process.attach_rumi_metadata(response, process)
             next_draft = rumi_process.extract_draft_response(generated_text)
             if next_draft is None:
-                return self._quarantine_unmarked_draft(process, phase=phase, review_round=review_index + 1)
+                return self._quarantine_unmarked_draft(
+                    process, phase=phase, review_round=review_index + 1
+                )
             draft = next_draft
 
             try:
@@ -166,7 +171,9 @@ class RumiProcessRunner:
                     "quarantined": True,
                     "reason": "reviewer_failed",
                 }
-                return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
+                return self._text_response(
+                    rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process
+                )
 
             review_text = self._response_text(review_response)
             review, repaired = self._parse_review_json_with_repair(
@@ -185,7 +192,9 @@ class RumiProcessRunner:
                     "reason": "reviewer_json_unparseable",
                     "review_round": review_index + 1,
                 }
-                return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
+                return self._text_response(
+                    rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process
+                )
             process["events"].append(
                 rumi_process.phase_event(
                     "reviewer",
@@ -213,9 +222,769 @@ class RumiProcessRunner:
             "reason": "watchdog_max_review_rounds",
             "last_review": deepcopy(review),
         }
-        return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
+        return self._text_response(
+            rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process
+        )
 
     def _run_deepthink_chain(
+        self,
+        *,
+        composite: dict[str, Any],
+        generator_member: dict[str, Any],
+        reviewer_member: dict[str, Any],
+        generator_model: str,
+        reviewer_model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        params: dict[str, Any],
+        context: dict[str, Any],
+        process: dict[str, Any],
+        max_reviews: int,
+    ) -> dict[str, Any]:
+        from domain.ai_client.deepthink_preflight import require_deepthink_ready
+        from domain.ai_client.deepthink_extensions import (
+            available_skill_catalog,
+            available_tool_catalog,
+            deepthink_extension_contract,
+            normalize_integration_plan,
+            selected_skill_instructions,
+            selected_tool_definitions,
+        )
+        from domain.flow import FlowEngine
+        from domain.flow.context import FlowPaused
+
+        budget = composite.get("budget") if isinstance(composite.get("budget"), dict) else {}
+        max_sections = self._positive_int(
+            params.get("deepthink_max_sections")
+            or budget.get("deepthink_max_sections")
+            or rumi_process.RUMI_DEEPTHINK_MAX_SECTIONS,
+            default=rumi_process.RUMI_DEEPTHINK_MAX_SECTIONS,
+            upper=rumi_process.RUMI_DEEPTHINK_MAX_SECTIONS,
+        )
+        process["watchdog"].update(
+            {
+                "max_review_rounds": 8,
+                "deepthink_max_sections": max_sections,
+                "flow_id": "defaultspack.deepthink",
+            }
+        )
+        process["deepthink"] = {
+            "enabled": True,
+            "source": rumi_process.RUMI_DEEPTHINK_SOURCE,
+            "warning": rumi_process.RUMI_DEEPTHINK_WARNING_JA,
+            "harness_tool_selection": deepcopy(context.get("harness_tool_selection", {})),
+            "plan": {},
+            "notes": [],
+            "reviews": [],
+            "section_drafts": [],
+            "integration_plan": {},
+            "profile_phase_outputs": [],
+        }
+        extension_contract = deepthink_extension_contract()
+        presentation = (
+            extension_contract.get("presentation")
+            if isinstance(extension_contract.get("presentation"), dict)
+            else {}
+        )
+        presentation_id = str(presentation.get("id") or "").strip()
+
+        def presentation_fields(*, include_definition: bool = False) -> dict[str, Any]:
+            fields: dict[str, Any] = {}
+            if presentation_id:
+                fields["presentation_template_id"] = presentation_id
+            if include_definition and presentation:
+                fields["presentation"] = deepcopy(presentation)
+            return fields
+
+        skill_catalog = available_skill_catalog()
+        pending_tool_response: dict[str, Any] | None = None
+        phase_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": 0.0,
+        }
+
+        def record_usage(response):
+            usage = (
+                response.get("usage")
+                if isinstance(response, dict) and isinstance(response.get("usage"), dict)
+                else {}
+            )
+            metadata = (
+                response.get("metadata")
+                if isinstance(response, dict) and isinstance(response.get("metadata"), dict)
+                else {}
+            )
+            if not usage and isinstance(metadata.get("usage"), dict):
+                usage = metadata["usage"]
+            input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+            output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+            total_tokens = int(usage.get("total_tokens") or input_tokens + output_tokens)
+            phase_usage["input_tokens"] += input_tokens
+            phase_usage["output_tokens"] += output_tokens
+            phase_usage["total_tokens"] += total_tokens
+            phase_usage["cost_usd"] += float(
+                usage.get("cost_usd")
+                or usage.get("total_cost_usd")
+                or metadata.get("cost_usd")
+                or 0
+            )
+
+        def ok(data):
+            return {
+                "status": "ok",
+                "data": data,
+                "usage": dict(phase_usage),
+            }
+
+        def emit_phase(phase, model, output="", metadata=None):
+            process["events"].append(
+                rumi_process.phase_event(
+                    phase,
+                    model,
+                    output=output,
+                    metadata=metadata or {},
+                )
+            )
+
+        def response_has_tools(response):
+            if rumi_process.response_has_tool_calls(response):
+                return True
+            content = response.get("content") if isinstance(response, dict) else []
+            return isinstance(content, list) and any(
+                isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
+                for block in content
+            )
+
+        def generator(
+            phase,
+            phase_messages,
+            *,
+            metadata=None,
+            phase_tools=None,
+            json_mode=False,
+        ):
+            nonlocal pending_tool_response
+            next_params = self._review_chain_params(
+                generator_member,
+                params,
+                context,
+            )
+            # JSON is requested in the prompt and repaired when needed. Do not
+            # require a provider-specific response_format capability.
+            response = self._complete(
+                generator_model,
+                phase_messages,
+                tools if phase_tools is None else phase_tools,
+                next_params,
+            )
+            record_usage(response)
+            output = self._response_text(response)
+            emit_phase(phase, generator_model, output, metadata)
+            if response_has_tools(response):
+                pending_tool_response = response
+                callback = context.get("activity_event_callback")
+                if callable(callback) and output.strip():
+                    callback(
+                        {
+                            "type": "status",
+                            "phase": "deepthink_action",
+                            "deepthink_phase": "action",
+                            **presentation_fields(),
+                            "message": output.strip()[:1_000],
+                            "trace_id": process["trace_id"],
+                            "model": generator_model,
+                        }
+                    )
+                raise FlowPaused(
+                    "DeepThink requested tool execution through the chat approval loop"
+                )
+            return output
+
+        def integration_context(data):
+            integration = (
+                data.get("integrations") if isinstance(data.get("integrations"), dict) else {}
+            )
+            skill_ids = [
+                str(item) for item in integration.get("selected_skill_ids", []) if str(item).strip()
+            ]
+            tool_ids = [
+                str(item) for item in integration.get("selected_tool_ids", []) if str(item).strip()
+            ]
+            instructions = selected_skill_instructions(
+                skill_ids,
+                skills=get_extension_registry_skills(),
+            )
+            profile_outputs = (
+                data.get("profile_phase_outputs", {}).get("items", [])
+                if isinstance(data.get("profile_phase_outputs"), dict)
+                else []
+            )
+            additions = []
+            if instructions:
+                additions.append(
+                    {
+                        "role": "system",
+                        "content": instructions,
+                    }
+                )
+            additions.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "DeepThink integration plan and public profile phase outputs:\n"
+                        + json.dumps(
+                            {
+                                "integration_plan": integration,
+                                "profile_phase_outputs": profile_outputs,
+                            },
+                            ensure_ascii=False,
+                        )[:24_000]
+                    ),
+                }
+            )
+            return additions, selected_tool_definitions(tools, tool_ids)
+
+        def get_extension_registry_skills():
+            from domain.extensions.runtime import get_extension_registry
+
+            return get_extension_registry().skills().list(enabled_only=True)
+
+        def invoke(function_name, data, flow_context):
+            del flow_context
+            phase_usage.update(
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                cost_usd=0.0,
+            )
+            callback = context.get("activity_event_callback")
+            phase_status = {
+                "deepthink.preflight": ("preflight", "DeepThinkの実行環境を確認しています"),
+                "deepthink.plan": ("planning", "回答計画を作成しています"),
+                "deepthink.integrations": (
+                    "integrations",
+                    "使用するtoolとskillを計画しています",
+                ),
+                "deepthink.evidence": ("evidence", "根拠と論点を整理しています"),
+                "deepthink.section_drafts": ("drafting", "セクションを作成しています"),
+                "deepthink.synthesize": ("synthesizing", "回答を統合しています"),
+                "deepthink.review": ("reviewing", "回答をレビューしています"),
+                "deepthink.revise": ("revising", "レビューを反映しています"),
+                "deepthink.finalize": ("completed", "DeepThinkが完了しました"),
+            }.get(function_name)
+            if callable(callback) and phase_status is not None:
+                callback(
+                    {
+                        "type": "status",
+                        "phase": "deepthink_{}".format(phase_status[0]),
+                        "deepthink_phase": phase_status[0],
+                        **presentation_fields(
+                            include_definition=function_name == "deepthink.preflight"
+                        ),
+                        "message": phase_status[1],
+                        "trace_id": process["trace_id"],
+                        "model": (
+                            reviewer_model
+                            if function_name == "deepthink.review"
+                            else generator_model
+                        ),
+                        "iteration": int(data.get("iteration") or 0),
+                    }
+                )
+            if function_name == "deepthink.preflight":
+                ready = require_deepthink_ready(
+                    model=generator_model,
+                    model_source=str(params.get("deepthink_model_source") or "conversation"),
+                    tools=tools,
+                    tool_policy=(
+                        params.get("tool_policy")
+                        if isinstance(params.get("tool_policy"), dict)
+                        else context.get("tool_policy")
+                        if isinstance(context.get("tool_policy"), dict)
+                        else {"execution": "chat_approval_loop"}
+                    ),
+                    budgets={
+                        "max_tool_calls": params.get("max_tool_calls", 16),
+                    },
+                )
+                emit_phase("deepthink_preflight", generator_model, metadata=ready)
+                return ok(ready)
+            if function_name == "deepthink.plan":
+                output = generator(
+                    "deepthink_planner",
+                    rumi_process.build_deepthink_planner_messages(
+                        messages,
+                        context,
+                        current_answer="",
+                        reviews=[],
+                        cycle_label="Flow Plan",
+                    ),
+                )
+                plan = self._parse_plan_with_repair(
+                    output,
+                    generator_model=generator_model,
+                    generator_member=generator_member,
+                    params=params,
+                    context=context,
+                    process=process,
+                    label="Flow Plan",
+                )
+                process["deepthink"]["plan"] = deepcopy(plan)
+                return ok(plan)
+            if function_name == "deepthink.integrations":
+                discovery_ids = list(extension_contract.get("discovery_tools") or [])
+                discovery_tools = selected_tool_definitions(tools, discovery_ids)
+                output = generator(
+                    "deepthink_integrations",
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Plan which host-provided tools and profile-visible skills "
+                                "are necessary for this DeepThink run. Select only ids from "
+                                "the supplied catalogs. Prefer no extra tool when it does not "
+                                "materially improve correctness. You may call a supplied "
+                                "discovery tool when its result is needed. Return one JSON "
+                                "object when no discovery call is needed."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {
+                                    "request": messages,
+                                    "plan": data.get("plan") or {},
+                                    "available_tools": available_tool_catalog(tools),
+                                    "available_skills": skill_catalog,
+                                    "discovery_tools": discovery_ids,
+                                    "required_tool_ids": params.get("deepthink_selected_tool_ids")
+                                    or [],
+                                    "required_skill_ids": params.get("deepthink_selected_skill_ids")
+                                    or [],
+                                    "schema": {
+                                        "selected_tool_ids": ["tool id"],
+                                        "selected_skill_ids": ["skill id"],
+                                        "tool_plan": ["when and why to call a tool"],
+                                        "skill_plan": ["how the skill applies"],
+                                        "rationale": "public concise rationale",
+                                    },
+                                },
+                                ensure_ascii=False,
+                            )[:64_000],
+                        },
+                    ],
+                    phase_tools=discovery_tools,
+                    json_mode=True,
+                )
+                proposed = rumi_process._parse_jsonish(output, {})
+                integration_plan = normalize_integration_plan(
+                    proposed,
+                    tools=tools,
+                    skills=skill_catalog,
+                    discovery_tools=discovery_ids,
+                )
+                required_tool_ids = [
+                    str(item)
+                    for item in (
+                        params.get("deepthink_selected_tool_ids")
+                        if isinstance(
+                            params.get("deepthink_selected_tool_ids"),
+                            list,
+                        )
+                        else []
+                    )
+                ]
+                required_skill_ids = [
+                    str(item)
+                    for item in (
+                        params.get("deepthink_selected_skill_ids")
+                        if isinstance(
+                            params.get("deepthink_selected_skill_ids"),
+                            list,
+                        )
+                        else []
+                    )
+                ]
+                available_tool_ids = {
+                    str(item.get("id") or "") for item in available_tool_catalog(tools)
+                }
+                available_skill_ids = {str(item.get("id") or "") for item in skill_catalog}
+                integration_plan["selected_tool_ids"] = list(
+                    dict.fromkeys(
+                        [
+                            *integration_plan["discovery_tool_ids"],
+                            *[item for item in required_tool_ids if item in available_tool_ids],
+                            *integration_plan["selected_tool_ids"],
+                        ]
+                    )
+                )
+                integration_plan["selected_skill_ids"] = list(
+                    dict.fromkeys(
+                        [
+                            *[item for item in required_skill_ids if item in available_skill_ids],
+                            *integration_plan["selected_skill_ids"],
+                        ]
+                    )
+                )
+                if callable(callback):
+                    callback(
+                        {
+                            "type": "status",
+                            "phase": "deepthink_integrations",
+                            "deepthink_phase": "integrations",
+                            **presentation_fields(),
+                            "message": "tool {}件・skill {}件を選択しました".format(
+                                len(integration_plan["selected_tool_ids"]),
+                                len(integration_plan["selected_skill_ids"]),
+                            ),
+                            "trace_id": process["trace_id"],
+                            "model": generator_model,
+                            "selected_tool_ids": list(integration_plan["selected_tool_ids"]),
+                            "selected_skill_ids": list(integration_plan["selected_skill_ids"]),
+                        }
+                    )
+                process["deepthink"]["integration_plan"] = deepcopy(integration_plan)
+                return ok(integration_plan)
+            if function_name == "deepthink.profile_phases":
+                additions, phase_tools = integration_context(data)
+                outputs = []
+                for phase in extension_contract.get("phases") or []:
+                    callback = context.get("activity_event_callback")
+                    if callable(callback):
+                        callback(
+                            {
+                                "type": "status",
+                                "phase": "deepthink_{}".format(phase["id"]),
+                                "deepthink_phase": phase["id"],
+                                **presentation_fields(),
+                                "phase_label": phase["label"],
+                                "message": "{}を実行しています".format(phase["label"]),
+                                "trace_id": process["trace_id"],
+                                "model": generator_model,
+                                "source_pack_id": phase["source_pack_id"],
+                            }
+                        )
+                    output = generator(
+                        "deepthink_profile_{}".format(phase["id"]),
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    phase["prompt"]
+                                    + "\nReturn only public, decision-relevant analysis. "
+                                    "Never expose hidden chain-of-thought."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    {
+                                        "request": messages,
+                                        "plan": data.get("plan") or {},
+                                        "integrations": data.get("integrations") or {},
+                                    },
+                                    ensure_ascii=False,
+                                )[:48_000],
+                            },
+                            *additions,
+                        ],
+                        phase_tools=phase_tools,
+                        metadata={
+                            "profile_phase_id": phase["id"],
+                            "source_pack_id": phase["source_pack_id"],
+                        },
+                    )
+                    outputs.append(
+                        {
+                            "id": phase["id"],
+                            "label": phase["label"],
+                            "output": output.strip()[:12_000],
+                            "source_pack_id": phase["source_pack_id"],
+                        }
+                    )
+                process["deepthink"]["profile_phase_outputs"] = deepcopy(outputs)
+                return ok({"items": outputs})
+            if function_name == "deepthink.evidence":
+                additions, phase_tools = integration_context(data)
+                output = generator(
+                    "deepthink_notes",
+                    [
+                        *rumi_process.build_deepthink_public_notes_messages(
+                            messages,
+                            data.get("plan") or {},
+                            context,
+                            attempt=1,
+                            existing_notes=[],
+                            current_draft="",
+                            reviews=[],
+                            stage_title="Evidence and public rationale",
+                            instruction=(
+                                "List only decision-relevant evidence, explicit user constraints, "
+                                "uncertainties, and alternative views. Use selected tools when "
+                                "fresh or external evidence is materially necessary. Do not infer "
+                                "sensitive traits or provide hidden chain-of-thought."
+                            ),
+                            input_only=True,
+                        ),
+                        *additions,
+                    ],
+                    phase_tools=phase_tools,
+                )
+                note = self._parse_note_with_repair(
+                    output,
+                    generator_model=generator_model,
+                    generator_member=generator_member,
+                    params=params,
+                    context=context,
+                    process=process,
+                    label="Flow evidence",
+                )
+                process["deepthink"]["notes"] = [deepcopy(note)]
+                return ok({"notes": [note]})
+            if function_name == "deepthink.section_drafts":
+                additions, phase_tools = integration_context(data)
+                plan = data.get("plan") or {}
+                evidence = list((data.get("evidence") or {}).get("notes") or [])
+                segments = rumi_process.deepthink_plan_segments(
+                    plan,
+                    max_sections=max_sections,
+                )
+                drafts = []
+                for index, segment in enumerate(segments, start=1):
+                    output = generator(
+                        "deepthink_writer",
+                        [
+                            *rumi_process.build_deepthink_writer_messages(
+                                messages,
+                                plan,
+                                evidence,
+                                "",
+                                [],
+                                draft_number=index,
+                                kind="section",
+                                stage_title="Section draft {}".format(index),
+                                section_title=segment,
+                                section_index=index,
+                                total_sections=len(segments),
+                                section_drafts=drafts,
+                            ),
+                            *additions,
+                        ],
+                        metadata={"section": index},
+                        phase_tools=phase_tools,
+                    )
+                    drafts.append(output.strip())
+                process["deepthink"]["section_drafts"] = deepcopy(drafts)
+                return ok({"items": drafts})
+            if function_name == "deepthink.synthesize":
+                additions, phase_tools = integration_context(data)
+                output = generator(
+                    "deepthink_synthesizing",
+                    [
+                        *rumi_process.build_deepthink_writer_messages(
+                            messages,
+                            data.get("plan") or {},
+                            list((data.get("evidence") or {}).get("notes") or []),
+                            "",
+                            [],
+                            draft_number=1,
+                            kind="final",
+                            stage_title="Synthesize",
+                            section_drafts=list(
+                                (data.get("section_drafts") or {}).get("items") or []
+                            ),
+                        ),
+                        *additions,
+                    ],
+                    phase_tools=phase_tools,
+                )
+                return ok(output.strip())
+            if function_name == "deepthink.review":
+                iteration = int(data.get("iteration") or 1)
+                response = self._complete(
+                    reviewer_model,
+                    rumi_process.build_deepthink_reviewer_messages(
+                        messages,
+                        str(data.get("draft") or ""),
+                        grounding_context={
+                            "evidence": data.get("evidence") or {},
+                            "integrations": data.get("integrations") or {},
+                            "profile_phase_outputs": data.get("profile_phase_outputs") or {},
+                        },
+                    ),
+                    [],
+                    self._review_chain_params(
+                        reviewer_member,
+                        params,
+                        context,
+                    ),
+                )
+                record_usage(response)
+                review_text = self._response_text(response)
+                review, repaired = self._parse_review_json_with_repair(
+                    review_text,
+                    reviewer_model=reviewer_model,
+                    reviewer_member=reviewer_member,
+                    params=params,
+                    context=context,
+                    process=process,
+                    label="Flow review {}".format(iteration),
+                )
+                if review is None:
+                    raise ValueError("DeepThink reviewer returned invalid JSON")
+                review["needs_revision"] = not bool(review.get("pass"))
+                review["iteration"] = iteration
+                review["feedback_hash"] = hashlib.sha256(
+                    json.dumps(
+                        review.get("required_changes") or [],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ).encode("utf-8")
+                ).hexdigest()
+                process["deepthink"]["reviews"].append(deepcopy(review))
+                emit_phase(
+                    "deepthink_reviewing",
+                    reviewer_model,
+                    repaired or review_text,
+                    {
+                        "review_round": iteration,
+                        "approved": bool(review.get("pass")),
+                        "json_repaired": bool(repaired),
+                    },
+                )
+                return ok(review)
+            if function_name == "deepthink.revise":
+                additions, phase_tools = integration_context(data)
+                output = generator(
+                    "deepthink_revising",
+                    [
+                        *rumi_process.build_deepthink_writer_messages(
+                            messages,
+                            data.get("plan") or {},
+                            list((data.get("evidence") or {}).get("notes") or []),
+                            str(data.get("draft") or ""),
+                            [data.get("review") or {}],
+                            loop_breaker=int(data.get("iteration") or 1) >= 7,
+                            draft_number=int(data.get("iteration") or 1) + 1,
+                            kind="final",
+                            stage_title="Revision {}".format(int(data.get("iteration") or 1)),
+                        ),
+                        *additions,
+                    ],
+                    phase_tools=phase_tools,
+                )
+                return ok(output.strip())
+            if function_name == "deepthink.finalize":
+                review = data.get("review") or {}
+                loop = data.get("loop") or {}
+                approved = bool(review.get("pass"))
+                process["review"] = {
+                    "approved": approved,
+                    "review_round": int(review.get("iteration") or loop.get("iterations") or 0),
+                    "loop_broken": loop.get("reason") == "no_progress",
+                    "reason": "" if approved else str(loop.get("reason") or "review_exhausted"),
+                    "reviewer_context_excluded_personalization": True,
+                }
+                return ok(
+                    self._text_response(
+                        str(data.get("draft") or ""),
+                        "stop" if approved else "review_quarantine",
+                        process,
+                    )
+                )
+            return {
+                "status": "error",
+                "error": {"message": "unknown DeepThink phase"},
+            }
+
+        flow_context = dict(context)
+        flow_context.update(
+            {
+                "_flow_function_invoker": invoke,
+                "_flow_budgets": {
+                    "max_tokens": params.get("deepthink_max_tokens", 300000),
+                    "max_cost_usd": params.get("deepthink_max_cost_usd", 0),
+                    "timeout_seconds": params.get(
+                        "deepthink_timeout_seconds",
+                        budget.get("deepthink_timeout_seconds", 21600),
+                    ),
+                },
+                "source": "rumi:deepthink",
+            }
+        )
+        requested_flow_run_id = str(params.get("_deepthink_flow_run_id") or "").strip()
+        if requested_flow_run_id:
+            flow_context["_flow_run_id"] = requested_flow_run_id
+        result = FlowEngine().execute(
+            "defaultspack.deepthink",
+            {"trace_id": process["trace_id"]},
+            flow_context,
+        )
+        process["flow"] = {
+            "flow_id": "defaultspack.deepthink",
+            "run_id": result.metadata.get("execution_id"),
+            "status": result.status,
+            "events": result.metadata.get("events", []),
+        }
+        self._redact_deepthink_event_outputs(process)
+        if pending_tool_response is not None:
+            process["review"] = {
+                "approved": False,
+                "quarantined": False,
+                "reason": "tool_execution_requested",
+                "flow_status": result.status,
+            }
+            return rumi_process.attach_rumi_metadata(
+                pending_tool_response,
+                process,
+            )
+        if result.is_success():
+            payload = (
+                result.output.get("data") if isinstance(result.output, dict) else result.output
+            )
+            if isinstance(payload, dict):
+                return rumi_process.attach_rumi_metadata(payload, process)
+        run_record = FlowEngine().get_run(result.metadata.get("execution_id")) or {}
+        stop_reason = str(run_record.get("stop_reason") or "")
+        failure_reason = {
+            "AuthorityApprovalRequired": "provider_authority_required",
+            "ProviderError": "provider_failure",
+            "ValueError": "reviewer_json_failure",
+            "FLOW_BUDGET_EXCEEDED": "budget_or_timeout_exhausted",
+            "FLOW_CANCELLED": "user_cancel",
+            "FLOW_PAUSED": "paused",
+        }.get(stop_reason, "deepthink_flow_failed")
+        process["review"] = {
+            "approved": False,
+            "quarantined": True,
+            "reason": failure_reason,
+            "flow_status": result.status,
+            "stop_reason": stop_reason,
+        }
+        return self._text_response(
+            rumi_process.RUMI_QUARANTINE_MESSAGE,
+            "review_quarantine",
+            process,
+        )
+
+    @staticmethod
+    def _redact_deepthink_event_outputs(process: dict[str, Any]) -> None:
+        """Persist phase facts and public notes, never model scratch/output previews."""
+
+        for event in process.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            if "output_preview" in event:
+                event["output_preview"] = ""
+                metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+                event["metadata"] = {
+                    **metadata,
+                    "output_redacted": True,
+                }
+
+    def _run_deepthink_chain_legacy(
         self,
         *,
         composite: dict[str, Any],
@@ -281,7 +1050,9 @@ class RumiProcessRunner:
         review_attempt = 0
         user_rejection_cycles_done = 0
 
-        def call_generator(phase, label, phase_messages, *, event_metadata=None, loop_breaker=False):
+        def call_generator(
+            phase, label, phase_messages, *, event_metadata=None, loop_breaker=False
+        ):
             next_params = self._review_chain_params(generator_member, params, context)
             if loop_breaker:
                 next_params["deepthink_loop_breaker"] = True
@@ -290,7 +1061,9 @@ class RumiProcessRunner:
             metadata = {"label": label}
             if event_metadata:
                 metadata.update(event_metadata)
-            process["events"].append(rumi_process.phase_event(phase, generator_model, output=output, metadata=metadata))
+            process["events"].append(
+                rumi_process.phase_event(phase, generator_model, output=output, metadata=metadata)
+            )
             if rumi_process.response_has_tool_calls(response):
                 return output, self._deferred_response(response, process, phase, label)
             return output, None
@@ -342,7 +1115,9 @@ class RumiProcessRunner:
             process["deepthink"]["plan"] = deepcopy(current_plan)
             return None
 
-        def add_thinking_step(label, instruction, *, segment_title="", section_drafts=None, input_only=False):
+        def add_thinking_step(
+            label, instruction, *, segment_title="", section_drafts=None, input_only=False
+        ):
             nonlocal note_attempt, notes
             note_attempt += 1
             output, deferred = call_generator(
@@ -379,7 +1154,16 @@ class RumiProcessRunner:
             process["deepthink"]["notes"] = deepcopy(notes)
             return None
 
-        def write_draft(label, *, kind, section_title="", section_index=None, total_sections=None, section_drafts=None, loop_breaker=False):
+        def write_draft(
+            label,
+            *,
+            kind,
+            section_title="",
+            section_index=None,
+            total_sections=None,
+            section_drafts=None,
+            loop_breaker=False,
+        ):
             nonlocal draft_attempt, current_answer
             draft_attempt += 1
             output, deferred = call_generator(
@@ -542,7 +1326,10 @@ class RumiProcessRunner:
                         "reviewer_error",
                         reviewer_model,
                         output=str(exc),
-                        metadata={"error_kind": self._error_kind(exc), "review_round": review_attempt},
+                        metadata={
+                            "error_kind": self._error_kind(exc),
+                            "review_round": review_attempt,
+                        },
                     )
                 )
                 process["review"] = {
@@ -584,7 +1371,9 @@ class RumiProcessRunner:
             if user_rejection_cycles_done < user_rejection_cycles:
                 try:
                     rejection_output = call_reviewer(
-                        rumi_process.build_deepthink_user_rejection_review_messages(messages, current_answer),
+                        rumi_process.build_deepthink_user_rejection_review_messages(
+                            messages, current_answer
+                        ),
                         label=f"ユーザー差し戻しレビュー {user_rejection_cycles_done + 1}",
                         attempt=900 + user_rejection_cycles_done + 1,
                     )
@@ -598,7 +1387,9 @@ class RumiProcessRunner:
                         label=f"user rejection review {user_rejection_cycles_done + 1}",
                     )
                     if rejection_review is None:
-                        raise ValueError("DeepThink user rejection reviewer returned unparseable JSON")
+                        raise ValueError(
+                            "DeepThink user rejection reviewer returned unparseable JSON"
+                        )
                     rejection_review = rumi_process.enforce_user_rejection_review(rejection_review)
                     reviews.append(rejection_review)
                     process["deepthink"]["reviews"] = deepcopy(reviews)
@@ -608,7 +1399,10 @@ class RumiProcessRunner:
                             "reviewer_error",
                             reviewer_model,
                             output=str(exc),
-                            metadata={"error_kind": self._error_kind(exc), "review_round": 900 + user_rejection_cycles_done + 1},
+                            metadata={
+                                "error_kind": self._error_kind(exc),
+                                "review_round": 900 + user_rejection_cycles_done + 1,
+                            },
                         )
                     )
                     process["review"] = {
@@ -761,7 +1555,9 @@ class RumiProcessRunner:
             )
             return ""
         output = self._response_text(response)
-        process["events"].append(rumi_process.phase_event("json_repair", model, output=output, metadata={"label": label}))
+        process["events"].append(
+            rumi_process.phase_event("json_repair", model, output=output, metadata={"label": label})
+        )
         if rumi_process.response_has_tool_calls(response):
             return ""
         return output
@@ -783,12 +1579,34 @@ class RumiProcessRunner:
         return max(0, min(int(upper), parsed))
 
     @staticmethod
-    def _review_chain_params(member: dict[str, Any], params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    def _review_chain_params(
+        member: dict[str, Any], params: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         next_params = dict(params or {})
         next_params["_composite_depth"] = int(next_params.get("_composite_depth", 0) or 0) + 1
         next_params.setdefault("rumi_mode", context.get("mode", "deep"))
-        metadata = member.get("metadata") if isinstance(member, dict) and isinstance(member.get("metadata"), dict) else {}
-        thinking_level = str(metadata.get("thinking_level") or context.get("default_thinking_level") or "").strip()
+        if context.get("mode") == "deepthink":
+            try:
+                current_timeout = float(next_params.get("request_timeout") or 0)
+            except (TypeError, ValueError):
+                current_timeout = 0.0
+            try:
+                deepthink_timeout = float(context.get("deepthink_request_timeout_seconds") or 1800)
+            except (TypeError, ValueError):
+                deepthink_timeout = 1800.0
+            next_params["request_timeout"] = max(
+                30.0,
+                min(21600.0, max(current_timeout, deepthink_timeout)),
+            )
+            next_params.setdefault("request_retries", 3)
+        metadata = (
+            member.get("metadata")
+            if isinstance(member, dict) and isinstance(member.get("metadata"), dict)
+            else {}
+        )
+        thinking_level = str(
+            metadata.get("thinking_level") or context.get("default_thinking_level") or ""
+        ).strip()
         if thinking_level and not next_params.get("thinking_level"):
             next_params["thinking_level"] = thinking_level
         return next_params
@@ -828,4 +1646,6 @@ class RumiProcessRunner:
         }
         if review_round is not None:
             process["review"]["review_round"] = review_round
-        return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "draft_quarantine", process)
+        return self._text_response(
+            rumi_process.RUMI_QUARANTINE_MESSAGE, "draft_quarantine", process
+        )

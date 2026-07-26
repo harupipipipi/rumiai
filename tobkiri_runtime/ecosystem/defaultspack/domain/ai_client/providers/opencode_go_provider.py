@@ -308,6 +308,8 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     @classmethod
     def _assert_supported_model(cls, model: str) -> str:
         model_id = cls._normalize_model_id(model)
+        if model_id not in cls.MODEL_IDS:
+            raise RuntimeError(f"opencode-go: unsupported model: {model_id}")
         return model_id
 
     @staticmethod

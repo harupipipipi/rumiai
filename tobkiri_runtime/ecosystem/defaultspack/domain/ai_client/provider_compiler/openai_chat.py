@@ -45,7 +45,12 @@ class OpenAIChatCompiler(ProviderCompiler):
     def parse_stream_chunk(self, raw: dict[str, Any], compiled: CompiledProviderRequest) -> list[RumiStreamEventIR]:
         events: list[RumiStreamEventIR] = []
         choices = raw.get("choices", []) if isinstance(raw, dict) else []
-        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        usage = {
+            "input_tokens": int(usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0),
+            "output_tokens": int(usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or 0),
+            "total_tokens": int(usage_raw.get("total_tokens") or 0),
+        }
         for choice in choices if isinstance(choices, list) else []:
             delta = choice.get("delta") if isinstance(choice, dict) and isinstance(choice.get("delta"), dict) else {}
             text = delta.get("content")

@@ -49,6 +49,70 @@ def test_contract_gateway_binds_active_startup_profile(monkeypatch) -> None:
     assert captured["profile_id"] == "defaults-profile"
 
 
+def test_contract_gateway_migrates_legacy_connection_once(monkeypatch) -> None:
+    class Container:
+        def get_or_none(self, _key):
+            return object()
+
+    calls = []
+    monkeypatch.setattr(gateway_contract_client, "get_container", lambda: Container())
+    monkeypatch.setattr(gateway_contract_client, "active_profile_id", lambda: "default-profile")
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "_migrate_legacy_connection",
+        lambda payload: payload["model_reference"] == "opencode-zen/model",
+    )
+
+    def invoke(_registry, _contract, _operation, payload):
+        calls.append(dict(payload))
+        if len(calls) == 1:
+            raise gateway_contract_client.GlobalContractInvocationError(
+                "not_configured",
+                "provider connection is not configured",
+            )
+        return {"output": "ok"}
+
+    monkeypatch.setattr(gateway_contract_client, "invoke_global_contract", invoke)
+
+    result = gateway_contract_client.generate(
+        {"model_reference": "opencode-zen/model"},
+    )
+
+    assert result["content"] == "ok"
+    assert len(calls) == 2
+
+
+def test_contract_gateway_does_not_retry_unrelated_failures(monkeypatch) -> None:
+    class Container:
+        def get_or_none(self, _key):
+            return object()
+
+    monkeypatch.setattr(gateway_contract_client, "get_container", lambda: Container())
+    monkeypatch.setattr(gateway_contract_client, "active_profile_id", lambda: "default-profile")
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "_migrate_legacy_connection",
+        lambda _payload: (_ for _ in ()).throw(AssertionError("must not migrate")),
+    )
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "invoke_global_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            gateway_contract_client.GlobalContractInvocationError(
+                "denied",
+                "provider access denied",
+            )
+        ),
+    )
+
+    try:
+        gateway_contract_client.generate({"model_reference": "opencode-zen/model"})
+    except gateway_contract_client.GlobalContractInvocationError as exc:
+        assert exc.code == "denied"
+    else:
+        raise AssertionError("expected provider failure")
+
+
 def test_provider_adapter_instance_matches_catalog_execution_hint() -> None:
     """Keep catalog models routable to the shared compatibility adapter."""
     ecosystem = Path(__file__).parents[1] / "ecosystem"

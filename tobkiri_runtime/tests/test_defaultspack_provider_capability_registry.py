@@ -68,15 +68,14 @@ def test_provider_api_surface_does_not_leak_aggregator_model_capabilities():
     assert vision.supports_tool_calling is True
 
 
-def test_groq_vision_model_keeps_image_content_block():
+def test_groq_runtime_vision_metadata_keeps_image_content_block():
     from domain.ai_client.capabilities.registry import default_registry
-    from domain.ai_client.providers import get_all_known_models
 
-    model = next(
-        item
-        for item in get_all_known_models("groq")
-        if item["id"] == "groq/meta-llama/llama-4-scout-17b-16e-instruct"
-    )
+    model = {
+        "id": "groq/account-visible-vision",
+        "provider_id": "groq",
+        "capabilities": {"image_input": True, "vision": True},
+    }
     caps = default_registry().for_model(model["id"], model)
 
     assert caps.supports_vision is True
@@ -114,11 +113,17 @@ def test_parallel_tool_capability_does_not_rewrite_provider_shape():
     assert caps.api_surface["supports_parallel_tool_call_shape"] is False
 
 
-def test_cerebras_parallel_tool_model_capability_is_preserved():
+def test_cerebras_runtime_parallel_tool_capability_is_preserved():
     from domain.ai_client.capabilities.registry import default_registry
-    from domain.ai_client.providers import get_all_known_models
 
-    model = next(item for item in get_all_known_models("cerebras") if item["id"] == "cerebras/zai-glm-4.7")
+    model = {
+        "id": "cerebras/account-visible-tools",
+        "provider_id": "cerebras",
+        "capabilities": {
+            "tool_calling": True,
+            "parallel_tool_calls": True,
+        },
+    }
     caps = default_registry().for_model(model["id"], model)
 
     assert caps.supports_tool_calling is True

@@ -1,0 +1,50 @@
+{
+  "id": "skill_search",
+  "description": "List and search every skill enabled by the active resolved profile.",
+  "loading": "always",
+  "config": {
+    "tool_id": "skill_search",
+    "name": "Skill Search",
+    "summary": "Discover available skills before selecting instructions for a task.",
+    "tool_category": "tool",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "loading": "always",
+    "tags": [
+      "skill",
+      "search",
+      "discovery",
+      "profile"
+    ],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional skill id, name, description, or trigger query. Empty returns every visible skill."
+          },
+          "skill_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional exact skill ids to inspect."
+          },
+          "include_instructions": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include full instructions only for explicitly inspected skills."
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.skill_search:run_skill_search"
+    }
+  }
+}

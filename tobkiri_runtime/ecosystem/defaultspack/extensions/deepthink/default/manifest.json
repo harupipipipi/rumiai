@@ -1,0 +1,92 @@
+{
+  "id": "default_deepthink",
+  "category": "deepthink",
+  "version": "1.0.0",
+  "enabled": true,
+  "priority": 100,
+  "display_name": "Default DeepThink extensions",
+  "description": "Default integration planning and multi-perspective requirements.",
+  "config": {
+    "discovery_tools": [
+      "tool_search",
+      "skill_search"
+    ],
+    "skills_visibility": "all_enabled",
+    "presentation": {
+      "schema_version": 1,
+      "id": "defaultspack.deepthink.v1",
+      "title": "DeepThink",
+      "aria_label": "DeepThink progress",
+      "icon": "brain-circuit",
+      "tone": "violet-sky",
+      "motion": {
+        "entry": "rise",
+        "surface": "aurora",
+        "indicator": "orbit",
+        "active_phase": "signal"
+      },
+      "event": {
+        "template_id_field": "presentation_template_id",
+        "phase_field": "deepthink_phase",
+        "phase_prefix": "deepthink_"
+      },
+      "phases": [
+        { "id": "preflight", "label": "確認", "description": "実行条件を確認" },
+        { "id": "planning", "label": "計画", "description": "回答の進め方を設計" },
+        { "id": "integrations", "label": "連携", "description": "toolとskillを選定" },
+        { "id": "evidence", "label": "根拠", "description": "情報と論点を整理" },
+        { "id": "drafting", "label": "下書き", "description": "回答を組み立て" },
+        { "id": "synthesizing", "label": "統合", "description": "内容を一つに統合" },
+        { "id": "reviewing", "label": "レビュー", "description": "品質と漏れを確認" },
+        { "id": "revising", "label": "修正", "description": "指摘を回答へ反映" }
+      ],
+      "dynamic_phases": {
+        "insert_after": "integrations",
+        "excluded": ["action", "completed", "paused", "failed", "profile_phases", "dispatch", "dispatch_completed"]
+      },
+      "statuses": {
+        "running": "実行中",
+        "completed": "完了",
+        "paused": "一時停止",
+        "failed": "失敗"
+      },
+      "feedback": {
+        "reviewing": "改善点が見つかったため、回答を修正しています。",
+        "approved": "レビューを通過した回答です。"
+      }
+    },
+    "phases": [
+      {
+        "id": "grounding",
+        "label": "根拠確認",
+        "prompt": "Identify which claims require repository, tool, or current-state evidence. Use selected read-only discovery tools when the request concerns existing code or live state. Clearly distinguish verified facts from assumptions, and do not invent an architecture when the current implementation can be inspected."
+      },
+      {
+        "id": "perspective_review",
+        "label": "複数視点レビュー",
+        "prompt": "Apply the configured affirmative, critical, and user perspectives to the plan. Surface conflicts, missing constraints, failure modes, and concrete changes needed before drafting."
+      }
+    ],
+    "perspectives": [
+      {
+        "id": "affirmative",
+        "name": "肯定的視点",
+        "mission": "価値、成立条件、最善の実現方法を示す"
+      },
+      {
+        "id": "critical",
+        "name": "批判的視点",
+        "mission": "欠点、反例、失敗条件、安全上の懸念を示す"
+      },
+      {
+        "id": "user",
+        "name": "ユーザー視点",
+        "mission": "会話で明示された目的、制約、期待への適合を検証する"
+      }
+    ]
+  },
+  "metadata": {
+    "source": "defaultspack",
+    "profile_scoped": true
+  }
+}

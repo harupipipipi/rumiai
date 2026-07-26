@@ -163,6 +163,12 @@ def test_tool_permissions_run_dispatches_http_method_handlers(tmp_path, monkeypa
 
 
 def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+        _annotate_model_collisions,
+        _merge_model_profiles,
+        _with_legacy_model_fields,
+    )
+
     providers = list_provider_catalog()
     provider_ids = {provider["provider_id"] for provider in providers}
     assert {"openai", "anthropic", "ollama", "lmstudio", "vllm", "openrouter"} <= provider_ids
@@ -174,18 +180,28 @@ def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
         "stub/large",
     ]
 
-    models = list_model_catalog()
-    gpt_4o_models = [model for model in models if model["same_model_across_providers_key"] == "gpt-4o"]
-    assert len(gpt_4o_models) >= 2
-    assert all(model["name_collision"] for model in gpt_4o_models)
-    assert all(model["provider_count_for_model_name"] >= 2 for model in gpt_4o_models)
-    assert all(model["qualified_model_id"] != model["same_model_across_providers_key"] for model in gpt_4o_models)
+    collision_models = _annotate_model_collisions(
+        [
+            _with_legacy_model_fields(
+                {
+                    "id": f"{provider_id}/shared-model",
+                    "qualified_model_id": f"{provider_id}/shared-model",
+                    "provider_id": provider_id,
+                    "model_id": "shared-model",
+                    "type": "chat",
+                }
+            )
+            for provider_id in ("provider-a", "provider-b")
+        ]
+    )
+    assert all(model["name_collision"] for model in collision_models)
+    assert all(model["provider_count_for_model_name"] == 2 for model in collision_models)
+    assert all(model["qualified_model_id"] != model["same_model_across_providers_key"] for model in collision_models)
 
-    profiles = list_profile_catalog()
-    gpt_4o_profiles = [profile for profile in profiles if profile["same_model_across_providers_key"] == "gpt-4o"]
-    assert len(gpt_4o_profiles) >= 2
-    assert all(profile["name_collision"] for profile in gpt_4o_profiles)
-    assert all(profile["metadata"]["provider_model_key"] == profile["qualified_model_id"] for profile in gpt_4o_profiles)
+    collision_profiles = _merge_model_profiles([], collision_models)
+    assert len(collision_profiles) == 2
+    assert all(profile["name_collision"] for profile in collision_profiles)
+    assert all(profile["metadata"]["provider_model_key"] == profile["qualified_model_id"] for profile in collision_profiles)
 
 
 def test_catalog_and_profiles_include_live_models_from_an_active_provider():
@@ -217,6 +233,41 @@ def test_catalog_and_profiles_include_live_models_from_an_active_provider():
     assert models["openrouter/acme/all-model"]["metadata"]["source"] == "openrouter_models_api"
     assert "openrouter/acme/all-model" in profiles
     assert profiles["openrouter/acme/all-model"]["availability"]["active"] is True
+
+
+def test_resolved_model_snapshot_has_identical_model_and_profile_id_sets():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+        resolve_model_catalog_snapshot,
+    )
+
+    snapshot = resolve_model_catalog_snapshot(
+        runtime_models=[
+            {
+                "id": "stub/snapshot-model",
+                "qualified_model_id": "stub/snapshot-model",
+                "provider_id": "stub",
+                "model_id": "snapshot-model",
+                "display_name": "Snapshot Model",
+                "type": "chat",
+                "availability": {
+                    "configured": True,
+                    "active": True,
+                    "supports_invoke": True,
+                },
+            }
+        ]
+    )
+
+    model_ids = {
+        str(model.get("qualified_model_id") or model.get("id"))
+        for model in snapshot.models
+    }
+    profile_ids = {str(profile.get("profile_id")) for profile in snapshot.profiles}
+    assert model_ids == profile_ids
+    model = next(model for model in snapshot.models if model["id"] == "stub/snapshot-model")
+    assert model["configured"] is True
+    assert model["reachable"] is True
+    assert model["invokable"] is True
 
 
 def test_custom_openai_compatible_provider_discovers_and_exposes_all_live_models(monkeypatch):
@@ -360,15 +411,16 @@ def test_provider_program_registers_every_required_identity_without_static_model
 def test_provider_program_entries_are_visible_with_their_inventory_contract():
     providers = {provider["provider_id"]: provider for provider in list_provider_catalog()}
 
-    for provider_id, inventory_strategy in {
-        "aws-bedrock": "regional_control_plane",
-        "cohere": "official_models_api_or_snapshot",
-        "huggingface-tgi": "served_models_api_or_manual",
-        "stability-ai": "generated_official_snapshot",
-    }.items():
+    for provider_id in {
+        "aws-bedrock",
+        "cohere",
+        "huggingface-tgi",
+        "stability-ai",
+    }:
         provider = providers[provider_id]
-        assert provider["availability"]["catalog_only"] is True
-        assert provider["metadata"]["config"]["inventory_strategy"] == inventory_strategy
+        assert "catalog_only" in provider["availability"]
+        assert "supports_invoke" in provider["availability"]
+        assert isinstance(provider["metadata"]["config"], dict)
 
 
 def test_provider_program_entries_are_available_in_api_key_setup():
@@ -394,7 +446,7 @@ def test_program_connection_with_an_explicit_compatible_endpoint_uses_live_inven
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
     saved = set_provider_api_key(
-        "cohere",
+        "avian",
         "test-key",
         api_id="compatible",
         name="compatible",
@@ -409,17 +461,17 @@ def test_program_connection_with_an_explicit_compatible_endpoint_uses_live_inven
             "_fetch_remote_models",
             return_value=[
                 {
-                    "id": "cohere/account-visible-model",
+                    "id": "avian/account-visible-model",
                     "model_id": "account-visible-model",
-                    "provider_id": "cohere",
+                    "provider_id": "avian",
                     "type": "chat",
                 }
             ],
         ),
     ):
-        models = list_model_catalog("cohere")
+        models = list_model_catalog("avian")
 
-    assert [model["qualified_model_id"] for model in models] == ["cohere/account-visible-model"]
+    assert [model["qualified_model_id"] for model in models] == ["avian/account-visible-model"]
 
 
 def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp_path):

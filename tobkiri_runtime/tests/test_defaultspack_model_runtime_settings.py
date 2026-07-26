@@ -67,13 +67,19 @@ def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     assert service.get_thinking_level()["level"] == "high"
 
 
-def test_model_runtime_settings_deepthink_toggle_warns(tmp_path):
+def test_model_runtime_settings_deepthink_toggle_warns(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
     service = ModelRuntimeSettingsService(tmp_path)
 
     assert service.get_deepthink_enabled()["enabled"] is False
     enabled = service.set_deepthink_enabled(True)
     assert enabled["enabled"] is True
     assert "数時間" in enabled["message"]
+    assert enabled["preflight"]["checks"]["provider_neutral"] is True
+    assert (
+        enabled["preflight"]["checks"]["model_source"]
+        == "conversation"
+    )
     assert service.get_settings()["deepthink_enabled"] is True
 
     disabled = service.set_deepthink_enabled(False)
@@ -81,7 +87,55 @@ def test_model_runtime_settings_deepthink_toggle_warns(tmp_path):
     assert service.get_settings()["deepthink_enabled"] is False
 
 
-def test_model_runtime_settings_deepthink_uses_desired_state_snapshot(tmp_path):
+def test_model_runtime_settings_deepthink_selected_source_requires_model(
+    tmp_path,
+    monkeypatch,
+):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service.update_deepthink_configuration({"model_source": "selected"})
+
+    try:
+        service.set_deepthink_enabled(True)
+    except RuntimeError as exc:
+        assert "Select a DeepThink model" in str(exc)
+    else:
+        raise AssertionError("DeepThink must reject an empty selected model")
+
+    assert service.get_deepthink_enabled()["enabled"] is False
+    service.update_deepthink_configuration({"model": "demo/selected"})
+    assert service.set_deepthink_enabled(True)["enabled"] is True
+    assert service.get_deepthink_enabled()["selected_model"] == "demo/selected"
+
+
+def test_delegated_deepthink_requires_explicit_request_and_user_permission(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    inherited, inherited_policy = service.authorize_delegated_deepthink(
+        {"deepthink_enabled": True},
+        requested=False,
+    )
+    assert inherited["deepthink_enabled"] is False
+    assert inherited_policy["reason"] == "not_requested"
+
+    denied, denied_policy = service.authorize_delegated_deepthink(
+        {},
+        requested=True,
+    )
+    assert denied["deepthink_enabled"] is False
+    assert denied_policy["reason"] == "delegated_deepthink_not_allowed"
+
+    service.update_deepthink_configuration({"allow_delegated_agents": True})
+    allowed, allowed_policy = service.authorize_delegated_deepthink(
+        {},
+        requested=True,
+    )
+    assert allowed["deepthink_enabled"] is True
+    assert allowed["deepthink_activation_source"] == "delegation"
+    assert allowed_policy["enabled"] is True
+
+
+def test_model_runtime_settings_deepthink_uses_desired_state_snapshot(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
     service = ModelRuntimeSettingsService(tmp_path)
 
     enabled = service.set_deepthink_enabled(
@@ -105,7 +159,8 @@ def test_model_runtime_settings_deepthink_uses_desired_state_snapshot(tmp_path):
     assert replay["revision"] == 1
 
 
-def test_model_runtime_settings_deepthink_two_desired_states_settle_to_last(tmp_path):
+def test_model_runtime_settings_deepthink_two_desired_states_settle_to_last(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
     service = ModelRuntimeSettingsService(tmp_path)
 
     enabled = service.set_deepthink_enabled(True, expected_revision=0)
