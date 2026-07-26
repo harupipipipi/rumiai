@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
+use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
+use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
 use crate::defaultspack_manager::DefaultspackManager;
@@ -29,7 +31,20 @@ const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack-main";
 const DEFAULTSPACK_WINDOW_TITLE: &str = "Tobkiri";
+const DEFAULTSPACK_LOCAL_AUTH_SCOPE: &str = "defaultspack-local-ui";
 static DEFAULTSPACK_LAUNCH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[derive(Debug, Serialize)]
+pub struct DefaultspackLocalAuthExchange {
+    exchange_code: String,
+    expires_at: f64,
+    origin: String,
+    window_id: String,
+    process_id: String,
+    device_id: String,
+    nonce: String,
+    scope: String,
+}
 
 fn with_defaultspack_launch_coordination<T>(
     operation: impl FnOnce() -> AnyResult<T>,
@@ -189,36 +204,19 @@ fn defaultspack_window_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/chat")
 }
 
-fn encode_url_fragment_value(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
-fn defaultspack_window_url_with_local_auth(port: u16, api_token: &str) -> AnyResult<String> {
-    let mut url = Url::parse(&defaultspack_window_url(port))
-        .with_context(|| format!("invalid defaultspack window port: {port}"))?;
-    url.set_fragment(Some(&format!(
-        "rumi_local_auth={}",
-        encode_url_fragment_value(api_token)
-    )));
-    Ok(url.to_string())
-}
-
-fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> AnyResult<String> {
-    let mut url = Url::parse(authenticated_url)
-        .with_context(|| format!("invalid authenticated Defaultspack URL: {authenticated_url}"))?;
-    let fragment = url.fragment().map(str::to_owned);
+fn defaultspack_window_url_with_path(base_url: &str, path: &str) -> AnyResult<String> {
+    let mut url =
+        Url::parse(base_url).with_context(|| format!("invalid Defaultspack URL: {base_url}"))?;
     let trimmed = path.trim();
     let path = if trimmed.is_empty() { "/chat" } else { trimmed };
-    if path.contains("://") || path.starts_with("//") || path.contains('\\') {
+    if path.contains("://")
+        || path.starts_with("//")
+        || path.contains('\\')
+        || path.contains('#')
+        || path.contains("rumi_local_auth")
+        || path.chars().any(char::is_control)
+        || has_invalid_percent_encoding(path)
+    {
         bail!("Defaultspack window path must be a same-origin path");
     }
     let path_without_fragment = path.split('#').next().unwrap_or(path);
@@ -231,18 +229,154 @@ fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> Any
     }
     url.set_path(pathname);
     url.set_query(query);
-    url.set_fragment(fragment.as_deref());
+    url.set_fragment(None);
     Ok(url.to_string())
 }
 
-pub(crate) fn add_defaultspack_local_auth(config: &AppConfig, mut url: Url) -> AnyResult<Url> {
-    let api_token = read_desktop_api_token_from_config(config)
-        .context("failed to read Viewer local auth token")?;
-    url.set_fragment(Some(&format!(
-        "rumi_local_auth={}",
-        encode_url_fragment_value(&api_token)
-    )));
+fn validate_defaultspack_window_url_for_port(url: Url, expected_port: u16) -> AnyResult<Url> {
+    if url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port() != Some(expected_port)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || url
+            .query()
+            .is_some_and(|query| query.contains("rumi_local_auth"))
+    {
+        bail!("Defaultspack window URL must use the reserved loopback origin");
+    }
     Ok(url)
+}
+
+pub(crate) fn validate_defaultspack_window_url(url: Url) -> AnyResult<Url> {
+    validate_defaultspack_window_url_for_port(url, DEFAULTSPACK_DEFAULT_PORT)
+}
+
+fn has_invalid_percent_encoding(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && (index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit())
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn secure_local_auth_id(prefix: &str) -> String {
+    let random: String = OsRng
+        .sample_iter(&Alphanumeric)
+        .take(48)
+        .map(char::from)
+        .collect();
+    format!("{prefix}-{random}")
+}
+
+fn launcher_device_id() -> &'static str {
+    static DEVICE_ID: OnceLock<String> = OnceLock::new();
+    DEVICE_ID
+        .get_or_init(|| secure_local_auth_id("launcher-device"))
+        .as_str()
+}
+
+fn allowed_defaultspack_window_label(label: &str) -> bool {
+    matches!(
+        label,
+        "defaultspack-main"
+            | "authority-approval"
+            | "ambient-trigger"
+            | "finger-recording"
+            | "defaults-console"
+            | "host-permissions"
+    )
+}
+
+#[tauri::command]
+pub fn defaultspack_local_auth_exchange(
+    window: WebviewWindow,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<DefaultspackLocalAuthExchange, String> {
+    issue_defaultspack_local_auth_exchange(&window, config.inner())
+        .map_err(|error| format!("failed to establish Defaultspack local session: {error:#}"))
+}
+
+fn issue_defaultspack_local_auth_exchange(
+    window: &WebviewWindow,
+    config: &AppConfig,
+) -> AnyResult<DefaultspackLocalAuthExchange> {
+    let window_id = window.label().to_string();
+    if !allowed_defaultspack_window_label(&window_id) {
+        bail!("window is not a Defaultspack surface");
+    }
+    let expected_port = read_defaultspack_desktop_metadata(config)?.port;
+    let url = validate_defaultspack_window_url_for_port(
+        window
+            .url()
+            .context("failed to inspect Defaultspack window URL")?,
+        expected_port,
+    )?;
+    let origin = url.origin().ascii_serialization();
+    let process_id = std::process::id().to_string();
+    let device_id = launcher_device_id().to_string();
+    let nonce = secure_local_auth_id("nonce");
+    let api_token = read_desktop_api_token_from_config(config)
+        .context("failed to read Defaultspack local auth token")?;
+    let endpoint = format!("{origin}/api/local-auth/exchange");
+    let csrf = secure_local_auth_id("csrf");
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("failed to build local auth exchange client")?
+        .post(endpoint)
+        .header("Origin", &origin)
+        .header("X-Rumi-CSRF", csrf)
+        .bearer_auth(api_token)
+        .json(&serde_json::json!({
+            "origin": origin,
+            "window_id": window_id,
+            "process_id": process_id,
+            "device_id": device_id,
+            "nonce": nonce,
+            "scope": DEFAULTSPACK_LOCAL_AUTH_SCOPE,
+        }))
+        .send()
+        .context("Defaultspack local auth exchange request failed")?;
+    if !response.status().is_success() {
+        bail!("Defaultspack rejected the local auth exchange");
+    }
+    let envelope: Value = response
+        .json()
+        .context("Defaultspack returned an invalid local auth exchange")?;
+    let data = envelope
+        .get("data")
+        .and_then(Value::as_object)
+        .context("Defaultspack local auth exchange response is missing data")?;
+    let exchange_code = data
+        .get("exchange_code")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .context("Defaultspack local auth exchange response is missing a code")?
+        .to_string();
+    let expires_at = data
+        .get("expires_at")
+        .and_then(Value::as_f64)
+        .context("Defaultspack local auth exchange response is missing expiry")?;
+    Ok(DefaultspackLocalAuthExchange {
+        exchange_code,
+        expires_at,
+        origin,
+        window_id,
+        process_id,
+        device_id,
+        nonce,
+        scope: DEFAULTSPACK_LOCAL_AUTH_SCOPE.to_string(),
+    })
 }
 
 fn defaultspack_window_url_for_log(url: &str) -> String {
@@ -936,7 +1070,7 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         }
     }
 
-    defaultspack_window_url_with_local_auth(metadata.port, &api_token)
+    Ok(base_url)
 }
 
 fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
@@ -1803,30 +1937,18 @@ echo "manual defaultspack helper"
     }
 
     #[test]
-    fn defaultspack_window_url_with_local_auth_uses_fragment() {
+    fn defaultspack_window_url_with_path_never_adds_auth_material() {
         assert_eq!(
-            defaultspack_window_url_with_local_auth(DEFAULTSPACK_DEFAULT_PORT, "local+token/1=")
+            defaultspack_window_url_with_path("http://127.0.0.1:8766/chat", "/chat?chat=abc-123")
                 .unwrap(),
-            "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
-        );
-    }
-
-    #[test]
-    fn defaultspack_window_url_with_path_preserves_local_auth_fragment() {
-        assert_eq!(
-            defaultspack_window_url_with_path(
-                "http://127.0.0.1:8766/chat#rumi_local_auth=local-token",
-                "/chat?chat=abc-123"
-            )
-            .unwrap(),
-            "http://127.0.0.1:8766/chat?chat=abc-123#rumi_local_auth=local-token"
+            "http://127.0.0.1:8766/chat?chat=abc-123"
         );
     }
 
     #[test]
     fn defaultspack_window_url_with_path_rejects_external_url() {
         let err = defaultspack_window_url_with_path(
-            "http://127.0.0.1:8766/chat#rumi_local_auth=local-token",
+            "http://127.0.0.1:8766/chat",
             "https://example.com/chat",
         )
         .unwrap_err();
@@ -1836,7 +1958,38 @@ echo "manual defaultspack helper"
     }
 
     #[test]
-    fn defaultspack_window_url_for_log_strips_local_auth_fragment() {
+    fn defaultspack_window_url_with_path_rejects_adversarial_destinations() {
+        for path in [
+            "//example.invalid/chat",
+            "javascript:alert(1)",
+            "file:///tmp/unsafe",
+            "/chat#fragment",
+            "/chat?rumi_local_auth=secret",
+            "/chat\\external",
+            "/%",
+            "relative/chat",
+        ] {
+            assert!(
+                defaultspack_window_url_with_path("http://127.0.0.1:8766/chat", path,).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn validate_defaultspack_window_url_rejects_credentials_and_fragments() {
+        for raw in [
+            "https://127.0.0.1:8766/chat",
+            "http://example.invalid:8766/chat",
+            "http://user:password@127.0.0.1:8766/chat",
+            "http://127.0.0.1:8766/chat#copied-history",
+            "http://127.0.0.1:8766/chat?rumi_local_auth=secret",
+        ] {
+            assert!(validate_defaultspack_window_url(Url::parse(raw).unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn defaultspack_window_url_for_log_strips_any_fragment() {
         assert_eq!(
             defaultspack_window_url_for_log(
                 "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
