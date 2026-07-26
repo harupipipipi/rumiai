@@ -4,7 +4,12 @@ from typing import Any
 
 
 TRUSTED_TOOL_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
-SUPPORTED_AUTHORABLE_EXECUTION_TYPES = {"rumi_function", "capability", "mcp"}
+SUPPORTED_AUTHORABLE_EXECUTION_TYPES = {
+    "rumi_function",
+    "capability",
+    "mcp",
+    "global_contract",
+}
 TRUSTED_LEGACY_EXECUTION_TYPES = {"local", "handler", "dynamic"}
 VALID_RISKS = {"low", "medium", "high", "critical"}
 SANDBOX_CAPABILITY_PREFIX = "sandbox."
@@ -136,6 +141,11 @@ def unsupported_execution_reason(tool_def: dict[str, Any]) -> str | None:
         if exec_type == "mcp":
             if not str(execution.get("server_name") or "").strip():
                 return "mcp tools must declare execution.server_name"
+        if exec_type == "global_contract":
+            if not str(execution.get("contract_id") or "").strip():
+                return "global_contract tools must declare execution.contract_id"
+            if not str(execution.get("operation") or "").strip():
+                return "global_contract tools must declare execution.operation"
         return None
     if legacy_execution_requires_trust(exec_type) and is_trusted_tool(tool_def):
         return None

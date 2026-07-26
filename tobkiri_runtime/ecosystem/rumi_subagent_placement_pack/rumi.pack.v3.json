@@ -1,0 +1,133 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {
+    "id": "rumi.subagent_placement",
+    "version": "1.0.0",
+    "kind": "service",
+    "display_name": "Tobkiri Subagent Placement",
+    "description": "Typed Subagent Placement and effective-plan compiler."
+  },
+  "contracts": {
+    "provides": [
+      {
+        "id": "rumi.service.subagent.placement.compile.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.compiler",
+        "cardinality": "one",
+        "security": "restricted",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.placement.compile"]
+      },
+      {
+        "id": "rumi.service.subagent.placement.stage.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.core-stage",
+        "cardinality": "chain",
+        "security": "restricted",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.placement.compile"]
+      },
+      {
+        "id": "rumi.service.subagent.protocol.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.builtin-protocols",
+        "cardinality": "many",
+        "security": "internal",
+        "failure": "isolate",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.placement.read"]
+      }
+    ],
+    "requires": [
+      {
+        "id": "rumi.resource.subagent.catalog.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": false
+      },
+      {
+        "id": "rumi.resource.subagent.placement.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.subagent.placement.stage.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "chain",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.subagent.protocol.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "many",
+        "optional": false
+      }
+    ]
+  },
+  "entrypoints": [
+    {
+      "id": "subagent-placement-compiler",
+      "contract_id": "rumi.service.subagent.placement.compile.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
+      "symbol": "create_compile_operation",
+      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+    },
+    {
+      "id": "subagent-placement-core-stage",
+      "contract_id": "rumi.service.subagent.placement.stage.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
+      "symbol": "create_core_stage",
+      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+    },
+    {
+      "id": "subagent-placement-protocols",
+      "contract_id": "rumi.service.subagent.protocol.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
+      "symbol": "create_protocol_catalog",
+      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+    }
+  ],
+  "resources": [],
+  "storage": [],
+  "permissions": [
+    {"capability": "subagent.catalog.read", "access": "read", "approval_required": false},
+    {"capability": "subagent.placement.read", "access": "read", "approval_required": false},
+    {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false}
+  ],
+  "provenance": {
+    "content_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451",
+    "build_identity": "rumi-subagent-placement-pack:1.0.0",
+    "trust_class": "local",
+    "signature": null
+  },
+  "migration": {
+    "from": ["defaultspack.domain.company.models.DEFAULT_AGENT_SPECS"],
+    "compatibility_aliases": [],
+    "compatibility_projection": "none",
+    "removal_wave": 10,
+    "sunset_at": "2028-12-31",
+    "rollback": "Keep legacy agent profiles and stop selecting Placement providers."
+  },
+  "extensions": {
+    "tobkiri.subagent_placement.boundary": {
+      "capability_plan_reused": true,
+      "authority_merge": "intersection",
+      "denials_merge": "union",
+      "budgets_merge": "minimum",
+      "required_unknown_feature": "fail_closed",
+      "stage_authority_widening": "deny"
+    }
+  }
+}

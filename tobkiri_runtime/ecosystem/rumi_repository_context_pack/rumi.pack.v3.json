@@ -1,0 +1,187 @@
+{
+  "pack_api_version": "rumi.pack.v3",
+  "pack": {
+    "id": "rumi.repository_context",
+    "version": "1.0.0",
+    "kind": "service",
+    "display_name": "Tobkiri Repository Context",
+    "description": "Low-cost repository evidence selection Subagent."
+  },
+  "contracts": {
+    "provides": [
+      {
+        "id": "rumi.resource.subagent.catalog.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "repository-context.catalog",
+        "cardinality": "many",
+        "security": "internal",
+        "failure": "isolate",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_repository_context_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.catalog.read"]
+      },
+      {
+        "id": "rumi.resource.subagent.placement.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "repository-context.placement",
+        "cardinality": "many",
+        "security": "internal",
+        "failure": "isolate",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_repository_context_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.placement.read"]
+      },
+      {
+        "id": "rumi.service.subagent.runtime.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "repository-context.runtime",
+        "instance_key": "repository-context",
+        "cardinality": "many",
+        "security": "sensitive",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_repository_context_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "process",
+        "required_capabilities": ["repository.context.prepare"]
+      },
+      {
+        "id": "rumi.service.repository.context.prepare.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "repository-context.prepare",
+        "cardinality": "one",
+        "security": "sensitive",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_repository_context_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "process",
+        "required_capabilities": ["repository.context.prepare"]
+      }
+    ],
+    "requires": [
+      {
+        "id": "rumi.service.subagent.placement.compile.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.file.inspect.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
+      },
+      {
+        "id": "rumi.service.ai.generate.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
+      }
+    ]
+  },
+  "entrypoints": [
+    {
+      "id": "repository-context-catalog",
+      "contract_id": "rumi.resource.subagent.catalog.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_repository_context_pack.runtime.context",
+      "symbol": "create_catalog_operation",
+      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+    },
+    {
+      "id": "repository-context-placement",
+      "contract_id": "rumi.resource.subagent.placement.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_repository_context_pack.runtime.context",
+      "symbol": "create_placement_operation",
+      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+    },
+    {
+      "id": "repository-context-runtime",
+      "contract_id": "rumi.service.subagent.runtime.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_repository_context_pack.runtime.context",
+      "symbol": "create_subagent_runtime",
+      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+    },
+    {
+      "id": "repository-context-prepare",
+      "contract_id": "rumi.service.repository.context.prepare.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_repository_context_pack.runtime.context",
+      "symbol": "create_prepare_operation",
+      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+    }
+  ],
+  "resources": [
+    {
+      "id": "subagents/repository-context-subagent.json",
+      "kind": "subagent.definition",
+      "content_hash": "sha256:bb392066d77d6a7f6ecae5341cb324eeb88abf60502c5ff923ea781c90ee65d9"
+    },
+    {
+      "id": "placements/repository-context.placement.json",
+      "kind": "subagent.placement",
+      "content_hash": "sha256:d6e4db49779fb972b0f5482a2a4f0ef08032fe744651e2041395757d63d21497"
+    },
+    {
+      "id": "prompts/repository-context.system.md",
+      "kind": "instructions",
+      "content_hash": "sha256:e7cdc94d7694c7dd23bdb55e21714d76afcbdb6da5c178a2d92f725e9c2e2071"
+    },
+    {
+      "id": "extensions/activities/repository_context/manifest.json",
+      "kind": "activity",
+      "content_hash": "sha256:3bde466cc00a8432cfcb99871074eb174d6fdac8b6147a33984df395857db4ae"
+    },
+    {
+      "id": "extensions/tools/repository_context_prepare/manifest.json",
+      "kind": "tool",
+      "content_hash": "sha256:bc280729e7b804252c6caa1eff144d3bde9c53dba1d4d8b9dddc3c72aedb513d"
+    },
+    {
+      "id": "extensions/skills/repository_context_preparation/manifest.json",
+      "kind": "skill",
+      "content_hash": "sha256:fd6980883c27bfa1807b48134a5aa321fe0ef777b4402143b55d00c5f3c9136f"
+    },
+    {
+      "id": "extensions/skills/repository_context_preparation/SKILL.md",
+      "kind": "skill.instructions",
+      "content_hash": "sha256:f616680365e0325ea03e3804d991634030c34b81f16a4804d2dfda4e008db33e"
+    }
+  ],
+  "storage": [],
+  "permissions": [
+    {"capability": "subagent.catalog.read", "access": "read", "approval_required": false},
+    {"capability": "subagent.placement.read", "access": "read", "approval_required": false},
+    {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false},
+    {"capability": "repository.context.prepare", "access": "execute", "approval_required": false},
+    {"capability": "file.inspect", "access": "read", "approval_required": false},
+    {"capability": "ai.gateway.generate", "access": "execute", "approval_required": false}
+  ],
+  "provenance": {
+    "content_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25",
+    "build_identity": "rumi-repository-context-pack:1.0.0",
+    "trust_class": "local",
+    "signature": null
+  },
+  "migration": {
+    "from": ["defaultspack.domain.agent.subagent_orchestrator.context_summarizer"],
+    "compatibility_aliases": [],
+    "compatibility_projection": "none",
+    "removal_wave": 10,
+    "sunset_at": "2028-12-31",
+    "rollback": "Disable the Placement and keep ordinary on-demand file tools."
+  },
+  "extensions": {
+    "tobkiri.repository_context.boundary": {
+      "placement_id": "repository-context",
+      "workspace_access": "read_only",
+      "model_cost_tiers": ["free", "low"],
+      "map_reduce": true,
+      "secret_like_input": "deny",
+      "output": "tobkiri.repository-evidence/v1"
+    }
+  }
+}

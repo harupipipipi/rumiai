@@ -1,0 +1,45 @@
+{
+  "schema_version": "rumi.artifact-manifest.v1",
+  "artifacts": [
+    {
+      "path": "runtime/context.py",
+      "sha256": "b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25",
+      "role": "runtime"
+    },
+    {
+      "path": "subagents/repository-context-subagent.json",
+      "sha256": "bb392066d77d6a7f6ecae5341cb324eeb88abf60502c5ff923ea781c90ee65d9",
+      "role": "subagent_definition"
+    },
+    {
+      "path": "placements/repository-context.placement.json",
+      "sha256": "d6e4db49779fb972b0f5482a2a4f0ef08032fe744651e2041395757d63d21497",
+      "role": "placement"
+    },
+    {
+      "path": "prompts/repository-context.system.md",
+      "sha256": "e7cdc94d7694c7dd23bdb55e21714d76afcbdb6da5c178a2d92f725e9c2e2071",
+      "role": "instructions"
+    },
+    {
+      "path": "extensions/activities/repository_context/manifest.json",
+      "sha256": "3bde466cc00a8432cfcb99871074eb174d6fdac8b6147a33984df395857db4ae",
+      "role": "activity"
+    },
+    {
+      "path": "extensions/tools/repository_context_prepare/manifest.json",
+      "sha256": "bc280729e7b804252c6caa1eff144d3bde9c53dba1d4d8b9dddc3c72aedb513d",
+      "role": "tool"
+    },
+    {
+      "path": "extensions/skills/repository_context_preparation/manifest.json",
+      "sha256": "fd6980883c27bfa1807b48134a5aa321fe0ef777b4402143b55d00c5f3c9136f",
+      "role": "skill"
+    },
+    {
+      "path": "extensions/skills/repository_context_preparation/SKILL.md",
+      "sha256": "f616680365e0325ea03e3804d991634030c34b81f16a4804d2dfda4e008db33e",
+      "role": "skill_instructions"
+    }
+  ]
+}

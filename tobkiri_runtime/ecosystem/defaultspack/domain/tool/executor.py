@@ -257,6 +257,9 @@ class ToolExecutor:
         if exec_type == "capability":
             return self._execute_capability(tool_def, arguments, context)
 
+        if exec_type == "global_contract":
+            return self._execute_global_contract(tool_def, arguments, context)
+
         if exec_type == "dynamic":
             return self._execute_dynamic(tool_def, arguments, context)
 
@@ -331,6 +334,129 @@ class ToolExecutor:
         if approval_error is not None:
             return approval_error
         return self._execute_capability_request(tool_def, request, approved_context)
+
+    def _execute_global_contract(self, tool_def, arguments, context):
+        """Invoke one selected global service without importing its provider."""
+
+        from core_runtime.di_container import get_container
+        from core_runtime.global_contract_dispatch import (
+            GlobalContractInvocationError,
+            GlobalContractUnavailable,
+            invoke_global_contract,
+            invoke_selected_global_provider,
+        )
+        from core_runtime.resolved_profile_scope import persisted_resolved_profile
+
+        execution = (
+            tool_def.get("execution", {})
+            if isinstance(tool_def, dict)
+            else {}
+        )
+        contract_id = str(execution.get("contract_id") or "").strip()
+        operation = str(execution.get("operation") or "").strip()
+        provider_instance_id = str(
+            execution.get("provider_instance_id") or ""
+        ).strip()
+        if not contract_id or not operation:
+            return {
+                "result": "Global contract execution descriptor is incomplete",
+                "is_error": True,
+                "widget": None,
+            }
+        requirements = tool_def.get("capability_requirements")
+        requirements = (
+            requirements if isinstance(requirements, dict) else {}
+        )
+        declared_connections = {
+            str(item)
+            for item in requirements.get("connections") or []
+            if str(item).strip()
+        }
+        if contract_id not in declared_connections:
+            return {
+                "result": "Global contract was not declared by the Tool",
+                "is_error": True,
+                "widget": None,
+            }
+        registry = (
+            context.get("interface_registry")
+            if isinstance(context, dict)
+            else None
+        ) or get_container().get_or_none("interface_registry")
+        plan = persisted_resolved_profile()
+        if registry is None or plan is None:
+            return {
+                "result": "Global contract runtime is unavailable",
+                "is_error": True,
+                "widget": None,
+            }
+        requested_profile = str(arguments.get("profile_id") or "").strip()
+        if requested_profile and requested_profile != plan.profile_id:
+            return {
+                "result": "Tool requested an inactive profile",
+                "is_error": True,
+                "widget": None,
+            }
+        source_pack_id = str(
+            tool_def.get("source_pack_id")
+            or (
+                tool_def.get("metadata", {}).get("source_pack_id")
+                if isinstance(tool_def.get("metadata"), dict)
+                else ""
+            )
+            or ""
+        ).strip()
+        payload = {
+            **dict(arguments or {}),
+            "profile_id": plan.profile_id,
+            "_contract_consumer_pack_id": source_pack_id,
+            "_contract_consumer_function_id": str(
+                tool_def.get("tool_id") or tool_def.get("name") or ""
+            ),
+        }
+        if isinstance(context, dict):
+            capability_plan = context.get("capability_plan")
+            if isinstance(capability_plan, dict):
+                payload["capability_plan"] = dict(capability_plan)
+            payload["registry_revision"] = str(
+                context.get("registry_revision")
+                or context.get("catalog_revision")
+                or getattr(plan, "catalog_revision", "")
+                or getattr(plan, "registry_revision", "")
+                or ""
+            )
+            payload["topology_revision"] = str(
+                context.get("topology_revision") or ""
+            )
+        try:
+            if provider_instance_id:
+                value = invoke_selected_global_provider(
+                    registry,
+                    contract_id,
+                    provider_instance_id,
+                    operation,
+                    payload,
+                )
+            else:
+                value = invoke_global_contract(
+                    registry,
+                    contract_id,
+                    operation,
+                    payload,
+                )
+        except (GlobalContractInvocationError, GlobalContractUnavailable) as exc:
+            return {
+                "result": str(exc),
+                "is_error": True,
+                "widget": None,
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "result": "Global contract request failed: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+        return {"result": value, "is_error": False, "widget": None}
 
     def _execute_capability_request(self, tool_def, request, context):
         principal_id = self._principal_id(tool_def, context)

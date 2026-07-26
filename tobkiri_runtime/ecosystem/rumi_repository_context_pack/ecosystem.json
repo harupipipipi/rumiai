@@ -1,0 +1,61 @@
+{
+  "pack_id": "rumi_repository_context_pack",
+  "pack_identity": "rumi:ecosystem/rumi_repository_context_pack",
+  "display_name": "Tobkiri Repository Context Pack",
+  "version": "1.0.0",
+  "description": "Low-cost repository evidence selection through a typed Subagent Placement.",
+  "dependencies": {
+    "rumi_subagent_placement_pack": ">=1.0.0,<2.0.0",
+    "rumi_file_inspect_pack": ">=1.0.0,<2.0.0",
+    "rumi_ai_gateway_pack": ">=1.0.0,<2.0.0"
+  },
+  "connectivity": {
+    "requires": [
+      "rumi.service.subagent.placement.compile.v1",
+      "rumi.service.file.inspect.v1",
+      "rumi.service.ai.generate.v1"
+    ],
+    "provides": [
+      "rumi.resource.subagent.catalog.v1",
+      "rumi.resource.subagent.placement.v1",
+      "rumi.service.subagent.runtime.v1",
+      "rumi.service.repository.context.prepare.v1"
+    ]
+  },
+  "required_secrets": [],
+  "required_capabilities": [
+    "subagent.catalog.read",
+    "subagent.placement.read",
+    "subagent.placement.compile",
+    "repository.context.prepare",
+    "file.inspect",
+    "ai.gateway.generate"
+  ],
+  "required_network": {"allowed_domains": [], "allowed_ports": []},
+  "host_execution": true,
+  "resources": [
+    "subagents/repository-context-subagent.json",
+    "placements/repository-context.placement.json",
+    "prompts/repository-context.system.md",
+    "extensions/activities/repository_context/manifest.json",
+    "extensions/tools/repository_context_prepare/manifest.json",
+    "extensions/skills/repository_context_preparation/manifest.json",
+    "extensions/skills/repository_context_preparation/SKILL.md"
+  ],
+  "provenance": {
+    "content_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25",
+    "build_identity": "rumi-repository-context-pack:1.0.0",
+    "trust_class": "local",
+    "signature": null
+  },
+  "metadata": {
+    "authoritative_owner": false,
+    "owner_surfaces": ["repository_context_preparation"],
+    "security": {
+      "workspace_read_only": true,
+      "secret_like_paths": "deny",
+      "secret_like_content": "deny",
+      "model_cost_tiers": ["free", "low"]
+    }
+  }
+}
