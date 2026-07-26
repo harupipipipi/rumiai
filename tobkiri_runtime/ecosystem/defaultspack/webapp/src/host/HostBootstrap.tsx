@@ -30,32 +30,39 @@ async function fetchDynamicCatalog(): Promise<FrontendCatalog> {
   return catalog;
 }
 
-async function invokeCapability(
+export async function invokeFrontendCapability(
   profileId: string,
   request: CapabilityInvocation,
 ): Promise<unknown> {
-  const response = await defaultspackApiFetch("/api/ui/capability/invoke", {
-    method: "POST",
-    cache: "no-store",
-    body: JSON.stringify({
-      request_id: crypto.randomUUID(),
-      expires_at: Date.now() / 1000 + 30,
-      profile_id: profileId,
-      plan_hash: request.planHash,
-      contribution_id: request.contributionId,
-      owner_pack_id: request.ownerPackId,
-      contract_id: request.contractId,
-      payload: request.payload,
-    }),
-  });
-  const envelope = await response.json() as ApiEnvelope<unknown>;
-  if (!response.ok || envelope.status !== "ok") {
-    const message = typeof envelope.error === "string"
-      ? envelope.error
-      : envelope.error?.message;
-    throw new Error(message || "capability_unavailable");
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await defaultspackApiFetch("/api/ui/capability/invoke", {
+      method: "POST",
+      cache: "no-store",
+      signal: controller.signal,
+      body: JSON.stringify({
+        request_id: crypto.randomUUID(),
+        expires_at: Date.now() / 1000 + 30,
+        profile_id: profileId,
+        plan_hash: request.planHash,
+        contribution_id: request.contributionId,
+        owner_pack_id: request.ownerPackId,
+        contract_id: request.contractId,
+        payload: request.payload,
+      }),
+    });
+    const envelope = await response.json() as ApiEnvelope<unknown>;
+    if (!response.ok || envelope.status !== "ok") {
+      const message = typeof envelope.error === "string"
+        ? envelope.error
+        : envelope.error?.message;
+      throw new Error(message || "capability_unavailable");
+    }
+    return envelope.data;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return envelope.data;
 }
 
 export function HostBootstrap({
@@ -86,8 +93,8 @@ export function HostBootstrap({
   const capabilities = useMemo<FrontendCapabilityClient | null>(() => {
     if (!catalog) return null;
     return {
-      invokeAction: (request) => invokeCapability(catalog.profile_id, request),
-      readDataSource: (request) => invokeCapability(catalog.profile_id, request),
+      invokeAction: (request) => invokeFrontendCapability(catalog.profile_id, request),
+      readDataSource: (request) => invokeFrontendCapability(catalog.profile_id, request),
     };
   }, [catalog]);
 

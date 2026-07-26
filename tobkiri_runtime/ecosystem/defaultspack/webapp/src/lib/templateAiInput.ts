@@ -12,6 +12,10 @@ import {
   mergeTemplateToolPolicies as mergeTemplateToolPoliciesCore,
   templateToolPolicySettings as templateToolPolicySettingsCore,
 } from "./templateToolPolicyMerge";
+import {
+  registeredComposerWidgetMetadata,
+  registeredWidgetKindIsResolvable,
+} from "./registeredComposerWidgets";
 
 export type { TemplateToolPolicySettings } from "./templateToolPolicyMerge";
 
@@ -321,7 +325,38 @@ export function templateComposerWidgetsForInput(
     .map<DroppedWidget | null>((item) => {
       const payload = templateWidgetPayload(item);
       const kind = nonEmptyString(payload.widgetKind) || nonEmptyString(payload.widget_kind) || nonEmptyString(item.widgetKind) || nonEmptyString(item.widget_kind);
-      if (kind && kind !== "tool_toggle") return null;
+      if (kind && kind !== "tool_toggle") {
+        if (
+          !["button", "panel", "selector"].includes(kind)
+          || !registeredWidgetKindIsResolvable(kind, payload, catalog)
+        ) {
+          return null;
+        }
+        const registeredMetadata = registeredComposerWidgetMetadata(payload);
+        if (!registeredMetadata) return null;
+        return {
+          id: nonEmptyString(payload.id) || item.id || `${kind}-widget`,
+          type: kind,
+          label: nonEmptyString(payload.label) || nonEmptyString(item.label) || item.id || kind,
+          description: nonEmptyString(payload.description) || nonEmptyString(item.description) || undefined,
+          enabled: payload.enabled !== false,
+          widgetKind: kind,
+          sourceItemId: (
+            nonEmptyString(payload.panel_id)
+            || nonEmptyString(payload.action_id)
+            || nonEmptyString(payload.data_source)
+            || item.id
+          ),
+          icon: nonEmptyString(payload.icon) || undefined,
+          metadata: {
+            source: "template_catalog_widget",
+            template_id: item.template_id ?? null,
+            piece_id: item.piece_id ?? null,
+            widget_id: item.id ?? null,
+            ...registeredMetadata,
+          },
+        };
+      }
       const toolId = (
         nonEmptyString(payload.tool_id)
         || nonEmptyString(payload.sourceItemId)
