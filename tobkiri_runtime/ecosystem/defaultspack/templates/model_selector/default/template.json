@@ -68,6 +68,15 @@
             "fields": []
         },
         {
+            "id": "deepthink_settings_section",
+            "kind": "settings_section",
+            "order": 21,
+            "section_id": "deepthink",
+            "label": "DeepThink",
+            "description": "Configure the explicit DeepThink mode. Turn it on or off with /deepthink.",
+            "fields": []
+        },
+        {
             "id": "model_select",
             "kind": "settings_field",
             "slot": "models",
@@ -260,22 +269,74 @@
             "help": "Rumi \u306f none/low/medium/high/xhigh \u3092\u9001\u308a\u3001\u5404 provider \u304c\u5bfe\u5fdc\u3059\u308b API \u30d1\u30e9\u30e1\u30fc\u30bf\u3078\u5909\u63db\u3057\u307e\u3059\u3002"
         },
         {
-            "id": "deepthink",
+            "id": "deepthink_model_source",
             "kind": "settings_field",
-            "slot": "models",
-            "order": 32,
-            "section_id": "models",
-            "field_id": "deepthink_enabled",
+            "slot": "deepthink",
+            "order": 22,
+            "section_id": "deepthink",
+            "field_id": "model_source",
+            "type": "select",
+            "label": "DeepThink Model Source",
+            "default": "conversation",
+            "options": [
+                {
+                    "value": "conversation",
+                    "label": "Conversation model"
+                },
+                {
+                    "value": "selected",
+                    "label": "Model selected below"
+                }
+            ],
+            "help": "\u4f1a\u8a71\u3067\u4f7f\u7528\u4e2d\u306e\u30e2\u30c7\u30eb\u3092\u4f7f\u3046\u304b\u3001DeepThink\u5c02\u7528\u306bSettings\u3067\u9078\u3093\u3060\u30e2\u30c7\u30eb\u3092\u4f7f\u3046\u304b\u3092\u6307\u5b9a\u3057\u307e\u3059\u3002"
+        },
+        {
+            "id": "deepthink_model",
+            "kind": "settings_field",
+            "slot": "deepthink",
+            "order": 23,
+            "section_id": "deepthink",
+            "field_id": "model",
+            "type": "model_select",
+            "renderer": "model_select",
+            "component": "SettingsFieldRendererHost",
+            "label": "DeepThink Model",
+            "default": "",
+            "visible_when": {
+                "field": "model_source",
+                "equals": "selected"
+            },
+            "help": "DeepThink\u3067\u4f7f\u3046\u30e2\u30c7\u30eb\u3092\u30e2\u30c7\u30eb\u30ab\u30bf\u30ed\u30b0\u304b\u3089\u9078\u629e\u3057\u307e\u3059\u3002provider\u306e\u56fa\u5b9a\u306f\u3042\u308a\u307e\u305b\u3093\u3002"
+        },
+        {
+            "id": "deepthink_allow_delegated_agents",
+            "kind": "settings_field",
+            "slot": "deepthink",
+            "order": 24,
+            "section_id": "deepthink",
+            "field_id": "allow_delegated_agents",
             "type": "toggle",
-            "label": "DeepThink",
+            "label": "Allow DeepThink for delegated agents",
             "default": false,
-            "help": "thinker\u578b\u306eDeepThink loop\u3092\u6709\u52b9\u306b\u3057\u307e\u3059\u3002\u30bf\u30b9\u30af\u306b\u306f\u6570\u6642\u9593\u304b\u304b\u308b\u53ef\u80fd\u6027\u304c\u3042\u308a\u307e\u3059\u3002"
+            "help": "Delegation\u304cDeepThink\u3092\u660e\u793a\u7684\u306b\u8981\u6c42\u3057\u305f\u5834\u5408\u306b\u9650\u308a\u8a31\u53ef\u3057\u307e\u3059\u3002\u89aa\u30bf\u30b9\u30af\u306eDeepThink\u72b6\u614b\u306f\u81ea\u52d5\u7d99\u627f\u3057\u307e\u305b\u3093\u3002"
+        },
+        {
+            "id": "deepthink_allow_background_continuations",
+            "kind": "settings_field",
+            "slot": "deepthink",
+            "order": 25,
+            "section_id": "deepthink",
+            "field_id": "allow_background_continuations",
+            "type": "toggle",
+            "label": "Allow DeepThink for background continuations",
+            "default": false,
+            "help": "CI\u5b8c\u4e86\u5f8c\u3084monitor\u30fbautomation\u306e\u7d99\u7d9a\u3067DeepThink\u3092\u518d\u5b9f\u884c\u3059\u308b\u3053\u3068\u3092\u8a31\u53ef\u3057\u307e\u3059\u3002\u901a\u5e38\u306fOFF\u3092\u63a8\u5968\u3057\u307e\u3059\u3002"
         },
         {
             "id": "favorite_profiles",
             "kind": "settings_field",
             "slot": "models",
-            "order": 33,
+            "order": 35,
             "section_id": "models",
             "type": "textarea",
             "label": "Composer Model Pins",

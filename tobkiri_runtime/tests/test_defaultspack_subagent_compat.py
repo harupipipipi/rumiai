@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from blocks.agent.run_subagent import run as run_subagent_block  # noqa: E402
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 from domain.chat.store import ChatStore  # noqa: E402
 from domain.chat.subagent_durability import (  # noqa: E402
     SUBAGENT_DURABLE_DRAFT_FLAG,
@@ -31,6 +32,10 @@ def _configure_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
+        str(tmp_path / "settings" / "frontend_settings.json"),
+    )
     ChatStore._instance = None
 
 
@@ -841,12 +846,90 @@ def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_pat
     assert seen["input"].startswith("Use the connected tools directly.")
     assert seen["tools"] == ["todo", "coding_file_search"]
     assert seen["params"]["tool_policy"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["params"]["deepthink_enabled"] is False
+    assert result["deepthink"]["reason"] == "not_requested"
     assert seen["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
     child = ChatStore().get_conversation(result["child_conversation_id"])
     assert child["system_prompt_id"] == "mimo_coding_company"
     assert child["group_id"] == "company:mimo-coding-company"
     assert child["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
     assert child["metadata"]["company_id"] == "mimo-coding-company"
+
+
+def test_delegation_deepthink_is_explicit_and_settings_gated(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    seen: dict[str, object] = {}
+    parent = {
+        "id": "parent-1",
+        "model": "stub/default",
+        "metadata": {},
+        "tags": [],
+        "group_id": None,
+        "system_prompt_id": None,
+    }
+
+    class FakeChatStore:
+        def __init__(self):
+            self.child = {
+                "id": "child-1",
+                "model": "stub/default",
+                "metadata": {},
+            }
+
+        def get_conversation(self, conversation_id):
+            return parent if conversation_id == parent["id"] else self.child
+
+        def create_conversation(self, **kwargs):
+            self.child = {
+                **self.child,
+                **kwargs,
+                "id": "child-1",
+                "metadata": dict(kwargs.get("metadata") or {}),
+            }
+            return dict(self.child)
+
+        def conversation_workspace_dir(self, conversation_id):
+            return tmp_path / "workspaces" / conversation_id
+
+        def update_conversation(self, conversation_id, patch):
+            self.child.update(patch)
+            return dict(self.child)
+
+    fake_store = FakeChatStore()
+
+    def fake_dispatch(envelope, context):
+        seen["params"] = envelope.params
+        return {"status": "ok", "assistant_text": "done"}
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.ChatStore",
+        lambda: fake_store,
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.ensure_subagent_child_has_assistant_response",
+        lambda *args, **kwargs: None,
+    )
+    denied = SubagentController().run(
+        {"task": "delegate", "deepthink": True},
+        {"conversation_id": "parent-1"},
+    )
+    assert seen["params"]["deepthink_enabled"] is False
+    assert denied["deepthink"]["reason"] == "delegated_deepthink_not_allowed"
+
+    ModelRuntimeSettingsService().update_deepthink_configuration(
+        {"allow_delegated_agents": True}
+    )
+    allowed = SubagentController().run(
+        {"task": "delegate again", "deepthink": True},
+        {"conversation_id": "parent-1"},
+    )
+    assert seen["params"]["deepthink_enabled"] is True
+    assert seen["params"]["deepthink_activation_source"] == "delegation"
+    assert allowed["deepthink"]["enabled"] is True
 
 
 def test_non_stream_subagent_child_creates_durable_assistant_draft_before_model(monkeypatch, tmp_path):

@@ -16,6 +16,7 @@ import {
   sanitizeAssistantAuthorityBoilerplate,
 } from "../lib/authorityApproval";
 import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
+import { ConversationActivityPresentation } from "../features/chat/presentation/ConversationActivityPresentation";
 import { classifyChatLink, openChatLink } from "../lib/chatLinkPolicy";
 import { classifyUntrustedImageUrl, extractImageBlockUrl, imageBlockAttachmentId } from "../lib/untrustedImagePolicy";
 import { safeUnknownBlockDetails } from "../lib/chatBlockPresentation";
@@ -1753,6 +1754,9 @@ export function ChatMessagesRenderer({
                   )}
 
                   <div className={cn("flex min-w-0 max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
+                    {message.role === "agent" && (
+                      <ConversationActivityPresentation events={message.events} />
+                    )}
                     {toolActivity && (
                       <ToolActivityPanel
                         items={toolActivity.items}

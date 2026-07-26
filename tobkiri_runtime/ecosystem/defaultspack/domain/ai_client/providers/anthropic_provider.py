@@ -11,6 +11,8 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from ..base_provider import BaseProvider
+from ..provider_endpoint import normalize_provider_base_url, provider_endpoint_url
+from ..provider_error import ProviderError
 
 
 class AnthropicProvider(BaseProvider):
@@ -25,6 +27,10 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(self):
         self._api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        self._base_url = normalize_provider_base_url(
+            os.environ.get("ANTHROPIC_BASE_URL", self.BASE_URL)
+        )
+        self.BASE_URL = self._base_url
         self._ssl_ctx = ssl.create_default_context()
 
     def _headers(self):
@@ -42,7 +48,7 @@ class AnthropicProvider(BaseProvider):
         query = {"limit": "1000"}
         if after_id:
             query["after_id"] = after_id
-        url = self.BASE_URL + "/v1/models?" + urllib.parse.urlencode(query)
+        url = provider_endpoint_url(self.BASE_URL, "/v1/models") + "?" + urllib.parse.urlencode(query)
         req = urllib.request.Request(url, headers=self._headers(), method="GET")
         try:
             with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=12) as response:
@@ -147,7 +153,7 @@ class AnthropicProvider(BaseProvider):
         return models
 
     def _request_json(self, path, body):
-        url = self.BASE_URL + path
+        url = provider_endpoint_url(self.BASE_URL, path)
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
@@ -155,16 +161,23 @@ class AnthropicProvider(BaseProvider):
                 raw_bytes = resp.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError("Anthropic API error {}: {}".format(exc.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_name", "anthropic") or "anthropic",
+                exc,
+                err_body,
+            ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError("Anthropic API connection error: {}".format(exc.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_name", "anthropic") or "anthropic",
+                exc.reason,
+            ) from exc
         try:
             return json.loads(raw_bytes)
         except (json.JSONDecodeError, ValueError):
             raise RuntimeError("Anthropic API returned invalid JSON: {}".format(raw_bytes[:500]))
 
     def _request_stream(self, path, body):
-        url = self.BASE_URL + path
+        url = provider_endpoint_url(self.BASE_URL, path)
         body["stream"] = True
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
@@ -172,9 +185,16 @@ class AnthropicProvider(BaseProvider):
             resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError("Anthropic API error {}: {}".format(exc.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_name", "anthropic") or "anthropic",
+                exc,
+                err_body,
+            ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError("Anthropic API connection error: {}".format(exc.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_name", "anthropic") or "anthropic",
+                exc.reason,
+            ) from exc
         return resp
 
     @staticmethod
@@ -512,6 +532,14 @@ class AnthropicProvider(BaseProvider):
                         yield {
                             "type": "content_delta",
                             "delta": {"type": "text", "text": delta.get("text", "")},
+                        }
+                    elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                        yield {
+                            "type": "reasoning_delta",
+                            "delta": {
+                                "type": "text",
+                                "text": str(delta.get("thinking") or ""),
+                            },
                         }
                     yield from self._anthropic_stream_tool_call_events(
                         event_type, obj, tool_call_state

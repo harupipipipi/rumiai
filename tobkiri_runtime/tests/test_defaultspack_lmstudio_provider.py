@@ -177,10 +177,12 @@ def test_lmstudio_explicit_load_and_unload_use_native_endpoints_only():
     ]
 
 
-def test_lmstudio_component_owns_runtime_discovery_and_has_no_placeholder():
+def test_lmstudio_catalog_descriptor_owns_runtime_discovery_and_has_no_placeholder():
     component_manifest_path = (
-        DEFAULTSPACK_ROOT
-        / "domain"
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "catalog"
         / "providers"
         / "lmstudio"
         / "manifest.json"

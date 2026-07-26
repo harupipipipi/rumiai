@@ -11,6 +11,7 @@ from domain.ai_client.api_key_store import (
     provider_named_api_keys,
     read_provider_api_key,
 )
+from domain.ai_client.deepthink_preflight import deepthink_preflight
 from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
 from domain.ai_client.model_pack_store import normalize_model_packs
 from domain.ai_client.model_roles import (
@@ -36,6 +37,9 @@ LEGACY_CLOUD_DEFAULT_MODELS = {
 }
 DEFAULT_THINKING_LEVEL = "medium"
 DEFAULT_DEEPTHINK_ENABLED = False
+DEFAULT_DEEPTHINK_MODEL_SOURCE = "conversation"
+DEFAULT_DEEPTHINK_ALLOW_DELEGATION = False
+DEFAULT_DEEPTHINK_ALLOW_BACKGROUND = False
 DEEPTHINK_STATE_REF = "defaultspack:models.deepthink_enabled"
 CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
 MODEL_SLOT_MAIN = "main"
@@ -222,11 +226,102 @@ class ModelRuntimeSettingsService:
 
     def get_deepthink_enabled(self) -> dict[str, Any]:
         settings = self.get_settings()
+        configuration = self.get_deepthink_configuration()
         return {
             "enabled": bool(settings.get("deepthink_enabled", DEFAULT_DEEPTHINK_ENABLED)),
+            "model_source": configuration["model_source"],
+            "selected_model": configuration["model"],
+            "allow_delegated_agents": configuration["allow_delegated_agents"],
+            "allow_background_continuations": configuration[
+                "allow_background_continuations"
+            ],
             "state_ref": DEEPTHINK_STATE_REF,
             "revision": self._settings_store.state_revision(DEEPTHINK_STATE_REF),
             "warning": "DeepThinkが有効なタスクには数時間かかる可能性があります。",
+        }
+
+    def get_deepthink_configuration(self) -> dict[str, Any]:
+        """Return configuration separately from the command-owned active state."""
+        all_settings = self._read_all()
+        models = all_settings.get("models")
+        models = models if isinstance(models, dict) else {}
+        raw = all_settings.get("deepthink")
+        raw = raw if isinstance(raw, dict) else {}
+        source = str(
+            raw.get(
+                "model_source",
+                models.get("deepthink_model_source", DEFAULT_DEEPTHINK_MODEL_SOURCE),
+            )
+            or DEFAULT_DEEPTHINK_MODEL_SOURCE
+        ).strip().lower()
+        if source not in {"conversation", "selected"}:
+            source = DEFAULT_DEEPTHINK_MODEL_SOURCE
+        return {
+            "model_source": source,
+            "model": str(
+                raw.get("model", models.get("deepthink_model", "")) or ""
+            ).strip(),
+            "allow_delegated_agents": self._coerce_bool(
+                raw.get("allow_delegated_agents"),
+                default=DEFAULT_DEEPTHINK_ALLOW_DELEGATION,
+            ),
+            "allow_background_continuations": self._coerce_bool(
+                raw.get("allow_background_continuations"),
+                default=DEFAULT_DEEPTHINK_ALLOW_BACKGROUND,
+            ),
+        }
+
+    def update_deepthink_configuration(
+        self, patch: dict[str, Any]
+    ) -> dict[str, Any]:
+        allowed_keys = {
+            "model_source",
+            "model",
+            "allow_delegated_agents",
+            "allow_background_continuations",
+        }
+        cleaned = {
+            key: value for key, value in dict(patch or {}).items()
+            if key in allowed_keys
+        }
+
+        def merge(all_settings: dict[str, Any]) -> dict[str, Any]:
+            current = all_settings.get("deepthink")
+            current = current if isinstance(current, dict) else {}
+            all_settings["deepthink"] = self._deep_merge(current, cleaned)
+            return all_settings
+
+        self._settings_store.update(merge)
+        return self.get_deepthink_configuration()
+
+    def authorize_delegated_deepthink(
+        self,
+        params: dict[str, Any] | None,
+        *,
+        requested: bool,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Apply the fail-closed DeepThink policy for a delegated agent."""
+        updated = dict(params or {})
+        allowed = bool(
+            self.get_deepthink_configuration()["allow_delegated_agents"]
+        )
+        enabled = bool(requested and allowed)
+        updated["deepthink_enabled"] = enabled
+        if enabled:
+            updated["deepthink_activation_source"] = "delegation"
+        else:
+            updated.pop("deepthink_activation_source", None)
+        return updated, {
+            "requested": bool(requested),
+            "allowed": allowed,
+            "enabled": enabled,
+            "reason": (
+                "enabled"
+                if enabled
+                else "not_requested"
+                if not requested
+                else "delegated_deepthink_not_allowed"
+            ),
         }
 
     def set_deepthink_enabled(
@@ -237,6 +332,27 @@ class ModelRuntimeSettingsService:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         requested = enabled if isinstance(enabled, bool) else None
+        if requested is None:
+            current_enabled = bool(
+                self.get_settings().get(
+                    "deepthink_enabled",
+                    DEFAULT_DEEPTHINK_ENABLED,
+                )
+            )
+            next_requested = not current_enabled
+        else:
+            next_requested = requested
+        configuration = self.get_deepthink_configuration()
+        preflight = (
+            deepthink_preflight(
+                model=str(configuration["model"]),
+                model_source=str(configuration["model_source"]),
+            )
+            if next_requested
+            else {"ready": True, "checks": {}, "failures": []}
+        )
+        if not preflight["ready"]:
+            raise RuntimeError(preflight["message"])
 
         def mutate(all_settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             current_models = all_settings.get("models", {})
@@ -278,12 +394,13 @@ class ModelRuntimeSettingsService:
         )
         next_enabled = bool(updated.get("enabled"))
         message = (
-            "DeepThinkをONにしました。タスクには数時間かかる可能性があります。"
+            "/deepthinkでDeepThinkモードをONにしました。タスクには数時間かかる可能性があります。"
             if next_enabled
-            else "DeepThinkをOFFにしました。"
+            else "/deepthinkでDeepThinkモードをOFFにしました。"
         )
         updated["message"] = message
         updated["warning"] = "タスクには数時間かかる可能性があります。" if next_enabled else ""
+        updated["preflight"] = preflight
         updated["state_snapshot"] = {
             "state_ref": DEEPTHINK_STATE_REF,
             "value": next_enabled,
@@ -419,6 +536,8 @@ class ModelRuntimeSettingsService:
             "on_switch_to_non_vision_with_images": "auto_bridge",
             "thinking_level": DEFAULT_THINKING_LEVEL,
             "deepthink_enabled": DEFAULT_DEEPTHINK_ENABLED,
+            "deepthink_model_source": DEFAULT_DEEPTHINK_MODEL_SOURCE,
+            "deepthink_model": "",
             "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
@@ -579,6 +698,19 @@ class ModelRuntimeSettingsService:
                 sanitized.get("deepthink_enabled"),
                 default=DEFAULT_DEEPTHINK_ENABLED,
             )
+        if "deepthink_model_source" in sanitized:
+            source = str(
+                sanitized.get("deepthink_model_source")
+                or DEFAULT_DEEPTHINK_MODEL_SOURCE
+            ).strip().lower()
+            sanitized["deepthink_model_source"] = (
+                source if source in {"conversation", "selected"}
+                else DEFAULT_DEEPTHINK_MODEL_SOURCE
+            )
+        if "deepthink_model" in sanitized:
+            sanitized["deepthink_model"] = str(
+                sanitized.get("deepthink_model") or ""
+            ).strip()
         if "on_switch_to_non_vision_with_images" in sanitized:
             policy = str(sanitized.get("on_switch_to_non_vision_with_images") or "auto_bridge").strip()
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
@@ -628,6 +760,17 @@ class ModelRuntimeSettingsService:
             models.get("deepthink_enabled"),
             default=DEFAULT_DEEPTHINK_ENABLED,
         )
+        source = str(
+            models.get("deepthink_model_source")
+            or DEFAULT_DEEPTHINK_MODEL_SOURCE
+        ).strip().lower()
+        models["deepthink_model_source"] = (
+            source if source in {"conversation", "selected"}
+            else DEFAULT_DEEPTHINK_MODEL_SOURCE
+        )
+        models["deepthink_model"] = str(
+            models.get("deepthink_model") or ""
+        ).strip()
         models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))

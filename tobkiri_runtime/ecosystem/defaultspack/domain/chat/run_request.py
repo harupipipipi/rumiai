@@ -27,6 +27,7 @@ from domain.ai_client.request_planner import plan_model_request
 from domain.capability.models import stable_revision
 from domain.capability.orchestrator import CapabilityOrchestrator
 from domain.capability.repository import CapabilityRepository
+from domain.ai_client.rumi_process import RUMI_MODEL_PACK_REF
 from domain.chat.ir import RumiChatIR
 from domain.chat.ir_blocks import IR_SCHEMA_VERSION
 from domain.chat.ir_legacy_adapter import (
@@ -35,7 +36,10 @@ from domain.chat.ir_legacy_adapter import (
     stored_messages_to_ir,
 )
 from domain.chat.modality_detector import detect_modalities
-from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
+from domain.chat.progress_tool import (
+    assistant_progress_system_instruction,
+    with_assistant_progress_tool,
+)
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
 from domain.chat.tool_selection_schema import (
@@ -131,6 +135,21 @@ _CODING_PR_TOOL_IDS = [
 ]
 
 
+def _route_deepthink_model(model: str, params: dict[str, Any]) -> str:
+    if not params.get("deepthink_enabled"):
+        return model
+    model_source = str(
+        params.get("deepthink_model_source") or "conversation"
+    ).strip().lower()
+    selected_model = str(params.get("deepthink_model") or "").strip()
+    params["rumi_base_model_override"] = (
+        selected_model
+        if model_source == "selected" and selected_model
+        else model
+    )
+    return RUMI_MODEL_PACK_REF
+
+
 def _is_provider_qualified_model(value: Any) -> bool:
     text = str(value or "").strip()
     return bool(text and "/" in text and not text.startswith("modelpack/"))
@@ -150,9 +169,8 @@ def _apply_provider_surface_defaults(
     updated = dict(provider_capabilities)
     if api_surface.get("supports_tool_call_shape") and not updated.get("supports_tool_calling"):
         updated["supports_tool_calling"] = True
-    if (
-        api_surface.get("supports_parallel_tool_call_shape")
-        and not updated.get("supports_parallel_tool_calls")
+    if api_surface.get("supports_parallel_tool_call_shape") and not updated.get(
+        "supports_parallel_tool_calls"
     ):
         updated["supports_parallel_tool_calls"] = True
     return updated
@@ -179,12 +197,11 @@ def _runtime_model_capabilities(
     return runtime_caps
 
 
-_AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
-    {"model.invoke", "api_key.use", "network.egress"}
-)
+_AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset({"model.invoke", "api_key.use", "network.egress"})
 _TOOL_SELECTION_MODES = {"auto", "manual", "none"}
 _TOOL_SELECTION_SCOPES = {"turn"}
 _TOOL_DISCOVERY_FALLBACK_IDS = {"tool_names", "tool_search"}
+
 
 @dataclass
 class NormalizedToolSelection:
@@ -262,6 +279,64 @@ def _resolve_template_tool_policy(
     return resolver_module.resolve_template_tool_policy(request_policy, metadata=metadata)
 
 
+def _is_background_deepthink_trigger(
+    metadata: dict[str, Any] | None,
+    context: dict[str, Any] | None,
+) -> bool:
+    """Identify machine-generated continuation turns that should not restart DeepThink."""
+
+    trigger_source = (
+        str((metadata or {}).get("source") or (context or {}).get("source") or "").strip().lower()
+    )
+    return trigger_source in {
+        "scheduler",
+        "scheduler_approval_followup",
+        "automation",
+        "monitor",
+        "background",
+        "background_followup",
+    } or trigger_source.endswith("_followup")
+
+
+def _with_default_discussion_selection(
+    selection: NormalizedToolSelection,
+    *,
+    available: bool,
+) -> NormalizedToolSelection:
+    """Keep Discussion on by default while respecting explicit disablement."""
+
+    if not available or selection.mode == "none" or selection.must_use:
+        return selection
+    excluded = {
+        (str(target.kind), str(target.id))
+        for target in selection.exclude
+        if hasattr(target, "kind") and hasattr(target, "id")
+    }
+    if ("tool", "discussion") in excluded:
+        return selection
+    included = {
+        (str(target.kind), str(target.id))
+        for target in selection.include
+        if hasattr(target, "kind") and hasattr(target, "id")
+    }
+    if ("tool", "discussion") in included:
+        return selection
+    discussion_target = normalize_tool_target("discussion")
+    if discussion_target is None:
+        return selection
+    return NormalizedToolSelection(
+        mode=selection.mode,
+        strategy=selection.strategy,
+        include=[*selection.include, discussion_target],
+        exclude=list(selection.exclude),
+        scope=selection.scope,
+        must_use=selection.must_use,
+        review=selection.review,
+        preview_id=selection.preview_id,
+        source=selection.source,
+    )
+
+
 def prepare_chat_run(
     input_data: dict[str, Any], context: dict[str, Any] | None = None
 ) -> PreparedChatRun:
@@ -273,9 +348,13 @@ def prepare_chat_run(
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         raise ValueError("Conversation not found")
-    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    conversation_metadata = (
+        conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    )
     if conversation_metadata.get("shared_read_only") is True:
-        raise ValueError("This imported conversation is read-only. Create a continue copy to send messages.")
+        raise ValueError(
+            "This imported conversation is read-only. Create a continue copy to send messages."
+        )
     active_startup_profile = _load_active_startup_profile()
     conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 
@@ -365,6 +444,7 @@ def prepare_chat_run(
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
     model_settings = model_settings_service.get_settings()
+    deepthink_configuration = model_settings_service.get_deepthink_configuration()
     route_override = _consume_turn_model_route_override(
         store, conversation_id, conversation, metadata
     )
@@ -390,8 +470,29 @@ def prepare_chat_run(
                 conversation_id=conversation_id,
             )["level"]
         )
-    if "deepthink_enabled" not in params:
+    background_deepthink_suppressed = _is_background_deepthink_trigger(
+        metadata,
+        context,
+    ) and not bool(
+        params.get("deepthink_allow_background")
+        or deepthink_configuration["allow_background_continuations"]
+    )
+    if background_deepthink_suppressed:
+        params["deepthink_enabled"] = False
+        params["deepthink_suppressed_reason"] = "background_continuation"
+    elif "deepthink_enabled" not in params:
         params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
+        if params["deepthink_enabled"]:
+            params["deepthink_activation_source"] = "slash_command"
+    params.setdefault(
+        "deepthink_model_source",
+        str(deepthink_configuration["model_source"]),
+    )
+    params.setdefault(
+        "deepthink_model",
+        str(deepthink_configuration["model"]),
+    )
+    model = _route_deepthink_model(model, params)
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
     requested_tool_ids_for_policy = _requested_tool_ids_from_selection(tool_selection)
@@ -452,9 +553,7 @@ def prepare_chat_run(
                 set(ignored_tool_policy_keys)
             )
             if isinstance(metadata, dict):
-                metadata["ignored_client_tool_policy_keys"] = sorted(
-                    set(ignored_tool_policy_keys)
-                )
+                metadata["ignored_client_tool_policy_keys"] = sorted(set(ignored_tool_policy_keys))
                 store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     frontend_precision = _frontend_precision_metadata(
         user_text=user_text,
@@ -598,8 +697,7 @@ def prepare_chat_run(
         )
     )
     force_preferred_model = bool(requested_model) or (
-        _is_provider_qualified_model(route_preferred_model)
-        and not route_preferred_capabilities
+        _is_provider_qualified_model(route_preferred_model) and not route_preferred_capabilities
     )
     if force_preferred_model:
         model = route_preferred_model
@@ -691,9 +789,7 @@ def prepare_chat_run(
     filter_entries = list(eligibility_result.get("entries") or [])
     if isinstance(tool_context.get("unselected_requested_tools"), list):
         filter_entries.extend(
-            entry
-            for entry in tool_context["unselected_requested_tools"]
-            if isinstance(entry, dict)
+            entry for entry in tool_context["unselected_requested_tools"] if isinstance(entry, dict)
         )
     compact_filter_entries = compact_tool_filter_entries(filter_entries)
     tool_context["tool_filter_result"] = filter_entries
@@ -793,7 +889,10 @@ def prepare_chat_run(
         try:
             from core_runtime.ai_input_token_estimator import estimate_tokens
             from core_runtime.ai_input_trace_store import AiInputTraceStore
-            from domain.prompt.usage import append_runtime_prompt_segment, compact_prompt_usage_for_metadata
+            from domain.prompt.usage import (
+                append_runtime_prompt_segment,
+                compact_prompt_usage_for_metadata,
+            )
 
             skill_segment = {
                 "id": "skill:runtime.matched_instructions",
@@ -817,19 +916,38 @@ def prepare_chat_run(
             request_context["prompt_usage"] = compact_prompt_usage_for_metadata(
                 append_runtime_prompt_segment(request_context.get("prompt_usage"), skill_segment)
             )
-            trace_info = request_context.get("ai_input_trace") if isinstance(request_context.get("ai_input_trace"), dict) else {}
+            trace_info = (
+                request_context.get("ai_input_trace")
+                if isinstance(request_context.get("ai_input_trace"), dict)
+                else {}
+            )
             trace_id = str(trace_info.get("trace_id") or "").strip()
-            trace_profile_id = str(trace_info.get("profile_id") or request_context.get("profile_id") or "").strip()
+            trace_profile_id = str(
+                trace_info.get("profile_id") or request_context.get("profile_id") or ""
+            ).strip()
             if trace_id and trace_profile_id:
                 trace_store = AiInputTraceStore()
                 trace = trace_store.get_trace(trace_profile_id, trace_id)
                 if isinstance(trace, dict):
-                    runtime_segments = trace.get("runtime_prompt_segments") if isinstance(trace.get("runtime_prompt_segments"), list) else []
+                    runtime_segments = (
+                        trace.get("runtime_prompt_segments")
+                        if isinstance(trace.get("runtime_prompt_segments"), list)
+                        else []
+                    )
                     runtime_segments.append(skill_segment)
                     trace["runtime_prompt_segments"] = runtime_segments
                     trace_store.save_trace(trace_profile_id, trace)
         except Exception:
             pass
+    forced_deepthink_skill_ids = [
+        str(item.get("id") or "").strip()
+        for item in matched_skills
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+    if forced_deepthink_skill_ids:
+        params["deepthink_selected_skill_ids"] = forced_deepthink_skill_ids
+    if requested_tool_ids_for_policy:
+        params["deepthink_selected_tool_ids"] = sorted(requested_tool_ids_for_policy)
     provider_input_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
     planned_request = plan_model_request(
         provider_input_ir,
@@ -936,7 +1054,9 @@ def _apply_effective_ai_input_to_request_context(
         "gate_decisions": trace.get("gate_decisions", []),
     }
     try:
-        updated["prompt_usage"] = compact_prompt_usage_for_metadata(prompt_usage_from_trace(trace, include_text=False))
+        updated["prompt_usage"] = compact_prompt_usage_for_metadata(
+            prompt_usage_from_trace(trace, include_text=False)
+        )
     except Exception:
         pass
     try:
@@ -1009,7 +1129,11 @@ def _tool_selection_hints_prompt(context: dict[str, Any]) -> str:
     metrics = metadata.get("metrics") if isinstance(metadata.get("metrics"), dict) else {}
     recommendations = metrics.get("recommended_tools")
     if not isinstance(recommendations, list):
-        recommendations = metadata.get("recommendations") if isinstance(metadata.get("recommendations"), list) else []
+        recommendations = (
+            metadata.get("recommendations")
+            if isinstance(metadata.get("recommendations"), list)
+            else []
+        )
     lines = []
     for item in recommendations[:16]:
         if not isinstance(item, dict):
@@ -1024,7 +1148,11 @@ def _tool_selection_hints_prompt(context: dict[str, Any]) -> str:
             suffix += " confidence={}".format(confidence)
         lines.append("- {}{}".format(tool_id, suffix))
     if not lines:
-        order = metrics.get("recommendation_order") if isinstance(metrics.get("recommendation_order"), list) else []
+        order = (
+            metrics.get("recommendation_order")
+            if isinstance(metrics.get("recommendation_order"), list)
+            else []
+        )
         lines = ["- {}".format(str(item)) for item in order[:16] if str(item or "").strip()]
     if not lines:
         return ""
@@ -1037,15 +1165,15 @@ def _tool_selection_hints_prompt(context: dict[str, Any]) -> str:
 
 def _tool_discovery_fallback_prompt(tools: list[dict[str, Any]]) -> str:
     tool_names = {
-        tool_name_from_definition(tool)
-        for tool in tools
-        if tool_name_from_definition(tool)
+        tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)
     }
     if not (_TOOL_DISCOVERY_FALLBACK_IDS & tool_names):
         return ""
     lines = ["Tool discovery fallback:"]
     if "tool_names" in tool_names:
-        lines.append("- To inspect the currently attached/registered tool names, call tool_names with {}.")
+        lines.append(
+            "- To inspect the currently attached/registered tool names, call tool_names with {}."
+        )
     if "tool_search" in tool_names:
         lines.append(
             '- To find tools related to a word or task, call tool_search with {"query":"coding","phase":"overview"}; use phase="schema" or include_schema=true only after choosing a concrete tool.'
@@ -1242,7 +1370,11 @@ def _prepared_user_content(
                 content.extend(audio_placeholders)
             elif audio_placeholders:
                 content.extend(audio_placeholders)
-    return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None, runtime_content
+    return (
+        content if isinstance(content, list) else [{"type": "text", "text": str(content)}],
+        metadata or None,
+        runtime_content,
+    )
 
 
 def _chat_references(
@@ -1434,7 +1566,9 @@ def _client_policy_value_false(value: Any) -> bool:
     return str(value).strip().lower() in {"0", "false", "no", "off"}
 
 
-def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _sanitize_untrusted_chat_tool_policy(
+    policy: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
     sanitized: dict[str, Any] = {}
     ignored: list[str] = []
     for key, value in policy.items():
@@ -1445,13 +1579,20 @@ def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[s
         if lower_key in _CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS:
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value):
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(
+            value
+        ):
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value):
+        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(
+            value
+        ):
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value):
+        if (
+            lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS
+            and _client_policy_value_false(value)
+        ):
             ignored.append(key_text)
             continue
         if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full":
@@ -1547,7 +1688,9 @@ def _profile_policy_tool_ids(policy: dict[str, Any] | None) -> list[str]:
 def _profile_node_allowed_actions(profile: dict[str, Any] | None) -> list[str]:
     if not isinstance(profile, dict):
         return []
-    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    node_settings = (
+        profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    )
     tool_settings = (
         node_settings.get("defaultspack.tool")
         if isinstance(node_settings.get("defaultspack.tool"), dict)
@@ -1572,7 +1715,9 @@ def _profile_client_agent_id(profile: dict[str, Any] | None, fallback: Any = Non
     if not isinstance(profile, dict):
         return fallback_id
     metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
-    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    node_settings = (
+        profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    )
     agent_settings = (
         node_settings.get("defaultspack.agent")
         if isinstance(node_settings.get("defaultspack.agent"), dict)
@@ -1650,7 +1795,9 @@ def _runtime_profile_with_policy_connected_tools(
         return runtime_profile, str(agent_id or "").strip()
 
     policy = base_profile.get("policy") if isinstance(base_profile.get("policy"), dict) else {}
-    policy_tool_ids = _profile_policy_tool_ids(policy) or _profile_node_allowed_actions(base_profile)
+    policy_tool_ids = _profile_policy_tool_ids(policy) or _profile_node_allowed_actions(
+        base_profile
+    )
     resolved_agent_id = _profile_client_agent_id(base_profile, fallback=agent_id)
     current_tool_ids = _runtime_profile_agent_tool_refs(base_profile, resolved_agent_id)
     tool_ids = _merge_profile_tool_ids(
@@ -1664,14 +1811,10 @@ def _runtime_profile_with_policy_connected_tools(
 
     patched = dict(base_profile)
     defaultspack = (
-        dict(patched.get("defaultspack"))
-        if isinstance(patched.get("defaultspack"), dict)
-        else {}
+        dict(patched.get("defaultspack")) if isinstance(patched.get("defaultspack"), dict) else {}
     )
     agents = (
-        dict(defaultspack.get("agents"))
-        if isinstance(defaultspack.get("agents"), dict)
-        else {}
+        dict(defaultspack.get("agents")) if isinstance(defaultspack.get("agents"), dict) else {}
     )
     selected_agent = (
         dict(agents.get(resolved_agent_id))
@@ -1801,7 +1944,9 @@ def _apply_authority_context(
     followup: dict[str, str] = {}
     approval_tokens: dict[str, dict[str, str]] = {}
 
-    def add_authority_followup(raw: Any, *, prefer_primary: bool = True, require_issued: bool = False) -> None:
+    def add_authority_followup(
+        raw: Any, *, prefer_primary: bool = True, require_issued: bool = False
+    ) -> None:
         nonlocal followup
         if not isinstance(raw, dict):
             return
@@ -1811,7 +1956,9 @@ def _apply_authority_context(
         ):
             return
         token = str(raw.get("approval_token") or raw.get("token") or "").strip()
-        authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+        authority_request_id = str(
+            raw.get("request_id") or raw.get("approval_request_id") or ""
+        ).strip()
         if require_issued and not _authority_followup_was_issued(
             raw,
             conversation_id=conversation_id,
@@ -1921,7 +2068,9 @@ def _authority_followup_was_issued(
     principal_id: str,
 ) -> bool:
     permission_id = str(raw.get("permission_id") or "").strip()
-    authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+    authority_request_id = str(
+        raw.get("request_id") or raw.get("approval_request_id") or ""
+    ).strip()
     token = str(raw.get("approval_token") or raw.get("token") or "").strip()
     if not permission_id or not authority_request_id or not token:
         return False
@@ -2142,11 +2291,17 @@ def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
-        if _attachment_audio_transcript(attachment) and not _attachment_include_audio_with_transcript(attachment):
+        if _attachment_audio_transcript(
+            attachment
+        ) and not _attachment_include_audio_with_transcript(attachment):
             continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
-        if not mime.startswith("audio/") or not isinstance(data_url, str) or not data_url.startswith("data:"):
+        if (
+            not mime.startswith("audio/")
+            or not isinstance(data_url, str)
+            or not data_url.startswith("data:")
+        ):
             continue
         size = attachment.get("size")
         if isinstance(size, int) and size > MAX_ATTACHMENT_AUDIO_BYTES:
@@ -2158,7 +2313,9 @@ def _attachment_audio_blocks(attachments: list[dict[str, Any]]) -> list[dict[str
         if not encoded:
             continue
         audio_format = _audio_format_from_mime(header or mime)
-        blocks.append({"type": "input_audio", "input_audio": {"data": encoded, "format": audio_format}})
+        blocks.append(
+            {"type": "input_audio", "input_audio": {"data": encoded, "format": audio_format}}
+        )
     return blocks
 
 
@@ -2172,7 +2329,9 @@ def _attachment_audio_placeholders(attachments: list[dict[str, Any]]) -> list[di
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         if not mime.startswith("audio/"):
             continue
-        name = str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        name = (
+            str(attachment.get("name") or "ambient-recording").strip()[:200] or "ambient-recording"
+        )
         duration_ms = attachment.get("duration_ms") or attachment.get("durationMs")
         suffix = f" ({int(duration_ms)}ms)" if isinstance(duration_ms, (int, float)) else ""
         blocks.append({"type": "text", "text": f"\n\n音声入力: {name}{suffix}"})
@@ -2280,7 +2439,9 @@ def _sanitize_attachment_metadata(attachments: list[dict[str, Any]]) -> list[dic
             item["transcribed"] = True
             item["transcript_length"] = len(_attachment_audio_transcript(attachment))
             source = attachment.get("transcript_source") or attachment.get("transcription_source")
-            metadata = attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+            metadata = (
+                attachment.get("metadata") if isinstance(attachment.get("metadata"), dict) else {}
+            )
             if not source:
                 source = metadata.get("transcript_source") or metadata.get("transcription_source")
             if isinstance(source, str) and source.strip():
@@ -2346,7 +2507,8 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
             exclude=exclude,
             scope=scope,
             must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=False),
-            review=raw_mode == "review" or _coerce_optional_bool(raw_selection.get("review"), default=False),
+            review=raw_mode == "review"
+            or _coerce_optional_bool(raw_selection.get("review"), default=False),
             preview_id=str(raw_selection.get("preview_id") or "").strip() or None,
             source="tool_selection",
         )
@@ -2420,7 +2582,9 @@ def _apply_tool_selection_preview_snapshot(
         scope = "turn"
     return NormalizedToolSelection(
         mode=mode,
-        strategy=_normalize_tool_selection_strategy(raw_selection.get("strategy") or selection.strategy),
+        strategy=_normalize_tool_selection_strategy(
+            raw_selection.get("strategy") or selection.strategy
+        ),
         include=_coerce_tool_items(raw_selection.get("include")),
         exclude=_coerce_tool_items(raw_selection.get("exclude")),
         scope=scope,
@@ -2791,9 +2955,17 @@ def _with_inferred_tools(
 def _with_frontend_precision_tool_selection(input_data: dict[str, Any]) -> dict[str, Any]:
     updated = dict(input_data or {})
     params = dict(updated.get("params") if isinstance(updated.get("params"), dict) else {})
-    selection = dict(params.get("tool_selection") if isinstance(params.get("tool_selection"), dict) else {})
-    include = _merge_tool_items(_coerce_tool_items(selection.get("include")), list(PRECISION_TOOL_NAMES))
-    exclude = [item for item in _coerce_tool_id_list(selection.get("exclude")) if item not in PRECISION_TOOL_NAMES]
+    selection = dict(
+        params.get("tool_selection") if isinstance(params.get("tool_selection"), dict) else {}
+    )
+    include = _merge_tool_items(
+        _coerce_tool_items(selection.get("include")), list(PRECISION_TOOL_NAMES)
+    )
+    exclude = [
+        item
+        for item in _coerce_tool_id_list(selection.get("exclude"))
+        if item not in PRECISION_TOOL_NAMES
+    ]
     selection.update(
         {
             "mode": "auto",
@@ -2817,7 +2989,11 @@ def _frontend_precision_metadata(
     request_context: dict[str, Any],
 ) -> dict[str, Any] | None:
     files = _frontend_precision_file_hints(input_data, metadata, conversation_metadata)
-    explicit = metadata.get("frontend_precision") if isinstance(metadata.get("frontend_precision"), dict) else {}
+    explicit = (
+        metadata.get("frontend_precision")
+        if isinstance(metadata.get("frontend_precision"), dict)
+        else {}
+    )
     command_hint = ""
     if explicit:
         mode = str(explicit.get("mode") or explicit.get("command") or "strict").strip()
@@ -2842,7 +3018,14 @@ def _frontend_precision_file_hints(
     for source in (input_data, metadata, conversation_metadata):
         if not isinstance(source, dict):
             continue
-        for key in ("files", "paths", "target_paths", "targetPaths", "changed_files", "changedFiles"):
+        for key in (
+            "files",
+            "paths",
+            "target_paths",
+            "targetPaths",
+            "changed_files",
+            "changedFiles",
+        ):
             raw = source.get(key)
             if isinstance(raw, list):
                 values.extend(raw)
@@ -2933,11 +3116,7 @@ def _requested_tool_ids_from_selection(selection: NormalizedToolSelection) -> li
 
 
 def _tool_name_set(tools: list[dict[str, Any]]) -> set[str]:
-    return {
-        name
-        for name in (tool_name_from_definition(tool) for tool in tools)
-        if name
-    }
+    return {name for name in (tool_name_from_definition(tool) for tool in tools) if name}
 
 
 def _unselected_requested_tool_entries(
@@ -2960,7 +3139,9 @@ def _unselected_requested_tool_entries(
         elif tool_id not in profile_names:
             reason_code = "not_connected_to_profile"
             reason = "selected tool is not connected to the active runtime profile"
-            suggestions = ["Connect the tool in the active runtime profile or choose a team workspace profile that includes it."]
+            suggestions = [
+                "Connect the tool in the active runtime profile or choose a team workspace profile that includes it."
+            ]
         else:
             reason_code = "not_attached_to_turn"
             reason = "selected tool was eligible in the catalog but was not attached for this turn"
@@ -3015,6 +3196,13 @@ def _available_tools(
     try:
         settings = _read_frontend_settings()
         registry_tools = ToolRegistry().list_tools()
+        selection = _with_default_discussion_selection(
+            selection,
+            available=any(
+                tool_name_from_definition(tool) == "discussion" for tool in registry_tools
+            ),
+        )
+        resolved_context["tool_selection"] = _tool_selection_metadata(selection)
         profile_filtered = filter_tool_definitions_for_runtime_profile(
             registry_tools,
             runtime_profile,
@@ -3035,9 +3223,7 @@ def _available_tools(
         resolved_context["capability_settings_snapshot"] = settings
         selection_trace = decision.to_trace_dict()
         selected_tool_ids = [
-            tool_name_from_definition(tool)
-            for tool in filtered
-            if tool_name_from_definition(tool)
+            tool_name_from_definition(tool) for tool in filtered if tool_name_from_definition(tool)
         ]
         if requested_tool_ids:
             unselected_requested_tools = _unselected_requested_tool_entries(
@@ -3079,7 +3265,9 @@ def _available_tools(
             resolved_context["tool_selection"]["stage"] = "selection_forbidden"
         elif selection.mode == "manual":
             try:
-                filtered, unknown_tools = _resolve_selected_tools(selection.include, user_text=user_text, context=resolved_context)
+                filtered, unknown_tools = _resolve_selected_tools(
+                    selection.include, user_text=user_text, context=resolved_context
+                )
                 if unknown_tools:
                     resolved_context["unknown_selected_tools"] = unknown_tools
             except Exception:
@@ -3127,6 +3315,13 @@ def _available_tools(
                 }
             except Exception:
                 filtered = []
+    filtered = _with_deepthink_discovery_tools(
+        filtered,
+        profile_filtered,
+        input_data,
+        resolved_context,
+        selection_mode=selection.mode,
+    )
     filtered = _merge_tool_definitions(filtered, caller_provider_tools)
     if caller_provider_tool_ids:
         selection_metadata = resolved_context.get("tool_selection")
@@ -3148,7 +3343,11 @@ def _persist_tool_selection_trace(
     trace_mode = str(tool_settings.get("selector_trace") or "summary").strip().lower()
     if trace_mode not in {"none", "summary", "full"}:
         trace_mode = "summary"
-    selection_metadata = resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {}
+    selection_metadata = (
+        resolved_context.get("tool_selection")
+        if isinstance(resolved_context.get("tool_selection"), dict)
+        else {}
+    )
     selection_metadata["trace_mode"] = trace_mode
     _attach_tool_selection_trace_authority(selection_metadata, resolved_context)
     if trace_mode == "none":
@@ -3276,12 +3475,18 @@ def _tool_selection_trace_metadata(
 
 
 def _tool_selection_trace_profile_id(resolved_context: dict[str, Any]) -> str:
-    principal = resolved_context.get("_authenticated_principal") if isinstance(resolved_context, dict) else None
+    principal = (
+        resolved_context.get("_authenticated_principal")
+        if isinstance(resolved_context, dict)
+        else None
+    )
     if isinstance(principal, dict):
         candidate = str(principal.get("profile_id") or "").strip()
         if candidate:
             return candidate
-    subject = resolved_context.get("_authority_subject") if isinstance(resolved_context, dict) else None
+    subject = (
+        resolved_context.get("_authority_subject") if isinstance(resolved_context, dict) else None
+    )
     if isinstance(subject, dict):
         candidate = str(subject.get("profile_id") or "").strip()
         if candidate:
@@ -3301,9 +3506,15 @@ def _tool_selection_selector_model(
     for source in (
         trace,
         decision.to_trace_dict() if hasattr(decision, "to_trace_dict") else {},
-        resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {},
+        resolved_context.get("tool_selection")
+        if isinstance(resolved_context.get("tool_selection"), dict)
+        else {},
     ):
-        metrics = source.get("metrics") if isinstance(source, dict) and isinstance(source.get("metrics"), dict) else {}
+        metrics = (
+            source.get("metrics")
+            if isinstance(source, dict) and isinstance(source.get("metrics"), dict)
+            else {}
+        )
         selector_model = (
             str(metrics.get("selector_model") or source.get("selector_model") or "").strip()
             if isinstance(source, dict)
@@ -3316,7 +3527,11 @@ def _tool_selection_selector_model(
 
 def _read_frontend_settings() -> dict[str, Any]:
     env_path = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
-    path = Path(env_path).expanduser() if env_path else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    path = (
+        Path(env_path).expanduser()
+        if env_path
+        else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -3342,6 +3557,44 @@ def _merge_tool_definitions(*groups: list[dict[str, Any]]) -> list[dict[str, Any
             seen.add(key)
             merged.append(tool)
     return merged
+
+
+def _with_deepthink_discovery_tools(
+    selected_tools: list[dict[str, Any]],
+    profile_filtered_tools: list[dict[str, Any]],
+    input_data: dict[str, Any],
+    resolved_context: dict[str, Any],
+    *,
+    selection_mode: str = "",
+) -> list[dict[str, Any]]:
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    enabled = params.get("deepthink_enabled")
+    if str(selection_mode or "").strip().lower() == "none" or not (
+        enabled is True
+        or (isinstance(enabled, str) and enabled.strip().lower() in {"1", "true", "yes", "on"})
+    ):
+        return selected_tools
+
+    from domain.ai_client.deepthink_extensions import deepthink_extension_contract
+
+    requested = [
+        str(tool_id).strip()
+        for tool_id in deepthink_extension_contract().get("discovery_tools", [])
+        if str(tool_id or "").strip()
+    ]
+    allowed = {
+        tool_name_from_definition(tool): tool
+        for tool in profile_filtered_tools
+        if tool_name_from_definition(tool)
+    }
+    attached_tools = [allowed[tool_id] for tool_id in requested if tool_id in allowed]
+    attached_ids = [tool_name_from_definition(tool) for tool in attached_tools]
+    resolved_context["deepthink_discovery_tools"] = {
+        "requested": requested,
+        "attached": attached_ids,
+        "unavailable": [tool_id for tool_id in requested if tool_id not in allowed],
+    }
+    return _merge_tool_definitions(selected_tools, attached_tools)
 
 
 def _tool_definition_id(tool: dict[str, Any]) -> str:

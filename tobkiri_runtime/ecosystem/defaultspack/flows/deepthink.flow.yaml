@@ -1,0 +1,112 @@
+flow_id: defaultspack.deepthink
+name: DeepThink
+version: 1.0.0
+description: Durable plan, evidence, drafting, synthesis, review, and revision flow.
+durable: true
+budgets:
+  max_tokens: 300000
+  max_cost_usd: 0
+  timeout_seconds: 21600
+steps:
+  - id: preflight
+    phase: preflight
+    type: function
+    function: deepthink.preflight
+    input: {}
+    output: preflight
+  - id: plan
+    phase: planning
+    type: function
+    function: deepthink.plan
+    input: {}
+    output: plan
+  - id: integrations
+    phase: integrations
+    type: function
+    function: deepthink.integrations
+    input:
+      plan: "{{plan}}"
+    output: integrations
+  - id: profile_phases
+    phase: profile_phases
+    type: function
+    function: deepthink.profile_phases
+    input:
+      plan: "{{plan}}"
+      integrations: "{{integrations}}"
+    output: profile_phase_outputs
+  - id: evidence
+    phase: evidence
+    type: function
+    function: deepthink.evidence
+    input:
+      plan: "{{plan}}"
+      integrations: "{{integrations}}"
+      profile_phase_outputs: "{{profile_phase_outputs}}"
+    output: evidence
+  - id: section_drafts
+    phase: drafting
+    type: function
+    function: deepthink.section_drafts
+    input:
+      plan: "{{plan}}"
+      evidence: "{{evidence}}"
+      integrations: "{{integrations}}"
+      profile_phase_outputs: "{{profile_phase_outputs}}"
+    output: section_drafts
+  - id: synthesize
+    phase: synthesizing
+    type: function
+    function: deepthink.synthesize
+    input:
+      plan: "{{plan}}"
+      evidence: "{{evidence}}"
+      section_drafts: "{{section_drafts}}"
+      integrations: "{{integrations}}"
+      profile_phase_outputs: "{{profile_phase_outputs}}"
+    output: draft
+  - id: review_loop
+    phase: reviewing
+    type: loop
+    max_iterations: 8
+    until: "{{review.pass}}"
+    dedupe_key: "{{review.feedback_hash}}"
+    checkpoint_each_iteration: true
+    on_exhausted: return_last
+    steps:
+      - id: review
+        phase: reviewing
+        type: function
+        function: deepthink.review
+        input:
+          draft: "{{draft}}"
+          iteration: "{{loop.iteration}}"
+          evidence: "{{evidence}}"
+          integrations: "{{integrations}}"
+          profile_phase_outputs: "{{profile_phase_outputs}}"
+        output: review
+      - id: revise
+        phase: revising
+        type: function
+        function: deepthink.revise
+        when: "{{review.needs_revision}}"
+        input:
+          draft: "{{draft}}"
+          plan: "{{plan}}"
+          evidence: "{{evidence}}"
+          integrations: "{{integrations}}"
+          profile_phase_outputs: "{{profile_phase_outputs}}"
+          review: "{{review}}"
+          iteration: "{{loop.iteration}}"
+        output: draft
+  - id: final
+    phase: completed
+    type: function
+    function: deepthink.finalize
+    input:
+      draft: "{{draft}}"
+      review: "{{review}}"
+      loop: "{{review_loop}}"
+    output: final_response
+result:
+  value: "{{final_response}}"

@@ -58,6 +58,37 @@ def provider_health_report(
         evidence = health_by_id.get(instance_id, {})
         credential = credential_by_id.get(instance_id)
         status = str(evidence.get("status") or "unknown")
+        metadata = catalog.get("metadata") if isinstance(catalog.get("metadata"), Mapping) else {}
+        runtime_diagnostic = (
+            dict(metadata.get("runtime_diagnostic"))
+            if isinstance(metadata.get("runtime_diagnostic"), Mapping)
+            else {}
+        )
+        if runtime_diagnostic and status == "unknown":
+            status = str(runtime_diagnostic.get("kind") or "unknown")
+        diagnostics = []
+        if runtime_diagnostic:
+            diagnostics.append(
+                {
+                    "severity": "error",
+                    "code": str(runtime_diagnostic.get("kind") or "runtime_error"),
+                    "message": str(
+                        runtime_diagnostic.get("message")
+                        or "Provider runtime initialization or model synchronization failed."
+                    ),
+                    "error_type": str(runtime_diagnostic.get("error_type") or ""),
+                }
+            )
+        else:
+            diagnostics.append(
+                {
+                    "severity": "info",
+                    "code": "remote_health_unknown"
+                    if status == "unknown" else "verified_health",
+                    "message": "Remote health remains unknown until verified."
+                    if status == "unknown" else "Health is backed by verified evidence.",
+                }
+            )
         providers.append(
             {
                 "provider_id": provider_id,
@@ -80,15 +111,7 @@ def provider_health_report(
                     "scopes": list(credential.get("scopes") or []) if credential else [],
                 },
                 "models": {"default_model": "", "default_model_for": {}},
-                "diagnostics": [
-                    {
-                        "severity": "info",
-                        "code": "remote_health_unknown"
-                        if status == "unknown" else "verified_health",
-                        "message": "Remote health remains unknown until verified."
-                        if status == "unknown" else "Health is backed by verified evidence.",
-                    }
-                ],
+                "diagnostics": diagnostics,
             }
         )
     return {

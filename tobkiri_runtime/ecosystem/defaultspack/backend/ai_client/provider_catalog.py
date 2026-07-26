@@ -6,6 +6,7 @@ selects the global owners; this module only preserves legacy response fields.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from core_runtime.di_container import get_container
@@ -39,6 +40,21 @@ _LIVE_INVENTORY_SOURCES = {
     "native_server_api",
     "last_known_good_inventory",
 }
+
+
+@dataclass(frozen=True)
+class ResolvedModelCatalogSnapshot:
+    """One immutable projection shared by settings, chat, search, and runtime."""
+
+    providers: tuple[Dict[str, Any], ...]
+    models: tuple[Dict[str, Any], ...]
+    profiles: tuple[Dict[str, Any], ...]
+
+    def model_ids(self) -> tuple[str, ...]:
+        return tuple(
+            str(model.get("qualified_model_id") or model.get("id") or "")
+            for model in self.models
+        )
 
 
 def _runtime_client():
@@ -110,7 +126,11 @@ def _selected_provider_fallback() -> List[Dict[str, Any]]:
     ]
 
 
-def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
+def list_model_catalog(
+    provider: str = "",
+    *,
+    runtime_models: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
     try:
         result = _invoke(
             _MODEL_CATALOG_CONTRACT,
@@ -118,17 +138,32 @@ def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
             {"provider_id": provider} if provider else {},
         )
     except (GlobalContractInvocationError, GlobalContractUnavailable):
-        return _selected_catalog_fallback(provider)
+        return _annotate_model_collisions(
+            _selected_catalog_fallback(provider, runtime_models=runtime_models)
+        )
     models = result.get("models") if isinstance(result, dict) else None
     models = models if isinstance(models, list) else []
     if not models:
-        return _selected_catalog_fallback(provider)
-    return [
-        _with_legacy_model_fields(model) for model in _merge_runtime_inventory(models, provider)
-    ]
+        return _annotate_model_collisions(
+            _selected_catalog_fallback(provider, runtime_models=runtime_models)
+        )
+    return _annotate_model_collisions(
+        [
+            _with_legacy_model_fields(model)
+            for model in _merge_runtime_inventory(
+                models,
+                provider,
+                runtime_models=runtime_models,
+            )
+        ]
+    )
 
 
-def _selected_catalog_fallback(provider: str) -> List[Dict[str, Any]]:
+def _selected_catalog_fallback(
+    provider: str,
+    *,
+    runtime_models: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
     """Project the bundled catalog only when its owning Pack is active.
 
     The launcher can serve its first request while global-contract handlers are
@@ -137,7 +172,11 @@ def _selected_catalog_fallback(provider: str) -> List[Dict[str, Any]]:
     This is deliberately limited to the selected model-catalog Pack and uses
     its declarative resource; it never enables an unselected provider.
     """
-    runtime_only = _merge_runtime_inventory([], provider)
+    runtime_only = _merge_runtime_inventory(
+        [],
+        provider,
+        runtime_models=runtime_models,
+    )
     try:
         from core_runtime.resolved_profile_scope import effective_pack_ids
 
@@ -150,7 +189,11 @@ def _selected_catalog_fallback(provider: str) -> List[Dict[str, Any]]:
             ]
         models = get_all_known_models(provider_id=provider or None)
         models = _merge_selected_openrouter_inventory(models, provider)
-        models = _merge_runtime_inventory(models, provider)
+        models = _merge_runtime_inventory(
+            models,
+            provider,
+            runtime_models=runtime_models,
+        )
     except Exception:
         models = runtime_only
     return [_with_legacy_model_fields(model) for model in models if isinstance(model, dict)]
@@ -159,6 +202,8 @@ def _selected_catalog_fallback(provider: str) -> List[Dict[str, Any]]:
 def _merge_runtime_inventory(
     models: List[Dict[str, Any]],
     provider: str,
+    *,
+    runtime_models: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     """Merge runtime discovery, treating a successful live inventory as final.
 
@@ -169,10 +214,13 @@ def _merge_runtime_inventory(
     catalog entries, and runtime metadata wins for duplicate model ids.
     """
     normalized_provider = str(provider or "").strip()
-    try:
-        runtime_models = _runtime_client().list_models(provider=normalized_provider or None)
-    except Exception:
-        runtime_models = []
+    if runtime_models is None:
+        try:
+            runtime_models = _runtime_client().list_models(
+                provider=normalized_provider or None
+            )
+        except Exception:
+            runtime_models = []
     runtime_models = [dict(model) for model in runtime_models if isinstance(model, dict)]
 
     providers_with_live_inventory = {
@@ -279,16 +327,34 @@ def _merge_selected_openrouter_inventory(
         return models
 
 
-def list_profile_catalog() -> List[Dict[str, Any]]:
+def resolve_model_catalog_snapshot(
+    provider: str = "",
+    *,
+    runtime_models: List[Dict[str, Any]] | None = None,
+) -> ResolvedModelCatalogSnapshot:
+    """Resolve providers, models, and profiles once from one model inventory."""
+    providers = list_provider_catalog()
+    models = list_model_catalog(provider, runtime_models=runtime_models)
     try:
         result = _invoke(_MODEL_PROFILE_CONTRACT, "list", {})
     except (GlobalContractInvocationError, GlobalContractUnavailable):
-        return _selected_profile_fallback()
-    profiles = result.get("profiles") if isinstance(result, dict) else None
-    profiles = profiles if isinstance(profiles, list) else []
-    if not profiles:
-        return _selected_profile_fallback()
-    return _merge_model_profiles(profiles, list_model_catalog())
+        declared_profiles: List[Dict[str, Any]] = []
+    else:
+        profiles = result.get("profiles") if isinstance(result, dict) else None
+        declared_profiles = profiles if isinstance(profiles, list) else []
+    resolved_profiles = _merge_model_profiles(declared_profiles, models)
+    return ResolvedModelCatalogSnapshot(
+        providers=tuple(dict(item) for item in providers),
+        models=tuple(dict(item) for item in models),
+        profiles=tuple(dict(item) for item in resolved_profiles),
+    )
+
+
+def list_profile_catalog() -> List[Dict[str, Any]]:
+    return [
+        dict(profile)
+        for profile in resolve_model_catalog_snapshot().profiles
+    ]
 
 
 def _merge_model_profiles(
@@ -303,12 +369,17 @@ def _merge_model_profiles(
     """
     merged: Dict[str, Dict[str, Any]] = {}
     order: List[str] = []
+    resolved_model_ids = {
+        str(model.get("qualified_model_id") or model.get("id") or "")
+        for model in models
+        if isinstance(model, dict)
+    }
     for raw in profiles:
         if not isinstance(raw, dict):
             continue
         profile = _with_legacy_profile_fields(raw)
         profile_id = str(profile.get("profile_id") or profile.get("qualified_model_id") or "")
-        if not profile_id:
+        if not profile_id or profile_id not in resolved_model_ids:
             continue
         merged[profile_id] = profile
         order.append(profile_id)
@@ -578,6 +649,26 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     item["defaults"] = defaults
     item["pricing"] = pricing
     metadata = dict(item.get("metadata", {}))
+    availability = (
+        dict(item.get("availability", {}))
+        if isinstance(item.get("availability"), dict)
+        else {}
+    )
+    item["catalog_only"] = bool(
+        item.get("catalog_only", metadata.get("catalog_only", availability.get("catalog_only", False)))
+    )
+    item["configured"] = bool(
+        item.get("configured", availability.get("configured", False))
+    )
+    item["reachable"] = bool(
+        item.get("reachable", availability.get("reachable", availability.get("active", False)))
+    )
+    item["invokable"] = bool(
+        item.get(
+            "invokable",
+            item.get("supports_invoke", availability.get("supports_invoke", False)),
+        )
+    )
     metadata.update(
         {
             "max_context": max_context,
@@ -601,6 +692,10 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
             "model_capabilities": item["model_capabilities"],
             "defaults": defaults,
             "pricing": pricing,
+            "catalog_only": item["catalog_only"],
+            "configured": item["configured"],
+            "reachable": item["reachable"],
+            "invokable": item["invokable"],
             "routing": dict(item.get("routing", {}))
             if isinstance(item.get("routing"), dict)
             else {},
@@ -614,6 +709,34 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     )
     item["metadata"] = metadata
     return item
+
+
+def _annotate_model_collisions(
+    models: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    provider_ids_by_canonical: Dict[str, set[str]] = {}
+    for model in models:
+        canonical = _canonical_model_id(model)
+        provider_id = str(model.get("provider_id") or model.get("provider") or "")
+        if canonical and provider_id:
+            provider_ids_by_canonical.setdefault(canonical, set()).add(provider_id)
+    annotated: List[Dict[str, Any]] = []
+    for raw in models:
+        item = dict(raw)
+        canonical = _canonical_model_id(item)
+        provider_count = len(provider_ids_by_canonical.get(canonical, set()))
+        collision = provider_count > 1
+        item["name_collision"] = collision
+        item["provider_count_for_model_name"] = provider_count
+        metadata = dict(item.get("metadata") or {})
+        metadata["provider_model_key"] = str(
+            item.get("qualified_model_id") or item.get("id") or ""
+        )
+        metadata["name_collision"] = collision
+        metadata["provider_count_for_model_name"] = provider_count
+        item["metadata"] = metadata
+        annotated.append(item)
+    return annotated
 
 
 def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:

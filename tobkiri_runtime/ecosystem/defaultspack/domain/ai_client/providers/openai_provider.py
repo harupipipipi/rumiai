@@ -13,6 +13,8 @@ import base64
 import ssl
 
 from ..base_provider import BaseProvider
+from ..provider_endpoint import normalize_provider_base_url, provider_endpoint_url
+from ..provider_error import ProviderError
 
 
 class OpenAIProvider(BaseProvider):
@@ -28,6 +30,10 @@ class OpenAIProvider(BaseProvider):
 
     def __init__(self):
         self._api_key = os.environ.get("OPENAI_API_KEY", "")
+        self._base_url = normalize_provider_base_url(
+            os.environ.get("OPENAI_BASE_URL", self.BASE_URL)
+        )
+        self.BASE_URL = self._base_url
         # Provider discovery must not disappear merely because a minimal host
         # environment lacks Windows certificate-location variables.  Requests
         # still use urllib's verified default context when this construction is
@@ -51,7 +57,7 @@ class OpenAIProvider(BaseProvider):
 
     def _request_json(self, path, body, *, timeout=120.0):
         """POST して JSON をパースして返す"""
-        url = self.BASE_URL + path
+        url = provider_endpoint_url(self.BASE_URL, path)
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
@@ -59,9 +65,16 @@ class OpenAIProvider(BaseProvider):
                 raw_bytes = resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenAI API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_id", "openai") or "openai",
+                e,
+                err_body,
+            ) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("OpenAI API connection error: {}".format(e.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_id", "openai") or "openai",
+                e.reason,
+            ) from e
         try:
             return json.loads(raw_bytes)
         except (json.JSONDecodeError, ValueError):
@@ -74,7 +87,7 @@ class OpenAIProvider(BaseProvider):
         if not self._api_key:
             return []
         request = urllib.request.Request(
-            self.BASE_URL + "/models",
+            provider_endpoint_url(self.BASE_URL, "/models"),
             headers=self._headers(content_type=None),
             method="GET",
         )
@@ -161,7 +174,7 @@ class OpenAIProvider(BaseProvider):
 
     def _request_stream(self, path, body, *, timeout=120.0):
         """POST して SSE ストリームを返す (generator)"""
-        url = self.BASE_URL + path
+        url = provider_endpoint_url(self.BASE_URL, path)
         body["stream"] = True
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
@@ -169,9 +182,16 @@ class OpenAIProvider(BaseProvider):
             resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenAI API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_id", "openai") or "openai",
+                e,
+                err_body,
+            ) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("OpenAI API connection error: {}".format(e.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_id", "openai") or "openai",
+                e.reason,
+            ) from e
         return resp
 
     def _request_multipart(self, path, fields, files):
@@ -199,7 +219,7 @@ class OpenAIProvider(BaseProvider):
         body_parts.append("--{}--".format(boundary).encode())
         body_bytes = b"\r\n".join(body_parts)
         ct = "multipart/form-data; boundary={}".format(boundary)
-        url = self.BASE_URL + path
+        url = provider_endpoint_url(self.BASE_URL, path)
         req = urllib.request.Request(url, data=body_bytes, method="POST")
         req.add_header("Authorization", "Bearer " + self._api_key)
         req.add_header("Content-Type", ct)
@@ -208,24 +228,47 @@ class OpenAIProvider(BaseProvider):
                 return resp.read()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenAI API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_id", "openai") or "openai",
+                e,
+                err_body,
+            ) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("OpenAI API connection error: {}".format(e.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_id", "openai") or "openai",
+                e.reason,
+            ) from e
 
     @staticmethod
     def _parse_sse_lines(resp):
-        """HTTPResponse から SSE の data 行を yield する"""
+        """Yield complete SSE data fields, including terminal ``[DONE]``."""
         buf = b""
+        data_lines = []
         for chunk in iter(lambda: resp.read(4096), b""):
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                line = line.decode("utf-8", errors="replace").strip()
-                if line.startswith("data: "):
-                    payload = line[6:]
-                    if payload == "[DONE]":
-                        return
-                    yield payload
+                line = line.rstrip(b"\r").decode("utf-8", errors="replace")
+                if line == "":
+                    if data_lines:
+                        payload = "\n".join(data_lines)
+                        data_lines = []
+                        yield payload
+                        if payload.strip() == "[DONE]":
+                            return
+                    continue
+                if line.startswith("data:"):
+                    value = line[5:]
+                    if value.startswith(" "):
+                        value = value[1:]
+                    data_lines.append(value)
+        if buf:
+            line = buf.rstrip(b"\r").decode("utf-8", errors="replace")
+            if line.startswith("data:"):
+                value = line[5:]
+                data_lines.append(value[1:] if value.startswith(" ") else value)
+        if data_lines:
+            yield "\n".join(data_lines)
 
     # ── build_request / parse_response ──────────────────────────────────
 
@@ -454,12 +497,23 @@ class OpenAIProvider(BaseProvider):
             "/chat/completions", body, **self._request_timeout_kwargs(params)
         )
         tool_call_state = {}
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        finish_reason = "stop"
         try:
             for payload in self._parse_sse_lines(resp):
+                if str(payload or "").strip() == "[DONE]":
+                    break
                 try:
                     obj = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                usage_raw = obj.get("usage") or {}
+                if usage_raw:
+                    usage = {
+                        "input_tokens": usage_raw.get("prompt_tokens", 0),
+                        "output_tokens": usage_raw.get("completion_tokens", 0),
+                        "total_tokens": usage_raw.get("total_tokens", 0),
+                    }
                 choices = obj.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
@@ -479,6 +533,7 @@ class OpenAIProvider(BaseProvider):
                     yield from self._stream_tool_call_events(delta, tool_call_state)
                     finish = choices[0].get("finish_reason")
                     if finish:
+                        finish_reason = finish
                         for current in tool_call_state.values():
                             if current.get("started") and not current.get("ended"):
                                 current["ended"] = True
@@ -487,18 +542,11 @@ class OpenAIProvider(BaseProvider):
                                     "id": current.get("id", ""),
                                     "name": current.get("name", ""),
                                 }
-                        usage_raw = obj.get("usage") or {}
-                        yield {
-                            "type": "stream_end",
-                            "finish_reason": finish,
-                            "usage": {
-                                "input_tokens": usage_raw.get("prompt_tokens", 0),
-                                "output_tokens": usage_raw.get("completion_tokens", 0),
-                                "total_tokens": usage_raw.get("total_tokens", 0),
-                            },
-                        }
-                elif obj.get("usage"):
-                    pass
+            yield {
+                "type": "stream_end",
+                "finish_reason": finish_reason,
+                "usage": usage,
+            }
         finally:
             resp.close()
 
@@ -592,7 +640,7 @@ class OpenAIProvider(BaseProvider):
     def tts(self, model, text, voice):
         voice = voice or "alloy"
         body = {"model": model, "input": text, "voice": voice}
-        url = self.BASE_URL + "/audio/speech"
+        url = provider_endpoint_url(self.BASE_URL, "/audio/speech")
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
@@ -600,8 +648,15 @@ class OpenAIProvider(BaseProvider):
                 audio_bytes = resp.read()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("OpenAI API error {}: {}".format(e.code, err_body))
+            raise ProviderError.from_http_error(
+                getattr(self, "provider_id", "openai") or "openai",
+                e,
+                err_body,
+            ) from e
         except urllib.error.URLError as e:
-            raise RuntimeError("OpenAI API connection error: {}".format(e.reason))
+            raise ProviderError.connection(
+                getattr(self, "provider_id", "openai") or "openai",
+                e.reason,
+            ) from e
         b64 = base64.b64encode(audio_bytes).decode("ascii")
         return {"audio": "data:audio/mp3;base64," + b64}

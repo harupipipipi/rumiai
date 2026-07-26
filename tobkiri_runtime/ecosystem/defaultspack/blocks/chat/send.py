@@ -1865,6 +1865,24 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 )
             )
             invoke_context = build_tool_execution_context(context or {}, tool_name, connected_names)
+            if tool_name == "discussion":
+                invoke_context = dict(invoke_context or {})
+                invoke_context["conversation_model"] = model
+                invoke_context["agent_conversation_history"] = list(
+                    working_messages
+                )
+                system_message = next(
+                    (
+                        message
+                        for message in working_messages
+                        if isinstance(message, dict)
+                        and message.get("role") == "system"
+                    ),
+                    {},
+                )
+                invoke_context["agent_role"] = str(
+                    system_message.get("content") or ""
+                )
             if call_handler is not None:
                 result = call_handler(
                     "defaults.tool.invoke",
@@ -2014,6 +2032,10 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "deepthink_enabled": bool(params.get("deepthink_enabled")),
         }
     )
+    if params.get("deepthink_suppressed_reason"):
+        metadata["deepthink_suppressed_reason"] = str(
+            params["deepthink_suppressed_reason"]
+        )
     if debug_logs:
         metadata["ai_debug"] = {
             "enabled": True,

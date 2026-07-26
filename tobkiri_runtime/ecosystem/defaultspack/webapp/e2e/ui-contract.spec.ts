@@ -155,7 +155,7 @@ const embeddingProfile = {
   max_context: 2048,
   max_context_tokens: 2048,
   supports_thinking: false,
-  supports_tool_calling: false,
+  supports_tool_calling: true,
   supports_vision: false,
   local: false,
   configured: true,
@@ -182,17 +182,17 @@ const opencodeProfile = {
 };
 
 const opencodeZenProfile = {
-  profile_id: "opencode-zen/minimax-m3-free",
-  qualified_model_id: "opencode-zen/minimax-m3-free",
+  profile_id: "opencode-zen/deepseek-v4-flash-free",
+  qualified_model_id: "opencode-zen/deepseek-v4-flash-free",
   provider_id: "opencode-zen",
   provider_display_name: "OpenCode Zen",
-  model_id: "minimax-m3-free",
-  display_name: "MiniMax M3 Free via OpenCode Zen",
-  max_context: 200_000,
-  max_context_tokens: 200_000,
+  model_id: "deepseek-v4-flash-free",
+  display_name: "DeepSeek V4 Flash Free via OpenCode Zen",
+  max_context: -1,
+  max_context_tokens: -1,
   supports_thinking: true,
-  supports_tool_calling: true,
-  supports_vision: true,
+  supports_tool_calling: false,
+  supports_vision: false,
   local: false,
   availability: { configured: false, status: "requires_api_key" },
 };
@@ -943,6 +943,48 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
+
+test("DeepThink progress exposes its completed review state", async ({ page }) => {
+  await openDefaultspack(page, "/chat", {
+    conversationMutator: (conversation) => {
+      conversation.messages[1].events.push(
+        {
+          type: "status",
+          phase: "deepthink_planning",
+          deepthink_phase: "planning",
+          message: "計画を作成しました",
+          timestamp: now - 9_000,
+        },
+        {
+          type: "status",
+          phase: "deepthink_reviewing",
+          deepthink_phase: "reviewing",
+          message: "回答をレビューしました",
+          review_round: 1,
+          approved: true,
+          timestamp: now - 8_000,
+        },
+        {
+          type: "status",
+          phase: "deepthink_completed",
+          deepthink_phase: "completed",
+          message: "DeepThinkが完了しました",
+          approved: true,
+          timestamp: now - 7_000,
+        },
+      );
+    },
+  });
+
+  const progress = page.getByLabel("DeepThink progress");
+  await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute("data-deepthink-status", "completed");
+  await expect(progress).toContainText("DeepThink");
+  await expect(progress).toContainText("完了");
+  await expect(progress).toContainText("Review 1");
+  await expect(progress).toContainText("レビューを通過した回答です");
+  await expect(progress.getByRole("listitem")).toHaveCount(8);
+});
 
 test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 520 });
@@ -1939,11 +1981,11 @@ test("model picker search supports @provider filters", async ({ page }) => {
   const search = page.getByPlaceholder("モデルを検索... @google");
   await search.fill("@opencode");
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeVisible();
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("DeepSeek V4 Flash Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Gemini 2.5 Flash")).toBeHidden();
 
   await search.fill("@opencode zen");
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("DeepSeek V4 Flash Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
 
   await search.fill("@google flash");
@@ -1957,7 +1999,7 @@ test("model picker keeps unconfigured opencode zen visible for first-run setup",
   await page.getByRole("button", { name: /Stub Default/ }).click();
   const search = page.getByPlaceholder("モデルを検索... @google");
   await search.fill("minimax");
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("DeepSeek V4 Flash Free via OpenCode Zen")).toBeVisible();
 });
 
 test("preview pane opens from the chat canvas peek", async ({ page }) => {

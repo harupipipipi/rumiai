@@ -424,6 +424,222 @@ def test_declarative_flow_executes_branch_and_parallel_steps(monkeypatch):
     assert outputs["parallel_result"]["right"]["right_value"]["function"] == "test.right"
 
 
+def test_declarative_flow_runs_bounded_loop_and_persists_checkpoints(tmp_path):
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    engine._flows["test.durable_loop"] = {
+        "flow_id": "test.durable_loop",
+        "_declarative": True,
+        "durable": True,
+        "steps": [
+            {
+                "id": "review_loop",
+                "type": "loop",
+                "max_iterations": 4,
+                "until": "{{review.approved}}",
+                "dedupe_key": "{{review.feedback}}",
+                "checkpoint_each_iteration": True,
+                "on_exhausted": "error",
+                "steps": [
+                    {
+                        "id": "review",
+                        "type": "function",
+                        "function": "test.review",
+                        "input": {"iteration": "{{loop.iteration}}"},
+                        "output": "review",
+                    }
+                ],
+                "output": "review_result",
+            }
+        ],
+    }
+    calls = []
+
+    def invoke(function_name, step_input, flow_context):
+        del function_name, flow_context
+        iteration = int(step_input["iteration"])
+        calls.append(iteration)
+        return {
+            "status": "ok",
+            "data": {
+                "approved": iteration >= 3,
+                "feedback": "round-{}".format(iteration),
+            },
+        }
+
+    store_path = tmp_path / "flow-runs.json"
+    result = engine.execute(
+        "test.durable_loop",
+        {},
+        {
+            "_flow_function_invoker": invoke,
+            "_flow_run_store_path": str(store_path),
+        },
+    )
+
+    assert result.is_success()
+    assert calls == [1, 2, 3]
+    assert result.output["data"]["outputs"]["review_result"] == {
+        "completed": True,
+        "exhausted": False,
+        "iterations": 3,
+        "reason": "until",
+        "outputs": {"review": {"approved": True, "feedback": "round-3"}},
+    }
+    record = engine.get_run(
+        result.metadata["execution_id"],
+        store_path=store_path,
+    )
+    assert record["status"] == "completed"
+    assert record["phase"] == "review_loop"
+    assert [item["iteration"] for item in record["checkpoints"][:2]] == [1, 2]
+    assert "review_loop" in record["completed_steps"]
+
+
+def test_declarative_loop_breaks_when_review_makes_no_progress():
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    engine._flows["test.no_progress"] = {
+        "flow_id": "test.no_progress",
+        "_declarative": True,
+        "steps": [
+            {
+                "id": "review_loop",
+                "type": "loop",
+                "max_iterations": 8,
+                "until": "{{review.approved}}",
+                "dedupe_key": "{{review.feedback}}",
+                "on_exhausted": "return_last",
+                "steps": [
+                    {
+                        "id": "review",
+                        "type": "function",
+                        "function": "test.review",
+                        "output": "review",
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = engine.execute(
+        "test.no_progress",
+        {},
+        {
+            "_flow_function_invoker": lambda *_args: {
+                "status": "ok",
+                "data": {"approved": False, "feedback": "same"},
+            }
+        },
+    )
+
+    assert result.is_success()
+    loop = result.output["data"]["outputs"]["review_loop"]
+    assert loop["reason"] == "no_progress"
+    assert loop["iterations"] == 2
+
+
+def test_durable_flow_cancels_at_phase_boundary(tmp_path):
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    engine._flows["test.cancel"] = {
+        "flow_id": "test.cancel",
+        "_declarative": True,
+        "durable": True,
+        "steps": [
+            {
+                "id": "work",
+                "type": "function",
+                "function": "test.work",
+            }
+        ],
+    }
+    store_path = tmp_path / "cancel-runs.json"
+    result = engine.execute(
+        "test.cancel",
+        {},
+        {
+            "_flow_run_store_path": str(store_path),
+            "_flow_function_invoker": lambda *_args: {
+                "status": "ok",
+                "data": "must not run",
+            },
+            "is_cancelled": lambda: True,
+        },
+    )
+
+    assert result.status == "cancelled"
+    assert result.output["error"]["code"] == "FLOW_CANCELLED"
+    record = engine.get_run(result.metadata["execution_id"], store_path=store_path)
+    assert record["status"] == "cancelled"
+    assert record["stop_reason"] == "FLOW_CANCELLED"
+
+
+def test_durable_flow_replays_exactly_once_receipt_after_restart(tmp_path):
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+    from ecosystem.defaultspack.domain.flow.run_store import FlowRunStore
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    engine._flows["test.receipt"] = {
+        "flow_id": "test.receipt",
+        "_declarative": True,
+        "durable": True,
+        "steps": [
+            {
+                "id": "side_effect",
+                "type": "function",
+                "function": "test.side_effect",
+                "output": "side_effect",
+            },
+            {
+                "id": "finish",
+                "type": "function",
+                "function": "test.finish",
+                "input": {"prior": "{{side_effect}}"},
+                "output": "finish",
+            },
+        ],
+    }
+    store_path = tmp_path / "receipt-runs.json"
+    store = FlowRunStore(store_path)
+    record = store.create(flow_id="test.receipt", trigger_input={})
+    store.record_receipt(
+        record["run_id"],
+        receipt_key="test.receipt:side_effect:0",
+        result={"status": "ok", "data": {"created": "once"}},
+    )
+    calls = []
+
+    def invoke(function_name, data, flow_context):
+        del flow_context
+        calls.append(function_name)
+        return {"status": "ok", "data": {"input": data}}
+
+    result = engine.execute(
+        "test.receipt",
+        {},
+        {
+            "_flow_run_id": record["run_id"],
+            "_flow_run_store_path": str(store_path),
+            "_flow_function_invoker": invoke,
+        },
+    )
+
+    assert result.is_success()
+    assert calls == ["test.finish"]
+    assert result.metadata["outputs"]["side_effect"] == {"created": "once"}
+    assert result.metadata["outputs"]["finish"]["input"]["prior"] == {
+        "created": "once"
+    }
+
+
 def test_persist_turn_writes_canonical_chat_store_messages(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_CHAT_STORE_PATH",

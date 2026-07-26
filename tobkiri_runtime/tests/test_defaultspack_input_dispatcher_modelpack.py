@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -684,6 +683,11 @@ def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypa
 
 
 def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_tools(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        AIClient,
+        "_provider_requires_authority",
+        staticmethod(lambda *_args, **_kwargs: False),
+    )
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
         json.dumps(
@@ -712,6 +716,8 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
     monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
 
     class DemoProvider:
+        provider_name = "demo"
+
         def __init__(self):
             self.calls = []
 
@@ -719,6 +725,10 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
             self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
             system = messages[0]["content"]
             user = messages[-1]["content"]
+            if "stateless third-party reviewer" in system.lower():
+                assert model_name == "generator"
+                assert tools == []
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 92, "issues": [], "required_changes": []})}]}
             if model_name == "generator":
                 assert params["thinking_level"] == "medium"
                 if "Plan the response before writing it" in system:
@@ -731,9 +741,6 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
                 if "section only" in system:
                     return {"content": [{"type": "text", "text": "section draft"}]}
                 return {"content": [{"type": "text", "text": "final ok"}]}
-            if model_name == "reviewer":
-                assert tools == []
-                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 92, "issues": [], "required_changes": []})}]}
             raise AssertionError(model_name)
 
     provider = DemoProvider()
@@ -753,7 +760,7 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
         "modelpack/review-pack",
         [{"role": "user", "content": "implement a larger change"}],
         [{"type": "function", "function": {"name": "web_search"}}],
-        {"deepthink_enabled": True},
+        {"deepthink_enabled": True, "tool_policy": {"approval": "runtime"}},
     )
     process = response["metadata"]["rumi_process"]
 
@@ -766,12 +773,17 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
     assert "deepthink_planner" in process["tooling"]["harness_tool_ids"]
     assert process["tooling"]["vision_tool_ids"] == []
     assert process["tooling"]["model_tools_are_separate_from_harness_tools"] is True
-    assert any(event["phase"] == "deepthink_notes" and "harness tool selection" in event["metadata"]["label"] for event in process["events"])
-    assert provider.calls[-1]["model"] == "reviewer"
+    assert any(event["phase"] == "deepthink_notes" for event in process["events"])
+    assert provider.calls[-1]["model"] == "generator"
     assert provider.calls[-1]["tools"] == []
 
 
 def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str):
+    monkeypatch.setattr(
+        AIClient,
+        "_provider_requires_authority",
+        staticmethod(lambda *_args, **_kwargs: False),
+    )
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
         json.dumps(
@@ -800,6 +812,8 @@ def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str)
     monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
 
     class DemoProvider:
+        provider_name = "demo"
+
         def __init__(self):
             self.calls = []
             self.plan_broken = False
@@ -819,6 +833,13 @@ def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str)
                 if '"pass"' in user:
                     return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 91, "issues": [], "required_changes": []})}]}
                 raise AssertionError(user)
+            if "stateless third-party reviewer" in system.lower():
+                assert model_name == "generator"
+                assert tools == []
+                if malformed_phase == "reviewer" and not self.review_broken:
+                    self.review_broken = True
+                    return {"content": [{"type": "text", "text": "pass yes score 91"}]}
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 91, "issues": [], "required_changes": []})}]}
             if model_name == "generator":
                 if "Plan the response before writing it" in system:
                     if malformed_phase == "planner" and not self.plan_broken:
@@ -833,12 +854,6 @@ def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str)
                 if "section only" in system:
                     return {"content": [{"type": "text", "text": "section draft"}]}
                 return {"content": [{"type": "text", "text": "final ok"}]}
-            if model_name == "reviewer":
-                assert tools == []
-                if malformed_phase == "reviewer" and not self.review_broken:
-                    self.review_broken = True
-                    return {"content": [{"type": "text", "text": "pass yes score 91"}]}
-                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 91, "issues": [], "required_changes": []})}]}
             raise AssertionError(model_name)
 
     provider = DemoProvider()

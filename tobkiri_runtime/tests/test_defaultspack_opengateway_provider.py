@@ -30,13 +30,13 @@ def _reset_client():
     AIClient._instance = None
 
 
-def test_get_all_known_models_includes_exact_opengateway_allowlist():
+def test_get_all_known_models_does_not_restore_opengateway_static_allowlist():
     from domain.ai_client.providers import get_all_known_models
 
     model_ids = {item["id"] for item in get_all_known_models()}
     opengateway_ids = {item for item in model_ids if item.startswith("gitlawb-opengateway/")}
 
-    assert opengateway_ids == OPENGATEWAY_MODELS
+    assert opengateway_ids == set()
 
 
 def test_provider_catalog_includes_opengateway():
@@ -169,39 +169,73 @@ def test_opengateway_resolve_provider(model_ref, model_id):
     assert resolved_model == model_id
 
 
-def test_opengateway_list_models_returns_only_allowlist():
+def test_opengateway_list_models_returns_live_account_inventory():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
     )
 
     provider = GitlawbOpengatewayProvider()
+    discovered = provider._normalize_remote_models(
+        [
+            {"id": model_id.split("/", 1)[1]}
+            for model_id in OPENGATEWAY_MODELS
+        ]
+    )
 
-    assert {item["id"] for item in provider.list_models()} == OPENGATEWAY_MODELS
-    assert all(item["metadata"]["api_key_required"] is True for item in provider.list_models())
+    with patch.object(provider, "_remote_discovered_models", return_value=discovered):
+        models = provider.list_models()
+
+    assert {item["id"] for item in models} == OPENGATEWAY_MODELS
 
 
-def test_opengateway_omni_declares_verified_vision():
+def test_opengateway_live_inventory_preserves_reported_vision():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
     )
 
     provider = GitlawbOpengatewayProvider()
-    profiles = {item["id"]: item for item in provider.list_models()}
+    with patch.object(
+        provider,
+        "_remote_discovered_models",
+        return_value=provider._normalize_remote_models(
+            [
+                {
+                    "id": "mimo-v2-omni",
+                    "capabilities": {"vision": True, "image_input": True},
+                }
+            ]
+        ),
+    ):
+        profiles = {item["id"]: item for item in provider.list_models()}
     omni = profiles["gitlawb-opengateway/mimo-v2-omni"]
 
-    assert "vision" in omni["capabilities"]
-    assert omni["metadata"]["vision_verified"] is True
+    assert omni["capabilities"]["vision"] is True
 
 
-def test_opengateway_rejects_non_allowlisted_models():
+def test_opengateway_accepts_new_models_from_gateway_authority():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
     )
 
     provider = GitlawbOpengatewayProvider()
 
-    with pytest.raises(RuntimeError, match="unsupported model"):
-        provider.complete("openai/gpt-4o", [{"role": "user", "content": "hi"}], [], {})
+    with patch.object(
+        provider,
+        "_request_json",
+        return_value={
+            "choices": [
+                {"message": {"content": "ok"}, "finish_reason": "stop"}
+            ]
+        },
+    ):
+        response = provider.complete(
+            "newly-provisioned-model",
+            [{"role": "user", "content": "hi"}],
+            [],
+            {},
+        )
+
+    assert response["content"][0]["text"] == "ok"
 
 
 def test_opengateway_translates_max_tokens_to_max_completion_tokens():

@@ -3551,13 +3551,16 @@ export function ComposerRenderer({
             command.active === true || command.enabled === true
           )).map((command) => {
             const active = command.active === true || command.enabled === true;
+            const runtimeLabel = command.id === "deepthink"
+              ? `DeepThink: ${active ? "ON" : "OFF"}`
+              : `${command.label || command.name}: ${active ? "オン" : "オフ"}`;
             const Icon = commandIcon(command);
             const unavailable = command.availability?.status === "unavailable";
             return (
               <button
                 key={command.id}
                 type="button"
-                aria-label={`${command.label || command.name}: ${active ? "オン" : "オフ"}`}
+                aria-label={runtimeLabel}
                 aria-pressed={active}
                 disabled={unavailable}
                 title={unavailable ? command.availability?.reason : undefined}
@@ -3565,7 +3568,7 @@ export function ComposerRenderer({
                 className="group/runtime relative rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <RuntimeStateIcon
-                  label={`${command.label || command.name}: ${active ? "オン" : "オフ"}`}
+                  label={runtimeLabel}
                   state={active ? "on" : "off"}
                   tone={active ? "sky" : "neutral"}
                   focusable={false}

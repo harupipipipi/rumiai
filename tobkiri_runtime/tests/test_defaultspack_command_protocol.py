@@ -143,6 +143,7 @@ def test_all_55_commands_have_authority_and_completion_conformance() -> None:
 def test_protocol_deepthink_invocation_returns_authoritative_state(
     tmp_path: Path, monkeypatch
 ) -> None:
+    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-key")
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
         str(tmp_path / "frontend_settings.json"),

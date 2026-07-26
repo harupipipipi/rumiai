@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import re
+from copy import copy
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -22,14 +23,17 @@ from domain.ai_client.model_metadata_schema import (
 from domain.ai_client import rumi_process
 from domain.ai_client.rumi_process_runner import RumiProcessRunner
 from domain.ai_client.oauth_store import provider_has_oauth_connection
+from domain.ai_client.provider_endpoint import normalize_provider_base_url
+from domain.ai_client.provider_error import ProviderError
+from domain.ai_client.provider_identity import canonical_model_ref, canonical_provider_id
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
     detect_available_providers,
     detect_rumi_provider,
-    get_all_known_models,
     get_provider_catalog,
     get_provider_catalog_map,
+    record_provider_runtime_diagnostic,
 )
 
 _HIDDEN_RUNTIME_LIST_PROVIDER_IDS = {"human-operator", "rumi"}
@@ -82,6 +86,13 @@ class AIClient:
                     and not local_default_enabled
                 ):
                     continue
+                if (
+                    entry.get("kind") == "local"
+                    and availability.get("configuration_source")
+                    in {"builtin_local_provider", "default_local_endpoint"}
+                    and not local_default_enabled
+                ):
+                    continue
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
                     if not provider_has_api_key(name) and not provider_has_oauth_connection(name):
                         continue
@@ -105,7 +116,7 @@ class AIClient:
 
     def register_provider(self, name, provider):
         """プロバイダーを動的に登録する。"""
-        self._providers[name] = provider
+        self._providers[canonical_provider_id(name)] = provider
 
     def register_profile(self, name, profile=None, provider="", model="", **kwargs):
         """互換的にプロファイルを登録する。"""
@@ -136,8 +147,19 @@ class AIClient:
         if callable(getattr(provider, "list_models", None)):
             try:
                 listed = provider.list_models() or []
-            except Exception:
+            except Exception as exc:
+                record_provider_runtime_diagnostic(
+                    provider_name,
+                    {
+                        "kind": "model_sync_error",
+                        "error_type": exc.__class__.__name__,
+                        "message": str(exc),
+                    },
+                )
                 listed = []
+            else:
+                diagnostic = getattr(provider, "model_sync_diagnostic", None)
+                record_provider_runtime_diagnostic(provider_name, diagnostic)
         if not listed and hasattr(provider, "KNOWN_MODELS"):
             listed = getattr(provider, "KNOWN_MODELS", []) or []
         return listed
@@ -292,8 +314,10 @@ class AIClient:
 
     def resolve_provider(self, model_str):
         """model文字列("provider/model" or "profile_name")から解決する。"""
+        model_str = canonical_model_ref(model_str)
         if "/" in model_str:
             provider_name, model_name = model_str.split("/", 1)
+            provider_name = canonical_provider_id(provider_name)
         else:
             profile = self._profiles.get(model_str)
             if profile:
@@ -430,12 +454,14 @@ class AIClient:
     def _route_parts(route_ref):
         cleaned = str(route_ref or "").strip()
         if "/" not in cleaned:
-            return cleaned, "main"
+            return canonical_provider_id(cleaned), "main"
         provider_id, api_id = cleaned.split("/", 1)
-        return provider_id.strip(), api_id.strip() or "main"
+        return canonical_provider_id(provider_id), api_id.strip() or "main"
 
     @staticmethod
     def _is_rate_limit_error(exc):
+        if isinstance(exc, ProviderError):
+            return exc.fallback_eligible
         message = str(exc).lower()
         return any(
             token in message
@@ -834,34 +860,26 @@ class AIClient:
         return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
 
     def _call_provider_with_overrides(self, provider, model_name, api_key, metadata, method_name, messages, tools=None, params=None):
-        had_key = hasattr(provider, "_api_key")
-        previous_key = getattr(provider, "_api_key", None)
-        had_base_url = hasattr(provider, "_base_url")
-        previous_base_url = getattr(provider, "_base_url", None)
-        had_base_url_attr = hasattr(provider, "BASE_URL")
-        previous_base_url_attr = getattr(provider, "BASE_URL", None)
-        base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
-        try:
-            if api_key:
-                provider._api_key = api_key
-            if base_url:
-                provider._base_url = base_url
-                provider.BASE_URL = base_url
-            method = getattr(provider, method_name)
-            return method(model_name, messages, tools or [], self._strip_authority_params(params))
-        finally:
-            if had_key:
-                provider._api_key = previous_key
-            elif api_key and hasattr(provider, "_api_key"):
-                delattr(provider, "_api_key")
-            if had_base_url:
-                provider._base_url = previous_base_url
-            elif base_url and hasattr(provider, "_base_url"):
-                delattr(provider, "_base_url")
-            if had_base_url_attr:
-                provider.BASE_URL = previous_base_url_attr
-            elif base_url and hasattr(provider, "BASE_URL"):
-                delattr(provider, "BASE_URL")
+        request_provider = self._provider_for_request(provider, api_key, metadata)
+        method = getattr(request_provider, method_name)
+        return method(model_name, messages, tools or [], self._strip_authority_params(params))
+
+    @staticmethod
+    def _provider_for_request(provider, api_key, metadata):
+        base_url = normalize_provider_base_url(
+            str((metadata or {}).get("base_url") or ""),
+            allow_empty=True,
+        )
+        factory = getattr(provider, "with_request_context", None)
+        if callable(factory):
+            return factory(api_key=api_key, base_url=base_url)
+        request_provider = copy(provider)
+        if api_key:
+            request_provider._api_key = api_key
+        if base_url:
+            request_provider._base_url = base_url
+            request_provider.BASE_URL = base_url
+        return request_provider
 
     def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
         routed, handled = self._call_api_bound_profile(method_name, model, messages, tools, params)
@@ -892,21 +910,15 @@ class AIClient:
     def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
         last_error = None
         for provider, model_name, api_key, metadata in route_attempts:
-            had_key = hasattr(provider, "_api_key")
-            previous_key = getattr(provider, "_api_key", None)
-            had_base_url = hasattr(provider, "_base_url")
-            previous_base_url = getattr(provider, "_base_url", None)
-            had_base_url_attr = hasattr(provider, "BASE_URL")
-            previous_base_url_attr = getattr(provider, "BASE_URL", None)
-            base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
             yielded = False
             try:
-                if api_key:
-                    provider._api_key = api_key
-                if base_url:
-                    provider._base_url = base_url
-                    provider.BASE_URL = base_url
-                for chunk in provider.stream(model_name, messages, tools or [], self._strip_authority_params(params)):
+                request_provider = self._provider_for_request(provider, api_key, metadata)
+                for chunk in request_provider.stream(
+                    model_name,
+                    messages,
+                    tools or [],
+                    self._strip_authority_params(params),
+                ):
                     yielded = True
                     yield chunk
                 return
@@ -914,19 +926,6 @@ class AIClient:
                 last_error = exc
                 if yielded or not self._is_rate_limit_error(exc):
                     raise
-            finally:
-                if had_key:
-                    provider._api_key = previous_key
-                elif api_key and hasattr(provider, "_api_key"):
-                    delattr(provider, "_api_key")
-                if had_base_url:
-                    provider._base_url = previous_base_url
-                elif base_url and hasattr(provider, "_base_url"):
-                    delattr(provider, "_base_url")
-                if had_base_url_attr:
-                    provider.BASE_URL = previous_base_url_attr
-                elif base_url and hasattr(provider, "BASE_URL"):
-                    delattr(provider, "BASE_URL")
         if last_error is not None:
             raise last_error
 
@@ -1110,6 +1109,8 @@ class AIClient:
 
     @staticmethod
     def _error_kind(exc):
+        if isinstance(exc, ProviderError):
+            return exc.kind
         message = str(exc).casefold()
         if "429" in message or "rate limit" in message or "rate_limit" in message:
             return "rate_limit"
@@ -1270,6 +1271,33 @@ class AIClient:
         budget = composite.get("budget") if isinstance(composite.get("budget"), dict) else {}
         generator_model = self._resolve_rumi_member_model(generator_model, params)
         reviewer_model = self._resolve_rumi_member_model(reviewer_model, params)
+        if rumi_process.deepthink_enabled(params):
+            from domain.ai_client.deepthink_preflight import require_deepthink_ready
+
+            model_source = str(
+                params.get("deepthink_model_source") or "conversation"
+            ).strip().lower()
+            selected_model = str(params.get("deepthink_model") or "").strip()
+            deepthink_model = (
+                selected_model
+                if model_source == "selected"
+                else generator_model
+            )
+            require_deepthink_ready(
+                model=deepthink_model,
+                model_source=model_source,
+                tools=tools or [],
+                tool_policy=(
+                    params.get("tool_policy")
+                    if isinstance(params.get("tool_policy"), dict)
+                    else None
+                ),
+                budgets={
+                    "max_tool_calls": params.get("max_tool_calls", 16),
+                },
+            )
+            generator_model = deepthink_model
+            reviewer_model = deepthink_model
         context = rumi_process.context_for_request(messages, tools or [], params)
         max_reviews = RumiProcessRunner._positive_int(
             params.get("max_review_rounds")
@@ -1300,6 +1328,13 @@ class AIClient:
             "action_preflight_required": bool(context.get("action_preflight_required")),
         }
         if process["deepthink_enabled"]:
+            process["deepthink_model_selection"] = {
+                "source": str(
+                    params.get("deepthink_model_source") or "conversation"
+                ),
+                "model": generator_model,
+                "provider_neutral": True,
+            }
             harness_tool_selection = rumi_process.select_harness_tools(messages, tools or [], params)
             context["harness_tool_selection"] = harness_tool_selection
             process["mode"] = "deepthink"
@@ -1459,10 +1494,18 @@ class AIClient:
             "deepthink_max_review_iterations",
             "deepthink_user_rejection_review_cycles",
             "deepthink_max_sections",
+            "deepthink_selected_skill_ids",
+            "deepthink_selected_tool_ids",
+            "deepthink_model_source",
+            "deepthink_model",
+            "deepthink_allow_background",
+            "deepthink_suppressed_reason",
             "deepthink_loop_breaker",
             "rumi_base_model_override",
             "rumi_require_intended_base_model",
             "_authority_context",
+            "_is_cancelled",
+            "_activity_event_callback",
         ):
             provider_params.pop(key, None)
         return provider_params
@@ -1477,23 +1520,15 @@ class AIClient:
             return callable(getattr(provider, "stream", None))
 
     def list_models(self, provider=None):
-        """登録済みプロバイダーの既知モデル一覧を返す。"""
+        """Return the same resolved model snapshot used by UI catalog consumers."""
         active_provider_ids = self._active_provider_ids()
+        provider = canonical_provider_id(provider) if provider is not None else None
         if provider is not None and provider not in active_provider_ids:
             return []
 
-        models = get_all_known_models(
-            provider_id=provider,
-            active_provider_ids=active_provider_ids,
-        )
-        models = [
-            model
-            for model in models
-            if model.get("provider_id") in active_provider_ids
-        ]
-
         catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
-        seen = {model.get("qualified_model_id") for model in models}
+        runtime_models = []
+        seen = set()
         provider_ids = [provider] if provider else sorted(active_provider_ids)
         for provider_id in provider_ids:
             provider_entry = catalog_map.get(provider_id)
@@ -1507,8 +1542,24 @@ class AIClient:
                 if qualified_model_id in seen:
                     continue
                 seen.add(qualified_model_id)
-                models.append(candidate)
-        return models
+                runtime_models.append(candidate)
+
+        try:
+            from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+                resolve_model_catalog_snapshot,
+            )
+        except ModuleNotFoundError:
+            from backend.ai_client.provider_catalog import resolve_model_catalog_snapshot
+
+        snapshot = resolve_model_catalog_snapshot(
+            provider or "",
+            runtime_models=runtime_models,
+        )
+        return [
+            model
+            for model in snapshot.models
+            if canonical_provider_id(model.get("provider_id")) in active_provider_ids
+        ]
 
     def list_providers(self):
         active_provider_ids = self._active_provider_ids()

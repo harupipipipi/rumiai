@@ -31,6 +31,13 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     # configured OpenRouter account, never from a bundled model snapshot.
     KNOWN_MODELS: List[Dict[str, Any]] = []
 
+    @staticmethod
+    def _header_value(value: str, fallback: str) -> str:
+        normalized = str(value or fallback).strip()
+        if "\r" in normalized or "\n" in normalized:
+            raise ValueError("OpenRouter application headers must not contain newlines")
+        return normalized
+
     def __init__(self, known_models: List[Dict[str, Any]] | None = None) -> None:
         models = self._catalog_models() if known_models is None else known_models
         super().__init__(
@@ -42,13 +49,14 @@ class OpenRouterProvider(OpenAICompatibleProvider):
             credential_required=True,
             known_models=models,
             extra_headers={
-                "HTTP-Referer": os.environ.get(
-                    "OPENROUTER_HTTP_REFERER",
-                    "https://github.com/harupipipipi/rumiai",
+                "HTTP-Referer": self._header_value(
+                    os.environ.get("OPENROUTER_HTTP_REFERER", ""),
+                    "https://github.com/harupipipipi/tobkiri",
                 ),
-                "X-Title": os.environ.get(
-                    "OPENROUTER_X_TITLE",
-                    os.environ.get("OPENROUTER_X_OPENROUTER_TITLE", "rumiai-defaultspack"),
+                "X-Title": self._header_value(
+                    os.environ.get("OPENROUTER_X_TITLE", "")
+                    or os.environ.get("OPENROUTER_X_OPENROUTER_TITLE", ""),
+                    "tobkiri-defaultspack",
                 ),
             },
             remote_model_discovery=True,
@@ -252,18 +260,13 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         return routed
 
     def list_models(self) -> List[Dict[str, Any]]:
-        return self._merge_remote_models([])
+        return self._merge_remote_models(list(self.KNOWN_MODELS))
 
     def _assert_supported_model(self, model: str) -> None:
         model_ref = str(model or "").strip()
         provider_model_id = self._provider_model_id(model_ref)
         supported: set[str] = set()
-        invocation_models: List[Dict[str, Any]] = []
-        cache = self._load_remote_model_cache()
-        if cache:
-            invocation_models.extend(self._normalize_remote_models(cache.get("models")))
-        if not invocation_models:
-            invocation_models.extend(self._remote_discovered_models())
+        invocation_models = self.list_models()
         for item in invocation_models:
             if not isinstance(item, dict):
                 continue

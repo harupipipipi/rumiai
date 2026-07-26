@@ -350,7 +350,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                 [dict(model) for model in models],
             )
             return models
-        return self._normalize_known_models(self._load_profile_models())
+        return []
 
     @staticmethod
     def _translate_thinking_level(model: str, thinking_level: str) -> str | None:
@@ -808,6 +808,13 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     @staticmethod
     def _is_transient_google_api_error(exc: Exception) -> bool:
+        if getattr(exc, "kind", "") in {
+            "rate_limit",
+            "quota",
+            "timeout",
+            "provider_error",
+        }:
+            return True
         message = str(exc)
         lowered = message.lower()
         return bool(

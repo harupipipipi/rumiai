@@ -2785,6 +2785,7 @@ function ChatApp() {
   const deepthinkMutationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const deepthinkDesiredStateRef = useRef(deepthinkEnabled);
   const deepthinkPendingCountRef = useRef(0);
+  const deepthinkLatestSequenceRef = useRef(0);
   const commandClientSequenceRef = useRef(0);
   useEffect(() => {
     if (deepthinkPendingCountRef.current === 0) {
@@ -4747,6 +4748,7 @@ function ChatApp() {
         : parsed.command.id === "deepthink" && parsed.command.execution.type === "rumi_function";
       const resolvedCommandName = parsed.command.canonical_id ?? parsed.command.name ?? parsed.command.id;
       let result: ComposerCommandExecuteResult;
+      let deepthinkSequence: number | null = null;
       if (isDeepthinkMutation) {
         const desired = Object.prototype.hasOwnProperty.call(commandArgs, "enabled")
           ? parseCommandBoolean(commandArgs.enabled, !deepthinkDesiredStateRef.current)
@@ -4756,6 +4758,8 @@ function ChatApp() {
         const invocationId = createCommandInvocationId("deepthink");
         void followCommandProgress(invocationId);
         const clientSequence = ++commandClientSequenceRef.current;
+        deepthinkSequence = clientSequence;
+        deepthinkLatestSequenceRef.current = clientSequence;
         deepthinkPendingCountRef.current += 1;
         const executeMutation = () => {
           const expectedRevision = commandStateRevisionsRef.current[
@@ -4793,6 +4797,13 @@ function ChatApp() {
         });
       }
       const appliedStatePaths = applyAuthoritativeCommandState(result);
+      if (
+        isDeepthinkMutation
+        && result.operation_status === "failed"
+        && deepthinkSequence === deepthinkLatestSequenceRef.current
+      ) {
+        deepthinkDesiredStateRef.current = deepthinkEnabled;
+      }
       const feedbackMessage = composerCommandResultMessage(result);
       if (result.requires_approval) {
         if (result.approval_request_id && result.operation_id) {

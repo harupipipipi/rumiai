@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -34,6 +35,7 @@ from blocks.chat.send import (
     _tool_visibility_message,
 )
 from domain.ai_client.bridge_plan import PlannedProviderRequest
+from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from domain.ai_client.run_seal import (
     RunSealPolicy,
     RunSealService,
@@ -42,7 +44,12 @@ from domain.ai_client.run_seal import (
     build_run_seal_policy,
     response_has_structured_output,
 )
-from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
+from domain.ai_client.provider_compiler.registry import (
+    compile_complete,
+    compile_stream,
+    compiler_for_api_family,
+)
+from domain.ai_client.rumi_process import RUMI_MODEL_PACK_REF
 from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
 from domain.ai_client.client import AIClient, AuthorityApprovalRequired
 from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
@@ -1567,6 +1574,11 @@ class ChatRunEngine:
     ) -> None:
         self._store = store or ChatStore()
         self._gateway = gateway or LLMGateway(client=client)
+        self._deepthink_gateway = (
+            self._gateway
+            if isinstance(self._gateway, LLMGateway)
+            else LLMGateway(client=client)
+        )
         self._run_id = ""
         self._conversation_id = ""
         self._event_seq = 0
@@ -2777,6 +2789,8 @@ class ChatRunEngine:
         seal_policy = self._run_seal_policy(prepared)
         if seal_policy.enabled:
             return (yield from self._model_turn_with_run_seal(prepared, messages, draft, seal_policy))
+        if prepared.params.get("deepthink_enabled"):
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
         if not self._stream_mode:
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
         if prepared.provider_tools and not self._provider_supports_stream_tool_calls(prepared.model):
@@ -2805,15 +2819,7 @@ class ChatRunEngine:
             finish_reason = "stop"
             usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             try:
-                self._current_stream = self._gateway.stream(
-                    {
-                        "model": prepared.model,
-                        "messages": messages,
-                        "tools": prepared.provider_tools,
-                        "params": prepared.params,
-                        "authority_context": prepared.request_context.get("authority", {}),
-                    }
-                )
+                self._current_stream = self._stream_turn(prepared, messages)
                 self._raise_if_cancelled()
                 for chunk in self._current_stream:
                     self._raise_if_cancelled()
@@ -3121,10 +3127,68 @@ class ChatRunEngine:
         messages: list[dict[str, Any]],
         draft: _AssistantDraft | None,
     ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
-        response = self._complete_turn(prepared, messages)
+        if self._stream_mode and prepared.params.get("deepthink_enabled"):
+            event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+            result_holder: dict[str, Any] = {}
+            prepared.params["_activity_event_callback"] = event_queue.put
+
+            def complete_in_background() -> None:
+                try:
+                    result_holder["response"] = self._complete_turn(
+                        prepared,
+                        messages,
+                    )
+                except BaseException as exc:
+                    result_holder["error"] = exc
+
+            worker = threading.Thread(
+                target=complete_in_background,
+                name="deepthink-flow",
+                daemon=True,
+            )
+            worker.start()
+            while worker.is_alive() or not event_queue.empty():
+                try:
+                    activity = event_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if not isinstance(activity, dict):
+                    continue
+                normalized = self._normalize_external_event(activity)
+                if normalized is None:
+                    continue
+                legacy = to_legacy_chat_stream_event(normalized)
+                if legacy is not None and legacy not in self._activity_events:
+                    self._activity_events.append(legacy)
+                yield normalized
+                self._sync_draft(draft, force=True)
+            worker.join()
+            prepared.params.pop("_activity_event_callback", None)
+            if "error" in result_holder:
+                raise result_holder["error"]
+            response = result_holder.get("response", {})
+        else:
+            response = self._complete_turn(prepared, messages)
         tool_uses = _tool_use_blocks(response)
         if not tool_uses:
             tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
+        metadata = response.get("metadata") if isinstance(response, dict) else {}
+        rumi_metadata = (
+            metadata.get("rumi_process")
+            if isinstance(metadata, dict)
+            and isinstance(metadata.get("rumi_process"), dict)
+            else {}
+        )
+        flow_metadata = (
+            rumi_metadata.get("flow")
+            if isinstance(rumi_metadata.get("flow"), dict)
+            else {}
+        )
+        deepthink_run_id = str(flow_metadata.get("run_id") or "").strip()
+        if tool_uses and deepthink_run_id:
+            prepared.params["_deepthink_flow_run_id"] = deepthink_run_id
+        elif not tool_uses:
+            prepared.params.pop("_deepthink_flow_run_id", None)
         if not tool_uses and self._stream_mode:
             text = self._response_text(response)
             if text:
@@ -3215,27 +3279,69 @@ class ChatRunEngine:
             raise RuntimeError("AI response failed internal validation after retry and compact.")
 
     def _complete_turn(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        if prepared.params.get("deepthink_enabled"):
+            prepared.params["_is_cancelled"] = self._is_cancelled
+        execution_model = (
+            RUMI_MODEL_PACK_REF
+            if prepared.params.get("deepthink_enabled")
+            else prepared.model
+        )
+        execution_call_handler = (
+            None
+            if prepared.params.get("deepthink_enabled")
+            else prepared.call_handler
+        )
+        activity_callback = prepared.params.get("_activity_event_callback")
+        if prepared.params.get("deepthink_enabled") and callable(activity_callback):
+            deepthink_client = getattr(self._deepthink_gateway, "_client", None)
+            pack_resolver = getattr(deepthink_client, "_model_pack_for_model", None)
+            model_pack_available = bool(
+                pack_resolver(execution_model)
+                if callable(pack_resolver)
+                else False
+            )
+            activity_callback(
+                {
+                    "type": "status",
+                    "phase": "deepthink_dispatch",
+                    "deepthink_phase": "dispatch",
+                    "message": "DeepThinkモデルパックへ実行を渡しています",
+                    "execution_model": execution_model,
+                    "gateway": self._deepthink_gateway.__class__.__name__,
+                    "model_pack_available": model_pack_available,
+                }
+            )
         try:
-            if self._use_provider_compiler(prepared):
+            if self._use_provider_compiler(prepared, self._gateway):
                 response = self._complete_turn_with_compiler(prepared, messages)
             else:
                 response = self._call_ai_complete_with_retry(
-                    prepared.model,
+                    execution_model,
                     messages,
                     prepared.provider_tools,
                     prepared.params,
-                    prepared.call_handler,
+                    execution_call_handler,
                     allow_retry=True,
                     authority_context=prepared.request_context.get("authority", {}),
+                    gateway=(
+                        self._deepthink_gateway
+                        if prepared.params.get("deepthink_enabled")
+                        else self._gateway
+                    ),
                 )
         except AuthorityApprovalRequired:
+            prepared.params.pop("_is_cancelled", None)
             raise
         except RuntimeError as exc:
+            prepared.params.pop("_is_cancelled", None)
             if self._tool_logs:
                 response = _ai_error_after_tool_use_response(str(exc))
                 response["tool_logs"] = list(self._tool_logs)
                 response["events"] = list(self._activity_events)
                 return response
+            raise
+        except BaseException:
+            prepared.params.pop("_is_cancelled", None)
             raise
         if not isinstance(response, dict):
             response = _ai_error_response(
@@ -3243,6 +3349,25 @@ class ChatRunEngine:
                 "AI provider returned an invalid response",
                 prepared.params,
                 events=list(self._activity_events),
+            )
+        if prepared.params.get("deepthink_enabled") and callable(activity_callback):
+            activity_callback(
+                {
+                    "type": "status",
+                    "phase": "deepthink_dispatch_completed",
+                    "deepthink_phase": "dispatch_completed",
+                    "message": "DeepThinkモデルパックの実行結果を受け取りました",
+                    "finish_reason": response.get("finish_reason"),
+                    "content_chars": len(self._response_text(response)),
+                    "metadata_keys": sorted(
+                        str(key)
+                        for key in (
+                            response.get("metadata", {}).keys()
+                            if isinstance(response.get("metadata"), dict)
+                            else []
+                        )
+                    ),
+                }
             )
         if not _tool_use_blocks(response) and not self._response_text(response).strip():
             retry_params = self._empty_response_retry_params(prepared)
@@ -3263,6 +3388,7 @@ class ChatRunEngine:
                     metadata["recovered_from_empty_response"] = True
                     retry_response["metadata"] = metadata
                     response = retry_response
+        prepared.params.pop("_is_cancelled", None)
         return response
 
     def _complete_turn_with_compiler(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3286,7 +3412,11 @@ class ChatRunEngine:
             except Exception:
                 pass
         api_family = str(caps.get("api_family") or "")
-        if compiler_for_api_family(api_family) is None or not callable(getattr(provider, "_request_json", None)):
+        if (
+            api_family == "google_native"
+            or compiler_for_api_family(api_family) is None
+            or not callable(getattr(provider, "_request_json", None))
+        ):
             return self._gateway.complete(
                 {
                     "model": prepared.model,
@@ -3323,6 +3453,102 @@ class ChatRunEngine:
         }
         response["metadata"] = metadata
         return response
+
+    def _stream_turn(
+        self,
+        prepared: PreparedChatRun,
+        messages: list[dict[str, Any]],
+    ):
+        request = {
+            "model": prepared.model,
+            "messages": messages,
+            "tools": prepared.provider_tools,
+            "params": prepared.params,
+            "authority_context": prepared.request_context.get("authority", {}),
+        }
+        if prepared.call_handler is not None or not self._use_provider_compiler(
+            prepared,
+            self._gateway,
+        ):
+            return self._gateway.stream(request)
+        provider, model_name = self._gateway.resolve_provider(prepared.model)
+        caps = dict(prepared.provider_capabilities or {})
+        caps.setdefault(
+            "provider_id",
+            str(prepared.model).split("/", 1)[0] if "/" in str(prepared.model) else "",
+        )
+        api_family = str(caps.get("api_family") or "")
+        parser = compiler_for_api_family(api_family)
+        if (
+            api_family == "google_native"
+            or parser is None
+            or not callable(getattr(provider, "_request_stream", None))
+        ):
+            return self._gateway.stream(request)
+        planned = PlannedProviderRequest(
+            ir=legacy_standard_messages_to_ir(messages, prepared.conversation_id),
+            model=model_name,
+            provider_capabilities=caps,
+            provider_tools=prepared.provider_tools,
+            params=prepared.params,
+            metadata=dict(prepared.provider_planning.get("metadata") or {}),
+        )
+        compiled = compile_stream(planned)
+        self._check_authority_for_compiled_provider(
+            prepared,
+            provider=provider,
+            provider_id=str(caps.get("provider_id") or ""),
+            model_name=model_name,
+        )
+        response = provider._request_stream(compiled.path, compiled.body)
+
+        def events():
+            try:
+                if api_family == "anthropic_messages" and callable(
+                    getattr(provider, "_parse_sse", None)
+                ):
+                    payloads = (
+                        (event_type, payload)
+                        for event_type, payload in provider._parse_sse(response)
+                    )
+                else:
+                    payloads = (
+                        ("", payload)
+                        for payload in provider._parse_sse_lines(response)
+                    )
+                stream_state: dict[str, str] = {}
+                for event_type, payload in payloads:
+                    if str(payload).strip() == "[DONE]":
+                        continue
+                    try:
+                        raw = json.loads(payload)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    if event_type and isinstance(raw, dict):
+                        raw.setdefault("type", event_type)
+                    if isinstance(raw, dict) and raw.get("type") == "content_block_start":
+                        block = raw.get("content_block")
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            stream_state = {
+                                "id": str(block.get("id") or raw.get("index") or ""),
+                                "name": str(block.get("name") or ""),
+                            }
+                        else:
+                            stream_state = {}
+                    if isinstance(raw, dict):
+                        raw["_compiler_state"] = stream_state
+                    for ir_event in parser.parse_stream_chunk(raw, compiled):
+                        event = ir_event.to_dict()
+                        metadata = event.pop("metadata", {})
+                        if isinstance(metadata, dict):
+                            event.update(metadata)
+                        yield event
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+
+        return events()
 
     @staticmethod
     def _check_authority_for_compiled_provider(
@@ -3906,6 +4132,12 @@ class ChatRunEngine:
         invoke_context["tool_call_id"] = tool_call_id
         invoke_context["is_cancelled"] = self._is_cancelled
         invoke_context["stream_event_callback"] = self._legacy_stream_event_callback
+        if tool_name == "discussion":
+            invoke_context["conversation_model"] = prepared.model
+            invoke_context["agent_conversation_history"] = list(
+                prepared.standard_messages or []
+            )
+            invoke_context["agent_role"] = str(prepared.system_prompt or "")
         if prepared.call_handler is not None:
             result = prepared.call_handler(
                 "defaults.tool.invoke",
@@ -4027,6 +4259,10 @@ class ChatRunEngine:
                 "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )
+        if prepared.params.get("deepthink_suppressed_reason"):
+            metadata["deepthink_suppressed_reason"] = str(
+                prepared.params["deepthink_suppressed_reason"]
+            )
         if self._progress_state:
             metadata["progress_state"] = dict(self._progress_state)
         if unattached_requested_tools or unselected_requested_tools or unknown_selected_tools:
@@ -4040,6 +4276,50 @@ class ChatRunEngine:
             }
         if isinstance(prepared.request_context, dict) and isinstance(prepared.request_context.get("tool_selection"), dict):
             metadata["tool_selection"] = dict(prepared.request_context["tool_selection"])
+        rumi_metadata = (
+            metadata.get("rumi_process")
+            if isinstance(metadata.get("rumi_process"), dict)
+            else {}
+        )
+        if rumi_metadata.get("deepthink_enabled"):
+            labels = {
+                "deepthink_preflight": ("preflight", "DeepThinkの実行環境を確認しました"),
+                "deepthink_planner": ("planning", "計画を作成しました"),
+                "deepthink_notes": ("evidence", "根拠と論点を整理しました"),
+                "deepthink_writer": ("drafting", "セクションを作成しました"),
+                "deepthink_synthesizing": ("synthesizing", "回答を統合しました"),
+                "deepthink_reviewing": ("reviewing", "回答をレビューしました"),
+                "deepthink_revising": ("revising", "レビューを反映しました"),
+            }
+            for index, event in enumerate(rumi_metadata.get("events") or []):
+                if not isinstance(event, dict):
+                    continue
+                phase = str(event.get("phase") or "")
+                mapped = labels.get(phase)
+                if mapped is None:
+                    continue
+                event_metadata = (
+                    event.get("metadata")
+                    if isinstance(event.get("metadata"), dict)
+                    else {}
+                )
+                activity = {
+                    "type": "status",
+                    "phase": "deepthink_{}".format(mapped[0]),
+                    "deepthink_phase": mapped[0],
+                    "presentation_template_id": "defaultspack.deepthink.v1",
+                    "message": mapped[1],
+                    "event_id": "deepthink:{}:{}".format(
+                        rumi_metadata.get("trace_id") or prepared.request_id,
+                        index,
+                    ),
+                    "trace_id": rumi_metadata.get("trace_id"),
+                    "model": event.get("model"),
+                    "review_round": event_metadata.get("review_round"),
+                    "approved": event_metadata.get("approved"),
+                }
+                if activity not in self._activity_events:
+                    self._activity_events.append(activity)
         trace_metadata = self._write_provider_trace(prepared, finalized)
         if trace_metadata:
             metadata["provider_trace"] = trace_metadata
@@ -4065,12 +4345,19 @@ class ChatRunEngine:
         return finalized
 
     @staticmethod
-    def _use_provider_compiler(prepared: PreparedChatRun) -> bool:
+    def _use_provider_compiler(
+        prepared: PreparedChatRun,
+        gateway: Any | None = None,
+    ) -> bool:
+        if prepared.params.get("deepthink_enabled"):
+            return False
         if str(os.environ.get("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", "") or "").strip().lower() in {"1", "true", "yes", "on"}:
             return False
-        if str(os.environ.get("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", "") or "").strip().lower() in {"1", "true", "yes", "on"}:
-            return True
-        return False
+        if gateway is not None and not callable(
+            getattr(gateway, "resolve_provider", None)
+        ):
+            return False
+        return True
 
     def _write_provider_trace(self, prepared: PreparedChatRun, response: dict[str, Any]) -> dict[str, Any] | None:
         try:
@@ -4166,11 +4453,19 @@ class ChatRunEngine:
 
     def _provider_supports_stream_tool_calls(self, model: str) -> bool:
         try:
-            provider, _ = self._gateway.resolve_provider(model)
+            self._gateway.resolve_provider(model)
+            capabilities = get_model_provider_capabilities(model)
         except Exception:
             return False
-        name = provider.__class__.__name__.lower()
-        return name in {"openaiprovider", "googleprovider"}
+        api_surface = (
+            capabilities.get("api_surface")
+            if isinstance(capabilities.get("api_surface"), dict)
+            else {}
+        )
+        return bool(
+            api_surface.get("supports_stream")
+            and api_surface.get("supports_tool_call_shape")
+        )
 
     def _log_inspector(self, prepared: PreparedChatRun, response: dict[str, Any]) -> None:
         try:
@@ -4231,6 +4526,7 @@ class ChatRunEngine:
         *,
         allow_retry: bool,
         authority_context: dict[str, Any] | None = None,
+        gateway: Any | None = None,
     ) -> dict[str, Any]:
         attempts = _ai_retry_attempts(params) if allow_retry else 1
         last_error = "AI request failed"
@@ -4252,7 +4548,8 @@ class ChatRunEngine:
                     if isinstance(response, dict) and response.get("status") == "ok":
                         return response.get("data", {})
                     return response
-                return self._gateway.complete(
+                effective_gateway = gateway or self._gateway
+                return effective_gateway.complete(
                     {
                         "model": model,
                         "messages": messages,
@@ -4503,6 +4800,10 @@ class ChatRunEngine:
             metadata.setdefault("attached_tools", list(prepared.tools_called))
             metadata["thinking_level"] = prepared.params.get("thinking_level")
             metadata["deepthink_enabled"] = bool(prepared.params.get("deepthink_enabled"))
+            if prepared.params.get("deepthink_suppressed_reason"):
+                metadata["deepthink_suppressed_reason"] = str(
+                    prepared.params["deepthink_suppressed_reason"]
+                )
             response["metadata"] = metadata
             return response
         return None

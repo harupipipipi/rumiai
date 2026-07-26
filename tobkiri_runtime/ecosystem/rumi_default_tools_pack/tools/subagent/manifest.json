@@ -16,7 +16,12 @@
           "task": {"type": "string"},
           "title": {"type": "string"},
           "model": {"type": "string"},
-          "agent_id": {"type": "string"}
+          "agent_id": {"type": "string"},
+          "deepthink": {
+            "type": "boolean",
+            "default": false,
+            "description": "Request DeepThink for this delegated agent. It is enabled only when the user allows delegated DeepThink in Settings."
+          }
         },
         "required": ["task"]
       }

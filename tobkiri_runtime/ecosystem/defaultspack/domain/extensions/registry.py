@@ -100,6 +100,9 @@ class ExtensionRegistry:
     def activities(self) -> "ActivityExtensionRegistry":
         return ActivityExtensionRegistry(self)
 
+    def deepthink(self) -> "DeepThinkExtensionRegistry":
+        return DeepThinkExtensionRegistry(self)
+
     def chat_modes(self) -> "ChatModeRegistry":
         return ChatModeRegistry(self)
 
@@ -330,6 +333,16 @@ class ActivityExtensionRegistry:
         """Return one Activity manifest by stable identifier."""
 
         return self._registry.get("activity", activity_id)
+
+
+class DeepThinkExtensionRegistry:
+    """Profile-selected DeepThink phases, perspectives, and discovery defaults."""
+
+    def __init__(self, registry: ExtensionRegistry) -> None:
+        self._registry = registry
+
+    def list(self, *, enabled_only: bool = True) -> List[Dict[str, Any]]:
+        return self._registry.list("deepthink", enabled_only=enabled_only)
 
 
 class ChatModeRegistry:

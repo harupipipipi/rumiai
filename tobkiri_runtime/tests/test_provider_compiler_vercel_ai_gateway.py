@@ -56,10 +56,17 @@ def test_vercel_ai_gateway_provider_catalog_and_credentials(monkeypatch):
     monkeypatch.delenv("VERCEL_AI_GATEWAY_API_KEY", raising=False)
 
     provider = get_provider_catalog_map()["vercel-ai-gateway"]
-    models = {item["id"]: item for item in get_all_known_models("vercel-ai-gateway")}
+    models = get_all_known_models("vercel-ai-gateway")
     caps = ProviderCapabilityRegistry().for_model(
         "vercel-ai-gateway/google/gemma-4-31b-it",
-        models["vercel-ai-gateway/google/gemma-4-31b-it"],
+        {
+            "provider_id": "vercel-ai-gateway",
+            "capabilities": {
+                "image_input": True,
+                "thinking": True,
+                "reasoning": True,
+            },
+        },
     )
 
     assert provider["metadata"]["adapter"] == "openai_compatible"
@@ -68,11 +75,7 @@ def test_vercel_ai_gateway_provider_catalog_and_credentials(monkeypatch):
     assert provider["availability"]["supports_invoke"] is True
     assert provider["availability"]["configured"] is False
     assert provider_secret_keys("vercel-ai-gateway") == ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
-    assert {
-        "vercel-ai-gateway/google/gemma-4-31b-it",
-        "vercel-ai-gateway/google/gemma-4-26b-a4b-it",
-    }.issubset(models)
-    assert models["vercel-ai-gateway/google/gemma-4-31b-it"]["context_window"] == 262144
+    assert models == []
     assert caps.api_family == "vercel_ai_gateway"
     assert caps.supports_vision is True
     assert caps.supports_reasoning is True

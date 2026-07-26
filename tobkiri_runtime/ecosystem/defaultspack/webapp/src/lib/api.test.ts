@@ -1237,6 +1237,33 @@ test("sendMessage serializes attachments and selected tools", async () => {
   });
 });
 
+test("sendMessage marks DeepThink as an explicit slash-command mode", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m-deepthink",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.sendMessage("c1", "deep task", { deepthink_enabled: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBody?.params?.deepthink_enabled, true);
+  assert.equal(requestBody?.params?.deepthink_activation_source, "slash_command");
+});
+
 test("sendMessage preserves an empty selected tools filter", async () => {
   let requestBody: any = null;
   const originalFetch = globalThis.fetch;

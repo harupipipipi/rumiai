@@ -3,21 +3,31 @@
 import sys
 import os
 import copy
+import hashlib
 import importlib.util
+import json
 import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from blocks._common import ok, error, gen_id, timestamp
+from blocks._common import error, ok
 
-from .context import FlowContext
+from .context import FlowContext, FlowControlError, FlowPaused
 from .result import FlowResult
 from .modifier import ModifierLoader
+from .run_store import FlowRunStore
 
 
 _TEMPLATE_RE = re.compile(r"^\{\{\s*(.*?)\s*\}\}$")
 _SIMPLE_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_:-]+)*$")
-_SUPPORTED_DECLARATIVE_STEP_TYPES = {"function", "subflow", "branch", "parallel"}
+_SUPPORTED_DECLARATIVE_STEP_TYPES = {
+    "function",
+    "subflow",
+    "branch",
+    "parallel",
+    "loop",
+}
 _FLOW_STACK_LIMIT = 10
+_FLOW_LOOP_HARD_LIMIT = 100
 
 
 class FlowEngine:
@@ -189,7 +199,7 @@ class FlowEngine:
 
         The runtime still supports legacy handler flows, but declarative flows
         are intentionally strict: orchestration steps may be function/subflow/
-        branch/parallel only, and references must point to flow input or earlier
+        branch/parallel/loop only, and references must point to flow input or earlier
         step outputs.
         """
         errors = []
@@ -343,6 +353,56 @@ class FlowEngine:
                             child_path + ".steps",
                         )
                     )
+            elif step_type == "loop":
+                max_iterations = step.get("max_iterations")
+                if not isinstance(max_iterations, int) or isinstance(max_iterations, bool):
+                    errors.append(
+                        "step '{}' max_iterations must be an integer".format(label)
+                    )
+                elif not 1 <= max_iterations <= _FLOW_LOOP_HARD_LIMIT:
+                    errors.append(
+                        "step '{}' max_iterations must be between 1 and {}".format(
+                            label,
+                            _FLOW_LOOP_HARD_LIMIT,
+                        )
+                    )
+                if "until" not in step:
+                    errors.append("step '{}' loop must define until".format(label))
+                loop_known = set(known_roots)
+                loop_known.add("loop")
+                errors.extend(
+                    self._validate_steps(
+                        step.get("steps", []),
+                        loop_known,
+                        seen_ids,
+                        label + ".steps",
+                    )
+                )
+                known_roots.update(loop_known - {"loop"})
+                errors.extend(
+                    self._validate_references_in_value(
+                        step.get("until"),
+                        loop_known,
+                        label + ".until",
+                    )
+                )
+                errors.extend(
+                    self._validate_references_in_value(
+                        step.get("dedupe_key"),
+                        loop_known,
+                        label + ".dedupe_key",
+                    )
+                )
+                on_exhausted = str(step.get("on_exhausted") or "error")
+                if on_exhausted not in {"error", "return_last", "pause"}:
+                    errors.append(
+                        "step '{}' has unsupported on_exhausted '{}'".format(
+                            label,
+                            on_exhausted,
+                        )
+                    )
+                if not isinstance(step.get("steps"), list) or not step.get("steps"):
+                    errors.append("step '{}' loop must define steps".format(label))
             if output_name:
                 known_roots.add(output_name)
             elif isinstance(step_id, str) and step_id.strip():
@@ -460,9 +520,18 @@ class FlowEngine:
         return bool(value)
 
     def _invoke_function_step(self, function_name, step_input, flow_context):
+        parent_context = flow_context._parent_context
+        if isinstance(parent_context, dict):
+            callback = parent_context.get("_flow_function_invoker")
+            if callable(callback):
+                return callback(
+                    function_name,
+                    step_input if isinstance(step_input, dict) else {"value": step_input},
+                    flow_context,
+                )
         from domain.function_runtime.bridge import invoke_function
 
-        context = flow_context._parent_context if isinstance(flow_context._parent_context, dict) else {}
+        context = parent_context if isinstance(parent_context, dict) else {}
         return invoke_function(
             function_name,
             step_input if isinstance(step_input, dict) else {"value": step_input},
@@ -585,6 +654,97 @@ class FlowEngine:
             combined[branch_id] = branch_outputs
         return {"status": "ok", "data": combined}
 
+    @staticmethod
+    def _dedupe_fingerprint(value):
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _execute_loop_step(self, flow_id, step, values, outputs, flow_context):
+        max_iterations = int(step["max_iterations"])
+        seen = set()
+        body_outputs = {}
+        stop_reason = "max_iterations"
+        resume_record = flow_context.get_variable("_resume_record", {})
+        resume_iteration = (
+            int(resume_record.get("iteration") or 0)
+            if str(resume_record.get("phase") or "") == str(step["id"])
+            else 0
+        )
+        for iteration in range(resume_iteration + 1, max_iterations + 1):
+            flow_context.check_control()
+            values["loop"] = {
+                "iteration": iteration,
+                "index": iteration - 1,
+                "max_iterations": max_iterations,
+                "completed": False,
+            }
+            flow_context.set_variable("_loop_iteration", iteration)
+            body_outputs = {}
+            result = self._execute_steps(
+                flow_id,
+                step.get("steps", []),
+                values,
+                body_outputs,
+                flow_context,
+                checkpoint=False,
+            )
+            if self._result_is_error(result):
+                return result
+            if step.get("checkpoint_each_iteration", True):
+                flow_context.checkpoint(
+                    phase=step["id"],
+                    step_id=step["id"],
+                    values=values,
+                    outputs=outputs,
+                    iteration=iteration,
+                    usage=(
+                        result.get("usage")
+                        if isinstance(result.get("usage"), dict)
+                        else None
+                    ),
+                )
+                flow_context.check_control()
+            if self._condition_matches(step.get("until"), values):
+                stop_reason = "until"
+                values["loop"]["completed"] = True
+                break
+            dedupe_value = self._resolve_value(
+                step.get("dedupe_key", body_outputs),
+                values,
+            )
+            fingerprint = self._dedupe_fingerprint(dedupe_value)
+            if fingerprint in seen:
+                stop_reason = "no_progress"
+                break
+            seen.add(fingerprint)
+        completed = stop_reason == "until"
+        data = {
+            "completed": completed,
+            "exhausted": not completed,
+            "iterations": int(values.get("loop", {}).get("iteration") or 0),
+            "reason": stop_reason,
+            "outputs": body_outputs,
+        }
+        flow_context.set_variable("_loop_iteration", 0)
+        if completed or step.get("on_exhausted") == "return_last":
+            return {"status": "ok", "data": data}
+        if step.get("on_exhausted") == "pause":
+            raise FlowPaused("loop paused after {}".format(stop_reason))
+        return error(
+            "loop '{}' stopped without satisfying its condition: {}".format(
+                step["id"],
+                stop_reason,
+            ),
+            "FLOW_LOOP_EXHAUSTED",
+            details=data,
+        )
+
     def _execute_step(self, flow_id, step, values, outputs, flow_context):
         step_type = step.get("type")
         if step_type == "function":
@@ -603,20 +763,68 @@ class FlowEngine:
                 {"flow_id": flow_id, "step_id": step["id"], "type": "parallel"},
             )
             return self._execute_parallel_step(flow_id, step, values, outputs, flow_context)
+        if step_type == "loop":
+            flow_context.emit_event(
+                "flow.step.started",
+                {"flow_id": flow_id, "step_id": step["id"], "type": "loop"},
+            )
+            return self._execute_loop_step(
+                flow_id,
+                step,
+                values,
+                outputs,
+                flow_context,
+            )
         return error("unsupported step type '{}'".format(step_type), "FLOW_UNSUPPORTED_STEP")
 
-    def _execute_steps(self, flow_id, steps, values, outputs, flow_context):
+    def _execute_steps(
+        self,
+        flow_id,
+        steps,
+        values,
+        outputs,
+        flow_context,
+        *,
+        checkpoint=True,
+    ):
+        accumulated_usage: dict[str, float] = {}
         for step in steps:
             step_id = step["id"]
+            completed_steps = flow_context.get_variable("_completed_steps", set())
+            if step_id in completed_steps:
+                continue
+            flow_context.check_control()
             if not self._condition_matches(step.get("when"), values):
                 flow_context.emit_event(
                     "flow.step.skipped",
                     {"flow_id": flow_id, "step_id": step_id},
                 )
                 continue
-            result = self._execute_step(flow_id, step, values, outputs, flow_context)
+            loop_iteration = int(
+                flow_context.get_variable("_loop_iteration", 0) or 0
+            )
+            receipt_key = "{}:{}:{}".format(
+                flow_id,
+                step_id,
+                loop_iteration,
+            )
+            result = flow_context.receipt(receipt_key)
+            if result is None:
+                result = self._execute_step(flow_id, step, values, outputs, flow_context)
+                if step.get("exactly_once", step.get("type") == "function"):
+                    flow_context.record_receipt(receipt_key, result)
             if not isinstance(result, dict):
                 result = {"status": "ok", "data": result}
+            usage = result.get("usage")
+            if isinstance(usage, dict):
+                for key, raw_value in usage.items():
+                    if isinstance(raw_value, (int, float)) and not isinstance(
+                        raw_value,
+                        bool,
+                    ):
+                        accumulated_usage[key] = (
+                            accumulated_usage.get(key, 0) + raw_value
+                        )
             if result.get("status") == "error":
                 flow_context.emit_event(
                     "flow.step.error",
@@ -639,7 +847,22 @@ class FlowEngine:
                 "flow.step.completed",
                 {"flow_id": flow_id, "step_id": step_id},
             )
-        return {"status": "ok", "data": outputs}
+            if checkpoint:
+                flow_context.checkpoint(
+                    phase=str(step.get("phase") or step_id),
+                    step_id=step_id,
+                    values=values,
+                    outputs=outputs,
+                    usage=(
+                        result.get("usage")
+                        if isinstance(result.get("usage"), dict)
+                        else None
+                    ),
+                )
+        response = {"status": "ok", "data": outputs}
+        if accumulated_usage:
+            response["usage"] = accumulated_usage
+        return response
 
     def _declared_outputs(self, flow_def, values, outputs):
         declared_outputs = flow_def.get("outputs")
@@ -705,11 +928,18 @@ class FlowEngine:
                 metadata={"flow_id": flow_id, "execution_id": flow_context.execution_id},
             )
 
-        values = {
-            "input": trigger_input if isinstance(trigger_input, dict) else {},
-            "context": flow_context._parent_context if isinstance(flow_context._parent_context, dict) else {},
-        }
-        outputs = {}
+        resume_record = flow_context.get_variable("_resume_record", {})
+        values = copy.deepcopy(resume_record.get("values") or {})
+        values.setdefault(
+            "input",
+            trigger_input if isinstance(trigger_input, dict) else {},
+        )
+        values["context"] = (
+            flow_context._parent_context
+            if isinstance(flow_context._parent_context, dict)
+            else {}
+        )
+        outputs = copy.deepcopy(resume_record.get("outputs") or {})
         steps = flow_def.get("steps", [])
         step_result = self._execute_steps(flow_id, steps, values, outputs, flow_context)
         if self._result_is_error(step_result):
@@ -773,13 +1003,87 @@ class FlowEngine:
             if not isinstance(session, dict):
                 session = {}
 
+        durable = bool(
+            flow_def.get("_declarative")
+            and flow_def.get("durable", False)
+            and not (
+                isinstance(parent_ctx, dict)
+                and parent_ctx.get("_disable_flow_durability")
+            )
+        )
+        run_store = None
+        run_record = {}
+        execution_id = None
+        if durable:
+            store_path = (
+                parent_ctx.get("_flow_run_store_path")
+                if isinstance(parent_ctx, dict)
+                else None
+            )
+            run_store = FlowRunStore(store_path)
+            requested_run_id = str(
+                parent_ctx.get("_flow_run_id") or ""
+            ).strip() if isinstance(parent_ctx, dict) else ""
+            if requested_run_id:
+                run_record = run_store.get(requested_run_id) or {}
+                if not run_record:
+                    return FlowResult(
+                        status="error",
+                        output=error(
+                            "Flow run '{}' not found".format(requested_run_id),
+                            "FLOW_RUN_NOT_FOUND",
+                        ),
+                        metadata={"flow_id": flow_id, "execution_id": requested_run_id},
+                    )
+                if str(run_record.get("flow_id") or "") != flow_id:
+                    return FlowResult(
+                        status="error",
+                        output=error(
+                            "Flow run belongs to a different flow",
+                            "FLOW_RUN_MISMATCH",
+                        ),
+                        metadata={"flow_id": flow_id, "execution_id": requested_run_id},
+                    )
+                if str(run_record.get("status") or "") != "running":
+                    run_record = run_store.resume(requested_run_id)
+                execution_id = requested_run_id
+            else:
+                run_record = run_store.create(
+                    flow_id=flow_id,
+                    trigger_input=(
+                        trigger_input if isinstance(trigger_input, dict) else {}
+                    ),
+                    budgets=(
+                        parent_ctx.get("_flow_budgets")
+                        if isinstance(parent_ctx, dict)
+                        and isinstance(parent_ctx.get("_flow_budgets"), dict)
+                        else flow_def.get("budgets")
+                    ),
+                    metadata={
+                        "source": (
+                            parent_ctx.get("source")
+                            if isinstance(parent_ctx, dict)
+                            else ""
+                        ),
+                    },
+                )
+                execution_id = run_record["run_id"]
+
         flow_context = FlowContext(
             flow_id=flow_id,
             trigger_input=trigger_input,
             flow_config=flow_config,
             session=session,
             parent_context=parent_ctx,
+            execution_id=execution_id,
+            run_store=run_store,
         )
+        if run_record:
+            flow_context.set_variable("_resume_record", run_record)
+            flow_context.set_variable(
+                "_completed_steps",
+                set(run_record.get("completed_steps") or []),
+            )
 
         modifiers = self._modifier_loader.load_modifiers(flow_id)
         self._modifier_loader.apply_pre_hooks(modifiers, flow_context)
@@ -797,18 +1101,67 @@ class FlowEngine:
         )
 
         if flow_def.get("_declarative") and "handler" not in flow_def:
-            flow_result = self._execute_declarative(
-                flow_id,
-                flow_def,
-                trigger_input,
-                flow_context,
-            )
+            try:
+                flow_result = self._execute_declarative(
+                    flow_id,
+                    flow_def,
+                    trigger_input,
+                    flow_context,
+                )
+            except FlowControlError as exc:
+                if run_store is not None:
+                    run_store.finish(
+                        flow_context.execution_id,
+                        status=exc.status,
+                        stop_reason=exc.code,
+                    )
+                return FlowResult(
+                    status=exc.status,
+                    output=error(str(exc), exc.code),
+                    metadata={
+                        "flow_id": flow_id,
+                        "execution_id": flow_context.execution_id,
+                        "events": flow_context.get_events(),
+                    },
+                )
+            except Exception as exc:
+                if run_store is not None:
+                    run_store.finish(
+                        flow_context.execution_id,
+                        status="failed",
+                        stop_reason=type(exc).__name__,
+                    )
+                return FlowResult(
+                    status="error",
+                    output=error(str(exc), "FLOW_EXECUTION_FAILED"),
+                    metadata={
+                        "flow_id": flow_id,
+                        "execution_id": flow_context.execution_id,
+                        "exception_type": type(exc).__name__,
+                        "events": flow_context.get_events(),
+                    },
+                )
             if flow_result.is_success():
                 self._modifier_loader.apply_post_hooks(modifiers, flow_context, flow_result)
                 flow_context.emit_event(
                     "flow.completed",
                     {"flow_id": flow_id, "status": flow_result.status},
                 )
+                if run_store is not None:
+                    run_store.finish(
+                        flow_context.execution_id,
+                        status="completed",
+                        result=flow_result.output,
+                    )
+            elif run_store is not None:
+                run_store.finish(
+                    flow_context.execution_id,
+                    status="failed",
+                    stop_reason="flow_error",
+                    result=flow_result.output,
+                )
+            flow_result.metadata["events"] = flow_context.get_events()
+            flow_result.metadata["durable"] = durable
             return flow_result
 
         handler = self._get_handler(flow_id)
@@ -889,6 +1242,58 @@ class FlowEngine:
                 }
             )
         return result
+
+    def get_run(self, run_id, *, store_path=None):
+        """Read a durable run record for status/audit UIs."""
+
+        return FlowRunStore(store_path).get(run_id)
+
+    def cancel_run(self, run_id, *, reason="user_cancel", store_path=None):
+        """Request cancellation at the next phase boundary."""
+
+        return FlowRunStore(store_path).request_cancel(run_id, reason=reason)
+
+    def pause_run(self, run_id, *, reason="user_pause", store_path=None):
+        """Request a pause at the next phase boundary."""
+
+        return FlowRunStore(store_path).request_pause(run_id, reason=reason)
+
+    def resume_run(self, run_id, *, context=None, store_path=None):
+        """Resume a paused/failed run from its latest durable checkpoint."""
+
+        store = FlowRunStore(store_path)
+        record = store.resume(run_id)
+        next_context = dict(context or {})
+        next_context["_flow_run_id"] = run_id
+        if store_path is not None:
+            next_context["_flow_run_store_path"] = str(store_path)
+        return self.execute(
+            str(record.get("flow_id") or ""),
+            dict(record.get("trigger_input") or {}),
+            next_context,
+        )
+
+    def retry_run_from_phase(
+        self,
+        run_id,
+        phase,
+        *,
+        context=None,
+        store_path=None,
+    ):
+        """Retry a durable run from a named phase checkpoint."""
+
+        store = FlowRunStore(store_path)
+        record = store.prepare_retry(run_id, phase)
+        next_context = dict(context or {})
+        next_context["_flow_run_id"] = run_id
+        if store_path is not None:
+            next_context["_flow_run_store_path"] = str(store_path)
+        return self.execute(
+            str(record.get("flow_id") or ""),
+            dict(record.get("trigger_input") or {}),
+            next_context,
+        )
 
     def get_flow(self, flow_id):
         """フロー定義を取得する

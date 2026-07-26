@@ -1,9 +1,32 @@
-"""FlowContext — フロー実行コンテキスト"""
+"""Flow execution context with durable checkpoints and public events."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from blocks._common import ok, error, gen_id, timestamp
+from blocks._common import error, gen_id, timestamp
+
+
+class FlowControlError(RuntimeError):
+    """Base class for a deliberate durable-flow stop."""
+
+    status = "failed"
+    code = "FLOW_STOPPED"
+
+
+class FlowCancelled(FlowControlError):
+    status = "cancelled"
+    code = "FLOW_CANCELLED"
+
+
+class FlowPaused(FlowControlError):
+    status = "paused"
+    code = "FLOW_PAUSED"
+
+
+class FlowBudgetExceeded(FlowControlError):
+    status = "failed"
+    code = "FLOW_BUDGET_EXCEEDED"
 
 
 class FlowContext:
@@ -13,7 +36,17 @@ class FlowContext:
     変数の保存・取得、イベント発行などの機能を提供する。
     """
 
-    def __init__(self, flow_id, trigger_input, flow_config, session=None, parent_context=None):
+    def __init__(
+        self,
+        flow_id,
+        trigger_input,
+        flow_config,
+        session=None,
+        parent_context=None,
+        *,
+        execution_id=None,
+        run_store=None,
+    ):
         self.flow_id = flow_id
         self.trigger_input = trigger_input
         self.flow_config = flow_config
@@ -21,7 +54,8 @@ class FlowContext:
         self._parent_context = parent_context if parent_context is not None else {}
         self._variables = {}
         self._events = []
-        self._execution_id = gen_id()
+        self._execution_id = str(execution_id or gen_id())
+        self._run_store = run_store
         self._created_at = timestamp()
 
     def call_handler(self, handler_name, params):
@@ -63,6 +97,8 @@ class FlowContext:
             "timestamp": timestamp(),
         }
         self._events.append(event_record)
+        if self._run_store is not None:
+            self._run_store.append_event(self._execution_id, event_record)
         if isinstance(self._parent_context, dict) and "emit_event" in self._parent_context:
             callback = self._parent_context["emit_event"]
             if callable(callback):
@@ -117,6 +153,70 @@ class FlowContext:
     def get_events(self):
         """記録されたイベント一覧を返す"""
         return list(self._events)
+
+    def check_control(self):
+        """Stop at a safe boundary when durable control or budgets require it."""
+
+        if isinstance(self._parent_context, dict):
+            cancelled = self._parent_context.get("is_cancelled")
+            if callable(cancelled) and cancelled():
+                if self._run_store is not None:
+                    self._run_store.request_cancel(
+                        self._execution_id,
+                        reason="user_cancel",
+                    )
+                raise FlowCancelled("flow run was cancelled by the user")
+        if self._run_store is None:
+            return
+        state = self._run_store.control_state(self._execution_id)
+        if state.get("cancel_requested"):
+            raise FlowCancelled("flow run was cancelled")
+        if state.get("pause_requested"):
+            raise FlowPaused("flow run was paused")
+        if state.get("timed_out"):
+            raise FlowBudgetExceeded("flow timeout exceeded")
+        if state.get("token_budget_exhausted"):
+            raise FlowBudgetExceeded("flow token budget exceeded")
+        if state.get("cost_budget_exhausted"):
+            raise FlowBudgetExceeded("flow cost budget exceeded")
+
+    def checkpoint(
+        self,
+        *,
+        phase,
+        step_id,
+        values,
+        outputs,
+        iteration=0,
+        usage=None,
+    ):
+        """Persist a resumable checkpoint at a phase boundary."""
+
+        if self._run_store is None:
+            return None
+        return self._run_store.checkpoint(
+            self._execution_id,
+            phase=phase,
+            step_id=step_id,
+            values=values,
+            outputs=outputs,
+            iteration=iteration,
+            usage=usage,
+        )
+
+    def receipt(self, receipt_key):
+        if self._run_store is None:
+            return None
+        return self._run_store.receipt(self._execution_id, receipt_key)
+
+    def record_receipt(self, receipt_key, result):
+        if self._run_store is None:
+            return None
+        return self._run_store.record_receipt(
+            self._execution_id,
+            receipt_key=receipt_key,
+            result=result,
+        )
 
     @property
     def execution_id(self):

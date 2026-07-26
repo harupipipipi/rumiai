@@ -8,5 +8,5 @@
   "adapter": "python_entrypoint",
   "entrypoint": "domain.ai_client.providers.genspark_provider:GensparkProvider",
   "api_key_env": "GENSPARK_API_KEY",
-  "credential_required": false
+  "credential_required": true
 }

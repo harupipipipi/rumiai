@@ -35,6 +35,10 @@ DEFAULT_CATEGORY_SPECS: Dict[str, CategorySpec] = {
         category_id="activity",
         manifest_glob="activities/*/manifest.json",
     ),
+    "deepthink": CategorySpec(
+        category_id="deepthink",
+        manifest_glob="deepthink/*/manifest.json",
+    ),
     "chat_mode": CategorySpec(
         category_id="chat_mode",
         manifest_glob="chat_modes/*/manifest.json",
