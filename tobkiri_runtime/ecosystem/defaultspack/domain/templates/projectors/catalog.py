@@ -277,8 +277,14 @@ def _component_binding(template: RumiTemplate, piece: TemplatePiece) -> dict[str
     item = _metadata_item(template, piece, default_id=piece.id)
     item.setdefault("part_id", piece.data.get("part_id") or piece.data.get("part") or piece.id)
     item.setdefault(
-        "component", piece.data.get("component") or piece.data.get("renderer") or piece.id
+        "component",
+        piece.data.get("component_id")
+        or piece.data.get("component")
+        or piece.data.get("renderer")
+        or piece.id,
     )
+    item.setdefault("component_id", item["component"])
+    item.setdefault("api_version", "rumi.frontend.component.v1")
     item.setdefault("renderer", piece.data.get("renderer") or item.get("component"))
     if "field_types" in piece.data and isinstance(piece.data["field_types"], list):
         item["field_types"] = [

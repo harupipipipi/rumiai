@@ -37,6 +37,7 @@ import {
   type SettingsFieldRendererProps,
 } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import { defaultFrontendComponentRegistry } from "./components/builtinFrontendComponents";
 import { ModelRoutingOverview } from "./settings/ModelRoutingOverview";
 import { ProfileSettingsPanel } from "./settings/ProfileSettingsPanel";
 import { buildSettingsProfileWorkspace } from "./settings/settingsProfileModel";
@@ -4165,6 +4166,7 @@ export function SettingsModalRenderer({
       )}
       <SettingsFieldRendererHost
         registry={settingsModalFieldRendererRegistry}
+        frontendComponentRegistry={defaultFrontendComponentRegistry}
         componentBindings={catalog?.component_bindings ?? []}
         fallbackRenderer={SettingsFieldFallback}
         sectionId={field.sourceSectionId}

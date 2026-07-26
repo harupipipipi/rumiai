@@ -2,6 +2,10 @@ import { type ComponentType, type ReactElement } from "react";
 
 import type { SettingChangeHandler } from "../types";
 import {
+  FrontendComponentHost,
+  type FrontendComponentRegistry,
+} from "../components/frontendComponentRegistry";
+import {
   settingsFieldRendererLookupKeys,
   type TemplateComponentBinding,
   type TemplateSettingsField,
@@ -111,17 +115,56 @@ function legacyFallbackProps(props: SettingsFieldRendererProps): SettingsFieldRe
 
 export function SettingsFieldRendererHost({
   registry,
+  frontendComponentRegistry,
   componentBindings,
   fallbackRenderer: FallbackRenderer,
   ...props
 }: SettingsFieldRendererProps & {
   registry: SettingsFieldRendererRegistry;
+  frontendComponentRegistry?: FrontendComponentRegistry;
   componentBindings?: TemplateComponentBinding[];
   fallbackRenderer: SettingsFieldRenderer;
 }): ReactElement {
   const match = registry.resolve(props.field, componentBindings);
-  if (!match) return <FallbackRenderer {...legacyFallbackProps(props)} />;
+  if (!match) {
+    const binding = resolveGenericComponentBinding(props.field, componentBindings ?? []);
+    if (frontendComponentRegistry && binding) {
+      return (
+        <FrontendComponentHost
+          registry={frontendComponentRegistry}
+          request={{
+            componentId: binding.component_id ?? binding.component,
+            apiVersion: binding.api_version,
+            slot: binding.slot ?? "settings_field",
+            props: binding.props,
+            data: binding.data,
+            actions: binding.actions,
+            dataSourceIds: binding.data_source_ids,
+            fallbackComponentId: binding.fallback_component_id,
+            templateId: binding.template_id,
+            templateSourcePackId: binding.source_pack_id,
+            templateTrust: binding.trust_level,
+          }}
+        />
+      );
+    }
+    return <FallbackRenderer {...legacyFallbackProps(props)} />;
+  }
 
   const Renderer = match.entry.render;
   return <Renderer {...props} />;
+}
+
+function resolveGenericComponentBinding(
+  field: TemplateSettingsField,
+  componentBindings: TemplateComponentBinding[],
+): TemplateComponentBinding | null {
+  const lookupKeys = settingsFieldRendererLookupKeys(field, componentBindings);
+  return (
+    componentBindings.find(
+      (binding) =>
+        lookupKeys.includes(binding.part_id) ||
+        lookupKeys.includes(binding.component_id ?? binding.component),
+    ) ?? null
+  );
 }
