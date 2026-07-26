@@ -72,6 +72,39 @@ def test_registry_and_model_service_updates_share_one_transaction(
     assert saved[REVISION_KEY] == 2
 
 
+def test_attachment_secret_patterns_have_a_user_facing_setting(tmp_path: Path) -> None:
+    registry = FrontendRegistry(pack_root=tmp_path)
+    sections = registry._settings_sections([], [], template_catalog={}, lightweight=True)
+    privacy = next(section for section in sections if section["id"] == "privacy_security")
+    field = next(
+        field for field in privacy["fields"] if field["id"] == "attachment_secret_patterns"
+    )
+
+    assert field["type"] == "textarea"
+    assert field["default"] == ""
+    assert registry._default_settings()["privacy_security"]["attachment_secret_patterns"] == ""
+
+
+def test_attachment_secret_patterns_are_bounded_deduplicated_literals(tmp_path: Path) -> None:
+    registry = FrontendRegistry(pack_root=tmp_path)
+    values = registry._default_settings()
+    values["privacy_security"]["attachment_secret_patterns"] = [
+        "  Customer-Marker  ",
+        "customer-marker",
+        "xy",
+        "x" * 129,
+        *[f"pattern-{index}" for index in range(40)],
+    ]
+
+    refreshed = registry._refresh_derived_settings(values)
+    patterns = refreshed["privacy_security"]["attachment_secret_patterns"].splitlines()
+
+    assert patterns[0] == "Customer-Marker"
+    assert len(patterns) == 32
+    assert "xy" not in patterns
+    assert "x" * 129 not in patterns
+
+
 def test_concurrent_process_updates_preserve_disjoint_keys(tmp_path: Path) -> None:
     path = tmp_path / "frontend_settings.json"
     context = multiprocessing.get_context("spawn")

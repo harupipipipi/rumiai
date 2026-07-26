@@ -1004,6 +1004,24 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "privacy_security",
+                "label": "Privacy & Security",
+                "description": "Control attachment data-loss prevention before content leaves the device.",
+                "fields": [
+                    {
+                        "id": "attachment_secret_patterns",
+                        "label": "Attachment secret patterns",
+                        "type": "textarea",
+                        "default": "",
+                        "help": (
+                            "One literal value per line (maximum 32, 3–128 characters). "
+                            "Matching is case-insensitive; detected values are never copied "
+                            "into review metadata or diagnostics."
+                        ),
+                    },
+                ],
+            },
+            {
                 "id": "preview",
                 "label": "Preview",
                 "description": "右 preview pane と activity feed の挙動。",
@@ -2937,6 +2955,7 @@ class FrontendRegistry:
                 "max_items_per_day": 3,
             },
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "placeholder"},
+            "privacy_security": {"attachment_secret_patterns": ""},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
             },
@@ -3550,6 +3569,29 @@ class FrontendRegistry:
             general.get("spotlight_shortcut_text_input"),
             True,
         )
+
+        privacy = refreshed.setdefault("privacy_security", {})
+        if not isinstance(privacy, dict):
+            privacy = {}
+            refreshed["privacy_security"] = privacy
+        raw_attachment_patterns = privacy.get("attachment_secret_patterns")
+        candidates = (
+            raw_attachment_patterns
+            if isinstance(raw_attachment_patterns, list)
+            else re.split(r"\r?\n|,", str(raw_attachment_patterns or ""))
+        )
+        attachment_patterns: list[str] = []
+        seen_attachment_patterns: set[str] = set()
+        for candidate in candidates:
+            pattern = str(candidate or "").strip()
+            folded = pattern.casefold()
+            if not 3 <= len(pattern) <= 128 or folded in seen_attachment_patterns:
+                continue
+            seen_attachment_patterns.add(folded)
+            attachment_patterns.append(pattern)
+            if len(attachment_patterns) >= 32:
+                break
+        privacy["attachment_secret_patterns"] = "\n".join(attachment_patterns)
 
         tools = refreshed.setdefault("tools", {})
         if not isinstance(tools, dict):

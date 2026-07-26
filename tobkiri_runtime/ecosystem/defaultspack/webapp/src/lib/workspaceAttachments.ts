@@ -1,10 +1,11 @@
 import type { AttachedFile } from "../renderers/types";
+import { scanAttachmentSecurity } from "./attachmentSecurity";
 
 export const WORKSPACE_ATTACHMENT_TEXT_LIMIT = 120_000;
 
-export function workspaceFileToAttachment(path: string, content: string, size?: number): AttachedFile {
+export function workspaceFileToAttachment(path: string, content: string, size?: number, customPatterns: string[] = []): AttachedFile {
   const truncated = content.length > WORKSPACE_ATTACHMENT_TEXT_LIMIT;
-  return {
+  const attachment: AttachedFile = {
     id: `workspace-${path}-${Date.now()}`,
     name: path,
     size: size ?? content.length,
@@ -14,6 +15,7 @@ export function workspaceFileToAttachment(path: string, content: string, size?: 
     source: "workspace",
     sourcePath: path,
   };
+  return { ...attachment, securityReview: scanAttachmentSecurity(attachment, customPatterns) };
 }
 
 export function hasWorkspaceAttachment(files: AttachedFile[], path: string): boolean {
