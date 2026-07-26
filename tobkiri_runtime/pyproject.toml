@@ -11,6 +11,7 @@ dependencies = [
   "cryptography>=42.0.0",
   "jsonschema>=4.26.0",
   "PyYAML>=6.0.2",
+  "tzdata>=2026.3",
 ]
 
 [project.optional-dependencies]

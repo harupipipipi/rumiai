@@ -360,6 +360,11 @@ pycparser==2.22 \
 typing-extensions==4.15.0 \
     --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
 
+# IANA time-zone database for zoneinfo on hosts without a system database.
+tzdata==2026.3 \
+    --hash=sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415 \
+    --hash=sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931
+
 # Optional: Enhanced secret key storage (recommended for production)
 # keyring and its transitive dependencies must be pinned with hashes before
 # being added to this automatically installed requirements file.
