@@ -69,7 +69,6 @@ export type ChatItem = {
 };
 
 const HISTORY_CHAT_ICON_SIZE = 14;
-const HISTORY_PANE_MINIMIZE_DELAY_MS = 180;
 const HISTORY_ICON_COMPONENTS = {
   ai: Bot,
   book: BookOpen,
@@ -1506,8 +1505,6 @@ export function HistoryBoard({
   const [newGroupError, setNewGroupError] = useState<string | null>(null);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isSelectingGroupDirectory, setIsSelectingGroupDirectory] = useState(false);
-  const [isHistoryMinimizing, setIsHistoryMinimizing] = useState(false);
-  const minimizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedCodingWorkspace = useMemo(
     () => codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId) ?? null,
@@ -1523,10 +1520,6 @@ export function HistoryBoard({
       }));
     });
   }, [visibleChatItems, customGroups]);
-
-  useEffect(() => () => {
-    if (minimizeTimerRef.current) clearTimeout(minimizeTimerRef.current);
-  }, []);
 
   const [activeColumnDrag, setActiveColumnDrag] = useState<ChatGroup | null>(null);
   const [activeChat, setActiveChat] = useState<ChatItem | null>(null);
@@ -1770,18 +1763,7 @@ export function HistoryBoard({
   };
 
   const handleMinimizeHistory = () => {
-    if (!onMinimize || isHistoryMinimizing) return;
-    const reducedMotion = typeof window !== "undefined"
-      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reducedMotion) {
-      onMinimize();
-      return;
-    }
-    setIsHistoryMinimizing(true);
-    minimizeTimerRef.current = setTimeout(() => {
-      minimizeTimerRef.current = null;
-      onMinimize();
-    }, HISTORY_PANE_MINIMIZE_DELAY_MS);
+    onMinimize?.();
   };
 
   const createCustomGroup = (customGroup: CustomGroupInfo) => {
@@ -2290,7 +2272,6 @@ export function HistoryBoard({
         data-history-pane-content="true"
         className={cn(
           "relative flex h-full min-w-0 origin-left flex-col overflow-hidden bg-[#09090b] transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-          isHistoryMinimizing && "pointer-events-none -translate-x-3 opacity-40",
         )}
       >
         {/* Top action bar */}
@@ -2301,9 +2282,7 @@ export function HistoryBoard({
               <button
                 type="button"
                 onClick={handleMinimizeHistory}
-                disabled={isHistoryMinimizing}
-                aria-busy={isHistoryMinimizing || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-70"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
                 title="サイドバーを閉じる"
                 aria-label="サイドバーを閉じる"
               >

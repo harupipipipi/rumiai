@@ -7,6 +7,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { installKeyboardOnlyFocusRings } from "../lib/focusModality";
 import {
   atMentionMenuKeyAction,
+  atomicComposerMentionEdit,
   atMentionPalettePayload,
   commandPalettePayload,
   commandArgumentPalettePayload,
@@ -512,6 +513,23 @@ test("inline mention parts color only active exact semantic mentions", () => {
   assert.deepEqual(
     composerInlineMentionParts("\\@Browser Companion and @Browser CompanionX", [widget]),
     [{ mention: false, text: "\\@Browser Companion and @Browser CompanionX" }],
+  );
+});
+
+test("semantic mentions delete atomically from either edge or a partial selection", () => {
+  const widget = composerToolMentionWidget({ id: "browser_companion", label: "Browser Companion", category: "tool" });
+  const input = "Use @Browser Companion now";
+  assert.deepEqual(
+    atomicComposerMentionEdit(input, 22, 22, "Backspace", [widget]),
+    { value: "Use  now", cursor: 4 },
+  );
+  assert.deepEqual(
+    atomicComposerMentionEdit(input, 4, 4, "Delete", [widget]),
+    { value: "Use  now", cursor: 4 },
+  );
+  assert.deepEqual(
+    atomicComposerMentionEdit(input, 8, 12, "Backspace", [widget]),
+    { value: "Use  now", cursor: 4 },
   );
 });
 

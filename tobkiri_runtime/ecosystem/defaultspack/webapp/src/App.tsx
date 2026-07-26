@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Cloud, Copy, Download, Hand, Link, Loader2, X } from "lucide-react";
 
 import {
@@ -88,6 +88,7 @@ import {
   withComposerMentionSelectionOwnership,
 } from "./lib/composerWidgets";
 import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
+import { fileToAttachment } from "./lib/attachments";
 import { toolGroupFor } from "./lib/toolUi";
 import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -2548,6 +2549,8 @@ function ChatApp() {
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
+  const workspaceFileDragDepthRef = useRef(0);
   const [pendingMentionAttachmentPaths, setPendingMentionAttachmentPaths] = useState<string[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
   const [composerEntityReferences, setComposerEntityReferences] = useState<ComposerEntityReference[]>([]);
@@ -4993,6 +4996,37 @@ function ChatApp() {
     setAttachedFiles((prev) => [...prev, ...files]);
   };
 
+  const handleWorkspaceFileDragEnter = (event: ReactDragEvent<HTMLElement>) => {
+    if (!isChatWorkspace || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    workspaceFileDragDepthRef.current += 1;
+    setIsWorkspaceFileDragActive(true);
+  };
+
+  const handleWorkspaceFileDragOver = (event: ReactDragEvent<HTMLElement>) => {
+    if (!isChatWorkspace || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleWorkspaceFileDragLeave = (event: ReactDragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    workspaceFileDragDepthRef.current = Math.max(0, workspaceFileDragDepthRef.current - 1);
+    if (workspaceFileDragDepthRef.current === 0) setIsWorkspaceFileDragActive(false);
+  };
+
+  const handleWorkspaceFileDrop = (event: ReactDragEvent<HTMLElement>) => {
+    workspaceFileDragDepthRef.current = 0;
+    setIsWorkspaceFileDragActive(false);
+    if (event.defaultPrevented || event.dataTransfer.files.length === 0) return;
+    event.preventDefault();
+    void Promise.all(Array.from(event.dataTransfer.files).map(fileToAttachment))
+      .then(handleFileAttach)
+      .catch((attachmentError) => {
+        setError(attachmentError instanceof Error ? attachmentError.message : "ファイルを添付できませんでした。");
+      });
+  };
+
   const handleAtFileAttach = (path: string) => {
     const normalizedPath = path.trim();
     if (mode !== "coding" || !normalizedPath) return;
@@ -6847,7 +6881,24 @@ function ChatApp() {
         <main
           className={cn("rumi-workspace-main relative flex min-h-0 min-w-0 flex-1 bg-[#09090b]", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
+          onDragEnter={handleWorkspaceFileDragEnter}
+          onDragOver={handleWorkspaceFileDragOver}
+          onDragLeave={handleWorkspaceFileDragLeave}
+          onDrop={handleWorkspaceFileDrop}
         >
+          {isWorkspaceFileDragActive && (
+            <div
+              role="status"
+              aria-label="ファイルをここにドロップ"
+              className="pointer-events-none absolute inset-0 rumi-layer-modal flex items-center justify-center bg-black/75 backdrop-blur-[2px]"
+            >
+              <div className="mx-6 flex max-w-md flex-col items-center rounded-3xl border border-dashed border-sky-300/55 bg-[#15171c]/95 px-10 py-9 text-center shadow-2xl">
+                <Cloud className="mb-4 text-sky-200" size={42} strokeWidth={1.6} aria-hidden="true" />
+                <p className="text-xl font-semibold text-zinc-50">ここにドロップ</p>
+                <p className="mt-2 text-sm text-zinc-400">画像やファイルを会話に追加します</p>
+              </div>
+            </div>
+          )}
           <div className={cn("rumi-chat-pane flex min-h-0 min-w-0 flex-1 flex-col rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             <WorkspaceTabBar
               tabs={workspaceTabs}

@@ -109,7 +109,7 @@ export function composerToolMentionDisplay(item: ComposerExtensionItem): { label
   return { label, description: description && description !== label ? description : undefined };
 }
 
-export function composerToolMentionWidget(item: ComposerExtensionItem): DroppedWidget {
+export function composerToolMentionWidget(item: ComposerExtensionItem, syntaxOverride?: string): DroppedWidget {
   const label = item.ui?.composer_label ?? item.label ?? item.id;
   const description = item.ui?.composer_description ?? item.description;
   return {
@@ -128,7 +128,7 @@ export function composerToolMentionWidget(item: ComposerExtensionItem): DroppedW
         id: item.id,
         kind: "tool",
         label,
-        syntax: `@${label}`,
+        syntax: syntaxOverride || `@${label}`,
         tool_id: item.id,
       },
       tool: {
@@ -168,7 +168,7 @@ export function composerSkillMentionDisplay(item: ComposerSkillItem): { label: s
   };
 }
 
-export function composerSkillMentionWidget(item: ComposerSkillItem): DroppedWidget {
+export function composerSkillMentionWidget(item: ComposerSkillItem, syntaxOverride?: string): DroppedWidget {
   const label = item.label || item.id;
   return {
     id: item.id,
@@ -184,7 +184,7 @@ export function composerSkillMentionWidget(item: ComposerSkillItem): DroppedWidg
         id: item.id,
         kind: "skill",
         label,
-        syntax: `@${label}`,
+        syntax: syntaxOverride || `@${label}`,
         skill_id: item.id,
       },
       skill: {
@@ -199,7 +199,7 @@ export function composerSkillMentionWidget(item: ComposerSkillItem): DroppedWidg
   };
 }
 
-export function composerFileMentionWidget(file: string): DroppedWidget {
+export function composerFileMentionWidget(file: string, syntaxOverride?: string): DroppedWidget {
   return {
     id: `mention-file:${file}`,
     type: "file",
@@ -215,7 +215,7 @@ export function composerFileMentionWidget(file: string): DroppedWidget {
         id: file,
         kind: "file",
         label: file,
-        syntax: `@${file}`,
+        syntax: syntaxOverride || `@${file}`,
       },
     },
   };

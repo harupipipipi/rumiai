@@ -49,6 +49,7 @@ import {
   Pencil,
   Play,
   Plug,
+  Plus,
   Search,
   ScanSearch,
   ScrollText,
@@ -98,7 +99,16 @@ import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
 import { composerFileMentionWidget, composerKnownMentionValues, composerMentionToolIdsFromWidgets, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
-import { COMPOSER_REFERENCE_MIME, insertComposerReferencePaste, mergeComposerReferences, restoreComposerReferences, serializeComposerReferences, type ComposerEntityReference } from "../lib/composerReferences";
+import {
+  COMPOSER_REFERENCE_MIME,
+  composerReferencesAsMarkdown,
+  insertComposerReferencePaste,
+  mergeComposerReferences,
+  restoreComposerMarkdownReferences,
+  restoreComposerReferences,
+  serializeComposerReferences,
+  type ComposerEntityReference,
+} from "../lib/composerReferences";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { activeMentionAtCursor, isMentionStart, utf16OffsetToCodePointIndex } from "../lib/mentionContract";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
@@ -174,16 +184,16 @@ type ComposerChromeWidgetSpec = {
 };
 
 const COMPOSER_CHROME_WIDTHS = {
-  icon: { basis: "2.25rem", min: "2.25rem", max: "2.25rem" },
+  icon: { basis: "44px", min: "44px", max: "44px" },
   mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
   badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
   thinking: { basis: "5.25rem", min: "5.25rem", max: "5.25rem", shrink: 0 },
   status: { basis: "auto", min: "2.5rem", shrink: 0 },
-  send: { basis: "2.25rem", min: "2.25rem", max: "2.25rem" },
-  sendLarge: { basis: "2.5rem", min: "2.5rem", max: "2.5rem" },
+  send: { basis: "44px", min: "44px", max: "44px" },
+  sendLarge: { basis: "44px", min: "44px", max: "44px" },
 } satisfies Record<string, ComposerChromeWidth>;
 
-const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-9 min-w-0 items-center rounded-xl border border-white/[0.08] bg-white/[0.045] px-2.5";
+const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-[44px] min-h-[44px] min-w-0 items-center rounded-xl border border-white/[0.08] bg-white/[0.045] px-2.5";
 const AT_MENTION_LISTBOX_ID = "composer-at-mention-listbox";
 const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
 const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
@@ -191,7 +201,7 @@ const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
 const NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT = 22;
 const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 240;
 const CONVERSATION_TEXTAREA_MIN_HEIGHT = 24;
-const CONVERSATION_TEXTAREA_MAX_HEIGHT = 180;
+const CONVERSATION_TEXTAREA_MAX_HEIGHT = 240;
 const COLLAPSED_TEXTAREA_MAX_HEIGHT = 72;
 const TEXTAREA_COLLAPSE_THRESHOLD = 104;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -1178,7 +1188,7 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
   const isImage = /^image\//.test(file.type ?? "");
   const fileMeta = lineCount ? `${lineCount}行` : `${Math.max(1, Math.ceil(file.size / 1024))} KB`;
   return (
-    <div className={`group/file relative flex-shrink-0 overflow-hidden rounded-xl border border-white/[0.1] bg-[#1b1c20] shadow-sm ${isImage ? "h-24 w-24" : "h-[66px] w-[190px]"}`}>
+    <div className="group/file relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-xl border border-white/[0.1] bg-[#1b1c20] shadow-sm">
       {isImage ? (
         <>
           {file.dataUrl ? (
@@ -1193,13 +1203,13 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
           </div>
         </>
       ) : (
-        <div className="flex h-full items-center gap-3 px-3 pr-8">
-          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[10px] font-semibold text-zinc-300">
+        <div className="flex h-full flex-col justify-between p-2.5">
+          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[9px] font-semibold text-zinc-300">
             {ext.slice(0, 4)}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-[12px] font-medium text-zinc-100" title={file.name}>{file.name}</span>
-            <span className="mt-0.5 block text-[10px] text-zinc-500">{fileMeta}</span>
+            <span className="block truncate text-[11px] font-medium text-zinc-100" title={file.name}>{file.name}</span>
+            <span className="mt-0.5 block text-[9px] text-zinc-500">{fileMeta}</span>
           </span>
         </div>
       )}
@@ -2196,6 +2206,41 @@ export function composerInlineMentionParts(
   return parts;
 }
 
+export function atomicComposerMentionEdit(
+  input: string,
+  selectionStart: number,
+  selectionEnd: number,
+  key: "Backspace" | "Delete",
+  widgets: DroppedWidget[],
+): { value: string; cursor: number } | null {
+  let cursor = 0;
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const part of composerInlineMentionParts(input, widgets)) {
+    const start = cursor;
+    cursor += part.text.length;
+    if (part.mention) ranges.push({ start, end: cursor });
+  }
+  if (ranges.length === 0) return null;
+
+  let removeStart = Math.min(selectionStart, selectionEnd);
+  let removeEnd = Math.max(selectionStart, selectionEnd);
+  const collapsed = removeStart === removeEnd;
+  const affected = ranges.filter((range) => (
+    collapsed
+      ? key === "Backspace"
+        ? range.start < removeStart && removeStart <= range.end
+        : range.start <= removeStart && removeStart < range.end
+      : range.start < removeEnd && range.end > removeStart
+  ));
+  if (affected.length === 0) return null;
+  removeStart = Math.min(removeStart, ...affected.map((range) => range.start));
+  removeEnd = Math.max(removeEnd, ...affected.map((range) => range.end));
+  return {
+    value: `${input.slice(0, removeStart)}${input.slice(removeEnd)}`,
+    cursor: removeStart,
+  };
+}
+
 /** Remove the unfinished mention that currently owns the textarea cursor. */
 export function dismissActiveAtMentionText(
   input: string,
@@ -2479,6 +2524,7 @@ export function ComposerRenderer({
   onCodingContextRefresh,
 }: ComposerRendererProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
   const [openToolGroup, setOpenToolGroup] = useState<string | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -2501,6 +2547,8 @@ export function ComposerRenderer({
   const [textareaFocused, setTextareaFocused] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
+  const attachmentMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inlineMentionLayerRef = useRef<HTMLDivElement | null>(null);
@@ -2856,6 +2904,25 @@ export function ComposerRenderer({
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!attachmentMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (attachmentMenuRef.current?.contains(target) || attachmentMenuButtonRef.current?.contains(target)) return;
+      setAttachmentMenuOpen(false);
+    };
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttachmentMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
     setSelectedCommandIndex((current) => {
       if (matchedCommands.length === 0) return 0;
       return Math.min(current, matchedCommands.length - 1);
@@ -3111,24 +3178,38 @@ export function ComposerRenderer({
 		    [atMentionKnownValues, atMentionQuery.length, atMentionStart, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange],
 		  );
 
+  const attachFiles = useCallback(async (files: FileList | null) => {
+    if (!files?.length) return;
+    if (!templateAllowsFileAttachments) return;
+    const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
+    onFileAttach?.(newFiles);
+  }, [onFileAttach, templateAllowsFileAttachments]);
+
   const handleCopy = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const textarea = event.currentTarget;
     const selectedText = input.slice(textarea.selectionStart, textarea.selectionEnd);
     const serialized = serializeComposerReferences(selectedText, entityReferences);
     if (!serialized) return;
     event.preventDefault();
-    event.clipboardData.setData("text/plain", selectedText);
+    event.clipboardData.setData("text/plain", composerReferencesAsMarkdown(selectedText, entityReferences));
     event.clipboardData.setData(COMPOSER_REFERENCE_MIME, serialized);
   }, [entityReferences, input]);
 
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (event.clipboardData.files.length > 0) {
+      event.preventDefault();
+      void attachFiles(event.clipboardData.files);
+      return;
+    }
     const raw = event.clipboardData.getData(COMPOSER_REFERENCE_MIME);
-    if (!raw) return;
-    const restored = restoreComposerReferences(raw, {
+    const catalog = {
       tools: toolItems,
       skills: skillExtensions,
       files: mode === "coding" ? codingContext?.files ?? [] : [],
-    });
+    };
+    const restored = raw
+      ? restoreComposerReferences(raw, catalog)
+      : restoreComposerMarkdownReferences(event.clipboardData.getData("text/plain"), catalog);
     if (!restored) return;
     event.preventDefault();
     const textarea = event.currentTarget;
@@ -3136,20 +3217,22 @@ export function ComposerRenderer({
     onInputChange(next.value);
     onEntityReferencesChange?.(mergeComposerReferences(entityReferences, next.references, next.value));
     for (const reference of next.references) {
-      if (reference.kind === "file" && mode === "coding") onAtFileAttach?.(reference.id);
+      if (reference.kind === "tool") {
+        const item = toolItems.find((candidate) => candidate.id === reference.id);
+        if (item) onDropWidget?.(composerToolMentionWidget(item, reference.syntax));
+      } else if (reference.kind === "skill") {
+        const skill = skillExtensions.find((candidate) => candidate.id === reference.id);
+        if (skill) onDropWidget?.(composerSkillMentionWidget(skill, reference.syntax));
+      } else if (mode === "coding") {
+        onDropWidget?.(composerFileMentionWidget(reference.id, reference.syntax));
+        onAtFileAttach?.(reference.id);
+      }
     }
     setTimeout(() => {
       textarea.setSelectionRange(next.cursor, next.cursor);
       textarea.focus();
     }, 0);
-  }, [codingContext?.files, entityReferences, input, mode, onAtFileAttach, onEntityReferencesChange, onInputChange, skillExtensions, toolItems]);
-
-  const attachFiles = useCallback(async (files: FileList | null) => {
-    if (!files?.length) return;
-    if (!templateAllowsFileAttachments) return;
-    const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
-    onFileAttach?.(newFiles);
-  }, [onFileAttach, templateAllowsFileAttachments]);
+  }, [attachFiles, codingContext?.files, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, skillExtensions, toolItems]);
 
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
@@ -3327,6 +3410,25 @@ export function ComposerRenderer({
       if (isComposerImeEvent(event)) return;
 
       const currentKeyInput = textareaRef.current?.value ?? input;
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const textarea = event.currentTarget;
+        const atomicEdit = atomicComposerMentionEdit(
+          currentKeyInput,
+          textarea.selectionStart,
+          textarea.selectionEnd,
+          event.key,
+          droppedWidgets,
+        );
+        if (atomicEdit) {
+          event.preventDefault();
+          handleInputChange(atomicEdit.value);
+          window.setTimeout(() => {
+            textarea.setSelectionRange(atomicEdit.cursor, atomicEdit.cursor);
+            textarea.focus();
+          }, 0);
+          return;
+        }
+      }
       if (
         (event.key === "Enter" || event.key === "Tab")
         && isModelPickerToggleCommand(modelDropdownOpen, currentKeyInput)
@@ -3451,6 +3553,7 @@ export function ComposerRenderer({
       atMentionQuery.length,
       atMentionStart,
       chooseModelCommandCandidate,
+      droppedWidgets,
       hasModelCommandCandidates,
       hasSlashCommandPrefix,
       handleAtMentionSelect,
@@ -3500,22 +3603,53 @@ export function ComposerRenderer({
     {
       id: "file-attach",
       slot: "leading",
-      homeSlot: "toolbar-leading",
+      homeSlot: "editor-leading",
       order: 20,
       visible: templateAllowsFileAttachments,
       width: COMPOSER_CHROME_WIDTHS.icon,
+      className: "relative overflow-visible",
       render: () => (
-        <button
-          type="button"
-          tabIndex={chromeButtonTabIndex}
-          aria-label="ファイルを添付"
-          disabled={!templateAllowsFileAttachments}
-          title="ファイル添付（複数選択可）"
-          onClick={() => fileInputRef.current?.click()}
-          className="rumi-icon-button"
-        >
-          <WarmActionIcon kind={isNewConversation ? "menu" : "attach"} size={isNewConversation ? "lg" : "md"} />
-        </button>
+        <>
+          <button
+            ref={attachmentMenuButtonRef}
+            type="button"
+            tabIndex={chromeButtonTabIndex}
+            aria-label="ファイルを添付"
+            aria-expanded={attachmentMenuOpen}
+            disabled={!templateAllowsFileAttachments}
+            title="写真とファイルを追加"
+            onClick={() => setAttachmentMenuOpen((open) => !open)}
+            className="rumi-icon-button text-zinc-300"
+          >
+            <Plus aria-hidden="true" size={isNewConversation ? 24 : 20} strokeWidth={1.8} />
+          </button>
+          {attachmentMenuOpen && (
+            <div
+              ref={attachmentMenuRef}
+              role="menu"
+              aria-label="添付メニュー"
+              className="rumi-attachment-menu rumi-popover absolute left-0 top-full rumi-layer-modal mt-2 w-[min(360px,calc(100vw-32px))] p-2"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAttachmentMenuOpen(false);
+                  fileInputRef.current?.click();
+                }}
+                className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm text-zinc-100 transition-colors hover:bg-white/[0.06]"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-200">
+                  <CloudUpload aria-hidden="true" size={17} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-medium">写真とファイルを追加</span>
+                  <span className="block text-xs text-zinc-500">コンピューターからアップロード</span>
+                </span>
+              </button>
+            </div>
+          )}
+        </>
       ),
     },
     {
@@ -3529,7 +3663,7 @@ export function ComposerRenderer({
         <span
           role="status"
           aria-label="現在の実行オプション"
-          className="inline-flex h-9 max-w-full items-center gap-0.5 rounded-xl border border-white/[0.07] bg-white/[0.025] p-1"
+          className="inline-flex h-[44px] min-h-[44px] max-w-full items-center gap-0.5 rounded-xl border border-white/[0.07] bg-white/[0.025] p-1"
         >
           <RuntimeStateIcon
             label={`実行モード: ${currentModeMeta.description}`}
@@ -3730,7 +3864,7 @@ export function ComposerRenderer({
               aria-label={`モデル: ${profileName}`}
               disabled={isGenerating}
               onClick={() => setModelDropdownOpen((v) => !v)}
-              className="flex h-full w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
+              className="flex h-[44px] min-h-[44px] w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
               <span className="min-w-0 flex-1 truncate" title={profileName}>モデル: {compactSelectedProfileName}</span>
               <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
@@ -3836,7 +3970,7 @@ export function ComposerRenderer({
               ? "ファイルを読み込み中"
               : "送信"}
           className={`rumi-send-button flex flex-shrink-0 items-center justify-center rounded-full transition-all duration-150 disabled:cursor-not-allowed ${
-            isNewConversation ? "h-10 w-10" : "h-9 w-9"
+            "h-[44px] min-h-[44px] w-[44px] min-w-[44px]"
           } ${
             isGenerating
               ? input.trim()
@@ -3859,7 +3993,9 @@ export function ComposerRenderer({
     },
   ];
 
-  const leadingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "leading");
+  const conversationFileAttachWidget = chromeWidgets.find((widget) => widget.id === "file-attach" && widget.visible !== false);
+  const leadingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "leading")
+    .filter((widget) => widget.id !== "file-attach");
   const trailingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "trailing");
   const newConversationInlineLeadingWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-leading");
   const newConversationTopRightWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-trailing");
@@ -4266,7 +4402,7 @@ export function ComposerRenderer({
               <div className="rumi-composer-main-panel flex flex-col justify-between gap-2 rounded-[1.5rem] border border-white/[0.09] bg-[#17181d] p-3 shadow-xl transition-all duration-300">
                 <div className={`rumi-composer-editor-row grid min-h-11 items-end gap-x-3 ${
                   newConversationInlineLeadingWidgets.length > 0
-                    ? "grid-cols-[2.25rem_minmax(0,1fr)_auto]"
+                    ? "grid-cols-[44px_minmax(0,1fr)_auto]"
                     : newConversationTopRightWidgets.length > 0
                       ? "grid-cols-[minmax(0,1fr)_auto]"
                       : "grid-cols-1"
@@ -4368,64 +4504,71 @@ export function ComposerRenderer({
               </div>
             </div>
           ) : (
-            <div className="relative min-w-0">
-              {hasInlineMentions && (
-                <div
-                  ref={inlineMentionLayerRef}
-                  aria-hidden="true"
-                  data-composer-inline-mentions
-                  className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 pb-0 pt-2.5 text-[15px] leading-[22px] text-zinc-100 max-[640px]:px-3 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
-                >
-                  {inlineMentionParts.map((part, index) => (
-                    <span key={`${index}:${part.text}`} className={part.mention ? "rumi-composer-inline-mention" : undefined}>{part.text}</span>
-                  ))}
+            <div className={`grid min-w-0 items-end gap-1 px-2 ${conversationFileAttachWidget ? "grid-cols-[44px_minmax(0,1fr)]" : "grid-cols-1"}`}>
+              {conversationFileAttachWidget && (
+                <div className="self-end pb-0.5">
+                  <ComposerChromeWidget widget={conversationFileAttachWidget} />
                 </div>
               )}
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={input}
-                data-template-composer-input={templateComposerInputId || undefined}
-                onChange={(event) => {
-                  resizeComposerTextarea(event.currentTarget);
-                  handleInputChange(event.currentTarget.value);
-                }}
-                placeholder={effectiveComposerPlaceholder}
-                aria-label="Rumiにメッセージを送信"
-                aria-autocomplete="list"
-                aria-controls={activeComposerListboxId}
-                aria-activedescendant={activeComposerOptionId}
-                aria-expanded={atMentionOpen || showCommandSuggestions || Boolean(commandArgumentPalette)}
-                role="combobox"
-                className={`rumi-composer-textarea relative min-h-[24px] w-full max-h-[180px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-4 pb-0 pt-2.5 text-[15px] leading-[22px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 max-[640px]:min-h-[24px] max-[640px]:px-3 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
-                onScroll={(event) => syncInlineMentionScroll(event.currentTarget)}
-                onFocus={() => {
-                  setTextareaFocused(true);
-                  window.setTimeout(() => updateAtMentionStateFromInput(input), 0);
-                }}
-                onBlur={() => {
-                  window.setTimeout(() => {
-                    if (document.activeElement !== textareaRef.current) setTextareaFocused(false);
-                  }, 0);
-                }}
-                onClick={() => updateAtMentionStateFromInput(input)}
-                onKeyUp={(event) => {
-                  if (event.key !== "Escape") updateAtMentionStateFromInput(input);
-                }}
-                onKeyDownCapture={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-                    event.stopPropagation();
-                  }
-                }}
-                onKeyDown={handleKeyDown}
-                onCopy={handleCopy}
-                onPaste={handlePaste}
-              />
-              <ComposerTextareaResizeButton
-                collapsed={textareaCollapsed}
-                visible={textareaCanCollapse || textareaCollapsed}
-                onToggle={() => setTextareaCollapsed((current) => !current)}
-              />
+              <div className="relative min-w-0">
+                {hasInlineMentions && (
+                  <div
+                    ref={inlineMentionLayerRef}
+                    aria-hidden="true"
+                    data-composer-inline-mentions
+                    className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 pb-0 pt-2.5 text-[15px] leading-[22px] text-zinc-100 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
+                  >
+                    {inlineMentionParts.map((part, index) => (
+                      <span key={`${index}:${part.text}`} className={part.mention ? "rumi-composer-inline-mention" : undefined}>{part.text}</span>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={input}
+                  data-template-composer-input={templateComposerInputId || undefined}
+                  onChange={(event) => {
+                    resizeComposerTextarea(event.currentTarget);
+                    handleInputChange(event.currentTarget.value);
+                  }}
+                  placeholder={effectiveComposerPlaceholder}
+                  aria-label="Rumiにメッセージを送信"
+                  aria-autocomplete="list"
+                  aria-controls={activeComposerListboxId}
+                  aria-activedescendant={activeComposerOptionId}
+                  aria-expanded={atMentionOpen || showCommandSuggestions || Boolean(commandArgumentPalette)}
+                  role="combobox"
+                  className={`rumi-composer-textarea relative min-h-[24px] w-full max-h-[240px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-2 pb-0 pt-2.5 text-[15px] leading-[22px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 max-[640px]:min-h-[24px] max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
+                  onScroll={(event) => syncInlineMentionScroll(event.currentTarget)}
+                  onFocus={() => {
+                    setTextareaFocused(true);
+                    window.setTimeout(() => updateAtMentionStateFromInput(input), 0);
+                  }}
+                  onBlur={() => {
+                    window.setTimeout(() => {
+                      if (document.activeElement !== textareaRef.current) setTextareaFocused(false);
+                    }, 0);
+                  }}
+                  onClick={() => updateAtMentionStateFromInput(input)}
+                  onKeyUp={(event) => {
+                    if (event.key !== "Escape") updateAtMentionStateFromInput(input);
+                  }}
+                  onKeyDownCapture={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                      event.stopPropagation();
+                    }
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onCopy={handleCopy}
+                  onPaste={handlePaste}
+                />
+                <ComposerTextareaResizeButton
+                  collapsed={textareaCollapsed}
+                  visible={textareaCanCollapse || textareaCollapsed}
+                  onToggle={() => setTextareaCollapsed((current) => !current)}
+                />
+              </div>
             </div>
           )}
 

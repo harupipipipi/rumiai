@@ -1748,10 +1748,83 @@ test("composer controls are keyboard reachable, visibly named, and at least 44px
     page.getByRole("button", { name: "メッセージを送信" }),
   ]) {
     const box = await control.boundingBox();
+    const label = await control.getAttribute("aria-label");
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width, `${label} width`).toBeGreaterThanOrEqual(44);
+    expect(box!.height, `${label} height`).toBeGreaterThanOrEqual(44);
   }
+});
+
+test("composer uses a leading plus menu and accepts clipboard and workspace file drops", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const attach = page.getByRole("button", { name: "ファイルを添付" });
+  const composerBox = await composer.boundingBox();
+  const attachBox = await attach.boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect(attachBox).not.toBeNull();
+  expect(attachBox!.x).toBeLessThan(composerBox!.x);
+
+  await attach.click();
+  await expect(page.getByRole("menu", { name: "添付メニュー" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /写真とファイルを追加/ })).toBeVisible();
+  await attach.click();
+
+  await composer.evaluate((target) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File(["clipboard"], "clipboard.txt", { type: "text/plain" }));
+    target.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dataTransfer,
+    }));
+  });
+  await expect(page.getByRole("button", { name: "clipboard.txt を削除" })).toBeVisible();
+
+  await page.locator("main").evaluate((target) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File(["drop"], "workspace-drop.txt", { type: "text/plain" }));
+    target.dispatchEvent(new DragEvent("dragenter", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }));
+  });
+  await expect(page.getByRole("status", { name: "ファイルをここにドロップ" })).toBeVisible();
+  await page.locator("main").evaluate((target) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File(["drop"], "workspace-drop.txt", { type: "text/plain" }));
+    target.dispatchEvent(new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }));
+  });
+  await expect(page.getByRole("status", { name: "ファイルをここにドロップ" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "workspace-drop.txt を削除" })).toBeVisible();
+});
+
+test("composer mentions paste portably and delete as one semantic unit", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+
+  await composer.evaluate((target) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", '[@Web Search](plugin://web_search@openai-bundled")');
+    target.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dataTransfer,
+    }));
+  });
+  await expect(composer).toHaveValue("@Web Search");
+  await expect(page.locator("[data-composer-inline-mentions]")).toContainText("@Web Search");
+
+  await composer.press("End");
+  await composer.press("Backspace");
+  await expect(composer).toHaveValue("");
+  await expect(page.locator("[data-composer-inline-mentions]")).toHaveCount(0);
 });
 
 test("attachment remove and cancel actions expose 44px visible focus targets", async ({ page }) => {

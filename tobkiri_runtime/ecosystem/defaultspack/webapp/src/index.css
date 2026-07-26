@@ -366,8 +366,10 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 2.25rem;
-  width: 2.25rem;
+  min-height: 44px;
+  min-width: 44px;
+  height: 44px;
+  width: 44px;
   flex-shrink: 0;
   border-radius: 0.625rem;
   color: #a1a1aa;
