@@ -2001,6 +2001,12 @@ export type ShellRenderer = {
   module?: string;
   export?: string;
   trust?: "local";
+  verified?: boolean;
+  provenance?: {
+    source?: string;
+    content_hash?: string;
+    build_id?: string;
+  };
 };
 
 export type SkillCatalogItem = {
