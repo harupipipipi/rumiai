@@ -102,7 +102,7 @@ import { COMPOSER_REFERENCE_MIME, insertComposerReferencePaste, mergeComposerRef
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { activeMentionAtCursor, isMentionStart, utf16OffsetToCodePointIndex } from "../lib/mentionContract";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
-import { startPinchAudioRecorder, type ActiveAudioRecorder, type AmbientAudioRecording } from "../ambient/ambientMedia";
+import { startPinchAudioRecorder, type ActiveAudioRecorder } from "../ambient/ambientMedia";
 import { ambientTriggerClient } from "../ambient/ambientTriggerClient";
 import composerPaletteTemplateJson from "../templates/composerPalette.template.json";
 
@@ -112,6 +112,44 @@ export type ComposerSubmissionLock = {
   signature: string;
   submittedAt: number;
 };
+
+type ComposerVoicePhase = "idle" | "consent" | "starting" | "listening" | "transcribing" | "review" | "error";
+export type ComposerVoiceInsertMode = "insert" | "replace" | "append";
+
+export function composerVoiceLanguage(documentLanguage?: string, browserLanguage?: string): string {
+  const candidate = String(documentLanguage || browserLanguage || "").trim();
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(candidate) ? candidate : "en-US";
+}
+
+export function composerVoiceErrorMessage(errorCode: string, online = true): string {
+  const code = errorCode.trim().toLowerCase();
+  if (code === "not-allowed" || code === "service-not-allowed") return "Microphone permission was denied. Allow microphone access in browser or OS settings, then retry.";
+  if (code === "audio-capture" || code === "not-found") return "No usable microphone was found. Check the selected input device and OS microphone access.";
+  if (code === "network" || !online) return "Speech recognition could not reach its service. Check your connection or use local/offline transcription.";
+  if (code === "no-speech" || code === "nomatch") return "No speech was recognized. Check the microphone, speak clearly, and retry.";
+  if (code === "aborted") return "Voice input was cancelled. Your original draft was preserved.";
+  return "Speech recognition stopped unexpectedly. Your original draft was preserved; retry or use local/offline transcription.";
+}
+
+export function applyComposerVoiceTranscript(
+  draft: string,
+  transcript: string,
+  mode: ComposerVoiceInsertMode,
+  selection: { start: number; end: number },
+): { value: string; cursor: number } {
+  const cleanTranscript = transcript.trim();
+  if (!cleanTranscript) return { value: draft, cursor: Math.min(selection.end, draft.length) };
+  if (mode === "replace") return { value: cleanTranscript, cursor: cleanTranscript.length };
+  if (mode === "append") {
+    const separator = draft && !draft.endsWith("\n") ? "\n" : "";
+    const value = `${draft}${separator}${cleanTranscript}`;
+    return { value, cursor: value.length };
+  }
+  const start = Math.max(0, Math.min(selection.start, draft.length));
+  const end = Math.max(start, Math.min(selection.end, draft.length));
+  const value = `${draft.slice(0, start)}${cleanTranscript}${draft.slice(end)}`;
+  return { value, cursor: start + cleanTranscript.length };
+}
 
 export function composerSubmissionSignature(
   input: string,
@@ -1651,8 +1689,8 @@ function ModelDropdown({
           {providerState.active && (
             <div className="mt-2 rounded-lg border border-sky-400/20 bg-sky-400/[0.07] px-2.5 py-2" aria-live="polite">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">プロバイダー選択中</span>
-                <span className="rounded border border-sky-400/20 bg-sky-400/[0.08] px-1.5 py-0.5 text-[9px] text-sky-200">
+                <span className="text-xs font-semibold uppercase tracking-wider text-sky-300">プロバイダー選択中</span>
+                <span className="rounded border border-sky-400/20 bg-sky-400/[0.08] px-1.5 py-0.5 text-xs text-sky-200">
                   {resolvedSelectorSchema.layout.provider_confirm_key}でプロバイダーを確定
                 </span>
               </div>
@@ -2350,7 +2388,7 @@ function ModelCommandCandidatePopup({
       className="fixed rumi-layer-modal w-[min(460px,calc(100vw-32px))] overflow-hidden rumi-popover"
     >
       <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Models</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Models</span>
         {onClose && (
           <button
             type="button"
@@ -2379,7 +2417,7 @@ function ModelCommandCandidatePopup({
             >
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-zinc-100">{modelCandidateTitle(candidate)}</span>
-                <span className="block truncate text-[11px] text-zinc-500">{modelCandidateSubtitle(candidate)}</span>
+                <span className="block truncate text-xs text-zinc-500">{modelCandidateSubtitle(candidate)}</span>
               </span>
               {badge && (
                 <span
@@ -2493,9 +2531,14 @@ export function ComposerRenderer({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
-  const [voiceStatus, setVoiceStatus] = useState<"idle" | "starting" | "listening" | "transcribing" | "error">("idle");
+  const [voiceStatus, setVoiceStatus] = useState<ComposerVoicePhase>("idle");
   const [voiceElapsedSeconds, setVoiceElapsedSeconds] = useState(0);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceLanguage, setVoiceLanguage] = useState(() => composerVoiceLanguage(
+    typeof document === "undefined" ? "" : document.documentElement.lang,
+    typeof navigator === "undefined" ? "" : navigator.language,
+  ));
   const [textareaCollapsed, setTextareaCollapsed] = useState(false);
   const [textareaCanCollapse, setTextareaCanCollapse] = useState(false);
   const [textareaFocused, setTextareaFocused] = useState(false);
@@ -2505,7 +2548,9 @@ export function ComposerRenderer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const inlineMentionLayerRef = useRef<HTMLDivElement | null>(null);
   const voiceRecorderRef = useRef<ActiveAudioRecorder | null>(null);
+  const voiceGenerationRef = useRef(0);
   const voiceStartedAtRef = useRef(0);
+  const voiceOriginalDraftRef = useRef({ value: input, selection: { start: input.length, end: input.length } });
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submissionLockRef = useRef<ComposerSubmissionLock | null>(null);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
@@ -3194,6 +3239,7 @@ export function ComposerRenderer({
   const handleSubmitWithApiKeyGuard = useCallback(
     (event: React.SyntheticEvent) => {
       event.preventDefault();
+      if (voiceStatus !== "idle") return;
       if (isGenerating) {
         const prompt = input.trim();
         if (prompt && !steerBusy) {
@@ -3214,7 +3260,7 @@ export function ComposerRenderer({
       submissionLockRef.current = { signature, submittedAt: now };
       onSubmit(event);
     },
-    [attachedFiles, input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy],
+    [attachedFiles, input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, pendingMentionAttachmentPaths.length, selectedProfile, steerBusy, voiceStatus],
   );
 
   const handleSendButtonClick = useCallback(
@@ -3234,15 +3280,18 @@ export function ComposerRenderer({
   }, [voiceStatus]);
 
   useEffect(() => () => {
+    voiceGenerationRef.current += 1;
     voiceRecorderRef.current?.cancel();
     voiceRecorderRef.current = null;
   }, []);
 
   const cancelVoiceInput = useCallback(() => {
+    voiceGenerationRef.current += 1;
     voiceRecorderRef.current?.cancel();
     voiceRecorderRef.current = null;
     setVoiceElapsedSeconds(0);
-    setVoiceError(null);
+    setVoiceError("");
+    setVoiceTranscript("");
     setVoiceStatus("idle");
     window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, []);
@@ -3250,12 +3299,13 @@ export function ComposerRenderer({
   const stopAndTranscribeVoice = useCallback(async () => {
     const recorder = voiceRecorderRef.current;
     if (!recorder) return;
+    const generation = ++voiceGenerationRef.current;
     voiceRecorderRef.current = null;
     setVoiceStatus("transcribing");
-    setVoiceError(null);
-    let recording: AmbientAudioRecording | null = null;
+    setVoiceError("");
     try {
-      recording = await recorder.stop();
+      const recording = await recorder.stop();
+      if (voiceGenerationRef.current !== generation) return;
       const result = await ambientTriggerClient.submitEvent({
         source: "microphone",
         trigger: "transcription_test",
@@ -3266,56 +3316,117 @@ export function ComposerRenderer({
         audio_mime_type: recording.mimeType,
         audio_size: recording.size,
         audio_name: `composer-voice.${recording.extension}`,
-        params: { language: "ja" },
+        params: { language: voiceLanguage },
         metadata: { surface: "composer", voice_input_use_ai: voiceInputUseAi },
       });
+      if (voiceGenerationRef.current !== generation) return;
       const transcript = String(result.transcript ?? "").trim();
-      if (!transcript) throw new Error("音声を文字起こしできませんでした");
-      const prefix = voiceInputUseAi ? "文字起こしして: " : "";
-      const base = input.trimEnd();
-      onInputChange(`${base}${base ? "\n" : ""}${prefix}${transcript}`);
-      setVoiceStatus("idle");
+      if (!transcript) {
+        setVoiceError(composerVoiceErrorMessage("no-speech"));
+        setVoiceStatus("error");
+        return;
+      }
+      setVoiceTranscript(transcript);
+      setVoiceStatus("review");
       setVoiceElapsedSeconds(0);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "音声入力に失敗しました";
-      if (recording && onFileAttach) {
-        onFileAttach([{
-          id: `voice-${Date.now()}`,
-          name: `voice-${new Date().toISOString().replace(/[:.]/g, "-")}.${recording.extension}`,
-          size: recording.size,
-          type: recording.mimeType,
-          dataUrl: recording.dataUrl,
-        }]);
-        setVoiceError(`${message}。録音をファイルとして添付しました。`);
-      } else {
-        setVoiceError(message);
-      }
+      if (voiceGenerationRef.current !== generation) return;
+      const errorName = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
+      const code = errorName.includes("notallowed") || errorName.includes("permission")
+        ? "not-allowed"
+        : errorName.includes("notfound") || errorName.includes("device")
+          ? "audio-capture"
+          : errorName.includes("network") || errorName.includes("fetch")
+            ? "network"
+            : "unknown";
+      setVoiceError(composerVoiceErrorMessage(code, typeof navigator === "undefined" ? true : navigator.onLine));
       setVoiceStatus("error");
     } finally {
       window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
     }
-  }, [input, onFileAttach, onInputChange, voiceInputUseAi]);
+  }, [voiceInputUseAi, voiceLanguage]);
 
-  const toggleVoiceInput = useCallback(async () => {
-    if (!voiceInputEnabled || !templateAllowsVoiceInput) return;
-    if (voiceStatus === "listening") {
-      await stopAndTranscribeVoice();
-      return;
-    }
-    if (voiceStatus === "starting" || voiceStatus === "transcribing") return;
+  const startVoiceRecording = useCallback(async () => {
+    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating) return;
+    const generation = ++voiceGenerationRef.current;
+    const textarea = textareaRef.current;
+    voiceOriginalDraftRef.current = {
+      value: input,
+      selection: {
+        start: textarea?.selectionStart ?? input.length,
+        end: textarea?.selectionEnd ?? input.length,
+      },
+    };
     setVoiceStatus("starting");
-    setVoiceError(null);
+    setVoiceError("");
+    setVoiceTranscript("");
     try {
       const recorder = await startPinchAudioRecorder();
+      if (voiceGenerationRef.current !== generation) {
+        recorder.cancel();
+        return;
+      }
       voiceRecorderRef.current = recorder;
       voiceStartedAtRef.current = performance.now();
       setVoiceElapsedSeconds(0);
       setVoiceStatus("listening");
     } catch (error) {
-      setVoiceError(error instanceof Error ? error.message : "マイクを開始できませんでした");
+      const errorName = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
+      const code = errorName.includes("notallowed") || errorName.includes("permission")
+        ? "not-allowed"
+        : "audio-capture";
+      setVoiceError(composerVoiceErrorMessage(code));
       setVoiceStatus("error");
     }
-  }, [stopAndTranscribeVoice, templateAllowsVoiceInput, voiceInputEnabled, voiceStatus]);
+  }, [input, isGenerating, templateAllowsVoiceInput, voiceInputEnabled]);
+
+  const applyVoiceTranscript = useCallback((mode: ComposerVoiceInsertMode) => {
+    const result = applyComposerVoiceTranscript(
+      voiceOriginalDraftRef.current.value,
+      voiceTranscript,
+      mode,
+      voiceOriginalDraftRef.current.selection,
+    );
+    onInputChange(result.value);
+    setVoiceStatus("idle");
+    setVoiceTranscript("");
+    setVoiceError("");
+    window.setTimeout(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+      textareaRef.current?.setSelectionRange(result.cursor, result.cursor);
+    }, 0);
+  }, [onInputChange, voiceTranscript]);
+
+  const toggleVoiceInput = useCallback(async () => {
+    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating) return;
+    if (voiceStatus === "listening") {
+      await stopAndTranscribeVoice();
+      return;
+    }
+    if (voiceStatus === "starting" || voiceStatus === "transcribing") return;
+    setVoiceError("");
+    setVoiceStatus(voiceStatus === "review" ? "review" : "consent");
+  }, [isGenerating, stopAndTranscribeVoice, templateAllowsVoiceInput, voiceInputEnabled, voiceStatus]);
+
+  useEffect(() => {
+    if (voiceStatus !== "listening") return undefined;
+    const interrupt = (code: "aborted" | "audio-capture") => {
+      voiceRecorderRef.current?.cancel();
+      voiceRecorderRef.current = null;
+      setVoiceError(composerVoiceErrorMessage(code));
+      setVoiceStatus("error");
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") interrupt("aborted");
+    };
+    const onDeviceChange = () => interrupt("audio-capture");
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    navigator.mediaDevices?.addEventListener?.("devicechange", onDeviceChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      navigator.mediaDevices?.removeEventListener?.("devicechange", onDeviceChange);
+    };
+  }, [voiceStatus]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3587,15 +3698,18 @@ export function ComposerRenderer({
       homeSlot: "toolbar-trailing",
       order: 30,
       visible: templateAllowsVoiceInput,
-      mobile: "hide",
+      mobile: "show",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
 		        <button
 		          type="button"
 	          tabIndex={chromeButtonTabIndex}
-	          aria-label={isVoiceListening ? "音声入力を停止" : "音声入力を開始"}
+	          aria-label={isVoiceListening ? "Stop voice input and review transcript" : voiceStatus === "review" ? "Review captured voice transcript" : "Start reviewable voice input"}
+	          aria-pressed={isVoiceListening}
+	          aria-expanded={voiceStatus !== "idle"}
+	          aria-controls="composer-voice-panel"
 		          disabled={!voiceInputEnabled || !templateAllowsVoiceInput || voiceStatus === "starting" || voiceStatus === "transcribing"}
-		          title={isVoiceListening ? "録音を停止して文字起こし" : voiceStatus === "transcribing" ? "文字起こし中" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
+		          title={isVoiceListening ? "Stop and review voice input" : "Reviewable voice input"}
 		          onClick={() => void toggleVoiceInput()}
 	          className={isVoiceListening ? "rumi-icon-button is-live" : "rumi-icon-button"}
 	        >
@@ -4127,47 +4241,90 @@ export function ComposerRenderer({
           )}
 
           {voiceStatus !== "idle" && (
-            <div className="rumi-voice-capture mx-3 mt-2 flex min-h-11 items-center gap-3 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-2" role="status" aria-live="polite">
-              <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${voiceStatus === "error" ? "bg-rose-500/10 text-rose-300" : "bg-white/[0.06] text-zinc-100"}`}>
-                {voiceStatus === "starting" || voiceStatus === "transcribing" ? <Loader2 size={15} className="animate-spin" /> : <WarmActionIcon kind="mic" size="sm" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                {voiceStatus === "listening" ? (
-                  <span className="flex items-center gap-3">
-                    <span className="rumi-voice-waveform" aria-hidden="true">
-                      {Array.from({ length: 18 }, (_, index) => <i key={index} style={{ animationDelay: `${(index % 6) * -90}ms` }} />)}
-                    </span>
-                    <span className="flex-shrink-0 font-mono text-[11px] tabular-nums text-zinc-400">{formatVoiceDuration(voiceElapsedSeconds)}</span>
-                  </span>
-                ) : (
-                  <span className={`block truncate text-[11px] ${voiceStatus === "error" ? "text-rose-200" : "text-zinc-400"}`}>
-                    {voiceStatus === "starting" ? "マイクを準備中..." : voiceStatus === "transcribing" ? "音声を文字起こし中..." : voiceError || "音声入力に失敗しました"}
-                  </span>
-                )}
-              </span>
-              {voiceStatus === "listening" && (
-                <button
-                  type="button"
-                  aria-label="録音を停止して文字起こし"
-                  title="録音を停止して文字起こし"
-                  onClick={() => void stopAndTranscribeVoice()}
-                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-950 transition-transform hover:scale-105"
-                >
-                  <Square size={10} fill="currentColor" />
-                </button>
-              )}
-              {(voiceStatus === "listening" || voiceStatus === "error") && (
-                <button
-                  type="button"
-                  aria-label={voiceStatus === "listening" ? "録音をキャンセル" : "音声エラーを閉じる"}
-                  title={voiceStatus === "listening" ? "キャンセル" : "閉じる"}
-                  onClick={cancelVoiceInput}
-                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                >
+            <section
+              id="composer-voice-panel"
+              aria-labelledby="composer-voice-heading"
+              className="rumi-voice-capture mx-3 mt-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-3"
+            >
+              <div className="flex items-start gap-3">
+                <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${voiceStatus === "error" ? "bg-rose-500/10 text-rose-300" : "bg-white/[0.06] text-zinc-100"}`}>
+                  {voiceStatus === "starting" || voiceStatus === "transcribing" ? <Loader2 size={15} className="animate-spin" /> : <WarmActionIcon kind="mic" size="sm" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 id="composer-voice-heading" className="text-sm font-medium text-zinc-100">
+                    {voiceStatus === "consent" ? "Reviewable voice input" : voiceStatus === "listening" ? "Recording voice input" : voiceStatus === "review" ? "Review transcript" : voiceStatus === "error" ? "Voice input unavailable" : voiceStatus === "transcribing" ? "Creating transcript" : "Preparing microphone"}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-400">
+                    Audio is recorded in memory and sent to your configured Tobkiri transcription route. It is never inserted into the draft automatically; the configured provider may process it under that route&apos;s settings.
+                  </p>
+                </div>
+                <button type="button" onClick={cancelVoiceInput} aria-label="Close voice input" title="Close" className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100">
                   <X size={14} />
                 </button>
+              </div>
+
+              {voiceStatus === "consent" && (
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <label className="min-w-44 flex-1 text-xs text-zinc-300">
+                    Transcription language
+                    <select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.currentTarget.value)} className="mt-1 block h-9 w-full rounded-lg border border-white/10 bg-zinc-900 px-2 text-sm text-zinc-100 outline-none focus:border-sky-400/50">
+                      {!["en-US", "en-GB", "ja-JP", "ko-KR", "zh-CN"].includes(voiceLanguage) && <option value={voiceLanguage}>{voiceLanguage}</option>}
+                      <option value="en-US">English (US)</option>
+                      <option value="en-GB">English (UK)</option>
+                      <option value="ja-JP">日本語</option>
+                      <option value="ko-KR">한국어</option>
+                      <option value="zh-CN">中文（简体）</option>
+                    </select>
+                  </label>
+                  <button type="button" onClick={() => void startVoiceRecording()} className="min-h-9 rounded-lg bg-zinc-100 px-3 text-sm font-medium text-zinc-950 hover:bg-white">
+                    Allow and start microphone
+                  </button>
+                </div>
               )}
-            </div>
+
+              {(voiceStatus === "starting" || voiceStatus === "transcribing") && (
+                <p className="mt-3 text-xs text-zinc-300" role="status" aria-live="polite">
+                  {voiceStatus === "starting" ? "Waiting for microphone access…" : "Transcribing the captured audio…"}
+                </p>
+              )}
+
+              {voiceStatus === "listening" && (
+                <div className="mt-3 flex items-center gap-3" role="status" aria-live="polite">
+                  <span className="rumi-voice-waveform flex-1" aria-hidden="true">
+                    {Array.from({ length: 18 }, (_, index) => <i key={index} style={{ animationDelay: `${(index % 6) * -90}ms` }} />)}
+                  </span>
+                  <span className="font-mono text-xs tabular-nums text-zinc-300">{formatVoiceDuration(voiceElapsedSeconds)}</span>
+                  <button type="button" onClick={() => void stopAndTranscribeVoice()} className="flex min-h-9 items-center gap-2 rounded-lg bg-zinc-100 px-3 text-sm font-medium text-zinc-950 hover:bg-white">
+                    <Square size={10} fill="currentColor" />
+                    Stop and review
+                  </button>
+                  <button type="button" onClick={cancelVoiceInput} className="min-h-9 rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/[0.06]">Discard</button>
+                </div>
+              )}
+
+              {voiceStatus === "review" && (
+                <div className="mt-3">
+                  <label className="block text-xs text-zinc-300">
+                    Editable transcript
+                    <textarea value={voiceTranscript} onChange={(event) => setVoiceTranscript(event.currentTarget.value)} rows={3} className="mt-1 block max-h-40 min-h-20 w-full resize-y rounded-lg border border-white/10 bg-zinc-950/70 px-3 py-2 text-sm leading-5 text-zinc-100 outline-none focus:border-sky-400/50" />
+                  </label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => applyVoiceTranscript("insert")} disabled={!voiceTranscript.trim()} className="min-h-9 rounded-lg bg-zinc-100 px-3 text-sm font-medium text-zinc-950 disabled:opacity-40">Insert at cursor</button>
+                    <button type="button" onClick={() => applyVoiceTranscript("append")} disabled={!voiceTranscript.trim()} className="min-h-9 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 disabled:opacity-40">Append</button>
+                    <button type="button" onClick={() => applyVoiceTranscript("replace")} disabled={!voiceTranscript.trim()} className="min-h-9 rounded-lg border border-white/10 px-3 text-sm text-zinc-200 disabled:opacity-40">Replace draft</button>
+                    <button type="button" onClick={() => setVoiceStatus("consent")} className="min-h-9 rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/[0.06]">Record again</button>
+                    <button type="button" onClick={cancelVoiceInput} className="min-h-9 rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/[0.06]">Discard</button>
+                  </div>
+                </div>
+              )}
+
+              {voiceStatus === "error" && (
+                <div className="mt-3 flex flex-wrap items-center gap-2" role="alert">
+                  <p className="mr-auto text-xs text-rose-200">{voiceError || composerVoiceErrorMessage("unknown")}</p>
+                  <button type="button" onClick={() => { setVoiceError(""); setVoiceStatus("consent"); }} className="min-h-9 rounded-lg border border-white/10 px-3 text-sm text-zinc-100">Try again</button>
+                </div>
+              )}
+            </section>
           )}
 
           {isNewConversation && (attachedFiles.length > 0 || pendingMentionAttachmentPaths.length > 0) && (
@@ -4296,6 +4453,7 @@ export function ComposerRenderer({
                       autoFocus
                       rows={1}
                       value={input}
+                      readOnly={voiceStatus !== "idle"}
                       data-template-composer-input={templateComposerInputId || undefined}
                       onChange={(event) => {
                         resizeComposerTextarea(event.currentTarget);
@@ -4385,6 +4543,7 @@ export function ComposerRenderer({
                 ref={textareaRef}
                 rows={1}
                 value={input}
+                readOnly={voiceStatus !== "idle"}
                 data-template-composer-input={templateComposerInputId || undefined}
                 onChange={(event) => {
                   resizeComposerTextarea(event.currentTarget);
