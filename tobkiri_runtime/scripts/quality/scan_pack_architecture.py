@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections import Counter, defaultdict
 import datetime as dt
 import json
 import re
@@ -146,17 +147,90 @@ def verify_shrink_only_baseline(
     baseline: dict[str, dict[str, Any]],
     reference: dict[str, dict[str, Any]],
 ) -> None:
-    """Reject new or mutated exceptions relative to an approved baseline."""
-    additions = sorted(set(baseline) - set(reference))
+    """Reject broader exceptions while allowing source-only line relocation."""
+    baseline_groups = _baseline_groups(baseline)
+    reference_groups = _baseline_groups(reference)
+    additions = sorted(
+        key
+        for key, items in baseline_groups.items()
+        if len(items) > len(reference_groups.get(key, ()))
+    )
     if additions:
         raise BaselineError(
-            "shrink-only baseline contains new identities: " + ", ".join(additions)
+            "shrink-only baseline contains new identities: "
+            + ", ".join(_edge_key_text(key) for key in additions)
         )
-    for identity, item in baseline.items():
-        if item != reference[identity]:
+    for key, items in baseline_groups.items():
+        candidate_metadata = Counter(
+            _relocation_stable_metadata(item) for item in items
+        )
+        reference_metadata = Counter(
+            _relocation_stable_metadata(item)
+            for item in reference_groups.get(key, ())
+        )
+        if candidate_metadata - reference_metadata:
             raise BaselineError(
-                f"shrink-only baseline metadata changed for {identity}"
+                "shrink-only baseline metadata changed for "
+                + _edge_key_text(key)
             )
+
+
+def find_unbaselined_violations(
+    violations: Iterable[Violation],
+    baseline: dict[str, dict[str, Any]],
+) -> list[Violation]:
+    """Match baseline edges one-to-one without treating line drift as new."""
+    remaining = Counter(
+        _baseline_edge_key(item) for item in baseline.values()
+    )
+    active: list[Violation] = []
+    for item in violations:
+        key = _violation_edge_key(item)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            active.append(item)
+    return active
+
+
+def _baseline_groups(
+    baseline: dict[str, dict[str, Any]],
+) -> dict[tuple[str, str, str, str], list[dict[str, Any]]]:
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in baseline.values():
+        groups[_baseline_edge_key(item)].append(item)
+    return groups
+
+
+def _baseline_edge_key(
+    item: dict[str, Any],
+) -> tuple[str, str, str, str]:
+    return (
+        str(item.get("rule") or ""),
+        str(item.get("path") or ""),
+        str(item.get("source") or ""),
+        str(item.get("target") or ""),
+    )
+
+
+def _violation_edge_key(item: Violation) -> tuple[str, str, str, str]:
+    return item.rule, item.path, item.source, item.target
+
+
+def _edge_key_text(key: tuple[str, str, str, str]) -> str:
+    return "|".join(key)
+
+
+def _relocation_stable_metadata(item: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"identity", "line"}
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def scan_repository(root: Path) -> list[Violation]:
@@ -559,7 +633,7 @@ def main() -> int:
         print(f"pack-architecture: {exc}", file=sys.stderr)
         return 2
     violations = scan_repository(root)
-    active = [item for item in violations if item.identity not in baseline]
+    active = find_unbaselined_violations(violations, baseline)
     if args.format == "json":
         print(
             json.dumps(

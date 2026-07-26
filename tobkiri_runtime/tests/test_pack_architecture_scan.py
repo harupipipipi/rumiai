@@ -122,19 +122,78 @@ def test_baseline_rejects_wildcards_and_missing_metadata(tmp_path: Path) -> None
         scanner.load_baseline(baseline)
 
 
-def test_baseline_is_shrink_only_by_exact_identity() -> None:
-    scanner = _scanner()
-    approved = {
-        "edge-a": {"identity": "edge-a", "owner": "architecture"}
+def _baseline_exception(
+    *,
+    line: int,
+    owner: str = "architecture",
+    target: str = "pack_b",
+) -> dict[str, object]:
+    rule = "cross_pack_import"
+    path = "tobkiri_runtime/ecosystem/pack_a/consumer.py"
+    source = "pack_a"
+    return {
+        "identity": f"{rule}|{path}|{line}|{source}|{target}",
+        "rule": rule,
+        "path": path,
+        "line": line,
+        "source": source,
+        "target": target,
+        "owner": owner,
     }
 
+
+def _baseline(*items: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {str(item["identity"]): item for item in items}
+
+
+def test_baseline_is_shrink_only_by_semantic_edge() -> None:
+    scanner = _scanner()
+    approved = _baseline(_baseline_exception(line=10))
+
     scanner.verify_shrink_only_baseline({}, approved)
+    scanner.verify_shrink_only_baseline(
+        _baseline(_baseline_exception(line=25)),
+        approved,
+    )
     with pytest.raises(scanner.BaselineError, match="new identities"):
         scanner.verify_shrink_only_baseline(
-            {**approved, "edge-b": {"identity": "edge-b"}}, approved
+            _baseline(
+                _baseline_exception(line=25),
+                _baseline_exception(line=30),
+            ),
+            approved,
         )
     with pytest.raises(scanner.BaselineError, match="metadata changed"):
         scanner.verify_shrink_only_baseline(
-            {"edge-a": {"identity": "edge-a", "owner": "someone-else"}},
+            _baseline(
+                _baseline_exception(line=25, owner="someone-else")
+            ),
             approved,
         )
+
+
+def test_current_scan_matches_relocated_baseline_edges_one_to_one() -> None:
+    scanner = _scanner()
+    baseline = _baseline(_baseline_exception(line=10))
+    relocated = scanner.Violation(
+        rule="cross_pack_import",
+        path="tobkiri_runtime/ecosystem/pack_a/consumer.py",
+        line=25,
+        source="pack_a",
+        target="pack_b",
+        guidance="Use a contract.",
+    )
+    duplicate = scanner.Violation(
+        rule=relocated.rule,
+        path=relocated.path,
+        line=30,
+        source=relocated.source,
+        target=relocated.target,
+        guidance=relocated.guidance,
+    )
+
+    assert scanner.find_unbaselined_violations([relocated], baseline) == []
+    assert scanner.find_unbaselined_violations(
+        [relocated, duplicate],
+        baseline,
+    ) == [duplicate]
