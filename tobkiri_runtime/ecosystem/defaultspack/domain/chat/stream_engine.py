@@ -1557,6 +1557,54 @@ class _AssistantDraft:
         )
 
 
+def _missing_required_tool_ids(
+    required_tool_ids: set[str],
+    tool_logs: list[dict[str, Any]],
+) -> list[str]:
+    executed_tool_ids = {
+        str(item.get("tool_name") or item.get("name") or "").strip()
+        for item in tool_logs
+        if isinstance(item, dict)
+        and not bool(item.get("internal"))
+        and str(
+            item.get("tool_name") or item.get("name") or ""
+        ).strip()
+        != "assistant_progress"
+        and _successful_required_tool_log(item)
+    }
+    return sorted(required_tool_ids - executed_tool_ids)
+
+
+def _successful_required_tool_log(item: dict[str, Any]) -> bool:
+    if any(
+        bool(item.get(key))
+        for key in (
+            "is_error",
+            "cancelled",
+            "rejected",
+            "rejected_by_policy",
+            "approval_required",
+        )
+    ):
+        return False
+    status = str(item.get("status") or "").strip().casefold()
+    if status and status not in {"completed", "succeeded", "success", "ok"}:
+        return False
+    result = item.get("result")
+    if isinstance(result, dict):
+        if _tool_result_is_error(result):
+            return False
+        result_status = str(result.get("status") or "").strip().casefold()
+        if result_status and result_status not in {
+            "completed",
+            "succeeded",
+            "success",
+            "ok",
+        }:
+            return False
+    return True
+
+
 class ChatRunEngine:
     def __init__(
         self,
@@ -2443,6 +2491,42 @@ class ChatRunEngine:
                 self._sync_draft(draft, force=True)
                 break
             if not tool_uses:
+                required_tool_ids = {
+                    str(item).strip()
+                    for item in (
+                        (prepared.tool_context or {}).get(
+                            "required_tool_ids"
+                        )
+                        or []
+                    )
+                    if str(item or "").strip()
+                }
+                missing_required = _missing_required_tool_ids(
+                    required_tool_ids,
+                    self._tool_logs,
+                )
+                if missing_required:
+                    response = {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Required Tool was not called: "
+                                    + ", ".join(missing_required)
+                                ),
+                            }
+                        ],
+                        "finish_reason": "required_tool_not_called",
+                        "usage": (
+                            response.get("usage", {})
+                            if isinstance(response, dict)
+                            else {}
+                        ),
+                        "metadata": {
+                            "required_tool_not_called": True,
+                            "missing_required_tool_ids": missing_required,
+                        },
+                    }
                 break
 
             _append_assistant_tool_use_message(

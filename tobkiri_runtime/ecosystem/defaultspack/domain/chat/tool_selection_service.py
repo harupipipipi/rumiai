@@ -87,8 +87,24 @@ class ToolSelectionService:
         conversation_exclude = normalize_tool_targets(conversation_preferences.get("exclude"))
         include = _merge_targets(conversation_include, selection_include)
         exclude = _merge_targets(conversation_exclude, selection_exclude)
-        if not _developer_capability(context) and any(
-            target.kind in {"tool", "skill"} for target in [*include, *exclude]
+        verified_explicit_tool_ids = {
+            str(item).strip()
+            for item in context.get("verified_explicit_tool_ids", [])
+            if str(item or "").strip()
+        }
+        unverified_low_level_targets = [
+            target
+            for target in [*include, *exclude]
+            if target.kind in {"tool", "skill"}
+            and not (
+                target in include
+                and target.kind == "tool"
+                and target.id in verified_explicit_tool_ids
+            )
+        ]
+        if (
+            not _developer_capability(context)
+            and unverified_low_level_targets
         ):
             raise PermissionError(
                 "raw Tool and Skill targets require the developer capability"

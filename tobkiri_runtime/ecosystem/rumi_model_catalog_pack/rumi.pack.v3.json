@@ -31,17 +31,17 @@
       "loader": "python",
       "module": "ecosystem.rumi_model_catalog_pack.runtime.catalog",
       "symbol": "create_model_catalog_operation",
-      "artifact_hash": "sha256:12a158af6ea6837fc883db5ddee9d5aa5598f105ff64adcb6ebd0414f30a6a88"
+      "artifact_hash": "sha256:8164899ac57d3d47147f5a05986d1d9a718ee67479625488c191c5f770d5068e"
     }
   ],
   "resources": [
-    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:119a72a75968f56f12c3422ea07e1f2ef4860d7e03dfdd23520c4b9cdbb51788"}
+    {"id": "catalog/providers+extensions/llm/providers", "kind": "ai.model_catalog", "content_hash": "sha256:23cd323554cef32f891827a9a6ddd9c75b7fd3c898d0b501c7e62b091a5001cd"}
   ],
   "storage": [
     {
       "namespace": "rumi.model_catalog.openrouter_inventory",
       "schema_version": "1.0.0",
-      "authoritative": false,
+      "authoritative": true,
       "retention": "latest last-known-good inventory until replacement or cache cleanup",
       "export_import": false
     }
@@ -50,7 +50,7 @@
     {"capability": "ai.model.catalog.read", "access": "read", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:94db7bf6697b2468ff3b6bc6f1ab720c826677d6394b23d2466bc9d69dba80ed",
+    "content_hash": "sha256:84a8e5ad9f697540d9bd814f25ee070f31809a463e338f0706c328c6bec735fd",
     "build_identity": "rumi-model-catalog-pack:2.0.0",
     "trust_class": "local",
     "signature": null

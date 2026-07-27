@@ -73,9 +73,13 @@ def create_generate_operation(client: GlobalContractClient):
     """Create the global non-streaming gateway operation."""
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"generate", "invoke"}:
+        if name not in {"generate", "invoke", "resolve"}:
             raise ValueError(f"unknown generate operation: {name}")
-        return _invoke(client, payload, streaming=False)
+        return _invoke(
+            client,
+            {**dict(payload), "resolve_only": name == "resolve"},
+            streaming=False,
+        )
 
     return operation
 
@@ -114,6 +118,7 @@ def _invoke(
     *,
     streaming: bool,
 ) -> dict[str, Any]:
+    resolve_only = bool(payload.get("resolve_only"))
     prepared = client.invoke(
         REQUEST_PREPARE_CONTRACT,
         "prepare",
@@ -150,7 +155,26 @@ def _invoke(
         provider_metadata,
         requirement,
         health,
+        explicit_pricing=request.get("_resolved_model_pricing"),
     )
+    exact_binding = bool(
+        requirement.preferred_model_id
+        and requirement.preferred_provider_instance_id
+        and not request.get("allow_failover")
+    )
+    if exact_binding and requirement.preferred_model_id:
+        candidates = [
+            item
+            for item in candidates
+            if item.model_id == requirement.preferred_model_id
+        ]
+    if exact_binding and requirement.preferred_provider_instance_id:
+        candidates = [
+            item
+            for item in candidates
+            if item.provider_instance_id
+            == requirement.preferred_provider_instance_id
+        ]
     if not candidates:
         _record_diagnostic(
             request_id,
@@ -179,6 +203,22 @@ def _invoke(
         selected=selected,
         policy_revision=str(request.get("policy_revision") or ""),
     )
+    if resolve_only:
+        return {
+            "status": "ok",
+            "model_id": selected.model_id,
+            "provider_instance_id": selected.provider_instance_id,
+            "catalog_provider_instance_id": (
+                selected.catalog_provider_instance_id
+            ),
+            "catalog_revision": selected.catalog_revision,
+            "pricing_revision": selected.catalog_revision,
+            "pricing": {
+                "input": selected.input_cost,
+                "output": selected.output_cost,
+                "currency": str(selected.raw.get("currency") or "USD"),
+            },
+        }
     invocation = {
         "request_id": request_id,
         "model_id": str(
@@ -375,6 +415,20 @@ def _resolve_model_reference(
     request["parameters"] = parameters
     if request.get("credential_handle") is None:
         request["credential_handle"] = profile.get("credential_handle")
+    metadata = profile.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    pricing = metadata.get("pricing")
+    if isinstance(pricing, Mapping):
+        request["_resolved_model_pricing"] = {
+            "input": _optional_float(pricing.get("input")),
+            "output": _optional_float(pricing.get("output")),
+            "currency": str(pricing.get("currency") or "USD"),
+            "revision": str(
+                metadata.get("pricing_revision")
+                or resolved.get("store_revision")
+                or "model-profile"
+            ),
+        }
 
 
 def _merge_requirements(
@@ -435,6 +489,8 @@ def _catalog_candidates(
     providers: Mapping[str, Mapping[str, Any]],
     requirement: RouteRequirement,
     health: Mapping[str, Mapping[str, Any]],
+    *,
+    explicit_pricing: Any = None,
 ) -> tuple[list[Candidate], list[dict[str, str]]]:
     catalog_models: list[dict[str, Any]] = []
     for catalog_provider in client.providers(CATALOG_CONTRACT):
@@ -454,7 +510,11 @@ def _catalog_candidates(
             descriptor = dict(raw)
             descriptor["catalog_provider_instance_id"] = catalog_provider_id
             catalog_models.append(descriptor)
-    _append_explicit_live_model(catalog_models, requirement)
+    _append_explicit_live_model(
+        catalog_models,
+        requirement,
+        explicit_pricing=explicit_pricing,
+    )
     routed = client.invoke(
         ROUTING_CONTRACT,
         "route",
@@ -487,6 +547,8 @@ def _catalog_candidates(
 def _append_explicit_live_model(
     catalog_models: list[dict[str, Any]],
     requirement: RouteRequirement,
+    *,
+    explicit_pricing: Any = None,
 ) -> None:
     """Bridge a provider-verified live model into deterministic routing.
 
@@ -514,14 +576,24 @@ def _append_explicit_live_model(
         capabilities.add("tool_calling")
     if requirement.thinking:
         capabilities.add("thinking")
+    pricing = (
+        dict(explicit_pricing)
+        if isinstance(explicit_pricing, Mapping)
+        else {}
+    )
     catalog_models.append(
         {
             "model_id": model_id,
             "provider_model_id": provider_model_id,
             "provider_id": provider_id,
-            "execution_provider_instance_id": "provider.compatibility",
+            "execution_provider_instance_id": "provider.compatibility.generate",
             "health_provider_instance_id": f"provider.{provider_id}",
-            "catalog_revision": "explicit-live-model:v1",
+            "catalog_revision": str(
+                pricing.get("revision") or "explicit-live-model:v1"
+            ),
+            "input_cost": _optional_float(pricing.get("input")),
+            "output_cost": _optional_float(pricing.get("output")),
+            "currency": str(pricing.get("currency") or "USD"),
             "capabilities": sorted(capabilities),
             "modalities": sorted(requirement.modalities or {"text"}),
             "context_length": requirement.minimum_context,
@@ -597,6 +669,11 @@ def _normalize_result(
         "request_id": request_id,
         "model_id": selected.model_id,
         "provider_instance_id": selected.provider_instance_id,
+        "catalog_provider_instance_id": (
+            selected.catalog_provider_instance_id
+        ),
+        "catalog_revision": selected.catalog_revision,
+        "pricing_revision": selected.catalog_revision,
         "output": value.get("output"),
         "tool_intents": list(value.get("tool_intents") or []),
         "finish_reason": str(value.get("finish_reason") or "stop"),

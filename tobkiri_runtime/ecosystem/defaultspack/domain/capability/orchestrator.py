@@ -329,6 +329,11 @@ class CapabilityOrchestrator:
             for tool in selected_tools
             if _tool_id(tool)
         }
+        plan.tool_capability_grants = {
+            _tool_id(tool): _tool_capability_grants(tool)
+            for tool in selected_tools
+            if _tool_id(tool)
+        }
 
         expansion = self._activities.expand(activity_ids, eligible_tools)
         safety_skills = _unique(
@@ -520,6 +525,47 @@ def _compact_skill(skill: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_id(tool: dict[str, Any]) -> str:
     return str(tool.get("tool_id") or tool.get("name") or tool.get("id") or "").strip()
+
+
+def _tool_capability_grants(tool: dict[str, Any]) -> list[str]:
+    direct = tool.get("capability_grants")
+    requirements = (
+        tool.get("capability_requirements")
+        if isinstance(tool.get("capability_requirements"), dict)
+        else {}
+    )
+    values = list(direct) if isinstance(direct, list) else []
+    for key in ("runtime", "connections"):
+        raw = requirements.get(key)
+        if isinstance(raw, list):
+            values.extend(raw)
+    normalized = {
+        str(item).strip()
+        for item in values
+        if str(item or "").strip()
+    }
+    connection_capabilities = {
+        "rumi.service.file.inspect.v1": "file.inspect",
+        "rumi.service.ai.generate.v1": "ai.gateway.generate",
+        "rumi.service.subagent.placement.compile.v1": (
+            "subagent.placement.compile"
+        ),
+    }
+    normalized.update(
+        connection_capabilities[item]
+        for item in tuple(normalized)
+        if item in connection_capabilities
+    )
+    if "rumi.service.repository.context.prepare.v1" in normalized:
+        normalized.update(
+            {
+                "file.inspect",
+                "ai.gateway.generate",
+                "subagent.placement.compile",
+                "repository.content.external_share",
+            }
+        )
+    return sorted(normalized)
 
 
 def _unique(values: Iterable[str]) -> list[str]:

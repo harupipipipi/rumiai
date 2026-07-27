@@ -35,7 +35,7 @@
   "host_execution": true,
   "resources": [],
  "provenance": {
-    "content_hash": "sha256:fbd35d689c65ad9a1b19a25c4b60b7ef1b50ce0c265a7c0a31dcb35bd0787730",
+    "content_hash": "sha256:bb73f11d2c669e2e2d9f95d7fc56a3eb3ced2f8c78864e996da3dbe6a091f16c",
     "build_identity": "rumi-ai-gateway-pack:1.0.0",
     "trust_class": "local",
     "signature": null

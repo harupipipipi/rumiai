@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
+import time
+from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping
+
+from core_runtime.repository_context_ledger import (
+    RepositoryContextLedger,
+    RepositoryContextLedgerConflict,
+    RepositoryContextLedgerInProgress,
+)
 
 
 FILE_INSPECT = "rumi.service.file.inspect.v1"
@@ -16,6 +26,8 @@ CATALOG = "rumi.resource.subagent.catalog.v1"
 PLACEMENT = "rumi.resource.subagent.placement.v1"
 PREPARE = "rumi.service.repository.context.prepare.v1"
 SUBAGENT_RUNTIME = "rumi.service.subagent.runtime.v1"
+HOST_AUTHORITY = "rumi.service.host.authorize.v1"
+PLACEMENT_PACK_ID = "rumi_subagent_placement_pack"
 
 PACK_ID = "rumi_repository_context_pack"
 DEFINITION_PATH = (
@@ -131,6 +143,7 @@ _SECRET_MARKERS = (
     "private_key",
     "secret_key",
 )
+_EXCLUDED_SAMPLE_LIMIT = 64
 
 
 class RepositoryContextError(RuntimeError):
@@ -151,16 +164,32 @@ class RepositoryContextPreparer:
         profile_id = str(payload.get("profile_id") or "default").strip()
         if not query or not workspace_id:
             raise RepositoryContextError("query and workspace_id are required")
+        _check_lifecycle(payload)
+        _redeem_authority(self.client, payload)
+        _assert_external_safe(query, "query")
+        workspace_binding = payload.get("_workspace_binding")
+        if not isinstance(workspace_binding, Mapping) or (
+            str(workspace_binding.get("workspace_id") or "").strip()
+            != workspace_id
+        ):
+            raise RepositoryContextError(
+                "workspace does not match the Host-owned binding"
+            )
+        if str(workspace_binding.get("access") or "") != "read_only":
+            raise RepositoryContextError("workspace binding must be read_only")
         plan = self._compile_plan(payload)
         budgets = plan.get("budgets") if isinstance(plan, Mapping) else {}
         budgets = budgets if isinstance(budgets, Mapping) else {}
+        maximum_tool_calls = int(
+            budgets.get("maximum_tool_calls") or 260
+        )
         max_candidates = _bounded_int(
             payload.get("max_candidates"),
             default=_DEFAULT_MAX_CANDIDATES,
             minimum=1,
             maximum=min(
                 _MAX_LISTED_FILES,
-                int(budgets.get("maximum_tool_calls") or _MAX_LISTED_FILES) * 20,
+                _max_candidates_for_tool_budget(maximum_tool_calls),
             ),
         )
         max_selected = _bounded_int(
@@ -189,6 +218,11 @@ class RepositoryContextPreparer:
                 "workspace_id": workspace_id,
                 "directory": ".",
                 "recursive": True,
+                "tracked_only": True,
+                "require_selected": True,
+                "_workspace_binding": dict(workspace_binding),
+                "_deadline_epoch_ms": payload.get("_deadline_epoch_ms"),
+                "_cancellation_token": payload.get("_cancellation_token"),
             },
         )
         items = listing.get("items") if isinstance(listing, Mapping) else []
@@ -201,34 +235,147 @@ class RepositoryContextPreparer:
         documents, read_excluded = self._read_candidates(
             profile_id,
             workspace_id,
+            query,
             candidates,
             max_file_bytes=max_file_bytes,
             total_read_budget=total_read_budget,
+            lifecycle=payload,
+            maximum_tool_calls=maximum_tool_calls,
+            workspace_binding=workspace_binding,
         )
-        model_reference = _model_reference(plan)
+        batch_count = sum(1 for _ in _batches(documents))
+        planned_tool_calls = (
+            1
+            + len(candidates)
+            + batch_count
+            + (1 if batch_count else 0)
+        )
+        if planned_tool_calls > maximum_tool_calls:
+            raise RepositoryContextError(
+                "repository context aggregate Tool-call budget exceeded"
+            )
+        placement_maximum_cost = float(
+            budgets.get("maximum_cost") or 1.0
+        )
+        requested_maximum_cost = float(
+            payload.get("maximum_cost") or placement_maximum_cost
+        )
+        aggregate_maximum_cost = min(
+            placement_maximum_cost,
+            requested_maximum_cost,
+        )
+        model_call_count = batch_count + (1 if batch_count else 0)
+        per_call_maximum_cost = (
+            aggregate_maximum_cost / model_call_count
+            if model_call_count
+            else aggregate_maximum_cost
+        )
+        model_binding = _resolve_model_binding(
+            self.client,
+            plan,
+            maximum_cost=aggregate_maximum_cost,
+            lifecycle=payload,
+        )
+        invocation_key = str(payload.get("_invocation_key") or "").strip()
+        if not invocation_key:
+            raise RepositoryContextError(
+                "Host-owned idempotency identity is required"
+            )
+        execution_digest = _sha(
+            {
+                "host_invocation_digest": str(
+                    payload.get("_invocation_digest") or ""
+                ),
+                "profile_id": profile_id,
+                "workspace_binding": dict(workspace_binding),
+                "effective_plan_hash": str(plan.get("plan_hash") or ""),
+                "model_binding": model_binding,
+                "repository_snapshot": [
+                    {
+                        "path": item["path"],
+                        "sha256": item["sha256"],
+                    }
+                    for item in documents
+                ],
+            }
+        )
+        ledger = _ledger()
+        try:
+            replay = ledger.reserve(
+                profile_id=profile_id,
+                key=invocation_key,
+                digest=execution_digest,
+            )
+        except (
+            RepositoryContextLedgerConflict,
+            RepositoryContextLedgerInProgress,
+        ) as exc:
+            raise RepositoryContextError(str(exc)) from exc
+        if replay is not None:
+            return replay
+        if isinstance(payload, dict):
+            payload["_ledger_reservation"] = {
+                "profile_id": profile_id,
+                "key": invocation_key,
+                "digest": execution_digest,
+            }
         batch_results = []
-        selected_models: set[str] = set()
+        selected_models: set[str] = {model_binding["model_id"]}
+        aggregate_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost": 0.0,
+        }
+        aggregate_token_budget = int(
+            budgets.get("context_token_budget") or 64_000
+        )
         for batch_index, batch in enumerate(_batches(documents), start=1):
-            mapped, model_id = self._map_batch(
+            _check_lifecycle(payload)
+            mapped, usage = self._map_batch(
                 query,
-                model_reference,
+                model_binding,
                 batch,
                 batch_index=batch_index,
                 max_selected=max_selected,
-                maximum_cost=float(payload.get("maximum_cost") or 1.0),
+                maximum_cost=per_call_maximum_cost,
+                invocation_scope=_invocation_scope(
+                    payload,
+                    plan,
+                    workspace_binding,
+                    documents=batch,
+                ),
+                lifecycle=payload,
             )
             batch_results.append(mapped)
-            if model_id:
-                selected_models.add(model_id)
-        reduced, reduce_model_id = self._reduce(
-            query,
-            model_reference,
-            batch_results,
-            max_selected=max_selected,
-            maximum_cost=float(payload.get("maximum_cost") or 1.0),
-        )
-        if reduce_model_id:
-            selected_models.add(reduce_model_id)
+            _consume_usage(
+                aggregate_usage,
+                usage,
+                maximum_cost=aggregate_maximum_cost,
+                maximum_tokens=aggregate_token_budget,
+            )
+        if batch_results:
+            reduced, reduce_usage = self._reduce(
+                query,
+                model_binding,
+                batch_results,
+                max_selected=max_selected,
+                maximum_cost=per_call_maximum_cost,
+                invocation_scope=_invocation_scope(
+                    payload,
+                    plan,
+                    workspace_binding,
+                    documents=documents,
+                ),
+                lifecycle=payload,
+            )
+            _consume_usage(
+                aggregate_usage,
+                reduce_usage,
+                maximum_cost=aggregate_maximum_cost,
+                maximum_tokens=aggregate_token_budget,
+            )
+        else:
+            reduced = {"summary": "", "selected_files": []}
         selected = _validated_selected(
             reduced.get("selected_files"),
             documents,
@@ -248,26 +395,43 @@ class RepositoryContextPreparer:
             ],
         ]
         excluded.sort(key=lambda item: (item["path"], item["reason"]))
+        excluded_reason_counts = dict(
+            sorted(Counter(item["reason"] for item in excluded).items())
+        )
+        excluded_artifact_ref = _store_excluded_artifact(excluded)
+        excluded_sample = excluded[:_EXCLUDED_SAMPLE_LIMIT]
+        summary = _safe_model_text(
+            str(reduced.get("summary") or "").strip(),
+            "summary",
+        )
         bundle = {
             "schema_version": "tobkiri.repository-evidence/v1",
             "query": query,
             "workspace_id": workspace_id,
             "placement_id": plan["placement"]["id"],
             "effective_plan_hash": plan["plan_hash"],
-            "model_binding": model_reference or "route://utility/context-summarizer",
+            "model_binding": model_binding,
             "selected_model_ids": sorted(selected_models),
-            "summary": str(reduced.get("summary") or "").strip(),
+            "summary": summary,
             "selected_files": selected,
-            "excluded_files": excluded,
+            "excluded_files": excluded_sample,
+            "excluded_reason_counts": excluded_reason_counts,
+            "excluded_artifact_ref": excluded_artifact_ref,
             "statistics": {
                 "listed": len(items) if isinstance(items, list) else 0,
                 "deterministic_candidates": len(candidates),
                 "files_read": len(documents),
                 "files_selected": len(selected),
                 "files_excluded": len(excluded),
-                "bytes_read": sum(int(item["size"]) for item in documents),
+                "bytes_read": sum(
+                    int(item.get("source_size") or item["size"])
+                    for item in documents
+                ),
                 "map_calls": len(batch_results),
-                "reduce_calls": 1,
+                "reduce_calls": 1 if batch_results else 0,
+                "input_tokens": aggregate_usage["input_tokens"],
+                "output_tokens": aggregate_usage["output_tokens"],
+                "usage_cost": aggregate_usage["cost"],
             },
             "handoff": {
                 "instruction": (
@@ -279,75 +443,80 @@ class RepositoryContextPreparer:
             },
         }
         bundle["bundle_hash"] = _sha(bundle)
+        ledger.complete(
+            profile_id=profile_id,
+            key=invocation_key,
+            digest=execution_digest,
+            result=bundle,
+        )
+        if isinstance(payload, dict):
+            payload.pop("_ledger_reservation", None)
         return bundle
 
     def _compile_plan(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         capability_plan = payload.get("capability_plan")
         if not isinstance(capability_plan, Mapping):
             raise RepositoryContextError("CapabilityPlan is required")
+        compile_payload = {
+            "placement_id": "repository-context",
+            "capability_plan": dict(capability_plan),
+            "registry_revision": str(
+                payload.get("registry_revision") or ""
+            ),
+            "topology_revision": str(
+                payload.get("topology_revision")
+                or "repository-context/v1"
+            ),
+            "profile_policy": _host_mapping(payload, "_profile_policy"),
+            "workspace_policy": _host_mapping(payload, "_workspace_policy"),
+            "host_policy": _host_mapping(payload, "_host_policy"),
+            "task_grant": _host_mapping(payload, "_task_grant"),
+            "host_enforcement": _host_mapping(payload, "_host_enforcement"),
+            "workspace_binding": _host_mapping(
+                payload, "_workspace_binding"
+            ),
+            "task_instructions": [str(payload.get("query") or "")],
+        }
+        compile_scope = {
+            "service_pack_id": PLACEMENT_PACK_ID,
+            "operation": "subagent.placement.compile",
+            "authority": "subagent.placement.compile",
+            "caller_id": f"repository-context:{payload.get('profile_id') or 'default'}",
+            "caller_pack_id": PACK_ID,
+            "caller_function_id": "repository-context.prepare",
+            "profile_id": str(payload.get("profile_id") or "default"),
+            "workspace_id": str(payload.get("workspace_id") or ""),
+            "session_id": str(
+                (payload.get("_authority_scope") or {}).get("session_id")
+                or ""
+            )
+            if isinstance(payload.get("_authority_scope"), Mapping)
+            else "",
+            "arguments": compile_payload,
+        }
+        issued = self.client.invoke(
+            HOST_AUTHORITY,
+            "authorize",
+            {
+                **compile_scope,
+                "approval_required": False,
+            },
+        )
+        if (
+            not isinstance(issued, Mapping)
+            or not issued.get("authorized")
+            or not issued.get("receipt")
+        ):
+            raise RepositoryContextError(
+                "Host authority denied Placement compilation"
+            )
         result = self.client.invoke(
             PLACEMENT_COMPILE,
             "compile",
             {
-                "placement_id": "repository-context",
-                "capability_plan": dict(capability_plan),
-                "registry_revision": str(
-                    payload.get("registry_revision") or ""
-                ),
-                "topology_revision": str(
-                    payload.get("topology_revision")
-                    or "repository-context/v1"
-                ),
-                "profile_policy": {
-                    "allowed_capabilities": [
-                        "file.inspect",
-                        "ai.gateway.generate",
-                        "subagent.placement.compile",
-                    ],
-                    "denied_capabilities": [
-                        "file.write",
-                        "git.publish",
-                        "secret.read",
-                        "terminal.execute",
-                    ],
-                    "maximum_cost": float(payload.get("maximum_cost") or 1.0),
-                    "minimum_approval": "auto",
-                },
-                "workspace_policy": {
-                    "allowed_capabilities": [
-                        "file.inspect",
-                        "ai.gateway.generate",
-                        "subagent.placement.compile",
-                    ],
-                    "denied_capabilities": ["file.write", "secret.read"],
-                },
-                "host_policy": {
-                    "allowed_capabilities": [
-                        "file.inspect",
-                        "ai.gateway.generate",
-                        "subagent.placement.compile",
-                    ],
-                    "denied_capabilities": [
-                        "file.write",
-                        "git.publish",
-                        "terminal.execute",
-                    ],
-                },
-                "task_grant": {
-                    "allowed_capabilities": [
-                        "file.inspect",
-                        "ai.gateway.generate",
-                        "subagent.placement.compile",
-                    ],
-                    "denied_capabilities": [],
-                },
-                "host_enforcement": {
-                    "tool_allowlist": "host_enforced",
-                    "workspace_scope": "host_enforced",
-                    "output_schema": "host_validated",
-                    "system_prompt": "behavioral_only",
-                },
-                "task_instructions": [str(payload.get("query") or "")],
+                **compile_payload,
+                "_authority_receipt": str(issued["receipt"]),
+                "_authority_scope": compile_scope,
             },
         )
         if not isinstance(result, Mapping):
@@ -358,15 +527,28 @@ class RepositoryContextPreparer:
         self,
         profile_id: str,
         workspace_id: str,
+        query: str,
         candidates: list[dict[str, Any]],
         *,
         max_file_bytes: int,
         total_read_budget: int,
+        lifecycle: Mapping[str, Any],
+        maximum_tool_calls: int,
+        workspace_binding: Mapping[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
         documents: list[dict[str, Any]] = []
         excluded: list[dict[str, str]] = []
         used = 0
         for candidate in candidates:
+            _check_lifecycle(lifecycle)
+            if len(documents) + 1 >= maximum_tool_calls:
+                excluded.append(
+                    {
+                        "path": candidate["path"],
+                        "reason": "tool_call_budget_exceeded",
+                    }
+                )
+                continue
             size = int(candidate["size"])
             if used + size > total_read_budget:
                 excluded.append(
@@ -385,6 +567,14 @@ class RepositoryContextPreparer:
                         "workspace_id": workspace_id,
                         "path": candidate["path"],
                         "max_bytes": max_file_bytes,
+                        "require_selected": True,
+                        "_workspace_binding": dict(workspace_binding),
+                        "_deadline_epoch_ms": lifecycle.get(
+                            "_deadline_epoch_ms"
+                        ),
+                        "_cancellation_token": lifecycle.get(
+                            "_cancellation_token"
+                        ),
                     },
                 )
             except (OSError, UnicodeError, ValueError):
@@ -407,13 +597,16 @@ class RepositoryContextPreparer:
                     }
                 )
                 continue
+            excerpt = _bounded_excerpt(content, query)
+            excerpt_encoded = excerpt.encode("utf-8")
             used += len(encoded)
             documents.append(
                 {
                     **candidate,
-                    "size": len(encoded),
+                    "size": len(excerpt_encoded),
+                    "source_size": len(encoded),
                     "sha256": hashlib.sha256(encoded).hexdigest(),
-                    "content": content,
+                    "content": excerpt,
                 }
             )
         return documents, excluded
@@ -421,13 +614,15 @@ class RepositoryContextPreparer:
     def _map_batch(
         self,
         query: str,
-        model_reference: str,
+        model_binding: Mapping[str, Any],
         documents: list[dict[str, Any]],
         *,
         batch_index: int,
         max_selected: int,
         maximum_cost: float,
-    ) -> tuple[dict[str, Any], str]:
+        invocation_scope: str,
+        lifecycle: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         payload = [
             {
                 "path": item["path"],
@@ -437,9 +632,11 @@ class RepositoryContextPreparer:
             for item in documents
         ]
         request = {
-            "request_id": f"repository-context-map:{batch_index}:{_short(query)}",
+            "request_id": (
+                f"repository-context-map:{batch_index}:{invocation_scope}"
+            ),
             "idempotency_key": (
-                f"repository-context-map:{batch_index}:{_short(query)}"
+                f"repository-context-map:{batch_index}:{invocation_scope}"
             ),
             "messages": [
                 {
@@ -475,30 +672,64 @@ class RepositoryContextPreparer:
                 "request_surface": "subagent",
                 "structured_output": True,
                 "maximum_cost": maximum_cost,
+                "preferred_model_id": model_binding["model_id"],
+                "preferred_provider_instance_id": (
+                    model_binding["provider_instance_id"]
+                ),
             },
-            "allow_failover": True,
+            "parameters": {
+                "response_format": {"type": "json_object"},
+                "max_tokens": 4096,
+            },
+            "allow_failover": False,
         }
-        if model_reference:
-            request["model_reference"] = model_reference
+        _assert_external_safe(
+            json.dumps(
+                {"query": query, "files": payload},
+                ensure_ascii=False,
+            ),
+            "map input",
+        )
+        _apply_remaining_timeout(request, lifecycle)
         response = self.client.invoke(
             AI_GENERATE,
             "generate",
             request,
         )
-        return _model_json(response, "map"), _response_model_id(response)
+        _validate_response_binding(response, model_binding)
+        return _model_json(response, "map"), _response_usage(response)
 
     def _reduce(
         self,
         query: str,
-        model_reference: str,
+        model_binding: Mapping[str, Any],
         batch_results: list[dict[str, Any]],
         *,
         max_selected: int,
         maximum_cost: float,
-    ) -> tuple[dict[str, Any], str]:
+        invocation_scope: str,
+        lifecycle: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        per_batch_limit = max(
+            1,
+            min(
+                max_selected,
+                (max_selected * 3 + max(1, len(batch_results)) - 1)
+                // max(1, len(batch_results)),
+            ),
+        )
+        compact_batch_results = []
+        for item in batch_results:
+            compact = dict(item)
+            selected_files = compact.get("selected_files")
+            if isinstance(selected_files, list):
+                compact["selected_files"] = selected_files[:per_batch_limit]
+            compact_batch_results.append(compact)
         request = {
-            "request_id": f"repository-context-reduce:{_short(query)}",
-            "idempotency_key": f"repository-context-reduce:{_short(query)}",
+            "request_id": f"repository-context-reduce:{invocation_scope}",
+            "idempotency_key": (
+                f"repository-context-reduce:{invocation_scope}"
+            ),
             "messages": [
                 {
                     "role": "system",
@@ -518,7 +749,7 @@ class RepositoryContextPreparer:
                         {
                             "query": query,
                             "maximum_selected": max_selected,
-                            "batch_results": batch_results,
+                            "batch_results": compact_batch_results,
                         },
                         ensure_ascii=False,
                     ),
@@ -530,17 +761,35 @@ class RepositoryContextPreparer:
                 "request_surface": "subagent",
                 "structured_output": True,
                 "maximum_cost": maximum_cost,
+                "preferred_model_id": model_binding["model_id"],
+                "preferred_provider_instance_id": (
+                    model_binding["provider_instance_id"]
+                ),
             },
-            "allow_failover": True,
+            "parameters": {
+                "response_format": {"type": "json_object"},
+                "max_tokens": 4096,
+            },
+            "allow_failover": False,
         }
-        if model_reference:
-            request["model_reference"] = model_reference
+        _assert_external_safe(
+            json.dumps(
+                {
+                    "query": query,
+                    "batch_results": compact_batch_results,
+                },
+                ensure_ascii=False,
+            ),
+            "reduce input",
+        )
+        _apply_remaining_timeout(request, lifecycle)
         response = self.client.invoke(
             AI_GENERATE,
             "generate",
             request,
         )
-        return _model_json(response, "reduce"), _response_model_id(response)
+        _validate_response_binding(response, model_binding)
+        return _model_json(response, "reduce"), _response_usage(response)
 
 
 def create_catalog_operation(
@@ -603,9 +852,24 @@ def create_prepare_operation(
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         if name != "prepare":
             raise ValueError(f"unknown repository context operation: {name}")
-        return preparer.prepare(payload)
+        bound_payload = dict(payload)
+        try:
+            return preparer.prepare(bound_payload)
+        except Exception:
+            reservation = bound_payload.get("_ledger_reservation")
+            if isinstance(reservation, Mapping):
+                _ledger().abandon(
+                    profile_id=str(reservation.get("profile_id") or ""),
+                    key=str(reservation.get("key") or ""),
+                    digest=str(reservation.get("digest") or ""),
+                )
+            raise
 
     return operation
+
+
+def _ledger() -> RepositoryContextLedger:
+    return RepositoryContextLedger()
 
 
 def create_subagent_runtime(
@@ -635,6 +899,231 @@ def create_subagent_runtime(
         }
 
     return operation
+
+
+def _host_mapping(
+    payload: Mapping[str, Any],
+    key: str,
+) -> dict[str, Any]:
+    value = payload.get(key)
+    if not isinstance(value, Mapping) or not value:
+        raise RepositoryContextError(f"{key} Host receipt is required")
+    return dict(value)
+
+
+def _redeem_authority(
+    client: Any,
+    payload: Mapping[str, Any],
+) -> None:
+    receipt = str(payload.get("_authority_receipt") or "").strip()
+    scope = payload.get("_authority_scope")
+    if not receipt or not isinstance(scope, Mapping):
+        raise RepositoryContextError("Host authority receipt is required")
+    arguments = scope.get("arguments")
+    if not isinstance(arguments, Mapping):
+        raise RepositoryContextError("Host authority scope is incomplete")
+    expected_bindings = {
+        "capability_plan_digest": str(
+            (payload.get("capability_plan") or {}).get("digest") or ""
+        )
+        if isinstance(payload.get("capability_plan"), Mapping)
+        else "",
+        "workspace_binding": dict(
+            payload.get("_workspace_binding") or {}
+        ),
+        "profile_policy": dict(payload.get("_profile_policy") or {}),
+        "workspace_policy": dict(payload.get("_workspace_policy") or {}),
+        "host_policy": dict(payload.get("_host_policy") or {}),
+        "task_grant": dict(payload.get("_task_grant") or {}),
+        "host_enforcement": dict(payload.get("_host_enforcement") or {}),
+        "registry_revision": str(payload.get("registry_revision") or ""),
+        "deadline_epoch_ms": int(
+            payload.get("_deadline_epoch_ms") or 0
+        ),
+        "invocation_key": str(payload.get("_invocation_key") or ""),
+        "invocation_digest": str(
+            payload.get("_invocation_digest") or ""
+        ),
+    }
+    if not bool(arguments.get("external_share_granted")):
+        raise RepositoryContextError(
+            "Host authority does not grant external sharing"
+        )
+    for key, value in expected_bindings.items():
+        if arguments.get(key) != value:
+            raise RepositoryContextError(
+                f"Host authority binding mismatch: {key}"
+            )
+    expected = dict(scope)
+    expected.update(
+        {
+            "service_pack_id": PACK_ID,
+            "operation": "repository.context.prepare",
+            "authority": "repository.content.external_share",
+            "receipt": receipt,
+        }
+    )
+    result = client.invoke(HOST_AUTHORITY, "redeem", expected)
+    if (
+        not isinstance(result, Mapping)
+        or not result.get("authorized")
+        or not result.get("redeemed")
+    ):
+        raise RepositoryContextError(
+            "Host authority receipt is invalid or already used"
+        )
+
+
+def _check_lifecycle(payload: Mapping[str, Any]) -> None:
+    deadline = int(payload.get("_deadline_epoch_ms") or 0)
+    if not deadline or int(time.time() * 1000) >= deadline:
+        raise RepositoryContextError("repository context deadline exceeded")
+    token = payload.get("_cancellation_token")
+    cancelled = False
+    if token is not None:
+        if callable(token):
+            try:
+                cancelled = bool(token())
+            except Exception:
+                cancelled = True
+        for name in ("is_cancelled", "is_set", "cancelled"):
+            if cancelled:
+                break
+            value = getattr(token, name, None)
+            if callable(value):
+                try:
+                    cancelled = bool(value())
+                except Exception:
+                    cancelled = True
+            elif value is not None:
+                cancelled = bool(value)
+            if cancelled:
+                break
+    if cancelled:
+        raise RepositoryContextError("repository context invocation cancelled")
+
+
+def _apply_remaining_timeout(
+    request: dict[str, Any],
+    lifecycle: Mapping[str, Any],
+) -> None:
+    _check_lifecycle(lifecycle)
+    deadline = int(lifecycle["_deadline_epoch_ms"])
+    remaining = max(1.0, (deadline - int(time.time() * 1000)) / 1000)
+    parameters = dict(request.get("parameters") or {})
+    parameters["request_timeout"] = min(120.0, remaining)
+    request["parameters"] = parameters
+
+
+def _invocation_scope(
+    payload: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    workspace_binding: Mapping[str, Any],
+    *,
+    documents: Iterable[Mapping[str, Any]],
+) -> str:
+    value = {
+        "invocation_digest": str(payload.get("_invocation_digest") or ""),
+        "workspace_binding": dict(workspace_binding),
+        "capability_plan_digest": str(
+            (payload.get("capability_plan") or {}).get("digest") or ""
+        )
+        if isinstance(payload.get("capability_plan"), Mapping)
+        else "",
+        "effective_plan_hash": str(plan.get("plan_hash") or ""),
+        "model_binding": _model_reference(plan),
+        "files": [
+            {
+                "path": str(item.get("path") or ""),
+                "sha256": str(item.get("sha256") or ""),
+            }
+            for item in documents
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def _store_excluded_artifact(
+    excluded: list[dict[str, str]],
+) -> str:
+    from core_runtime.paths import USER_DATA_DIR
+
+    content = json.dumps(
+        excluded,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
+    root = Path(USER_DATA_DIR) / "artifacts" / "repository-context"
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / f"{digest}.json"
+    if not target.exists():
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{digest}.",
+            suffix=".tmp",
+            dir=root,
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    return f"artifact://repository-context/{digest}"
+
+
+def _safe_model_text(value: str, field: str) -> str:
+    text = str(value or "").strip()
+    if len(text) > 16_000:
+        raise RepositoryContextError(
+            f"utility model returned oversized {field}"
+        )
+    if _looks_secret(text):
+        raise RepositoryContextError(
+            f"utility model returned secret-like {field}"
+        )
+    return text
+
+
+def _bounded_excerpt(
+    content: str,
+    query: str,
+    *,
+    maximum_chars: int = 12_000,
+) -> str:
+    if len(content) <= maximum_chars:
+        return content
+    tokens = {
+        token.casefold()
+        for token in _TOKEN.findall(query)
+        if len(token) >= 3
+    }
+    lines = content.splitlines()
+    matching = [
+        index
+        for index, line in enumerate(lines)
+        if any(token in line.casefold() for token in tokens)
+    ]
+    selected: set[int] = set()
+    for index in matching[:80]:
+        selected.update(
+            range(max(0, index - 3), min(len(lines), index + 4))
+        )
+    if not selected:
+        return content[:maximum_chars]
+    excerpt = "\n".join(lines[index] for index in sorted(selected))
+    return excerpt[:maximum_chars]
 
 
 def _candidate_files(
@@ -698,16 +1187,33 @@ def _excluded_reason(path: str, size: int, max_file_bytes: int) -> str:
 
 
 def _looks_secret(content: str) -> bool:
-    sample = content[:64_000].casefold()
+    text = str(content or "")
     patterns = (
-        "-----begin private key-----",
-        "aws_secret_access_key",
-        "client_secret=",
-        "api_key=",
-        "apikey=",
-        "authorization: bearer ",
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bgh[pousr]_[A-Za-z0-9]{20,}\b",
+        r"\bsk-(?:live-|test-)?[A-Za-z0-9_-]{16,}\b",
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+        r"\.[A-Za-z0-9_-]{8,}\b",
+        r"\bAuthorization\s*:\s*Bearer\s+\S+",
+        r"(?i)\b(?:authorization|cookie|set-cookie)\s*[:=]\s*[\"']?\S{8,}",
+        r"(?i)(?:[\"']\s*)?"
+        r"(?:api[_-]?key|secret|token|password|passwd|client_secret)"
+        r"(?:\s*[\"'])?\s*[:=]\s*[\"']?[^\s\"',}]{8,}",
+        r"(?i)\b(?:aws_secret_access_key|private_key|access_token|refresh_token)"
+        r"(?:\s*[\"'])?\s*[:=]\s*[\"']?[^\s\"',}]{8,}",
+        r"\bhttps?://[^/\s:@]+:[^/\s@]{8,}@",
+        r"\bAIza[0-9A-Za-z_-]{30,}\b",
+        r"\bxox[baprs]-[0-9A-Za-z-]{20,}\b",
     )
-    return any(pattern in sample for pattern in patterns)
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _assert_external_safe(value: str, field: str) -> None:
+    if _looks_secret(value):
+        raise RepositoryContextError(
+            f"{field} contains secret-like content"
+        )
 
 
 def _batches(
@@ -740,8 +1246,6 @@ def _model_json(value: Any, phase: str) -> dict[str, Any]:
         result = dict(candidate)
     else:
         text = str(candidate or "").strip()
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
         try:
             result = json.loads(text)
         except json.JSONDecodeError as exc:
@@ -752,7 +1256,81 @@ def _model_json(value: Any, phase: str) -> dict[str, Any]:
         raise RepositoryContextError(
             f"utility model returned invalid {phase} output"
         )
-    return result
+    return _validate_model_result(result, phase)
+
+
+def _validate_model_result(
+    result: dict[str, Any],
+    phase: str,
+) -> dict[str, Any]:
+    required_top = (
+        {"selected_files"}
+        if phase == "map"
+        else {"summary", "selected_files"}
+    )
+    if not required_top.issubset(result):
+        raise RepositoryContextError(
+            f"utility model returned invalid {phase} fields"
+        )
+    selected = result.get("selected_files")
+    if not isinstance(selected, list) or len(selected) > 128:
+        raise RepositoryContextError(
+            f"utility model returned invalid {phase} selected_files"
+        )
+    normalized = []
+    for item in selected:
+        if not isinstance(item, Mapping) or set(item) != {
+            "path",
+            "relevance_score",
+            "summary",
+            "evidence",
+        }:
+            raise RepositoryContextError(
+                f"utility model returned invalid {phase} file entry"
+            )
+        path = _safe_model_text(str(item.get("path") or ""), "path")
+        summary = _safe_model_text(
+            str(item.get("summary") or ""),
+            "file summary",
+        )
+        evidence = item.get("evidence")
+        if (
+            not isinstance(evidence, list)
+            or len(evidence) > 32
+            or any(not isinstance(value, str) for value in evidence)
+        ):
+            raise RepositoryContextError(
+                f"utility model returned invalid {phase} evidence"
+            )
+        safe_evidence = [
+            _safe_model_text(value[:2_000], "evidence")
+            for value in evidence
+        ]
+        try:
+            score = float(item.get("relevance_score"))
+        except (TypeError, ValueError) as exc:
+            raise RepositoryContextError(
+                f"utility model returned invalid {phase} relevance_score"
+            ) from exc
+        if not 0 <= score <= 1:
+            raise RepositoryContextError(
+                f"utility model returned invalid {phase} relevance_score"
+            )
+        normalized.append(
+            {
+                "path": path[:1_024],
+                "relevance_score": score,
+                "summary": summary[:4_000],
+                "evidence": safe_evidence,
+            }
+        )
+    output = {"selected_files": normalized}
+    if phase != "map":
+        output["summary"] = _safe_model_text(
+            str(result.get("summary") or ""),
+            "summary",
+        )
+    return output
 
 
 def _validated_selected(
@@ -806,11 +1384,138 @@ def _model_reference(plan: Mapping[str, Any]) -> str:
                 return reference.removeprefix("profile-model://")
             if reference.startswith("model://"):
                 return reference.removeprefix("model://")
+            if reference.startswith("route://"):
+                return reference
     return ""
 
 
-def _response_model_id(value: Any) -> str:
-    return str(value.get("model_id") or "") if isinstance(value, Mapping) else ""
+def _resolve_model_binding(
+    client: Any,
+    plan: Mapping[str, Any],
+    *,
+    maximum_cost: float,
+    lifecycle: Mapping[str, Any],
+) -> dict[str, Any]:
+    request: dict[str, Any] = {
+        "request_id": (
+            "repository-context-resolve:"
+            + str(plan.get("plan_hash") or "")
+        ),
+        "requirements": {
+            "modalities": ["text"],
+            "tool_calling": False,
+            "request_surface": "subagent",
+            "structured_output": True,
+            "maximum_cost": maximum_cost,
+        },
+        "parameters": {},
+        "allow_failover": False,
+    }
+    exact = _model_reference(plan)
+    if exact:
+        request["model_reference"] = exact
+    _apply_remaining_timeout(request, lifecycle)
+    resolved = client.invoke(AI_GENERATE, "resolve", request)
+    if not isinstance(resolved, Mapping) or resolved.get("status") != "ok":
+        raise RepositoryContextError("AI model binding could not be resolved")
+    binding = {
+        key: resolved.get(key)
+        for key in (
+            "model_id",
+            "provider_instance_id",
+            "catalog_provider_instance_id",
+            "catalog_revision",
+            "pricing_revision",
+            "pricing",
+        )
+    }
+    if not all(
+        str(binding.get(key) or "").strip()
+        for key in (
+            "model_id",
+            "provider_instance_id",
+            "catalog_revision",
+            "pricing_revision",
+        )
+    ):
+        raise RepositoryContextError("AI model binding is incomplete")
+    binding["route"] = next(
+        (
+            str(item.get("provider_ref") or "")
+            for item in plan.get("bindings") or []
+            if isinstance(item, Mapping) and item.get("slot") == "model"
+        ),
+        "",
+    )
+    binding["binding_hash"] = _sha(binding)
+    return binding
+
+
+def _validate_response_binding(
+    value: Any,
+    expected: Mapping[str, Any],
+) -> None:
+    if not isinstance(value, Mapping):
+        raise RepositoryContextError("AI gateway returned invalid binding")
+    for key in (
+        "model_id",
+        "provider_instance_id",
+        "catalog_revision",
+        "pricing_revision",
+    ):
+        if str(value.get(key) or "") != str(expected.get(key) or ""):
+            raise RepositoryContextError(
+                f"AI gateway changed pinned {key}"
+            )
+
+
+def _response_usage(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    usage = value.get("usage")
+    usage = dict(usage) if isinstance(usage, Mapping) else {}
+    cost = value.get("usage_cost")
+    cost = dict(cost) if isinstance(cost, Mapping) else {}
+    input_value = usage.get("input_tokens", usage.get("prompt_tokens"))
+    output_value = usage.get(
+        "output_tokens", usage.get("completion_tokens")
+    )
+    if input_value is None or output_value is None:
+        raise RepositoryContextError(
+            "AI gateway omitted provider usage"
+        )
+    if cost.get("known") is not True or cost.get("cost") is None:
+        raise RepositoryContextError(
+            "AI gateway omitted trusted pricing usage"
+        )
+    return {
+        "input_tokens": int(input_value),
+        "output_tokens": int(output_value),
+        "cost": float(cost["cost"]),
+    }
+
+
+def _consume_usage(
+    aggregate: dict[str, Any],
+    usage: Mapping[str, Any],
+    *,
+    maximum_cost: float,
+    maximum_tokens: int,
+) -> None:
+    aggregate["input_tokens"] += int(usage.get("input_tokens") or 0)
+    aggregate["output_tokens"] += int(usage.get("output_tokens") or 0)
+    aggregate["cost"] += float(usage.get("cost") or 0.0)
+    if (
+        aggregate["input_tokens"] + aggregate["output_tokens"]
+        > maximum_tokens
+    ):
+        raise RepositoryContextError(
+            "repository context aggregate token budget exceeded"
+        )
+    if aggregate["cost"] > maximum_cost:
+        raise RepositoryContextError(
+            "repository context aggregate cost budget exceeded"
+        )
 
 
 def _matches_exact(definition: Mapping[str, Any], exact_ref: str) -> bool:
@@ -884,6 +1589,19 @@ def _bounded_int(
     except (TypeError, ValueError):
         selected = default
     return max(minimum, min(maximum, selected))
+
+
+def _max_candidates_for_tool_budget(maximum_tool_calls: int) -> int:
+    """Reserve aggregate budget for list, map batches, and reduce."""
+
+    budget = max(1, int(maximum_tool_calls))
+    for count in range(min(_MAX_LISTED_FILES, budget), 0, -1):
+        batches = (
+            count + _DEFAULT_BATCH_FILES - 1
+        ) // _DEFAULT_BATCH_FILES
+        if 1 + count + batches + 1 <= budget:
+            return count
+    return 1
 
 
 def _sha(value: Any) -> str:

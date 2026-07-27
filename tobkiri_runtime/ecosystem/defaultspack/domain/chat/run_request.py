@@ -45,7 +45,7 @@ from domain.chat.tool_selection_schema import (
     normalize_tool_target,
     normalize_tool_targets,
 )
-from domain.mention import extract_mention_values
+from domain.mention import extract_mention_values, is_mention_start
 from domain.chat.tool_selection_service import ToolSelectionService
 from domain.chat.tool_selection_preview import (
     ToolSelectionPreviewAccessError,
@@ -502,7 +502,7 @@ def prepare_chat_run(
         parallel_tool_calls = tool_policy.get("parallel_tool_calls")
         if "parallel_tool_calls" not in params and isinstance(parallel_tool_calls, bool):
             params["parallel_tool_calls"] = parallel_tool_calls
-    if tool_selection.must_use and "tool_choice" not in params:
+    if tool_selection.must_use:
         params["tool_choice"] = "required"
     prepared_input = {**prepared_input, "params": params}
     tool_resolution_input = {
@@ -681,6 +681,34 @@ def prepare_chat_run(
         for tool in compiled_model_input["tools"]
         if tool_name_from_definition(tool) in compiled_tool_ids
     ]
+    if tool_selection.must_use:
+        attached_tool_ids = [
+            tool_name_from_definition(tool)
+            for tool in raw_tools
+            if tool_name_from_definition(tool)
+        ]
+        explicitly_requested = set(
+            _coerce_tool_id_list(list(tool_selection.include))
+        )
+        required_tool_ids = [
+            tool_id
+            for tool_id in attached_tool_ids
+            if not explicitly_requested or tool_id in explicitly_requested
+        ]
+        if not required_tool_ids:
+            raise ValueError(
+                "params.tool_selection.must_use did not resolve to an "
+                "attached Tool"
+            )
+        request_context["required_tool_ids"] = list(required_tool_ids)
+        tool_context["required_tool_ids"] = list(required_tool_ids)
+        if len(required_tool_ids) == 1 and not isinstance(
+            params.get("tool_choice"), dict
+        ):
+            params["tool_choice"] = {
+                "type": "function",
+                "function": {"name": required_tool_ids[0]},
+            }
     provider_tools = adapt_tool_definitions(raw_tools)
     skill_instructions = str(
         compiled_model_input.get("skill_instructions") or ""
@@ -1644,8 +1672,40 @@ def _runtime_profile_with_policy_connected_tools(
         )
         or ""
     ).strip()
-    if not base_profile and snapshot_profile_id:
-        base_profile = _profile_snapshot(snapshot_profile_id)
+    if snapshot_profile_id:
+        snapshot = _profile_snapshot(snapshot_profile_id)
+        if isinstance(snapshot, dict) and snapshot:
+            # Runtime graph projections intentionally omit some canonical
+            # profile fields. Preserve graph/agent authority while hydrating
+            # those non-authoritative fields from the saved snapshot.
+            base_profile = {
+                **snapshot,
+                **base_profile,
+                "metadata": {
+                    **(
+                        snapshot.get("metadata")
+                        if isinstance(snapshot.get("metadata"), dict)
+                        else {}
+                    ),
+                    **(
+                        base_profile.get("metadata")
+                        if isinstance(base_profile.get("metadata"), dict)
+                        else {}
+                    ),
+                },
+                "policy": {
+                    **(
+                        snapshot.get("policy")
+                        if isinstance(snapshot.get("policy"), dict)
+                        else {}
+                    ),
+                    **(
+                        base_profile.get("policy")
+                        if isinstance(base_profile.get("policy"), dict)
+                        else {}
+                    ),
+                },
+            }
     if not isinstance(base_profile, dict) or not base_profile:
         return runtime_profile, str(agent_id or "").strip()
 
@@ -2703,11 +2763,17 @@ def _tool_mention_ids_from_text(user_text: str) -> list[str]:
         registry = ToolRegistry()
     except Exception:
         return []
+    registered_tools: list[dict[str, Any]] = []
     try:
+        registered_tools = [
+            tool
+            for tool in registry.list_tools()
+            if isinstance(tool, dict)
+            and str(tool.get("tool_id") or "").strip()
+        ]
         known_tool_ids = [
             str(tool.get("tool_id") or "").strip()
-            for tool in registry.list_tools()
-            if isinstance(tool, dict) and str(tool.get("tool_id") or "").strip()
+            for tool in registered_tools
         ]
     except (AttributeError, TypeError):
         known_tool_ids = []
@@ -2725,7 +2791,115 @@ def _tool_mention_ids_from_text(user_text: str) -> list[str]:
             continue
         seen.add(tool_id)
         tool_ids.append(tool_id)
+    labels: dict[str, list[str]] = {}
+    for tool in registered_tools:
+        tool_id = str(tool.get("tool_id") or "").strip()
+        display_name = str(tool.get("display_name") or "").strip()
+        if not tool_id or not display_name:
+            continue
+        labels.setdefault(display_name.casefold(), []).append(tool_id)
+    for label, matching_ids in sorted(
+        labels.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if len(matching_ids) != 1:
+            continue
+        pattern = re.compile(
+            rf"@{re.escape(label)}(?![\w./:-])",
+            re.IGNORECASE,
+        )
+        if not any(
+            is_mention_start(user_text, match.start(), known_tool_ids)
+            for match in pattern.finditer(user_text)
+        ):
+            continue
+        tool_id = matching_ids[0]
+        if tool_id not in seen:
+            seen.add(tool_id)
+            tool_ids.append(tool_id)
     return tool_ids
+
+
+def _verified_approval_followup_tool_ids(
+    input_data: dict[str, Any],
+) -> list[str]:
+    """Recover the exact Tool authorized by a signed approval follow-up.
+
+    The visible approval-continuation text no longer contains the original
+    ``@Tool`` mention. Client-provided ``selected_tools`` is not sufficient
+    authority for a low-level Tool, so validate the server-side approval and
+    its one-shot token before treating this one Tool as explicitly selected.
+    Token consumption remains the executor's responsibility.
+    """
+
+    message = (
+        input_data.get("message")
+        if isinstance(input_data, dict)
+        and isinstance(input_data.get("message"), dict)
+        else {}
+    )
+    metadata = (
+        message.get("metadata")
+        if isinstance(message.get("metadata"), dict)
+        else {}
+    )
+    followup = (
+        metadata.get("approval_followup")
+        if isinstance(metadata.get("approval_followup"), dict)
+        else {}
+    )
+    tool_id = str(followup.get("tool_name") or "").strip()
+    request_id = str(
+        followup.get("request_id")
+        or followup.get("approval_request_id")
+        or ""
+    ).strip()
+    token = str(
+        followup.get("approval_token") or followup.get("token") or ""
+    ).strip()
+    if not (tool_id and request_id and token):
+        return []
+
+    try:
+        from domain.safety import approval
+
+        request = approval.get_approval_request(request_id)
+    except Exception:
+        return []
+    if not isinstance(request, dict):
+        return []
+    if str(request.get("status") or "") != "approved":
+        return []
+
+    operation = str(request.get("operation") or "").strip()
+    if operation != f"tool.{tool_id}":
+        return []
+    details = (
+        request.get("details")
+        if isinstance(request.get("details"), dict)
+        else {}
+    )
+    request_tool_id = str(details.get("tool_name") or "").strip()
+    if request_tool_id and request_tool_id != tool_id:
+        return []
+    args_hash = str(request.get("args_hash") or "").strip()
+    if not args_hash:
+        return []
+    try:
+        verification = approval.verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            consume=False,
+        )
+    except Exception:
+        return []
+    if not getattr(verification, "valid", False):
+        return []
+    if str(getattr(verification, "request_id", "") or "").strip() != request_id:
+        return []
+    return [tool_id]
 
 
 def _has_computer_use_tool(tool_ids: list[str]) -> bool:
@@ -2992,6 +3166,18 @@ def _available_tools(
     caller_provider_tools = _caller_provider_tool_definitions(input_data)
     resolved_context = resolve_runtime_profile_context(context or {})
     resolved_context["tool_selection"] = _tool_selection_metadata(selection)
+    verified_explicit_tool_ids = list(
+        dict.fromkeys(
+            [
+                *_tool_mention_ids_from_text(user_text),
+                *_verified_approval_followup_tool_ids(input_data),
+            ]
+        )
+    )
+    if verified_explicit_tool_ids:
+        resolved_context["verified_explicit_tool_ids"] = (
+            verified_explicit_tool_ids
+        )
     caller_provider_tool_ids = [
         tool_name_from_definition(tool)
         for tool in caller_provider_tools

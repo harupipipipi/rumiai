@@ -25,10 +25,12 @@ from domain.tool_policy.internal_context import (
 from domain.tool_policy.profile_permission import resolve_profile_tool_permission
 from domain.tool_policy.risk import resolve_tool_risk
 from pathlib import Path
+import hashlib
 import inspect
 import json
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +121,74 @@ def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def _capability_plan_tool_rejection(tool_name, tool_def, context):
+    """Fail closed when a compiled plan does not attach this exact Tool."""
+
+    if not isinstance(context, dict):
+        return None
+    plan = context.get("capability_plan")
+    if not isinstance(plan, dict):
+        return None
+    tools = plan.get("tools")
+    if not isinstance(tools, dict):
+        return {
+            "result": "CapabilityPlan Tool authority is invalid",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_invalid",
+        }
+    attached = {
+        str(item).strip()
+        for item in tools.get("attached") or []
+        if str(item or "").strip()
+    }
+    canonical_name = str(
+        tool_def.get("tool_id")
+        or tool_def.get("name")
+        or tool_name
+        or ""
+    ).strip()
+    if canonical_name not in attached and str(tool_name) not in attached:
+        return {
+            "result": "Tool is not attached by the active CapabilityPlan",
+            "is_error": True,
+            "widget": None,
+            "error_type": "tool_not_attached",
+        }
+    schema_hashes = tools.get("schema_hashes")
+    expected_hash = (
+        str(schema_hashes.get(canonical_name) or "").strip()
+        if isinstance(schema_hashes, dict)
+        else ""
+    )
+    schema = tool_def.get("schema")
+    if not isinstance(schema, dict):
+        contract = tool_def.get("contract")
+        schema = (
+            contract.get("input_schema")
+            if isinstance(contract, dict)
+            and isinstance(contract.get("input_schema"), dict)
+            else {}
+        )
+    actual_hash = hashlib.sha256(
+        json.dumps(
+            schema,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    if not expected_hash or expected_hash != actual_hash:
+        return {
+            "result": "Tool schema does not match the active CapabilityPlan",
+            "is_error": True,
+            "widget": None,
+            "error_type": "tool_schema_revision_mismatch",
+        }
+    return None
+
+
 def _approval_module():
     from domain.safety import approval
 
@@ -160,6 +230,13 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None
             }
+        plan_rejection = _capability_plan_tool_rejection(
+            tool_name,
+            tool_def,
+            context,
+        )
+        if plan_rejection is not None:
+            return plan_rejection
         adaptive_decision = guard_tool_execution(
             tool_name,
             arguments if isinstance(arguments, dict) else {},
@@ -390,6 +467,7 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
+        arguments = dict(arguments or {})
         requested_profile = str(arguments.get("profile_id") or "").strip()
         if requested_profile and requested_profile != plan.profile_id:
             return {
@@ -406,8 +484,102 @@ class ToolExecutor:
             )
             or ""
         ).strip()
+        context_workspace_id = str(
+            (context.get("workspace_id") or "")
+            if isinstance(context, dict)
+            else ""
+        ).strip()
+        requested_workspace_id = str(
+            arguments.get("workspace_id") or ""
+        ).strip()
+        if requested_workspace_id and (
+            not context_workspace_id
+            or requested_workspace_id != context_workspace_id
+        ):
+            return {
+                "result": "Tool requested a workspace outside the active binding",
+                "is_error": True,
+                "widget": None,
+                "error_type": "workspace_binding_mismatch",
+            }
+        if "workspace_id" in arguments or context_workspace_id:
+            if not context_workspace_id:
+                return {
+                    "result": "Active workspace binding is required",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "workspace_binding_missing",
+                }
+            arguments["workspace_id"] = context_workspace_id
+        workspace_binding = None
+        if context_workspace_id:
+            try:
+                workspace_snapshot = invoke_global_contract(
+                    registry,
+                    "rumi.resource.workspace.v1",
+                    "list",
+                    {"profile_id": plan.profile_id},
+                )
+                selected_workspace_id = (
+                    str(workspace_snapshot.get("selected_workspace_id") or "").strip()
+                    if isinstance(workspace_snapshot, dict)
+                    else ""
+                )
+                if (
+                    not isinstance(workspace_snapshot, dict)
+                    or selected_workspace_id != context_workspace_id
+                ):
+                    raise ValueError(
+                        "selected workspace changed "
+                        f"(expected {context_workspace_id!r}, "
+                        f"active {selected_workspace_id!r})"
+                    )
+                workspace_mount = invoke_global_contract(
+                    registry,
+                    "rumi.resource.workspace.v1",
+                    "get",
+                    {
+                        "profile_id": plan.profile_id,
+                        "workspace_id": context_workspace_id,
+                    },
+                )
+                if not isinstance(workspace_mount, dict):
+                    raise ValueError("workspace mount is unavailable")
+                root = Path(
+                    str(workspace_mount.get("root_path") or "")
+                ).resolve(strict=True)
+                root_stat = root.stat()
+                mount_revision = str(
+                    workspace_mount.get("revision")
+                    or workspace_mount.get("updated_at_ms")
+                    or workspace_mount.get("updated_at")
+                    or ""
+                )
+                workspace_binding = {
+                    "workspace_id": context_workspace_id,
+                    "access": "read_only",
+                    "mount_revision": mount_revision,
+                    "canonical_root": str(root),
+                    "root_st_dev": int(root_stat.st_dev),
+                    "root_st_ino": int(root_stat.st_ino),
+                }
+                workspace_binding["root_identity"] = hashlib.sha256(
+                    json.dumps(
+                        workspace_binding,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                return {
+                    "result": f"Active workspace binding failed: {exc}",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "workspace_binding_invalid",
+                }
         payload = {
-            **dict(arguments or {}),
+            **arguments,
             "profile_id": plan.profile_id,
             "_contract_consumer_pack_id": source_pack_id,
             "_contract_consumer_function_id": str(
@@ -421,13 +593,250 @@ class ToolExecutor:
             payload["registry_revision"] = str(
                 context.get("registry_revision")
                 or context.get("catalog_revision")
+                or (
+                    capability_plan.get("registry_revision")
+                    if isinstance(capability_plan, dict)
+                    else ""
+                )
                 or getattr(plan, "catalog_revision", "")
                 or getattr(plan, "registry_revision", "")
                 or ""
             )
+            if not payload["registry_revision"]:
+                return {
+                    "result": "Active registry revision is required",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "registry_revision_missing",
+                }
             payload["topology_revision"] = str(
                 context.get("topology_revision") or ""
             )
+            timeout_ms = max(
+                1,
+                int(execution.get("timeout_ms") or 120_000),
+            )
+            payload["_deadline_epoch_ms"] = int(time.time() * 1000) + timeout_ms
+            payload["_cancellation_token"] = context.get(
+                "cancellation_token"
+            ) or context.get("is_cancelled")
+            payload["_host_enforcement"] = {
+                "tool_allowlist": "host_enforced",
+                "workspace_scope": "host_enforced",
+                "output_schema": "host_validated",
+                "system_prompt": "behavioral_only",
+            }
+            host_allowed = [
+                "file.inspect",
+                "ai.gateway.generate",
+                "subagent.placement.compile",
+            ]
+            tool_capability_grants = (
+                capability_plan.get("tools", {}).get(
+                    "capability_grants", {}
+                )
+                if isinstance(capability_plan, dict)
+                and isinstance(capability_plan.get("tools"), dict)
+                else {}
+            )
+            exact_tool_grants = (
+                tool_capability_grants.get(
+                    str(
+                        tool_def.get("tool_id")
+                        or tool_def.get("name")
+                        or ""
+                    ),
+                    [],
+                )
+                if isinstance(tool_capability_grants, dict)
+                else []
+            )
+            if "repository.content.external_share" in {
+                str(value) for value in exact_tool_grants
+            }:
+                host_allowed.append("repository.content.external_share")
+            host_denied = [
+                "file.write",
+                "git.publish",
+                "secret.read",
+                "terminal.execute",
+            ]
+            for target in (
+                "_profile_policy",
+                "_workspace_policy",
+                "_host_policy",
+                "_task_grant",
+            ):
+                payload[target] = {
+                    "allowed_capabilities": list(host_allowed),
+                    "denied_capabilities": list(host_denied),
+                }
+            if workspace_binding is None:
+                return {
+                    "result": "Active workspace binding is required",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "workspace_binding_missing",
+                }
+            payload["_workspace_binding"] = workspace_binding
+            canonical_arguments = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            payload["_invocation_key"] = hashlib.sha256(
+                json.dumps(
+                    {
+                        "profile_id": plan.profile_id,
+                        "tool_id": tool_def.get("tool_id")
+                        or tool_def.get("name"),
+                        "arguments": arguments,
+                        "workspace": payload["_workspace_binding"],
+                        "capability_plan": (
+                            capability_plan.get("digest")
+                            if isinstance(capability_plan, dict)
+                            else ""
+                        ),
+                        "registry_revision": payload["registry_revision"],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()
+            payload["_invocation_digest"] = hashlib.sha256(
+                json.dumps(
+                    {
+                        "tool_id": tool_def.get("tool_id")
+                        or tool_def.get("name"),
+                        "arguments": arguments,
+                        "workspace": payload["_workspace_binding"],
+                        "capability_plan": (
+                            capability_plan.get("digest")
+                            if isinstance(capability_plan, dict)
+                            else ""
+                        ),
+                        "registry_revision": payload["registry_revision"],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()
+            authority_arguments = {
+                "consumer_pack_id": source_pack_id,
+                "consumer_function_id": str(
+                    tool_def.get("tool_id") or tool_def.get("name") or ""
+                ),
+                "capability_plan_digest": (
+                    capability_plan.get("digest")
+                    if isinstance(capability_plan, dict)
+                    else ""
+                ),
+                "attached_tool_id": str(
+                    tool_def.get("tool_id") or tool_def.get("name") or ""
+                ),
+                "tool_definition_hash": hashlib.sha256(
+                    json.dumps(
+                        tool_def,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest(),
+                "workspace_binding": payload["_workspace_binding"],
+                "external_share_granted": (
+                    "repository.content.external_share" in host_allowed
+                ),
+                "profile_policy": payload["_profile_policy"],
+                "workspace_policy": payload["_workspace_policy"],
+                "host_policy": payload["_host_policy"],
+                "task_grant": payload["_task_grant"],
+                "host_enforcement": payload["_host_enforcement"],
+                "registry_revision": payload["registry_revision"],
+                "arguments_hash": hashlib.sha256(
+                    canonical_arguments.encode("utf-8")
+                ).hexdigest(),
+                "deadline_epoch_ms": payload["_deadline_epoch_ms"],
+                "invocation_key": payload["_invocation_key"],
+                "invocation_digest": payload["_invocation_digest"],
+                "budget": {
+                    "timeout_ms": timeout_ms,
+                    "maximum_cost": arguments.get("maximum_cost"),
+                },
+            }
+            if not authority_arguments["external_share_granted"]:
+                return {
+                    "result": (
+                        "CapabilityPlan does not grant repository content "
+                        "external sharing"
+                    ),
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "external_share_not_granted",
+                }
+            authority = invoke_global_contract(
+                registry,
+                "rumi.service.host.authorize.v1",
+                "authorize",
+                {
+                    "_contract_consumer_pack_id": source_pack_id,
+                    "service_pack_id": source_pack_id,
+                    "operation": "repository.context.prepare",
+                    "authority": "repository.content.external_share",
+                    "caller_id": f"tool-executor:{plan.profile_id}",
+                    "caller_pack_id": source_pack_id,
+                    "caller_function_id": str(
+                        tool_def.get("tool_id")
+                        or tool_def.get("name")
+                        or ""
+                    ),
+                    "profile_id": plan.profile_id,
+                    "workspace_id": context_workspace_id,
+                    "session_id": str(
+                        context.get("conversation_id")
+                        or context.get("session_id")
+                        or ""
+                    ),
+                    "arguments": authority_arguments,
+                    "approval_required": False,
+                },
+            )
+            if (
+                not isinstance(authority, dict)
+                or not authority.get("authorized")
+                or not authority.get("receipt")
+            ):
+                return {
+                    "result": "Host authority denied repository context",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "host_authority_denied",
+                }
+            payload["_authority_receipt"] = str(authority["receipt"])
+            payload["_authority_scope"] = {
+                "service_pack_id": source_pack_id,
+                "operation": "repository.context.prepare",
+                "authority": "repository.content.external_share",
+                "caller_id": f"tool-executor:{plan.profile_id}",
+                "caller_pack_id": source_pack_id,
+                "caller_function_id": str(
+                    tool_def.get("tool_id") or tool_def.get("name") or ""
+                ),
+                "profile_id": plan.profile_id,
+                "workspace_id": context_workspace_id,
+                "session_id": str(
+                    context.get("conversation_id")
+                    or context.get("session_id")
+                    or ""
+                ),
+                "arguments": authority_arguments,
+            }
         try:
             if provider_instance_id:
                 value = invoke_selected_global_provider(
@@ -450,13 +859,31 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
             return {
                 "result": "Global contract request failed: {}".format(exc),
                 "is_error": True,
                 "widget": None,
             }
-        return {"result": value, "is_error": False, "widget": None}
+        widget = None
+        if (
+            isinstance(value, dict)
+            and value.get("schema_version")
+            == "tobkiri.repository-evidence/v1"
+        ):
+            widget = {
+                "type": "repository_evidence",
+                "statistics": dict(value.get("statistics") or {}),
+                "selected_files": list(value.get("selected_files") or []),
+                "excluded_reason_counts": dict(
+                    value.get("excluded_reason_counts") or {}
+                ),
+                "excluded_sample": list(value.get("excluded_files") or []),
+                "excluded_artifact_ref": str(
+                    value.get("excluded_artifact_ref") or ""
+                ),
+            }
+        return {"result": value, "is_error": False, "widget": widget}
 
     def _execute_capability_request(self, tool_def, request, context):
         principal_id = self._principal_id(tool_def, context)

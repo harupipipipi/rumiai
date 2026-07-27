@@ -20,20 +20,103 @@ def generate(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = _invoke(_GENERATE_CONTRACT, "generate", payload)
     if not isinstance(value, dict):
         raise RuntimeError("AI gateway returned an invalid result")
+    tool_intents = [
+        dict(item)
+        for item in value.get("tool_intents") or []
+        if isinstance(item, Mapping)
+    ]
     return {
         **value,
-        "content": value.get("output"),
-        "tool_calls": list(value.get("tool_intents") or []),
+        "content": _legacy_content(value.get("output"), tool_intents),
+        "tool_calls": tool_intents,
     }
 
 
+def _legacy_content(
+    output: Any,
+    tool_intents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project gateway output and intents to the chat engine's block schema."""
+    blocks: list[dict[str, Any]] = []
+    if isinstance(output, list):
+        blocks.extend(dict(item) for item in output if isinstance(item, Mapping))
+    elif output not in {None, ""}:
+        blocks.append({"type": "text", "text": str(output)})
+    for intent in tool_intents:
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": str(intent.get("intent_id") or ""),
+                "name": str(intent.get("operation") or ""),
+                "input": dict(intent.get("arguments") or {}),
+            }
+        )
+    return blocks
+
+
 def stream(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Invoke the distinct stream contract and return normalized events."""
+    """Invoke the stream contract and project typed events to chat chunks."""
     value = _invoke(_STREAM_CONTRACT, "stream", payload)
     events = value.get("events") if isinstance(value, dict) else None
     if not isinstance(events, list):
         raise RuntimeError("AI gateway returned an invalid stream")
-    return [dict(item) for item in events if isinstance(item, dict)]
+    projected: list[dict[str, Any]] = []
+    usage: dict[str, Any] = {}
+    for item in events:
+        if not isinstance(item, Mapping):
+            continue
+        event_type = str(item.get("type") or "")
+        if event_type == "text_delta":
+            text = str(item.get("delta") or "")
+            if text:
+                projected.append(
+                    {
+                        "type": "content_delta",
+                        "delta": {"type": "text", "text": text},
+                    }
+                )
+        elif event_type == "thinking_delta":
+            text = str(item.get("delta") or "")
+            if text:
+                projected.append(
+                    {
+                        "type": "reasoning_delta",
+                        "delta": {"type": "text", "text": text},
+                    }
+                )
+        elif event_type == "tool_intent_delta":
+            intent = item.get("tool_intent")
+            if isinstance(intent, Mapping):
+                projected.append(
+                    {
+                        "type": "tool_use",
+                        "id": str(intent.get("intent_id") or ""),
+                        "name": str(intent.get("operation") or ""),
+                        "input": dict(intent.get("arguments") or {}),
+                    }
+                )
+        elif event_type == "usage":
+            if isinstance(item.get("usage"), Mapping):
+                usage = dict(item["usage"])
+                if isinstance(item.get("usage_cost"), Mapping):
+                    usage["usage_cost"] = dict(item["usage_cost"])
+        elif event_type == "finish":
+            projected.append(
+                {
+                    "type": "stream_end",
+                    "finish_reason": str(item.get("finish_reason") or "stop"),
+                    "usage": usage,
+                }
+            )
+        elif event_type == "error":
+            projected.append(
+                {
+                    "type": "stream_end",
+                    "finish_reason": "error",
+                    "usage": usage,
+                }
+            )
+    return projected
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:

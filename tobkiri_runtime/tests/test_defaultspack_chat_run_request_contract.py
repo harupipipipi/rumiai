@@ -4,6 +4,7 @@ import base64
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -144,6 +145,57 @@ def test_tool_selection_rejects_raw_tool_definition_dict():
     )
 
     assert error == "params.tool_selection.include must contain only string IDs or {kind, id} targets"
+
+
+def test_approval_followup_tool_is_explicit_only_after_signed_server_verification(
+    monkeypatch,
+):
+    from domain.chat.run_request import _verified_approval_followup_tool_ids
+    from domain.safety import approval
+
+    monkeypatch.setattr(
+        approval,
+        "get_approval_request",
+        lambda request_id: {
+            "request_id": request_id,
+            "status": "approved",
+            "operation": "tool.repository_context_prepare",
+            "args_hash": "args-hash",
+            "details": {"tool_name": "repository_context_prepare"},
+        },
+    )
+    monkeypatch.setattr(
+        approval,
+        "verify_execution_token",
+        lambda token, operation, args_hash, consume=False: SimpleNamespace(
+            valid=(
+                token == "signed-token"
+                and operation == "tool.repository_context_prepare"
+                and args_hash == "args-hash"
+                and consume is False
+            ),
+            request_id="apr-followup",
+        ),
+    )
+    request = {
+        "message": {
+            "metadata": {
+                "approval_followup": {
+                    "approval_token": "signed-token",
+                    "request_id": "apr-followup",
+                    "tool_name": "repository_context_prepare",
+                }
+            }
+        }
+    }
+
+    assert _verified_approval_followup_tool_ids(request) == [
+        "repository_context_prepare"
+    ]
+    request["message"]["metadata"]["approval_followup"]["tool_name"] = (
+        "coding_terminal_exec"
+    )
+    assert _verified_approval_followup_tool_ids(request) == []
 
 
 def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkeypatch):
@@ -837,6 +889,69 @@ def test_prepare_chat_run_adds_requested_tool_to_existing_agent_profile(tmp_path
     assert "coding_terminal_exec" not in tool_names
     assert "coding_terminal_exec" not in prepared.connected_tool_names
     ChatStore._instance = None
+
+
+def test_explicit_tool_selection_does_not_expand_agent_tool_scope():
+    from domain.chat.run_request import (
+        _runtime_profile_with_policy_connected_tools,
+    )
+    runtime_profile = {
+        "packs": ["rumi_repository_context_pack"],
+        "defaultspack": {
+            "agents": {
+                "client_manager": {
+                    "tools": ["coding_file_read"],
+                },
+            },
+        },
+    }
+
+    patched, agent_id = _runtime_profile_with_policy_connected_tools(
+        runtime_profile,
+        agent_id="client_manager",
+    )
+
+    assert agent_id == "client_manager"
+    connected_agent_tools = patched["defaultspack"]["agents"][
+        "client_manager"
+    ]["tools"]
+    assert connected_agent_tools == ["coding_file_read"]
+
+
+def test_profile_snapshot_hydration_does_not_expand_agent_tool_scope(
+    monkeypatch,
+):
+    import domain.chat.run_request as run_request
+    monkeypatch.setattr(
+        run_request,
+        "_profile_snapshot",
+        lambda profile_id: {
+            "profile_id": profile_id,
+            "packs": ["rumi_repository_context_pack"],
+            "policy": {"capabilities": ["repository.context.prepare"]},
+        },
+    )
+
+    patched, agent_id = run_request._runtime_profile_with_policy_connected_tools(
+        {
+            "profile_id": "default-profile",
+            "defaultspack": {
+                "agents": {
+                    "client_manager": {
+                        "tools": ["coding_file_read"],
+                    },
+                },
+            },
+        },
+        profile_id="default-profile",
+        agent_id="client_manager",
+    )
+
+    assert agent_id == "client_manager"
+    assert patched["packs"] == ["rumi_repository_context_pack"]
+    assert patched["defaultspack"]["agents"]["client_manager"]["tools"] == [
+        "coding_file_read"
+    ]
 
 
 def test_prepare_chat_run_falls_back_to_selected_workspace_when_metadata_missing(tmp_path, monkeypatch):

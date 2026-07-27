@@ -35,10 +35,9 @@
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["query", "workspace_id"],
+      "required": ["query"],
       "properties": {
         "query": {"type": "string", "minLength": 1, "maxLength": 12000},
-        "workspace_id": {"type": "string", "minLength": 1},
         "max_candidates": {
           "type": "integer",
           "minimum": 1,
@@ -66,6 +65,8 @@
         "summary",
         "selected_files",
         "excluded_files",
+        "excluded_reason_counts",
+        "excluded_artifact_ref",
         "statistics",
         "bundle_hash"
       ],
@@ -74,6 +75,8 @@
         "summary": {"type": "string"},
         "selected_files": {"type": "array"},
         "excluded_files": {"type": "array"},
+        "excluded_reason_counts": {"type": "object"},
+        "excluded_artifact_ref": {"type": "string"},
         "statistics": {"type": "object"},
         "bundle_hash": {"type": "string"}
       }
@@ -90,7 +93,7 @@
       "class": "network",
       "operation": "ai.generate",
       "reversible": true,
-      "external": false
+      "external": true
     }
   ],
   "risk": {
@@ -112,11 +115,9 @@
   },
   "requirements": {
     "runtime_capabilities": [
-      "repository.context.prepare",
-      "file.inspect",
-      "subagent.placement.compile"
+      "runtime.workspace"
     ],
-    "model_capabilities": ["text", "structured_output"],
+    "model_capabilities": ["model.text", "model.tool_calling"],
     "connections": [
       "rumi.service.repository.context.prepare.v1"
     ],

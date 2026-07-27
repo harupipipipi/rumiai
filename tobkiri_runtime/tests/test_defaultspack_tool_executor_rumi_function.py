@@ -51,6 +51,160 @@ def test_tool_executor_no_longer_builds_private_function_registry():
     assert not hasattr(ToolExecutor, "_build_function_registry")
 
 
+def test_capability_plan_rejects_unattached_and_schema_mismatched_tools():
+    import hashlib
+    import json
+
+    from domain.tool.executor import _capability_plan_tool_rejection
+
+    schema = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    }
+    tool = {
+        "tool_id": "repository_context_prepare",
+        "schema": schema,
+    }
+    context = {
+        "capability_plan": {
+            "tools": {
+                "attached": [],
+                "schema_hashes": {},
+            }
+        }
+    }
+    assert _capability_plan_tool_rejection(
+        "repository_context_prepare",
+        tool,
+        context,
+    )["error_type"] == "tool_not_attached"
+
+    context["capability_plan"]["tools"] = {
+        "attached": ["repository_context_prepare"],
+        "schema_hashes": {
+            "repository_context_prepare": hashlib.sha256(
+                json.dumps(
+                    {"type": "object"},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        },
+    }
+    assert _capability_plan_tool_rejection(
+        "repository_context_prepare",
+        tool,
+        context,
+    )["error_type"] == "tool_schema_revision_mismatch"
+
+
+def test_global_contract_tool_uses_host_registry_and_ignores_caller_model(
+    monkeypatch,
+    tmp_path,
+):
+    from domain.tool.executor import ToolExecutor
+
+    captured = {}
+    executor = ToolExecutor()
+
+    def fake_invoke(
+        registry,
+        contract_id,
+        provider_instance_id,
+        operation,
+        payload,
+    ):
+        captured.update(
+            {
+                "registry": registry,
+                "contract_id": contract_id,
+                "provider_instance_id": provider_instance_id,
+                "operation": operation,
+                "payload": dict(payload),
+            }
+        )
+        return {"status": "ok"}
+
+    def fake_global_invoke(registry, contract_id, operation, payload):
+        if contract_id == "rumi.resource.workspace.v1":
+            if operation == "list":
+                return {"selected_workspace_id": "workspace-test"}
+            return {
+                "workspace_id": "workspace-test",
+                "root_path": str(tmp_path),
+                "revision": "mount-test-v1",
+            }
+        if contract_id == "rumi.service.host.authorize.v1":
+            return {"authorized": True, "receipt": "authority-test"}
+        raise AssertionError((registry, contract_id, operation, payload))
+
+    active_plan = SimpleNamespace(
+        profile_id="profile-test",
+        plan_hash="sha256:active-plan",
+    )
+    monkeypatch.setattr(
+        "core_runtime.resolved_profile_scope.persisted_resolved_profile",
+        lambda: active_plan,
+    )
+    monkeypatch.setattr(
+        "core_runtime.global_contract_dispatch.invoke_selected_global_provider",
+        fake_invoke,
+    )
+    monkeypatch.setattr(
+        "core_runtime.global_contract_dispatch.invoke_global_contract",
+        fake_global_invoke,
+    )
+    registry = object()
+    tool_def = {
+        "tool_id": "repository_context_prepare",
+        "source_pack_id": "rumi_repository_context_pack",
+        "capability_requirements": {
+            "connections": ["rumi.service.repository.context.prepare.v1"]
+        },
+        "execution": {
+            "type": "global_contract",
+            "contract_id": "rumi.service.repository.context.prepare.v1",
+            "provider_instance_id": "repository-context.prepare",
+            "operation": "prepare",
+        },
+    }
+
+    result = executor._execute_global_contract(
+        tool_def,
+        {"query": "find the implementation"},
+        {
+            "interface_registry": registry,
+            "model": "opencode-zen/mimo-v2.5-free",
+            "registry_revision": "registry-test",
+            "workspace_id": "workspace-test",
+            "workspace_root": "/tmp/workspace-test",
+            "capability_plan": {
+                "digest": "sha256:capability-plan",
+                "registry_revision": "registry-test",
+                "tools": {
+                    "capability_grants": {
+                        "repository_context_prepare": [
+                            "repository.content.external_share"
+                        ]
+                    }
+                },
+            },
+        },
+    )
+
+    assert result == {
+        "result": {"status": "ok"},
+        "is_error": False,
+        "widget": None,
+    }
+    assert captured["registry"] is registry
+    assert captured["payload"]["registry_revision"] == "registry-test"
+    assert "model_reference" not in captured["payload"]
+    assert captured["payload"]["workspace_id"] == "workspace-test"
+    assert captured["payload"]["_workspace_binding"]["access"] == "read_only"
+
+
 def test_tool_executor_uses_initialized_container_capability_executor(monkeypatch):
     from domain.tool.executor import ToolExecutor
 

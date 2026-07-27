@@ -5345,7 +5345,7 @@ function ChatApp() {
         approvalToken = decision.token ?? "";
         settleBrowserApproval(currentApproval);
       }
-      await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+      await api.streamMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
@@ -5449,7 +5449,7 @@ function ChatApp() {
       setSettledRuntimeApprovalIds((ids) => (
         ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
       ));
-      await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
+      await api.streamMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,

@@ -53,6 +53,7 @@ class CapabilityPlan:
     selected_skills: list[str] = field(default_factory=list)
     loaded_skills: list[str] = field(default_factory=list)
     tool_schema_hashes: dict[str, str] = field(default_factory=dict)
+    tool_capability_grants: dict[str, list[str]] = field(default_factory=dict)
     skill_instruction_hashes: dict[str, str] = field(default_factory=dict)
     approval_effects: list[dict[str, str]] = field(default_factory=list)
     tool_schema_tokens: int = 0
@@ -81,7 +82,7 @@ class CapabilityPlan:
     def to_dict(self) -> dict[str, Any]:
         """Return the versioned JSON contract."""
 
-        return {
+        result = {
             "schema_version": "tobkiri.capability-plan/v1",
             "plan_id": self.plan_id,
             "registry_revision": self.registry_revision,
@@ -101,6 +102,12 @@ class CapabilityPlan:
                 "attached": list(self.attached_tools),
                 "excluded": list(self.excluded_tools),
                 "schema_hashes": dict(self.tool_schema_hashes),
+                "capability_grants": {
+                    key: list(value)
+                    for key, value in sorted(
+                        self.tool_capability_grants.items()
+                    )
+                },
             },
             "skills": {
                 "required": list(self.required_skills),
@@ -117,6 +124,14 @@ class CapabilityPlan:
             "diagnostics": list(self.diagnostics),
             "trace_id": self.trace_id,
         }
+        result["digest"] = stable_revision(
+            {
+                key: value
+                for key, value in result.items()
+                if key not in {"plan_id", "trace_id"}
+            }
+        )
+        return result
 
 
 def stable_revision(value: Any) -> str:

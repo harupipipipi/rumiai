@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -87,6 +88,8 @@ def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
     ]
     assert all(model["metadata"]["inventory_source"] == "live" for model in models)
     assert models[0]["metadata"]["transport"] == "openai_chat_completions"
+    assert all(model["capabilities"]["tool_calling"] is False for model in models)
+    assert all(model["metadata"]["tool_calling_verified"] is False for model in models)
 
 
 @pytest.mark.parametrize("payload", [{"data": []}, {"unexpected": []}])
@@ -193,7 +196,16 @@ def test_opencode_zen_reasoning_complete_uses_live_openai_model_and_token_floor(
     assert captured["body"]["model"] == "deepseek-v4-flash-free"
     assert captured["body"]["max_tokens"] == 96
     assert captured["body"]["temperature"] == 0
-    assert "tools" not in captured["body"]
+    assert captured["body"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "noop",
+                "description": "",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
@@ -229,8 +241,16 @@ def test_opencode_zen_mimo_free_uses_openai_chat_completions(monkeypatch):
     assert captured["body"]["model"] == "mimo-v2.5-free"
     assert captured["body"]["max_tokens"] == 8
     assert captured["body"]["temperature"] == 0
-    assert "tools" not in captured["body"]
-    assert "tool_choice" not in captured["body"]
+    assert captured["body"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "noop",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    assert captured["body"]["tool_choice"] == "auto"
     assert "reasoning_effort" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
@@ -320,7 +340,16 @@ def test_opencode_zen_reasoning_stream_omits_tools_and_applies_token_floor(
     assert captured["path"] == "/v1/chat/completions"
     assert captured["body"]["model"] == "deepseek-v4-flash-free"
     assert captured["body"]["max_tokens"] == 96
-    assert "tools" not in captured["body"]
+    assert captured["body"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "noop",
+                "description": "",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
     assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "OK"}}
     assert events[-1]["type"] == "stream_end"
     assert response.closed is True
@@ -357,7 +386,16 @@ def test_opencode_zen_mimo_free_stream_stops_on_done_without_finish_chunk(monkey
     assert captured["path"] == "/v1/chat/completions"
     assert captured["body"]["model"] == "mimo-v2.5-free"
     assert captured["body"]["stream_options"] == {"include_usage": True}
-    assert "tools" not in captured["body"]
+    assert captured["body"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "noop",
+                "description": "",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
     assert events == [
         {"type": "reasoning_delta", "delta": {"type": "text", "text": "The user wants"}},
         {
@@ -404,6 +442,182 @@ def test_opencode_zen_stream_emits_one_end_after_final_usage(monkeypatch):
         }
     ]
     assert response.closed is True
+
+
+@pytest.mark.parametrize("container_key", ["message", "choice"])
+def test_opencode_zen_stream_recovers_completed_tool_calls_outside_delta(
+    monkeypatch,
+    container_key,
+):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "mimo-v2.5-free"}]
+    tool_call = {
+        "id": "call_repository",
+        "type": "function",
+        "function": {
+            "name": "repository_context_prepare",
+            "arguments": '{"workspace_id":"tobkiri-pr1322"}',
+        },
+    }
+    choice = {"delta": {}, "finish_reason": "tool_calls"}
+    if container_key == "message":
+        choice["message"] = {"content": None, "tool_calls": [tool_call]}
+    else:
+        choice["tool_calls"] = tool_call
+    response = _FakeSseResponse(
+        [
+            (
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [choice],
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 3,
+                            "total_tokens": 5,
+                        },
+                    }
+                )
+                + "\n\n"
+            ).encode(),
+            b"data: [DONE]\n\n",
+        ]
+    )
+
+    with patch.object(provider, "_request_openai_stream", return_value=response):
+        events = list(
+            provider.stream(
+                "opencode-zen/mimo-v2.5-free",
+                [{"role": "user", "content": "Use the tool"}],
+                [{"name": "repository_context_prepare", "input_schema": {"type": "object"}}],
+                {},
+            )
+        )
+
+    assert events == [
+        {
+            "type": "tool_call_start",
+            "id": "call_repository",
+            "name": "repository_context_prepare",
+        },
+        {
+            "type": "tool_call_delta",
+            "id": "call_repository",
+            "name": "repository_context_prepare",
+            "arguments_chunk": '{"workspace_id":"tobkiri-pr1322"}',
+        },
+        {
+            "type": "tool_call_end",
+            "id": "call_repository",
+            "name": "repository_context_prepare",
+        },
+        {
+            "type": "stream_end",
+            "finish_reason": "tool_calls",
+            "usage": {
+                "input_tokens": 2,
+                "output_tokens": 3,
+                "total_tokens": 5,
+            },
+        },
+    ]
+
+
+def test_opencode_zen_stream_recovers_missing_tool_payload_with_complete_call(
+    monkeypatch,
+):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "mimo-v2.5-free"}]
+    response = _FakeSseResponse(
+        [
+            (
+                b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],'
+                b'"usage":{"prompt_tokens":2,"completion_tokens":1,'
+                b'"total_tokens":3}}\n\n'
+            ),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    recovered = {
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_recovered",
+                            "type": "function",
+                            "function": {
+                                "name": "repository_context_prepare",
+                                "arguments": '{"query":"find files"}',
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 2,
+            "completion_tokens": 2,
+            "total_tokens": 4,
+        },
+    }
+
+    with (
+        patch.object(
+            provider,
+            "_request_openai_stream",
+            return_value=response,
+        ),
+        patch.object(
+            provider,
+            "_request_openai_json",
+            return_value=recovered,
+        ) as recover,
+    ):
+        events = list(
+            provider.stream(
+                "opencode-zen/mimo-v2.5-free",
+                [{"role": "user", "content": "Use the tool"}],
+                [
+                    {
+                        "name": "repository_context_prepare",
+                        "input_schema": {"type": "object"},
+                    }
+                ],
+                {},
+            )
+        )
+
+    recover.assert_called_once()
+    assert events == [
+        {
+            "type": "tool_call_start",
+            "id": "call_recovered",
+            "name": "repository_context_prepare",
+        },
+        {
+            "type": "tool_call_delta",
+            "id": "call_recovered",
+            "name": "repository_context_prepare",
+            "arguments_chunk": '{"query":"find files"}',
+        },
+        {
+            "type": "tool_call_end",
+            "id": "call_recovered",
+            "name": "repository_context_prepare",
+        },
+        {
+            "type": "stream_end",
+            "finish_reason": "tool_calls",
+            "usage": {
+                "input_tokens": 4,
+                "output_tokens": 3,
+                "total_tokens": 7,
+            },
+        },
+    ]
 
 
 def test_opencode_zen_secret_keys_and_detection(monkeypatch):

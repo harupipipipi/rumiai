@@ -4,13 +4,16 @@
   "display_name": "Tobkiri Subagent Placement Pack",
   "version": "1.0.0",
   "description": "Compiles typed Subagent Placements into immutable effective plans.",
-  "dependencies": {},
+  "dependencies": {
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
   "connectivity": {
     "requires": [
       "rumi.resource.subagent.catalog.v1",
       "rumi.resource.subagent.placement.v1",
       "rumi.service.subagent.placement.stage.v1",
-      "rumi.service.subagent.protocol.v1"
+      "rumi.service.subagent.protocol.v1",
+      "rumi.service.host.authorize.v1"
     ],
     "provides": [
       "rumi.service.subagent.placement.compile.v1",
@@ -22,13 +25,14 @@
   "required_capabilities": [
     "subagent.catalog.read",
     "subagent.placement.read",
-    "subagent.placement.compile"
+    "subagent.placement.compile",
+    "host.authority.consume"
   ],
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": true,
   "resources": [],
   "provenance": {
-    "content_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451",
+    "content_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f",
     "build_identity": "rumi-subagent-placement-pack:1.0.0",
     "trust_class": "local",
     "signature": null

@@ -77,6 +77,12 @@
         "version_range": ">=1.0.0 <2.0.0",
         "cardinality": "one",
         "optional": false
+      },
+      {
+        "id": "rumi.service.host.authorize.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
       }
     ]
   },
@@ -87,7 +93,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_repository_context_pack.runtime.context",
       "symbol": "create_catalog_operation",
-      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+      "artifact_hash": "sha256:9944cc14b5c1d7e9b782518ab8401f8ddacfce958f5d0795f51a1337dace3013"
     },
     {
       "id": "repository-context-placement",
@@ -95,7 +101,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_repository_context_pack.runtime.context",
       "symbol": "create_placement_operation",
-      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+      "artifact_hash": "sha256:9944cc14b5c1d7e9b782518ab8401f8ddacfce958f5d0795f51a1337dace3013"
     },
     {
       "id": "repository-context-runtime",
@@ -103,7 +109,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_repository_context_pack.runtime.context",
       "symbol": "create_subagent_runtime",
-      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+      "artifact_hash": "sha256:9944cc14b5c1d7e9b782518ab8401f8ddacfce958f5d0795f51a1337dace3013"
     },
     {
       "id": "repository-context-prepare",
@@ -111,19 +117,19 @@
       "loader": "python",
       "module": "ecosystem.rumi_repository_context_pack.runtime.context",
       "symbol": "create_prepare_operation",
-      "artifact_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25"
+      "artifact_hash": "sha256:9944cc14b5c1d7e9b782518ab8401f8ddacfce958f5d0795f51a1337dace3013"
     }
   ],
   "resources": [
     {
       "id": "subagents/repository-context-subagent.json",
       "kind": "subagent.definition",
-      "content_hash": "sha256:bb392066d77d6a7f6ecae5341cb324eeb88abf60502c5ff923ea781c90ee65d9"
+      "content_hash": "sha256:c1da0d6b75bd404f473d5c91d660dbfaf2ae1bd1a467b7e4a50c80a2ba48c44e"
     },
     {
       "id": "placements/repository-context.placement.json",
       "kind": "subagent.placement",
-      "content_hash": "sha256:d6e4db49779fb972b0f5482a2a4f0ef08032fe744651e2041395757d63d21497"
+      "content_hash": "sha256:bf31649318cd2291d4d92ef7e828d14b8365d1f46ef98cc29aff391a4f44ad45"
     },
     {
       "id": "prompts/repository-context.system.md",
@@ -138,7 +144,7 @@
     {
       "id": "extensions/tools/repository_context_prepare/manifest.json",
       "kind": "tool",
-      "content_hash": "sha256:bc280729e7b804252c6caa1eff144d3bde9c53dba1d4d8b9dddc3c72aedb513d"
+      "content_hash": "sha256:72557be8a979d6bc44fad5ac12efa1cab372dad01dc8d516b0f7b2d373b668e6"
     },
     {
       "id": "extensions/skills/repository_context_preparation/manifest.json",
@@ -158,10 +164,12 @@
     {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false},
     {"capability": "repository.context.prepare", "access": "execute", "approval_required": false},
     {"capability": "file.inspect", "access": "read", "approval_required": false},
-    {"capability": "ai.gateway.generate", "access": "execute", "approval_required": false}
+    {"capability": "ai.gateway.generate", "access": "execute", "approval_required": false},
+    {"capability": "repository.content.external_share", "access": "execute", "approval_required": false},
+    {"capability": "host.authority.consume", "access": "control", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:b3066a91cf6d9a582052274851384193c375ef28100b467106dc8340a2ff1d25",
+    "content_hash": "sha256:9944cc14b5c1d7e9b782518ab8401f8ddacfce958f5d0795f51a1337dace3013",
     "build_identity": "rumi-repository-context-pack:1.0.0",
     "trust_class": "local",
     "signature": null

@@ -48,6 +48,41 @@ def _tools():
     ]
 
 
+def test_raw_tool_target_requires_developer_mode_even_when_profile_connected():
+    from domain.chat.tool_selection_schema import ToolSelectionRequest
+    from domain.chat.tool_selection_service import ToolSelectionService
+
+    with pytest.raises(PermissionError, match="developer capability"):
+        ToolSelectionService(settings={}).select(
+            "read the file",
+            _tools(),
+            selection=ToolSelectionRequest(
+                mode="manual",
+                include=[{"kind": "tool", "id": "coding_file_read"}],
+            ),
+            context={"profile_authorized_tool_targets": ["coding_file_read"]},
+        )
+
+
+def test_verified_text_mention_allows_only_the_exact_tool_target():
+    from domain.chat.tool_selection_schema import ToolSelectionRequest
+    from domain.chat.tool_selection_service import ToolSelectionService
+
+    decision = ToolSelectionService(settings={}).select(
+        "@Read File read the file",
+        _tools(),
+        selection=ToolSelectionRequest(
+            mode="manual",
+            include=[{"kind": "tool", "id": "coding_file_read"}],
+        ),
+        context={"verified_explicit_tool_ids": ["coding_file_read"]},
+    )
+
+    assert [tool["tool_id"] for tool in decision.selected_tools] == [
+        "coding_file_read"
+    ]
+
+
 def test_all_schemas_exposes_every_schema_without_recommendations():
     from domain.chat.tool_selection_schema import ToolSelectionRequest
     from domain.chat.tool_selection_service import ToolSelectionService

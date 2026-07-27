@@ -115,6 +115,99 @@ class OpenAICompatibleProvider(OpenAIProvider):
             seed_models = self.list_curated_models()
         self.KNOWN_MODELS = self._normalize_known_models(seed_models or [])
 
+    def stream(self, model, messages, tools, params):
+        """Recover a tool call when a compatible stream omits its payload."""
+
+        pending_end: dict[str, Any] | None = None
+        saw_tool_call = False
+        for event in super().stream(model, messages, tools, params):
+            if not isinstance(event, dict):
+                yield event
+                continue
+            event_type = str(event.get("type") or "")
+            if event_type == "stream_end":
+                pending_end = dict(event)
+                continue
+            if event_type == "tool_call_start":
+                saw_tool_call = True
+            yield event
+
+        pending_end = pending_end or {
+            "type": "stream_end",
+            "finish_reason": "stop",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+            },
+        }
+        if (
+            pending_end.get("finish_reason") == "tool_calls"
+            and not saw_tool_call
+        ):
+            recovered = self.complete(model, messages, tools, params)
+            recovered_usage = (
+                recovered.get("usage")
+                if isinstance(recovered, dict)
+                and isinstance(recovered.get("usage"), dict)
+                else {}
+            )
+            stream_usage = (
+                pending_end.get("usage")
+                if isinstance(pending_end.get("usage"), dict)
+                else {}
+            )
+            pending_end["usage"] = {
+                key: int(stream_usage.get(key) or 0)
+                + int(recovered_usage.get(key) or 0)
+                for key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                )
+            }
+            content = (
+                recovered.get("content")
+                if isinstance(recovered, dict)
+                and isinstance(recovered.get("content"), list)
+                else []
+            )
+            for item in content:
+                if (
+                    not isinstance(item, dict)
+                    or item.get("type") != "tool_use"
+                ):
+                    continue
+                call_id = str(item.get("id") or "tool_call_recovered")
+                name = str(item.get("name") or "")
+                arguments = item.get("input")
+                yield {
+                    "type": "tool_call_start",
+                    "id": call_id,
+                    "name": name,
+                }
+                if arguments not in (None, ""):
+                    yield {
+                        "type": "tool_call_delta",
+                        "id": call_id,
+                        "name": name,
+                        "arguments_chunk": (
+                            arguments
+                            if isinstance(arguments, str)
+                            else json.dumps(
+                                arguments,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
+                        ),
+                    }
+                yield {
+                    "type": "tool_call_end",
+                    "id": call_id,
+                    "name": name,
+                }
+        yield pending_end
+
     @classmethod
     def profile_dir(cls):
         provider_name = str(getattr(cls, "provider_name", "") or "").strip()

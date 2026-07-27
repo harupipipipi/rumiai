@@ -342,19 +342,55 @@ class ToolRegistry:
         for manifest_path in sorted((pack_root / "tools").glob("*/manifest.json")):
             tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
+                if self._already_loaded_from_manifest(tool_def):
+                    continue
                 self.register(tool_def)
                 loaded += 1
         for manifest_path in sorted((pack_root / "tools").glob("*/tool.json")):
             tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
+                if self._already_loaded_from_manifest(tool_def):
+                    continue
                 self.register(tool_def)
                 loaded += 1
         for manifest_path in sorted((pack_root / "extensions" / "tools").glob("*/manifest.json")):
             tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
+                if self._already_loaded_from_manifest(tool_def):
+                    continue
                 self.register(tool_def)
                 loaded += 1
         return loaded
+
+    def _already_loaded_from_manifest(self, tool_def: dict) -> bool:
+        """Return whether discovery already registered this exact manifest.
+
+        Extension discovery and active-pack discovery can legitimately expose
+        the same first-party manifest. Only that identical canonical source is
+        idempotent; the registry still rejects the same Tool ID from a
+        different file or pack.
+        """
+
+        tool_id = str(tool_def.get("tool_id") or "").strip()
+        existing = self.get(tool_id) if tool_id else None
+        if existing is None:
+            return False
+
+        existing_source = _tool_source(existing)
+        incoming_source = _tool_source(tool_def)
+        if not existing_source or not incoming_source:
+            return False
+        try:
+            same_source = Path(existing_source).resolve() == Path(
+                incoming_source
+            ).resolve()
+        except (OSError, RuntimeError):
+            same_source = existing_source == incoming_source
+
+        return same_source and (
+            source_pack_id_from_manifest(existing)
+            == source_pack_id_from_manifest(tool_def)
+        )
 
     def _load_component_tools(self) -> int:
         loaded = 0
@@ -370,10 +406,24 @@ class ToolRegistry:
             if tool_def.get("tool_id") != component.id:
                 continue
             existing = self.get(tool_def["tool_id"])
-            if existing is not None and not self._component_may_annotate_existing_tool(
-                existing,
-                component.source_pack_id,
-            ):
+            if existing is not None:
+                if not self._component_may_annotate_existing_tool(
+                    existing,
+                    component.source_pack_id,
+                ):
+                    continue
+                metadata = dict(existing.get("metadata", {}))
+                metadata["component_category"] = "tools"
+                metadata["component_id"] = component.id
+                metadata["component_manifest_path"] = manifest.get(
+                    "source_path",
+                    "",
+                )
+                annotated = dict(existing)
+                annotated["metadata"] = metadata
+                with self._lock:
+                    self._tools[tool_def["tool_id"]] = annotated
+                loaded += 1
                 continue
             metadata = dict(tool_def.get("metadata", {}))
             metadata["source"] = "pack"

@@ -70,6 +70,12 @@
         "version_range": ">=1.0.0 <2.0.0",
         "cardinality": "many",
         "optional": false
+      },
+      {
+        "id": "rumi.service.host.authorize.v1",
+        "version_range": ">=1.0.0 <2.0.0",
+        "cardinality": "one",
+        "optional": false
       }
     ]
   },
@@ -80,7 +86,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_compile_operation",
-      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
     },
     {
       "id": "subagent-placement-core-stage",
@@ -88,7 +94,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_core_stage",
-      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
     },
     {
       "id": "subagent-placement-protocols",
@@ -96,7 +102,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_protocol_catalog",
-      "artifact_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451"
+      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
     }
   ],
   "resources": [],
@@ -104,10 +110,11 @@
   "permissions": [
     {"capability": "subagent.catalog.read", "access": "read", "approval_required": false},
     {"capability": "subagent.placement.read", "access": "read", "approval_required": false},
-    {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false}
+    {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false},
+    {"capability": "host.authority.consume", "access": "control", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:1d123b57c0a3c53b75d4033abc7d25c4c559b1ed618d35dbbd7979413861d451",
+    "content_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f",
     "build_identity": "rumi-subagent-placement-pack:1.0.0",
     "trust_class": "local",
     "signature": null

@@ -41,7 +41,8 @@
     "required_capabilities": [
       "file.inspect",
       "ai.gateway.generate",
-      "subagent.placement.compile"
+      "subagent.placement.compile",
+      "repository.content.external_share"
     ],
     "optional_capabilities": [],
     "denied_capabilities": [

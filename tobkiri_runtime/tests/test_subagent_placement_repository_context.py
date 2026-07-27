@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -11,10 +13,19 @@ from jsonschema import Draft202012Validator
 from ecosystem.rumi_repository_context_pack.runtime.context import (
     AI_GENERATE,
     FILE_INSPECT,
+    HOST_AUTHORITY,
     PLACEMENT_COMPILE,
     RepositoryContextPreparer,
+    RepositoryContextError,
     _candidate_files,
+    _consume_usage,
+    create_prepare_operation,
+    _looks_secret,
+    _model_reference,
+    _model_json,
+    _validate_response_binding,
 )
+from ecosystem.rumi_file_inspect_pack.runtime.inspect import FileInspectService
 from ecosystem.rumi_subagent_placement_pack.runtime.compiler import (
     CATALOG,
     PLACEMENT,
@@ -26,12 +37,27 @@ from ecosystem.rumi_subagent_placement_pack.runtime.compiler import (
 from ecosystem.defaultspack.domain.tool.security import (
     unsupported_execution_reason,
 )
+from core_runtime.repository_context_ledger import RepositoryContextLedger
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 ECOSYSTEM = RUNTIME_ROOT / "ecosystem"
 PLACEMENT_PACK = ECOSYSTEM / "rumi_subagent_placement_pack"
 CONTEXT_PACK = ECOSYSTEM / "rumi_repository_context_pack"
+AI_GATEWAY_PACK = ECOSYSTEM / "rumi_ai_gateway_pack"
+FILE_INSPECT_PACK = ECOSYSTEM / "rumi_file_inspect_pack"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_repository_context_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = RepositoryContextLedger(tmp_path / "repository-context.sqlite3")
+    monkeypatch.setattr(
+        "ecosystem.rumi_repository_context_pack.runtime.context._ledger",
+        lambda: ledger,
+    )
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -90,6 +116,11 @@ class PlacementClient:
         provider_instance_id: str | None = None,
     ) -> dict[str, Any]:
         del provider_instance_id
+        if contract_id == HOST_AUTHORITY:
+            if operation == "authorize":
+                return {"authorized": True, "receipt": "test-receipt"}
+            if operation == "redeem":
+                return {"authorized": True, "redeemed": True}
         if contract_id == PLACEMENT:
             assert operation == "get"
             return dict(self.placement)
@@ -116,13 +147,20 @@ def _compile_payload() -> dict[str, Any]:
     capabilities = [
         "ai.gateway.generate",
         "file.inspect",
+        "repository.content.external_share",
         "subagent.placement.compile",
     ]
-    return {
+    payload = {
         "placement_id": "repository-context",
         "capability_plan": {
             "plan_id": "plan-test",
             "registry_revision": "registry-test",
+            "tools": {
+                "attached": ["repository_context_prepare"],
+                "capability_grants": {
+                    "repository_context_prepare": capabilities,
+                },
+            },
         },
         "registry_revision": "registry-test",
         "topology_revision": "topology-test",
@@ -136,6 +174,78 @@ def _compile_payload() -> dict[str, Any]:
             "output_schema": "host_validated",
         },
     }
+    return _attach_placement_authority(payload)
+
+
+def _attach_placement_authority(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    payload.pop("_authority_receipt", None)
+    payload.pop("_authority_scope", None)
+    compile_arguments = dict(payload)
+    payload["_authority_receipt"] = "test-placement-receipt"
+    payload["_authority_scope"] = {
+            "caller_id": "test",
+            "caller_pack_id": "rumi_repository_context_pack",
+            "caller_function_id": "test",
+            "profile_id": "profile-test",
+            "workspace_id": "workspace-test",
+            "session_id": "session-test",
+            "arguments": compile_arguments,
+    }
+    return payload
+
+
+def _attach_prepare_authority(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    capability_plan = payload.get("capability_plan") or {}
+    payload.update(
+        {
+            "_authority_receipt": "test-prepare-receipt",
+            "_authority_scope": {
+            "caller_id": "tool-executor:profile-test",
+            "caller_pack_id": "rumi_repository_context_pack",
+            "caller_function_id": "repository_context_prepare",
+            "profile_id": str(payload.get("profile_id") or "default"),
+            "workspace_id": str(payload.get("workspace_id") or ""),
+            "session_id": "session-test",
+            "arguments": {
+                "capability_plan_digest": str(
+                    capability_plan.get("digest") or ""
+                ),
+                "workspace_binding": dict(
+                    payload.get("_workspace_binding") or {}
+                ),
+                "profile_policy": dict(
+                    payload.get("_profile_policy") or {}
+                ),
+                "workspace_policy": dict(
+                    payload.get("_workspace_policy") or {}
+                ),
+                "host_policy": dict(payload.get("_host_policy") or {}),
+                "task_grant": dict(payload.get("_task_grant") or {}),
+                "host_enforcement": dict(
+                    payload.get("_host_enforcement") or {}
+                ),
+                "registry_revision": str(
+                    payload.get("registry_revision") or ""
+                ),
+                "deadline_epoch_ms": int(
+                    payload.get("_deadline_epoch_ms") or 0
+                ),
+                "invocation_key": str(
+                    payload.get("_invocation_key") or ""
+                ),
+                "invocation_digest": str(
+                    payload.get("_invocation_digest") or ""
+                ),
+                "external_share_granted": True,
+            },
+        },
+        }
+    )
+    return payload
 
 
 def test_placement_compiles_deterministically_with_least_authority() -> None:
@@ -159,6 +269,7 @@ def test_placement_compiles_deterministically_with_least_authority() -> None:
     assert first["effective_authority"] == [
         "ai.gateway.generate",
         "file.inspect",
+        "repository.content.external_share",
         "subagent.placement.compile",
     ]
     assert first["placement"]["id"] == "repository-context"
@@ -181,6 +292,7 @@ def test_placement_fails_closed_for_missing_required_capability() -> None:
     )
     payload = _compile_payload()
     payload["workspace_policy"] = {"allowed_capabilities": ["file.inspect"]}
+    _attach_placement_authority(payload)
 
     with pytest.raises(
         PlacementCompileError,
@@ -189,6 +301,40 @@ def test_placement_fails_closed_for_missing_required_capability() -> None:
         SubagentPlacementCompiler(
             PlacementClient(definition=definition, placement=placement)
         ).compile(payload)
+
+
+def test_placement_requires_host_authority_receipt() -> None:
+    definition = _json(
+        CONTEXT_PACK / "subagents" / "repository-context-subagent.json"
+    )
+    placement = _json(
+        CONTEXT_PACK / "placements" / "repository-context.placement.json"
+    )
+    payload = _compile_payload()
+    payload.pop("_authority_receipt")
+    payload.pop("_authority_scope")
+
+    with pytest.raises(PlacementCompileError, match="receipt is required"):
+        SubagentPlacementCompiler(
+            PlacementClient(definition=definition, placement=placement)
+        ).compile(payload)
+
+
+def test_placement_ignores_contract_consumer_transport_identity() -> None:
+    definition = _json(
+        CONTEXT_PACK / "subagents" / "repository-context-subagent.json"
+    )
+    placement = _json(
+        CONTEXT_PACK / "placements" / "repository-context.placement.json"
+    )
+    payload = _compile_payload()
+    payload["_contract_consumer_pack_id"] = "rumi_repository_context_pack"
+
+    result = SubagentPlacementCompiler(
+        PlacementClient(definition=definition, placement=placement)
+    ).compile(payload)
+
+    assert result["placement"]["id"] == "repository-context"
 
 
 def test_placement_stage_cannot_widen_authority() -> None:
@@ -239,13 +385,68 @@ def test_candidate_filter_excludes_secrets_and_dependencies() -> None:
     assert reasons["asset.png"] == "non_text_extension"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        'CONFIG = {"password": "hunter2-super-secret"}',
+        'Authorization: Bearer abcdefghijklmnopqrstuvwxyz',
+        "https://user:super-secret-password@example.invalid/path",
+        'cookie: "session=abcdefghijklmnopqrstuvwxyz"',
+    ],
+)
+def test_repository_context_dlp_rejects_common_secret_forms(
+    value: str,
+) -> None:
+    assert _looks_secret(value)
+
+
+def test_repository_context_rejects_changed_pinned_provider() -> None:
+    expected = {
+        "model_id": "model-a",
+        "provider_instance_id": "provider-a",
+        "catalog_revision": "catalog-v1",
+        "pricing_revision": "pricing-v1",
+    }
+    with pytest.raises(RepositoryContextError, match="provider_instance_id"):
+        _validate_response_binding(
+            {
+                **expected,
+                "provider_instance_id": "provider-b",
+            },
+            expected,
+        )
+
+
+def test_repository_context_enforces_actual_aggregate_usage() -> None:
+    aggregate = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost": 0.0,
+    }
+    with pytest.raises(RepositoryContextError, match="cost budget"):
+        _consume_usage(
+            aggregate,
+            {"input_tokens": 10, "output_tokens": 5, "cost": 1.1},
+            maximum_cost=1.0,
+            maximum_tokens=100,
+        )
+
+
 class PrepareClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        mismatch_provider: bool = False,
+        usage_cost: float = 0.0,
+    ) -> None:
         self.ai_calls: list[dict[str, Any]] = []
+        self.mismatch_provider = mismatch_provider
+        self.usage_cost = usage_cost
         self.files = {
             "src/auth.py": "def verify_token(token):\n    return bool(token)\n",
             "src/theme.css": ".page { color: blue; }\n",
             "config/api_key.txt": "api_key=must-not-leave-workspace\n",
+            "src/generated.py": 'TOKEN = "sk-secret-content-must-not-egress"\n',
         }
 
     def invoke(
@@ -255,6 +456,11 @@ class PrepareClient:
         payload: Mapping[str, Any],
         **_: Any,
     ) -> dict[str, Any]:
+        if contract_id == HOST_AUTHORITY:
+            if operation == "authorize":
+                return {"authorized": True, "receipt": "test-receipt"}
+            if operation == "redeem":
+                return {"authorized": True, "redeemed": True}
         if contract_id == PLACEMENT_COMPILE:
             return {
                 "placement": {"id": "repository-context"},
@@ -265,7 +471,11 @@ class PrepareClient:
                         "provider_ref": "route://utility/context-summarizer",
                     }
                 ],
-                "budgets": {"maximum_tool_calls": 260},
+                "budgets": {
+                    "maximum_tool_calls": 260,
+                    "maximum_cost": 1.0,
+                    "context_token_budget": 64_000,
+                },
             }
         if contract_id == FILE_INSPECT and operation == "list":
             return {
@@ -277,6 +487,20 @@ class PrepareClient:
         if contract_id == FILE_INSPECT and operation == "read":
             return {"content": self.files[str(payload["path"])]}
         if contract_id == AI_GENERATE:
+            if operation == "resolve":
+                return {
+                    "status": "ok",
+                    "model_id": "opencode-zen/low-cost-test",
+                    "provider_instance_id": "provider.test.generate",
+                    "catalog_provider_instance_id": "catalog.test",
+                    "catalog_revision": "catalog-test-v1",
+                    "pricing_revision": "catalog-test-v1",
+                    "pricing": {
+                        "input": 0.0,
+                        "output": 0.0,
+                        "currency": "USD",
+                    },
+                }
             request = dict(payload)
             self.ai_calls.append(request)
             if len(self.ai_calls) == 1:
@@ -313,15 +537,39 @@ class PrepareClient:
                 }
             return {
                 "model_id": "opencode-zen/low-cost-test",
+                "provider_instance_id": (
+                    "provider.changed.generate"
+                    if self.mismatch_provider
+                    else "provider.test.generate"
+                ),
+                "catalog_revision": "catalog-test-v1",
+                "pricing_revision": "catalog-test-v1",
                 "output": {"content": json.dumps(output)},
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "usage_cost": {
+                    "cost": self.usage_cost,
+                    "known": True,
+                },
             }
         raise AssertionError((contract_id, operation, payload))
 
 
+def test_repository_context_resolves_utility_route_through_model_registry() -> None:
+    plan = {
+        "bindings": [
+            {
+                "slot": "model",
+                "provider_ref": "route://utility/context-summarizer",
+            }
+        ]
+    }
+
+    assert _model_reference(plan) == "route://utility/context-summarizer"
+
+
 def test_repository_context_prepares_validated_evidence_bundle() -> None:
     client = PrepareClient()
-    result = RepositoryContextPreparer(client).prepare(
-        {
+    payload = {
             "query": "Where is token authentication implemented?",
             "workspace_id": "workspace-test",
             "profile_id": "profile-test",
@@ -329,8 +577,67 @@ def test_repository_context_prepares_validated_evidence_bundle() -> None:
             "capability_plan": {
                 "plan_id": "plan-test",
                 "registry_revision": "registry-test",
+                "digest": "sha256:capability-plan",
+                "tools": {
+                    "attached": ["repository_context_prepare"],
+                    "capability_grants": {
+                        "repository_context_prepare": [
+                            "ai.gateway.generate",
+                            "file.inspect",
+                            "repository.content.external_share",
+                            "subagent.placement.compile",
+                        ]
+                    },
+                },
             },
+            "_profile_policy": {
+                "allowed_capabilities": [
+                    "ai.gateway.generate",
+                    "file.inspect",
+                    "repository.content.external_share",
+                    "subagent.placement.compile",
+                ]
+            },
+            "_workspace_policy": {
+                "allowed_capabilities": [
+                    "ai.gateway.generate",
+                    "file.inspect",
+                    "repository.content.external_share",
+                    "subagent.placement.compile",
+                ]
+            },
+            "_host_policy": {
+                "allowed_capabilities": [
+                    "ai.gateway.generate",
+                    "file.inspect",
+                    "repository.content.external_share",
+                    "subagent.placement.compile",
+                ]
+            },
+            "_task_grant": {
+                "allowed_capabilities": [
+                    "ai.gateway.generate",
+                    "file.inspect",
+                    "repository.content.external_share",
+                    "subagent.placement.compile",
+                ]
+            },
+            "_host_enforcement": {
+                "tool_allowlist": "host_enforced",
+                "workspace_scope": "host_enforced",
+                "output_schema": "host_validated",
+            },
+            "_workspace_binding": {
+                "workspace_id": "workspace-test",
+                "access": "read_only",
+                "root_identity": "sha256:test-root",
+            },
+            "_deadline_epoch_ms": int(time.time() * 1000) + 60_000,
+            "_invocation_digest": "sha256:test-invocation",
+            "_invocation_key": "repository-context:bundle-test",
         }
+    result = RepositoryContextPreparer(client).prepare(
+        _attach_prepare_authority(payload)
     )
 
     assert result["schema_version"] == "tobkiri.repository-evidence/v1"
@@ -342,12 +649,299 @@ def test_repository_context_prepares_validated_evidence_bundle() -> None:
         "def verify_token(token):"
     ]
     assert all("api_key=" not in json.dumps(call) for call in client.ai_calls)
+    assert all(
+        call["parameters"]["response_format"] == {"type": "json_object"}
+        and call["parameters"]["max_tokens"] == 4096
+        and 0 < call["parameters"]["request_timeout"] <= 120
+        for call in client.ai_calls
+    )
     excluded = {
         item["path"]: item["reason"] for item in result["excluded_files"]
     }
     assert excluded["config/api_key.txt"] == "secret_like_path"
+    assert excluded["src/generated.py"] == "secret_like_content"
     assert excluded["src/theme.css"] == "utility_model_not_selected"
     assert result["bundle_hash"].startswith("sha256:")
+
+
+def test_repository_context_rejects_prose_wrapped_fenced_json() -> None:
+    with pytest.raises(RepositoryContextError, match="invalid reduce JSON"):
+        _model_json(
+            {
+                "output": (
+                    "I will now return the structured result.\n"
+                    "```json\n"
+                    '{"summary":"ok","selected_files":[]}'
+                    "\n```"
+                )
+            },
+            "reduce",
+        )
+
+
+def test_repository_context_rejects_ambiguous_json_documents() -> None:
+    with pytest.raises(Exception, match="invalid reduce JSON"):
+        _model_json(
+            {
+                "output": (
+                    '{"summary":"first","selected_files":[]}\n'
+                    '```json\n{"summary":"second","selected_files":[]}\n```'
+                )
+            },
+            "reduce",
+        )
+
+
+@pytest.mark.parametrize(
+    ("phase", "payload", "expected"),
+    [
+        (
+            "map",
+            {
+                "summary": "Optional map-stage summary.",
+                "selected_files": [],
+                "files_considered": 4,
+            },
+            {"selected_files": []},
+        ),
+        (
+            "reduce",
+            {
+                "summary": "Relevant files selected.",
+                "selected_files": [],
+                "files_considered": 4,
+            },
+            {
+                "summary": "Relevant files selected.",
+                "selected_files": [],
+            },
+        ),
+    ],
+)
+def test_repository_context_discards_unused_top_level_model_fields(
+    phase: str,
+    payload: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    assert _model_json(
+        {
+            "output": {
+                "content": json.dumps(payload)
+            }
+        },
+        phase,
+    ) == expected
+
+
+def test_repository_context_deadline_fails_before_contract_calls() -> None:
+    client = PrepareClient()
+
+    with pytest.raises(RepositoryContextError, match="deadline exceeded"):
+        RepositoryContextPreparer(client).prepare(
+            {
+                "query": "find auth",
+                "workspace_id": "workspace-test",
+                "_workspace_binding": {
+                    "workspace_id": "workspace-test",
+                    "access": "read_only",
+                },
+                "_deadline_epoch_ms": int(time.time() * 1000) - 1,
+            }
+        )
+
+    assert client.ai_calls == []
+
+
+def test_repository_context_idempotency_replays_and_rejects_collision() -> None:
+    client = PrepareClient()
+    operation = create_prepare_operation(client)
+    payload = {
+        "query": "Where is token authentication implemented?",
+        "workspace_id": "workspace-test",
+        "profile_id": "profile-test",
+        "registry_revision": "registry-test",
+        "capability_plan": {
+            "plan_id": "plan-test",
+            "registry_revision": "registry-test",
+            "digest": "sha256:capability-plan",
+            "tools": {
+                "attached": ["repository_context_prepare"],
+                "capability_grants": {
+                    "repository_context_prepare": [
+                        "ai.gateway.generate",
+                        "file.inspect",
+                        "repository.content.external_share",
+                        "subagent.placement.compile",
+                    ]
+                },
+            },
+        },
+        "_profile_policy": {"allowed_capabilities": _compile_payload()["profile_policy"]["allowed_capabilities"]},
+        "_workspace_policy": {"allowed_capabilities": _compile_payload()["profile_policy"]["allowed_capabilities"]},
+        "_host_policy": {"allowed_capabilities": _compile_payload()["profile_policy"]["allowed_capabilities"]},
+        "_task_grant": {"allowed_capabilities": _compile_payload()["profile_policy"]["allowed_capabilities"]},
+        "_host_enforcement": {
+            "tool_allowlist": "host_enforced",
+            "workspace_scope": "host_enforced",
+            "output_schema": "host_validated",
+        },
+        "_workspace_binding": {
+            "workspace_id": "workspace-test",
+            "access": "read_only",
+            "root_identity": "sha256:test-root",
+        },
+        "_deadline_epoch_ms": int(time.time() * 1000) + 60_000,
+        "_invocation_key": "repository-context:test-key",
+        "_invocation_digest": "sha256:test-content",
+    }
+    _attach_prepare_authority(payload)
+
+    first = operation("prepare", payload)
+    call_count = len(client.ai_calls)
+    second_operation = create_prepare_operation(client)
+    assert second_operation("prepare", payload) == first
+    assert len(client.ai_calls) == call_count
+    with pytest.raises(RepositoryContextError, match="conflicts"):
+        operation(
+            "prepare",
+            _attach_prepare_authority(
+                {
+                    **payload,
+                    "_invocation_digest": "sha256:different-content",
+                }
+            ),
+        )
+    client.files["src/auth.py"] += "# repository changed\n"
+    with pytest.raises(RepositoryContextError, match="conflicts"):
+        create_prepare_operation(client)("prepare", payload)
+
+
+class _WorkspaceClient:
+    def __init__(self, root: Path, selected: str = "workspace-test") -> None:
+        self.root = root
+        self.selected = selected
+
+    def invoke(
+        self,
+        contract_id: str,
+        operation: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        assert contract_id == "rumi.resource.workspace.v1"
+        if operation == "list":
+            return {"selected_workspace_id": self.selected}
+        if operation == "get":
+            return {
+                "workspace_id": payload["workspace_id"],
+                "root_path": str(self.root),
+                "revision": "mount-test-v1",
+            }
+        raise AssertionError(operation)
+
+
+def _workspace_binding(root: Path) -> dict[str, Any]:
+    resolved = root.resolve(strict=True)
+    root_stat = resolved.stat()
+    binding = {
+        "workspace_id": "workspace-test",
+        "access": "read_only",
+        "mount_revision": "mount-test-v1",
+        "canonical_root": str(resolved),
+        "root_st_dev": int(root_stat.st_dev),
+        "root_st_ino": int(root_stat.st_ino),
+    }
+    binding["root_identity"] = hashlib.sha256(
+        json.dumps(
+            binding,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return binding
+
+
+def test_file_inspect_requires_exact_selected_workspace(tmp_path: Path) -> None:
+    service = FileInspectService(
+        _WorkspaceClient(tmp_path, selected="different-workspace")
+    )
+
+    with pytest.raises(PermissionError, match="selected Host binding"):
+        service.invoke(
+            "list",
+            {
+                "workspace_id": "workspace-test",
+                "directory": ".",
+                "recursive": True,
+                "require_selected": True,
+            },
+        )
+
+
+def test_file_inspect_tracked_only_excludes_untracked_and_symlinks(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(
+        ["git", "init", "-q", str(tmp_path)],
+        check=True,
+        capture_output=True,
+    )
+    tracked = tmp_path / "tracked.py"
+    tracked.write_text("print('tracked')\n", encoding="utf-8")
+    (tmp_path / "untracked.py").write_text(
+        "print('untracked')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "tracked.py"],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        (tmp_path / "tracked-link.py").symlink_to(tracked)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "add", "tracked-link.py"],
+            check=True,
+            capture_output=True,
+        )
+    except OSError:
+        pass
+    service = FileInspectService(_WorkspaceClient(tmp_path))
+
+    result = service.invoke(
+        "list",
+        {
+            "workspace_id": "workspace-test",
+            "directory": ".",
+            "recursive": True,
+            "tracked_only": True,
+            "require_selected": True,
+            "_workspace_binding": _workspace_binding(tmp_path),
+        },
+    )
+
+    assert [item["path"] for item in result["items"]] == ["tracked.py"]
+
+
+def test_file_inspect_rejects_changed_workspace_root_binding(
+    tmp_path: Path,
+) -> None:
+    original = tmp_path / "original"
+    replacement = tmp_path / "replacement"
+    original.mkdir()
+    replacement.mkdir()
+    service = FileInspectService(_WorkspaceClient(replacement))
+
+    with pytest.raises(PermissionError, match="workspace mount binding changed"):
+        service.invoke(
+            "list",
+            {
+                "workspace_id": "workspace-test",
+                "directory": ".",
+                "require_selected": True,
+                "_workspace_binding": _workspace_binding(original),
+            },
+        )
 
 
 @pytest.mark.parametrize(
@@ -408,15 +1002,65 @@ def test_tool_skill_and_activity_are_pack_native() -> None:
     assert tool["id"] in activity["members"]["tool_ids"]
     assert activity["id"] in skill["scope"]["activity_ids"]
     assert unsupported_execution_reason(tool) is None
+    assert tool["requirements"]["runtime_capabilities"] == [
+        "runtime.workspace"
+    ]
 
 
-@pytest.mark.parametrize("pack_root", [PLACEMENT_PACK, CONTEXT_PACK])
+@pytest.mark.parametrize(
+    "pack_root",
+    [
+        AI_GATEWAY_PACK,
+        FILE_INSPECT_PACK,
+        PLACEMENT_PACK,
+        CONTEXT_PACK,
+    ],
+)
 def test_pack_artifact_manifest_hashes_match(pack_root: Path) -> None:
     manifest = _json(pack_root / "artifact-manifest.json")
 
     for artifact in manifest["artifacts"]:
         content = (pack_root / artifact["path"]).read_bytes()
-        assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
+        declared = str(artifact["sha256"]).removeprefix("sha256:")
+        assert hashlib.sha256(content).hexdigest() == declared
+
+
+@pytest.mark.parametrize(
+    "pack_root",
+    [
+        AI_GATEWAY_PACK,
+        FILE_INSPECT_PACK,
+        PLACEMENT_PACK,
+        CONTEXT_PACK,
+    ],
+)
+def test_pack_entrypoint_and_provenance_hashes_match_declared_artifacts(
+    pack_root: Path,
+) -> None:
+    pack = _json(pack_root / "rumi.pack.v3.json")
+    ecosystem = _json(pack_root / "ecosystem.json")
+    entrypoint_hashes = {
+        str(item["artifact_hash"]) for item in pack["entrypoints"]
+    }
+    assert len(entrypoint_hashes) == 1
+    [declared_hash] = entrypoint_hashes
+    runtime_hash = declared_hash.removeprefix("sha256:")
+    manifest = _json(pack_root / "artifact-manifest.json")
+    declared_artifacts = {
+        str(item["sha256"]).removeprefix("sha256:")
+        for item in manifest["artifacts"]
+    }
+    assert runtime_hash in declared_artifacts
+    integrity = ecosystem.get("metadata", {}).get("integrity", {})
+    if integrity.get("artifact_manifest"):
+        index_hash = "sha256:" + hashlib.sha256(
+            (pack_root / "artifact-manifest.json").read_bytes()
+        ).hexdigest()
+        assert pack["provenance"]["content_hash"] == index_hash
+        assert ecosystem["provenance"]["content_hash"] == index_hash
+    else:
+        assert pack["provenance"]["content_hash"] == declared_hash
+        assert ecosystem["provenance"]["content_hash"] == declared_hash
 
 
 def test_global_contract_tool_descriptor_fails_closed() -> None:

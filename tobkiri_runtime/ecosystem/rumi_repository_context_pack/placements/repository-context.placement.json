@@ -57,7 +57,8 @@
     "allowed_capabilities": [
       "file.inspect",
       "ai.gateway.generate",
-      "subagent.placement.compile"
+      "subagent.placement.compile",
+      "repository.content.external_share"
     ],
     "denied_capabilities": [
       "file.write",

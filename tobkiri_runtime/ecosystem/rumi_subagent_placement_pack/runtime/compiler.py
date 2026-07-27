@@ -13,6 +13,8 @@ PLACEMENT = "rumi.resource.subagent.placement.v1"
 COMPILE = "rumi.service.subagent.placement.compile.v1"
 STAGE = "rumi.service.subagent.placement.stage.v1"
 PROTOCOL = "rumi.service.subagent.protocol.v1"
+HOST_AUTHORITY = "rumi.service.host.authorize.v1"
+PACK_ID = "rumi_subagent_placement_pack"
 
 _SCHEMA_DEFINITION = "tobkiri.subagent/v1"
 _SCHEMA_PLACEMENT = "tobkiri.subagent-placement/v1"
@@ -68,6 +70,7 @@ class SubagentPlacementCompiler:
     def compile(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Compile one Placement against selected registries and policies."""
 
+        _redeem_authority(self.client, payload)
         placement, placement_source = self._resolve_placement(payload)
         definition, definition_source = self._resolve_definition(placement)
         capability_plan = _object(payload.get("capability_plan"), "capability_plan")
@@ -289,6 +292,49 @@ class SubagentPlacementCompiler:
         return current
 
 
+def _redeem_authority(client: Any, payload: Mapping[str, Any]) -> None:
+    receipt = str(payload.get("_authority_receipt") or "").strip()
+    scope = payload.get("_authority_scope")
+    if not receipt or not isinstance(scope, Mapping):
+        raise PlacementCompileError("Host authority receipt is required")
+    scope_arguments = scope.get("arguments")
+    compile_arguments = {
+        str(key): value
+        for key, value in payload.items()
+        if key
+        not in {
+            "_authority_receipt",
+            "_authority_scope",
+            "_contract_consumer_pack_id",
+        }
+    }
+    if (
+        not isinstance(scope_arguments, Mapping)
+        or dict(scope_arguments) != compile_arguments
+    ):
+        raise PlacementCompileError(
+            "Host authority Placement arguments do not match"
+        )
+    expected = dict(scope)
+    expected.update(
+        {
+            "service_pack_id": PACK_ID,
+            "operation": "subagent.placement.compile",
+            "authority": "subagent.placement.compile",
+            "receipt": receipt,
+        }
+    )
+    result = client.invoke(HOST_AUTHORITY, "redeem", expected)
+    if (
+        not isinstance(result, Mapping)
+        or not result.get("authorized")
+        or not result.get("redeemed")
+    ):
+        raise PlacementCompileError(
+            "Host authority receipt is invalid or already used"
+        )
+
+
 def create_compile_operation(
     client: Any,
 ) -> Callable[[str, Mapping[str, Any]], Any]:
@@ -455,8 +501,7 @@ def _compile_authority(
         if allowed:
             layers.append(allowed)
     granted = _capability_grants(capability_plan)
-    if granted:
-        layers.append(granted)
+    layers.append(granted)
     effective = set.intersection(*layers) if layers else set()
     denied: set[str] = set(_strings(requirements.get("denied_capabilities")))
     for source in (
@@ -553,25 +598,18 @@ def _compile_enforcement(
     placement: Mapping[str, Any],
     payload: Mapping[str, Any],
 ) -> dict[str, str]:
+    del definition
+    host_enforcement = payload.get("host_enforcement")
+    if not isinstance(host_enforcement, Mapping):
+        raise PlacementCompileError("Host enforcement receipt is required")
     result: dict[str, str] = {}
-    for source in (
-        definition.get("enforcement"),
-        placement.get("enforcement"),
-        payload.get("host_enforcement"),
-    ):
-        if not isinstance(source, Mapping):
-            continue
-        for key, raw in source.items():
-            value = str(raw)
-            if value not in _ENFORCEMENT_RANK:
-                raise PlacementCompileError(
-                    f"unknown enforcement mode for {key}: {value}"
-                )
-            current = result.get(str(key))
-            if current is None or _ENFORCEMENT_RANK[value] > _ENFORCEMENT_RANK[
-                current
-            ]:
-                result[str(key)] = value
+    for key, raw in host_enforcement.items():
+        value = str(raw)
+        if value not in _ENFORCEMENT_RANK:
+            raise PlacementCompileError(
+                f"unknown enforcement mode for {key}: {value}"
+            )
+        result[str(key)] = value
     required = placement.get("required_enforcement")
     for key, raw in required.items() if isinstance(required, Mapping) else []:
         value = str(raw)
@@ -651,6 +689,16 @@ def _capability_grants(plan: Mapping[str, Any]) -> set[str]:
     for tool in tools if isinstance(tools, list) else []:
         if isinstance(tool, Mapping):
             values.update(_strings(tool.get("capability_grants")))
+    if isinstance(tools, Mapping):
+        attached = {
+            str(item).strip()
+            for item in tools.get("attached") or []
+            if str(item or "").strip()
+        }
+        grants = tools.get("capability_grants")
+        if isinstance(grants, Mapping):
+            for tool_id in attached:
+                values.update(_strings(grants.get(tool_id)))
     return values
 
 

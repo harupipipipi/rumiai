@@ -328,13 +328,25 @@ def _provider_model_id(request: Mapping[str, Any]) -> str:
 
 
 def _stream_result(result: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "events": [
-            {"type": "text_delta", "delta": str(result.get("output") or "")},
+    events: list[dict[str, Any]] = []
+    output = str(result.get("output") or "")
+    if output:
+        events.append({"type": "text_delta", "delta": output})
+    for intent in result.get("tool_intents") or []:
+        if isinstance(intent, Mapping):
+            events.append(
+                {
+                    "type": "tool_intent_delta",
+                    "tool_intent": dict(intent),
+                }
+            )
+    events.extend(
+        [
             {"type": "usage", "usage": dict(result.get("usage") or {})},
             {"type": "finish", "finish_reason": result.get("finish_reason")},
         ]
-    }
+    )
+    return {"events": events}
 
 
 def _endpoint(connection: Mapping[str, Any], suffix: str) -> str:
