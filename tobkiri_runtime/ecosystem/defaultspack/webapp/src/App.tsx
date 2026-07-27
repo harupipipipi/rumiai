@@ -43,6 +43,7 @@ import { ConversationShareLanding, ImportedConversationNotice } from "./pages/Co
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
+import { TaskPet } from "./components/TaskPet";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import type { ConversationToolPreferences } from "./features/tools/types";
@@ -2846,6 +2847,14 @@ function ChatApp() {
     }
     return null;
   }, [isConversationPending, isGenerating, messages]);
+  const latestUserTask = useMemo(() => {
+    for (const message of [...messages].reverse()) {
+      if (message.role !== "user") continue;
+      const text = message.rawText.trim();
+      if (text) return text;
+    }
+    return null;
+  }, [messages]);
 
   useEffect(() => {
     if (!latestAssistantFinal) return;
@@ -6597,6 +6606,16 @@ function ChatApp() {
       )}
 
       <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
+      <TaskPet
+        activityText={pendingRequest?.status ?? null}
+        completionKey={latestAssistantFinal?.messageId ?? null}
+        error={error}
+        hidden={isSettingsOpen || isSpotlightOpen || shareDialogOpen
+          || Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval)}
+        isRunning={isGenerating || isConversationPending}
+        raised={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])}
+        taskText={latestUserTask}
+      />
       {shareDialogOpen && (
         <LayerPortal layer="globalOverlay">
           <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShareDialogOpen(false); }}>
