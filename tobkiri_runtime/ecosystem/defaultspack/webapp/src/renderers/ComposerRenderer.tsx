@@ -4420,7 +4420,7 @@ export function ComposerRenderer({
                         ref={inlineMentionLayerRef}
                         aria-hidden="true"
                         data-composer-inline-mentions
-                        className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] text-zinc-100 ${textareaCanCollapse ? "pr-9" : ""}`}
+                        className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-0 py-2.5 text-[16px] font-medium leading-[24px] text-zinc-100 ${textareaCanCollapse ? "pr-9" : ""}`}
                       >
                         {inlineMentionParts.map((part, index) => (
                           <span key={`${index}:${part.text}`} className={part.mention ? "rumi-composer-inline-mention" : undefined}>{part.text}</span>
@@ -4444,7 +4444,7 @@ export function ComposerRenderer({
                       aria-activedescendant={activeComposerOptionId}
                       aria-expanded={atMentionOpen || showCommandSuggestions || Boolean(commandArgumentPalette)}
                       role="combobox"
-                      className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[240px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-9" : ""}`}
+                      className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[44px] w-full max-h-[240px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 py-2.5 text-[16px] font-medium leading-[24px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-9" : ""}`}
                       onScroll={(event) => syncInlineMentionScroll(event.currentTarget)}
                       onFocus={() => {
                         setTextareaFocused(true);

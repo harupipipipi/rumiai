@@ -1757,6 +1757,7 @@ test("composer controls are keyboard reachable, visibly named, and at least 44px
 
 test("composer uses a leading plus menu and accepts clipboard and workspace file drops", async ({ page }) => {
   await openDefaultspack(page, "/chat");
+  await page.getByTitle("New Chat").first().click();
 
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
   const attach = page.getByRole("button", { name: "ファイルを添付" });
@@ -1765,6 +1766,9 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
   expect(composerBox).not.toBeNull();
   expect(attachBox).not.toBeNull();
   expect(attachBox!.x).toBeLessThan(composerBox!.x);
+  const composerCenterY = composerBox!.y + composerBox!.height / 2;
+  const attachCenterY = attachBox!.y + attachBox!.height / 2;
+  expect(Math.abs(attachCenterY - composerCenterY)).toBeLessThanOrEqual(1);
 
   await attach.click();
   await expect(page.getByRole("menu", { name: "添付メニュー" })).toBeVisible();
