@@ -1,0 +1,38 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  shouldSendDesktopNotification,
+  taskPetViewModel,
+  truncateTaskPetText,
+} from "../lib/taskPet";
+
+test("task pet shows the current task and activity while thinking", () => {
+  const view = taskPetViewModel(
+    "thinking",
+    "GitHub リポジトリにタスクを見守るペットを追加する",
+    "フロントエンドのテストを実行中",
+  );
+
+  assert.equal(view.label, "思考中");
+  assert.equal(view.title, "GitHub リポジトリにタスクを見守るペットを追加する");
+  assert.equal(view.detail, "フロントエンドのテストを実行中");
+});
+
+test("task pet reports completion and clips long task text", () => {
+  const task = "長いタスク".repeat(30);
+  const view = taskPetViewModel("completed", task);
+
+  assert.equal(view.label, "完了");
+  assert.equal(view.title, "できたよ！");
+  assert.match(view.detail, /… を完了しました。$/);
+  assert.ok(view.detail.length < task.length);
+  assert.equal(truncateTaskPetText("  space   is normalized  ", 40), "space is normalized");
+});
+
+test("desktop notification is limited to granted background tabs", () => {
+  assert.equal(shouldSendDesktopNotification("granted", "hidden"), true);
+  assert.equal(shouldSendDesktopNotification("granted", "visible"), false);
+  assert.equal(shouldSendDesktopNotification("default", "hidden"), false);
+  assert.equal(shouldSendDesktopNotification("denied", "hidden"), false);
+});

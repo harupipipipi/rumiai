@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- Added a floating Tobkiri task pet that shows the active task, celebrates completion,
+  and can send opt-in desktop notifications while the app is in the background.
 - Added Quick Start section to README.md for easier onboarding
 - Added Troubleshooting section to README.md with common issues and solutions
 - Added Contributing section to README.md with development workflow guidelines
