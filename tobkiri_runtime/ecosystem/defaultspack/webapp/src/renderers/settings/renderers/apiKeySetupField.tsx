@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Plus, X } from "lucide-react";
 
 import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
 import { cn } from "../../../lib/cn";
@@ -39,7 +40,8 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
     allProviderOptions,
     providerScope,
   );
-  const [providerId, setProviderId] = useState(String(field.provider_id ?? providerOptions[0]?.provider_id ?? "google"));
+  const [providerId, setProviderId] = useState(String(field.provider_id ?? ""));
+  const [formOpen, setFormOpen] = useState(false);
   const [apiName, setApiName] = useState("main");
   const [secret, setSecret] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -57,8 +59,9 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
   const feedback = saveState === "saved" ? availabilityCopy(availability) : null;
 
   useEffect(() => {
+    if (!providerId) return;
     if (providerOptions.some((option) => option.provider_id === providerId)) return;
-    setProviderId(providerOptions[0]?.provider_id ?? "");
+    setProviderId("");
   }, [providerId, providerOptions]);
 
   const resetFeedback = () => {
@@ -105,6 +108,7 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
       setQuotaLabel("");
       setNotes("");
       setSaveState("saved");
+      setFormOpen(false);
     } catch (saveErrorValue) {
       setSaveState("idle");
       setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : "API key save failed.");
@@ -131,81 +135,111 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
             ))}
           </div>
         )}
-        <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
-          <SearchableProviderField
-            value={providerId}
-            options={providerOptions}
-            onChange={(nextProviderId) => {
-              setProviderId(nextProviderId);
-              resetFeedback();
-            }}
-            onAddCustom={(option) => {
-              onChange(sectionId, targetFieldId, {
-                action: "register_provider",
-                provider_id: option.providerId,
-                label: option.label,
-                kind: option.kind,
-              });
-              setProviderId(option.providerId);
-              resetFeedback();
-            }}
-          />
-          <input
-            value={apiName}
-            onChange={(event) => {
-              setApiName(event.target.value);
-              resetFeedback();
-            }}
-            placeholder="名前 (例: main, work)"
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-          />
-          <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 focus-within:border-zinc-600">
-            <select value={credentialMode} onChange={(event) => { setCredentialMode(event.target.value === "none" ? "none" : "api_key"); resetFeedback(); }} className="max-w-20 bg-transparent px-2 text-[10px] text-zinc-400 outline-none">
-              <option value="api_key">Key</option>
-              <option value="none">Local</option>
-            </select>
-            <input
-              type="password"
-              autoComplete="off"
-              value={secret}
-              disabled={credentialMode === "none"}
-              onChange={(event) => {
-                setSecret(event.target.value);
-                resetFeedback();
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                void handleSubmit();
-              }}
-              placeholder={credentialMode === "none" ? "loopback endpoint only" : `${providerId || "provider"} API key`}
-              className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-zinc-200 outline-none disabled:cursor-not-allowed disabled:text-zinc-600"
-            />
-          </div>
+        {registeredApis.length === 0 && !formOpen && (
+          <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-3 text-xs text-zinc-500">
+            登録済みのAI APIキーはありません。
+          </p>
+        )}
+        <div className="flex justify-end">
           <button
             type="button"
-            disabled={saveState === "saving" || !providerId.trim() || !apiName.trim() || (credentialMode === "api_key" ? !secret.trim() : !baseUrl.trim())}
-            onClick={() => void handleSubmit()}
+            onClick={() => {
+              setFormOpen((current) => !current);
+              resetFeedback();
+            }}
             className={cn(
-              "rounded-lg border px-3 py-2 text-xs transition-colors",
-              saveState !== "saving" && providerId.trim() && apiName.trim() && (credentialMode === "api_key" ? secret.trim() : baseUrl.trim())
-                ? "border-zinc-100 bg-zinc-100 text-zinc-950"
-                : "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600",
+              "inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors",
+              formOpen
+                ? "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/70 hover:bg-emerald-500/15",
             )}
           >
-            {saveState === "saving" ? "Saving" : "Save"}
+            {formOpen ? <X size={16} aria-hidden /> : <Plus size={16} aria-hidden />}
+            {formOpen ? "追加をやめる" : "APIキーを追加"}
           </button>
         </div>
-        <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
-          <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / quota / notes</summary>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); resetFeedback(); }} placeholder="base_url (optional)" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-            <input value={defaultModel} onChange={(event) => { setDefaultModel(event.target.value); resetFeedback(); }} placeholder="default model for this API" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-            <input value={allowedModels} onChange={(event) => { setAllowedModels(event.target.value); resetFeedback(); }} placeholder="allowed models, comma separated" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-            <input value={quotaLabel} onChange={(event) => { setQuotaLabel(event.target.value); resetFeedback(); }} placeholder="quota label" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-            <textarea value={notes} onChange={(event) => { setNotes(event.target.value); resetFeedback(); }} placeholder="notes for routing" className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2" />
+        {formOpen && (
+          <div className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3">
+            <p className="text-xs leading-5 text-zinc-500">
+              使いたいAIプロバイダーを選び、識別用の名前とAPIキーを入力します。
+            </p>
+            <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
+              <SearchableProviderField
+                value={providerId}
+                options={providerOptions}
+                onChange={(nextProviderId) => {
+                  setProviderId(nextProviderId);
+                  resetFeedback();
+                }}
+                onAddCustom={(option) => {
+                  onChange(sectionId, targetFieldId, {
+                    action: "register_provider",
+                    provider_id: option.providerId,
+                    label: option.label,
+                    kind: option.kind,
+                  });
+                  setProviderId(option.providerId);
+                  resetFeedback();
+                }}
+              />
+              <input
+                value={apiName}
+                onChange={(event) => {
+                  setApiName(event.target.value);
+                  resetFeedback();
+                }}
+                placeholder="名前 (例: main, work)"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+              />
+              <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 focus-within:border-zinc-600">
+                <select value={credentialMode} onChange={(event) => { setCredentialMode(event.target.value === "none" ? "none" : "api_key"); resetFeedback(); }} className="max-w-20 bg-transparent px-2 text-[10px] text-zinc-400 outline-none">
+                  <option value="api_key">Key</option>
+                  <option value="none">Local</option>
+                </select>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={secret}
+                  disabled={credentialMode === "none"}
+                  onChange={(event) => {
+                    setSecret(event.target.value);
+                    resetFeedback();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    void handleSubmit();
+                  }}
+                  placeholder={credentialMode === "none" ? "loopback endpoint only" : `${providerId || "provider"} API key`}
+                  className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-zinc-200 outline-none disabled:cursor-not-allowed disabled:text-zinc-600"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={saveState === "saving" || !providerId.trim() || !apiName.trim() || (credentialMode === "api_key" ? !secret.trim() : !baseUrl.trim())}
+                onClick={() => void handleSubmit()}
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-xs transition-colors",
+                  saveState !== "saving" && providerId.trim() && apiName.trim() && (credentialMode === "api_key" ? secret.trim() : baseUrl.trim())
+                    ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                    : "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600",
+                )}
+              >
+                {saveState === "saving" ? "Saving" : "Save"}
+              </button>
+            </div>
+            <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
+              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">詳細設定（任意）</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); resetFeedback(); }} placeholder="base_url (optional)" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+                <input value={defaultModel} onChange={(event) => { setDefaultModel(event.target.value); resetFeedback(); }} placeholder="default model for this API" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+                <input value={allowedModels} onChange={(event) => { setAllowedModels(event.target.value); resetFeedback(); }} placeholder="allowed models, comma separated" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+                <input value={quotaLabel} onChange={(event) => { setQuotaLabel(event.target.value); resetFeedback(); }} placeholder="quota label" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+                <textarea value={notes} onChange={(event) => { setNotes(event.target.value); resetFeedback(); }} placeholder="notes for routing" className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2" />
+              </div>
+            </details>
           </div>
-        </details>
+        )}
         {feedback?.text && (
           <div className={cn(
             "rounded-lg border px-3 py-2 text-[11px]",
