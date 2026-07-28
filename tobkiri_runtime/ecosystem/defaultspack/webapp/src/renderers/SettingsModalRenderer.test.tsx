@@ -733,6 +733,111 @@ test("Connections API credential template excludes AI provider keys", () => {
   assert.doesNotMatch(html, /openai:main:\*\*\*/);
 });
 
+test("Models places AI API registration before model API connections", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "main_model",
+              label: "Main Model",
+              type: "select",
+              options: [{ value: "openai/gpt-4.1", label: "GPT-4.1" }],
+            },
+            {
+              id: "model_api_routes",
+              label: "Model API Variants",
+              type: "model_api_routes",
+              renderer: "model_routing",
+              options: [{ value: "openai/gpt-4.1", label: "GPT-4.1", provider_id: "openai" }],
+              api_keys: [
+                {
+                  provider_id: "openai",
+                  label: "OpenAI",
+                  kind: "llm",
+                  apis: [{ api_id: "main", name: "AI key", kind: "llm", configured: true }],
+                },
+              ],
+            } as TemplateSettingsField,
+          ],
+        },
+        {
+          id: "apis",
+          label: "APIs",
+          fields: [
+            {
+              id: "api_keys",
+              label: "API Keys / Tokens",
+              type: "api_key_setup",
+              renderer: "api_key_setup",
+              provider_scope: "non_llm",
+              api_keys: [
+                {
+                  provider_id: "openai",
+                  label: "OpenAI",
+                  kind: "llm",
+                  apis: [{ api_id: "main", name: "AI key", kind: "llm", configured: true }],
+                },
+                {
+                  provider_id: "line",
+                  label: "LINE",
+                  kind: "custom",
+                  apis: [{ api_id: "channel", name: "LINE token", kind: "custom", configured: true }],
+                },
+              ],
+            } as unknown as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ] as SettingsSection[],
+      settingsValues: {
+        models: {
+          main_model: "openai/gpt-4.1",
+          model_api_routes: "openai/gpt-4.1: openai/main",
+        },
+        apis: {
+          api_keys: [
+            {
+              provider_id: "openai",
+              label: "OpenAI",
+              kind: "llm",
+              apis: [{ api_id: "main", name: "AI key", kind: "llm", configured: true }],
+            },
+            {
+              provider_id: "line",
+              label: "LINE",
+              kind: "custom",
+              apis: [{ api_id: "channel", name: "LINE token", kind: "custom", configured: true }],
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-provider-scope="llm"/);
+  assert.match(html, /openai:main:\*\*\*/);
+  assert.doesNotMatch(html, /line:channel:\*\*\*/);
+  assert.ok(
+    html.indexOf('data-settings-field="apis.api_keys"')
+      < html.indexOf('data-settings-field="models.model_api_routes"'),
+  );
+});
+
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {

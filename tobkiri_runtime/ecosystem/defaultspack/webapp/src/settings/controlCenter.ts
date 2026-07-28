@@ -641,6 +641,43 @@ export function buildControlCenterSections(settingsSections: SettingsSection[], 
       byId.get(targetId)?.sourceSections.push(sourceSection);
     }
   }
+  const connections = byId.get("accounts_connections");
+  const models = byId.get("models_api");
+  const sharedApiKeyField = connections?.fields.find((field) => (
+    field.sourceSectionId === "apis"
+    && field.id === "api_keys"
+    && (field.type === "api_keys" || String(field.type) === "api_key_setup")
+  ));
+  if (models && sharedApiKeyField) {
+    const modelApiKeyField = {
+      ...sharedApiKeyField,
+      label: normalizeLocale(locale) === "ja" ? "AI APIキー" : "AI API keys",
+      help: normalizeLocale(locale) === "ja"
+        ? "AIモデルで使うAPIキーを登録します。保存後、下の「モデルごとのAPI接続」でモデルへ割り当てられます。"
+        : "Register API keys used by AI models, then assign them under Model API connections below.",
+      type: "api_key_setup",
+      renderer: "api_key_setup",
+      provider_scope: "llm",
+      controlSectionId: "models_api" as const,
+    } as ControlCenterField;
+    models.fields.push(modelApiKeyField);
+    const apiSource = settingsSections.find((section) => section.id === "apis");
+    if (apiSource && !models.sourceSections.some((section) => section.id === apiSource.id)) {
+      models.sourceSections.push(apiSource);
+    }
+    const modelFieldRank = (field: ControlCenterField): number => {
+      if (field.sourceSectionId === "apis" && field.id === "api_keys") return 900;
+      if (field.id === "model_api_routes") return 910;
+      return 100;
+    };
+    models.fields = models.fields
+      .map((field, index) => ({ field, index }))
+      .sort((left, right) => (
+        modelFieldRank(left.field) - modelFieldRank(right.field)
+        || left.index - right.index
+      ))
+      .map(({ field }) => field);
+  }
   const quickSetup = byId.get("quick_setup");
   if (quickSetup) {
     quickSetup.fields = [];

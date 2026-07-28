@@ -1528,7 +1528,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "api_key_setup" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
   default?: unknown;
   required?: boolean;
   help?: string;

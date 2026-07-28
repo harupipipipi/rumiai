@@ -320,7 +320,7 @@ test("HistoryBoard replaces New Group with an accessible Projects creation heade
 
   assert.match(html, />Projects</);
   assert.match(html, /aria-label="New Project"/);
-  assert.match(html, /class="[^"]*h-11 w-11[^"]*"[^>]*aria-label="New Project"/);
+  assert.match(html, /class="[^"]*h-8 w-8[^"]*"[^>]*aria-label="New Project"/);
   assert.doesNotMatch(html, /New Group/);
 });
 

@@ -30,12 +30,15 @@ test("settings control center keeps the required section order", () => {
   ]);
 });
 
-test("model choice and provider credentials use separate categories", () => {
+test("AI API setup is shared with models while connections keeps the source field", () => {
   const sections = buildControlCenterSections([
     {
       id: "models",
       label: "Models",
-      fields: [{ id: "provider_select", label: "Provider", type: "provider_select" }],
+      fields: [
+        { id: "provider_select", label: "Provider", type: "provider_select" },
+        { id: "model_api_routes", label: "Model API Routes", type: "model_api_routes" },
+      ],
     },
     {
       id: "apis",
@@ -46,7 +49,10 @@ test("model choice and provider credentials use separate categories", () => {
 
   const modelsApi = sections.find((section) => section.id === "models_api");
   const connections = sections.find((section) => section.id === "accounts_connections");
-  assert.deepEqual(modelsApi?.fields.map((field) => field.id), ["provider_select"]);
+  assert.deepEqual(modelsApi?.fields.map((field) => field.id), ["provider_select", "api_keys", "model_api_routes"]);
+  const aiApiKeys = modelsApi?.fields.find((field) => field.sourceSectionId === "apis" && field.id === "api_keys");
+  assert.equal(aiApiKeys?.type, "api_key_setup");
+  assert.equal((aiApiKeys as unknown as Record<string, unknown>)?.provider_scope, "llm");
   assert.deepEqual(connections?.fields.map((field) => field.id), ["api_keys"]);
 });
 

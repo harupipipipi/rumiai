@@ -2336,23 +2336,23 @@ export function HistoryBoard({
         <SortableContext items={allSortableIds} strategy={verticalListSortingStrategy}>
           <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto pb-12">
             {!selectionMode && (
-              <div className="relative border-b border-zinc-800/70 bg-[#09090b] px-3 py-2">
-                <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+              <div className="relative border-b border-zinc-800/70 bg-[#09090b] px-3 py-1">
+                <div className="flex min-h-8 items-center justify-between gap-3 px-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <FolderOpen size={15} className="shrink-0 text-zinc-500" aria-hidden="true" />
-                    <span className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                    <FolderOpen size={14} className="shrink-0 text-zinc-500" aria-hidden="true" />
+                    <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                       Projects
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={openCreateGroup}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/70 text-zinc-400 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/70 text-zinc-400 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
                     title="New Project"
                     aria-label="New Project"
                     aria-expanded={isCreateGroupOpen}
                   >
-                    <Plus size={18} aria-hidden="true" />
+                    <Plus size={15} aria-hidden="true" />
                   </button>
                 </div>
                 {createGroupForm}
