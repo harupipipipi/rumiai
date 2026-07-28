@@ -6,6 +6,8 @@ export const TOBKIRI_LOADING_ANIMATION_URL =
   `${assetBaseUrl}assets/tobkiri-startup-blade-cut.svg`;
 
 export const TOBKIRI_LOADING_LABEL = "インターフェース本体を読み込んでいます…";
+export const TOBKIRI_STARTUP_ERROR_LABEL =
+  "正規のTobkiriランタイムへ接続できませんでした。";
 
 export type TobkiriLoadingStep = {
   id: string;
@@ -62,9 +64,9 @@ export function TobkiriLoadingScreen({
           Tobkiri
         </p>
         <p className="text-sm text-zinc-300">
-          {error ? "起動準備を完了できませんでした" : activeStep?.label ?? TOBKIRI_LOADING_LABEL}
+          {error ? TOBKIRI_STARTUP_ERROR_LABEL : activeStep?.label ?? TOBKIRI_LOADING_LABEL}
         </p>
-        {steps.length > 0 ? (
+        {!error && steps.length > 0 ? (
           <ol
             aria-label="起動準備の進行状況"
             className="mt-1 grid w-full max-w-md gap-2 text-left"
@@ -103,17 +105,27 @@ export function TobkiriLoadingScreen({
           </ol>
         ) : null}
         {error ? (
-          <div className="mt-1 w-full max-w-md rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-left">
-            <p role="alert" className="text-xs leading-5 text-red-100">{error}</p>
+          <div className="mt-1 flex w-full max-w-md flex-col items-center gap-3">
+            <p role="alert" className="text-xs leading-5 text-zinc-400">
+              Tobkiri Launcherから起動し直すか、しばらく待って再試行してください。
+            </p>
             {onRetry ? (
               <button
-                className="mt-3 rounded-lg border border-red-300/30 px-3 py-2 text-xs font-semibold text-red-50 hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                 onClick={onRetry}
                 type="button"
               >
-                起動準備を再試行
+                再試行
               </button>
             ) : null}
+            <details className="w-full text-left text-[11px] text-zinc-600">
+              <summary className="cursor-pointer text-center hover:text-zinc-400">
+                技術詳細
+              </summary>
+              <p className="mt-2 break-words rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 leading-5">
+                {error}
+              </p>
+            </details>
           </div>
         ) : null}
       </div>

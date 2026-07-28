@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   TOBKIRI_LOADING_ANIMATION_URL,
   TOBKIRI_LOADING_LABEL,
+  TOBKIRI_STARTUP_ERROR_LABEL,
   TobkiriLoadingScreen,
 } from "./TobkiriLoadingScreen";
 import { HostBootstrap } from "../host/HostBootstrap";
@@ -56,9 +57,13 @@ test("keeps failures inside the startup boundary and offers a retry", () => {
   );
 
   assert.match(markup, /role="alert"/);
+  assert.match(markup, new RegExp(TOBKIRI_STARTUP_ERROR_LABEL));
+  assert.match(markup, /Launcherから起動し直すか/);
+  assert.match(markup, />再試行</);
+  assert.match(markup, /<summary[^>]*>技術詳細<\/summary>/);
   assert.match(markup, /ツール情報を取得できませんでした/);
-  assert.match(markup, /起動準備を再試行/);
-  assert.match(markup, /data-status="error"/);
+  assert.doesNotMatch(markup, /data-startup-readiness-steps/);
+  assert.doesNotMatch(markup, /data-status="error"/);
 });
 
 test("uses the branded loading screen while the dynamic interface catalog loads", () => {
