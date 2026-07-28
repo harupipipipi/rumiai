@@ -2688,9 +2688,12 @@ export function explainDefaultspackApiError(
   const label = status ? `HTTP ${status}${statusText ? ` ${statusText}` : ""}` : "defaultspack API error";
   const code = error?.code ? ` (${error.code})` : "";
   const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
+  const recoveryHint = /local auth token (?:required|is not configured)/i.test(error?.message ?? "")
+    ? "この画面がTobkiri Launcherのローカル認証を引き継げていません。APIキーの誤りではありません。LauncherからTobkiriを開き直してください。"
+    : defaultspackApiStatusHint(status, error?.code);
   return [
     `${label}${code}`,
-    defaultspackApiStatusHint(status, error?.code),
+    recoveryHint,
     detail ? `詳細: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }

@@ -1156,6 +1156,17 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
+test("local auth errors identify the Launcher session instead of blaming the provider key", () => {
+  const message = explainDefaultspackApiError(401, {
+    code: "AUTH_REQUIRED",
+    message: "local auth token required",
+  }, "Unauthorized");
+
+  assert.match(message, /Tobkiri Launcher/);
+  assert.match(message, /APIキーの誤りではありません/);
+  assert.doesNotMatch(message, /ログイン状態、APIキー、OAuth 接続/);
+});
+
 test("browser authority QA disabled errors explain the launch requirement", () => {
   const message = explainDefaultspackApiError(404, {
     code: "AUTHORITY_BROWSER_TEST_DISABLED",
