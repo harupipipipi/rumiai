@@ -197,3 +197,23 @@ def test_current_scan_matches_relocated_baseline_edges_one_to_one() -> None:
         [relocated, duplicate],
         baseline,
     ) == [duplicate]
+
+
+def test_resolved_edges_must_be_removed_from_the_baseline() -> None:
+    scanner = _scanner()
+    resolved = _baseline_exception(line=10)
+    active = _baseline_exception(line=20, target="pack_c")
+    baseline = _baseline(resolved, active)
+    violation = scanner.Violation(
+        rule=str(active["rule"]),
+        path=str(active["path"]),
+        line=30,
+        source=str(active["source"]),
+        target=str(active["target"]),
+        guidance="Use a contract.",
+    )
+
+    assert scanner.find_stale_baseline_exceptions(
+        [violation],
+        baseline,
+    ) == [resolved]

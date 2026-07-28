@@ -1542,6 +1542,11 @@ _SENSITIVE_CHAT_PATH_RE = re.compile(
 _SENSITIVE_HUMAN_OPERATOR_PATH_RE = re.compile(
     r"^/api/human-operator/conversations/[^/]+/sessions/[^/]+(?:/messages)?$"
 )
+_COMPOSER_TRANSCRIPTION_PATH = "/api/ambient/transcriptions"
+# A 25 MiB recording is approximately 33.4 MiB when base64 encoded.  Leave a
+# small envelope for JSON fields while rejecting large bodies before buffering
+# or decoding them in the HTTP handler.
+_COMPOSER_TRANSCRIPTION_MAX_REQUEST_BYTES = 36 * 1024 * 1024
 _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
@@ -1646,6 +1651,67 @@ def _browser_api_origin_error(method, path, headers, client_address=None):
     origin = _header_value(headers, "Origin")
     if origin and not _is_allowed_sensitive_origin(origin):
         return (403, "origin not allowed for local defaultspack API", "ORIGIN_DENIED")
+    return None
+
+
+def _normalized_host_and_port(value, *, scheme="http"):
+    """Parse a Host header or Origin and reject ambiguous authority values."""
+    raw_value = str(value or "").strip()
+    if not raw_value or raw_value.startswith("//"):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(raw_value if "://" in raw_value else "//" + raw_value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or not parsed.hostname
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    normalized_scheme = str(parsed.scheme or scheme).lower()
+    if normalized_scheme != "http":
+        return None
+    hostname = str(parsed.hostname).lower()
+    if not _local_origin_allowed(f"http://{parsed.netloc or raw_value}"):
+        return None
+    return hostname, port if port is not None else 80
+
+
+def _composer_transcription_request_error(headers, client_address):
+    """Authorize the narrow, unauthenticated same-origin transcription route.
+
+    This is deliberately separate from privileged integration authorization:
+    the static composer needs to work when opened directly from the local
+    server, but a page hosted on a different localhost port must not be able to
+    consume CPU by submitting recordings.  A direct TCP caller must also be
+    loopback and the Host/Origin pair must be the exact same HTTP origin.
+    """
+    if not _local_is_loopback_request(
+        {str(key): str(value) for key, value in getattr(headers, "items", lambda: [])()},
+        client_address,
+    ):
+        return (403, "composer transcription requires a loopback client", "LOCAL_ONLY_REQUIRED")
+    origin = _header_value(headers, "Origin")
+    host = _header_value(headers, "Host")
+    origin_parts = _normalized_host_and_port(origin)
+    host_parts = _normalized_host_and_port(host)
+    if not origin_parts or not host_parts:
+        return (
+            403,
+            "composer transcription requires a valid loopback same-origin request",
+            "ORIGIN_DENIED",
+        )
+    if origin_parts != host_parts:
+        return (
+            403,
+            "composer transcription origin does not match the local server",
+            "ORIGIN_DENIED",
+        )
     return None
 
 
@@ -2058,6 +2124,20 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             if origin_error:
                 self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
                 return
+            if method == "POST" and path == _COMPOSER_TRANSCRIPTION_PATH:
+                transcription_error = _composer_transcription_request_error(
+                    self.headers, self.client_address
+                )
+                if transcription_error:
+                    # Do not drain an attacker-controlled multi-megabyte body
+                    # after rejecting it.  Closing prevents its bytes from
+                    # being treated as a pipelined follow-up request.
+                    self.close_connection = True
+                    self._send_json(
+                        transcription_error[0],
+                        error(transcription_error[1], transcription_error[2]),
+                    )
+                    return
             if _header_value(
                 self.headers, "X-Rumi-Approval-Browser-Token"
             ).strip():
@@ -2119,7 +2199,28 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         + hashlib.sha256(bearer.encode("utf-8")).hexdigest()
                     }
             if method in ("POST", "PUT", "PATCH"):
-                content_length = int(self.headers.get("Content-Length", 0))
+                try:
+                    content_length = int(self.headers.get("Content-Length", 0))
+                except (TypeError, ValueError):
+                    self._send_json(400, error("invalid Content-Length", "INVALID_CONTENT_LENGTH"))
+                    return
+                if content_length < 0:
+                    self._send_json(400, error("invalid Content-Length", "INVALID_CONTENT_LENGTH"))
+                    return
+                if (
+                    method == "POST"
+                    and path == _COMPOSER_TRANSCRIPTION_PATH
+                    and content_length > _COMPOSER_TRANSCRIPTION_MAX_REQUEST_BYTES
+                ):
+                    self.close_connection = True
+                    self._send_json(
+                        413,
+                        error(
+                            "recorded audio request is too large to transcribe",
+                            "AUDIO_PAYLOAD_TOO_LARGE",
+                        ),
+                    )
+                    return
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
                     raw_text = raw_body.decode("utf-8", errors="replace")

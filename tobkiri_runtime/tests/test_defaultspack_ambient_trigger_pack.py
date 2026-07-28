@@ -1737,6 +1737,13 @@ def test_ambient_routes_and_functions_are_registered():
     assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
     assert ("POST", "/api/ambient/config", "blocks.ambient.config") in routes
     assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
+    assert ("POST", "/api/ambient/transcriptions", "blocks.ambient.transcription") in routes
+    transcription_route = next(
+        route
+        for route in canonical_http_route_specs()
+        if route.method == "POST" and route.pattern == "/api/ambient/transcriptions"
+    )
+    assert transcription_route.local_only is True
     assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in routes
     assert ("POST", "/api/ambient/approval/deny", "blocks.ambient.approval") in routes
     assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in legacy_routes
@@ -1754,6 +1761,159 @@ def test_ambient_routes_and_functions_are_registered():
     )
 
 
+def test_composer_transcription_route_is_transient_and_does_not_dispatch(monkeypatch):
+    from blocks.ambient import transcription
+
+    captured = {}
+
+    def fake_transcribe(attachments, **kwargs):
+        captured["attachments"] = attachments
+        captured["kwargs"] = kwargs
+        return {
+            "status": "ok",
+            "text": "こんにちは",
+            "source": "local_whisper",
+            "model": "local-whisper",
+        }
+
+    monkeypatch.setattr(transcription, "transcribe_ambient_audio", fake_transcribe)
+    result = transcription.run(
+        {
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio_mime_type": "audio/webm",
+            "audio_size": 4,
+            "audio_name": "voice.webm",
+            "model": "opencode-zen/mimo-v2.5-free",
+            "params": {"language": "ja"},
+            "metadata": {"target_supports_audio": False},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["transcript"] == "こんにちは"
+    assert result["data"]["transcription"]["source"] == "local_whisper"
+    assert captured["attachments"][0]["do_not_persist"] is True
+    assert captured["kwargs"]["target_model_ref"] == "opencode-zen/mimo-v2.5-free"
+    assert captured["kwargs"]["target_supports_audio"] is False
+
+
+def test_composer_transcription_route_rejects_oversize_audio_before_provider_call(monkeypatch):
+    from blocks.ambient import transcription
+
+    called = False
+
+    def fake_transcribe(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(transcription, "transcribe_ambient_audio", fake_transcribe)
+    monkeypatch.setattr(transcription, "MAX_AUDIO_BYTES", 2)
+    result = transcription.run(
+        {
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio_size": 0,
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUDIO_PAYLOAD_TOO_LARGE"
+    assert called is False
+
+
+def test_composer_transcription_uses_decoded_bytes_not_caller_declared_size(monkeypatch):
+    from blocks.ambient import transcription
+
+    called = False
+
+    def fake_transcribe(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(transcription, "MAX_AUDIO_BYTES", 2)
+    monkeypatch.setattr(transcription, "transcribe_ambient_audio", fake_transcribe)
+    result = transcription.run(
+        {
+            # `AAAA` decodes to three bytes, while the caller claims none.
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio_size": 0,
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUDIO_PAYLOAD_TOO_LARGE"
+    assert called is False
+
+
+def test_composer_transcription_rejects_nested_or_duplicate_media_before_provider_call(monkeypatch):
+    from blocks.ambient import transcription
+
+    called = False
+
+    def fake_transcribe(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(transcription, "transcribe_ambient_audio", fake_transcribe)
+    payload = {
+        "audio_data_url": "data:audio/webm;base64,AAAA",
+        "audio_mime_type": "audio/webm",
+        "attachments": [
+            {
+                "type": "audio/webm",
+                "dataUrl": "data:audio/webm;base64,AAAA",
+            }
+        ],
+    }
+    result = transcription.run(payload, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
+    assert called is False
+
+    result = transcription.run(
+        {
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio": "data:audio/webm;base64,AAAA",
+        },
+        {},
+    )
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
+    assert called is False
+
+
+def test_composer_transcription_rejects_invalid_or_mismatched_audio_mime(monkeypatch):
+    from blocks.ambient import transcription
+
+    monkeypatch.setattr(
+        transcription,
+        "transcribe_ambient_audio",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not transcribe")),
+    )
+    malformed = transcription.run(
+        {"audio_data_url": "data:audio/webm,not-base64"},
+        {},
+    )
+    assert malformed["status"] == "error"
+    assert malformed["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
+
+    mismatched = transcription.run(
+        {
+            "audio_data_url": "data:audio/webm;base64,AAAA",
+            "audio_mime_type": "audio/mpeg",
+        },
+        {},
+    )
+    assert mismatched["status"] == "error"
+    assert mismatched["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
+
+
 def test_ambient_events_viewer_token_satisfies_local_ui_context(monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "viewer-local-token")
 
@@ -1769,6 +1929,10 @@ def test_ambient_events_viewer_token_satisfies_local_ui_context(monkeypatch):
         "/api/ambient/events",
         {},
     )
+    assert http._requires_sensitive_http_auth(
+        "POST",
+        "/api/ambient/transcriptions",
+    ) is False
 
 
 def test_ambient_monitor_start_function_returns_browser_owned_contract(monkeypatch):

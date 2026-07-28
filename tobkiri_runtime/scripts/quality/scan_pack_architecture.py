@@ -193,6 +193,22 @@ def find_unbaselined_violations(
     return active
 
 
+def find_stale_baseline_exceptions(
+    violations: Iterable[Violation],
+    baseline: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return exceptions whose semantic edge no longer exists in the scan."""
+    remaining = Counter(_violation_edge_key(item) for item in violations)
+    stale: list[dict[str, Any]] = []
+    for item in baseline.values():
+        key = _baseline_edge_key(item)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            stale.append(item)
+    return stale
+
+
 def _baseline_groups(
     baseline: dict[str, dict[str, Any]],
 ) -> dict[tuple[str, str, str, str], list[dict[str, Any]]]:
@@ -633,6 +649,15 @@ def main() -> int:
         print(f"pack-architecture: {exc}", file=sys.stderr)
         return 2
     violations = scan_repository(root)
+    stale = find_stale_baseline_exceptions(violations, baseline)
+    if stale:
+        identities = ", ".join(str(item["identity"]) for item in stale)
+        print(
+            "pack-architecture: baseline contains resolved identities; "
+            f"remove them to preserve shrink-only enforcement: {identities}",
+            file=sys.stderr,
+        )
+        return 2
     active = find_unbaselined_violations(violations, baseline)
     if args.format == "json":
         print(

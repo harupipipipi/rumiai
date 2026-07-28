@@ -52,6 +52,12 @@ import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerC
 import { applyCommandStateSnapshots, createCommandInvocationId } from "./lib/commandState";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import {
+  PROJECTS_CHANGED_EVENT,
+  loadProjects,
+  projectTaskContext,
+  type ProjectInfo,
+} from "./features/projects/projectStorage";
+import {
   filterModelProfilesBySelector,
   modelSelectorSchemaFromCatalog,
 } from "./features/models";
@@ -116,6 +122,7 @@ import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
+import { manualRuntimeModeSelectionEnabled } from "./features/runtimeMode/runtimeMode";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
@@ -2547,6 +2554,7 @@ function ChatApp() {
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
+  const [projects, setProjects] = useState<ProjectInfo[]>(() => loadProjects());
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
@@ -2600,10 +2608,26 @@ function ChatApp() {
   ];
 
   useEffect(() => {
-    if (mode === "chat") {
+    const refreshProjects = () => setProjects(loadProjects());
+    window.addEventListener(PROJECTS_CHANGED_EVENT, refreshProjects);
+    window.addEventListener("storage", refreshProjects);
+    return () => {
+      window.removeEventListener(PROJECTS_CHANGED_EVENT, refreshProjects);
+      window.removeEventListener("storage", refreshProjects);
+    };
+  }, []);
+
+  const allowManualRuntimeModeSelection = manualRuntimeModeSelectionEnabled(settingsValues);
+
+  useEffect(() => {
+    if (
+      !allowManualRuntimeModeSelection
+      && mode !== "agent"
+      && window.location.pathname !== "/coding"
+    ) {
       setMode("agent");
     }
-  }, [mode, setMode]);
+  }, [allowManualRuntimeModeSelection, mode, setMode]);
 
   useEffect(() => {
     if (!shareDialogOpen) return;
@@ -3856,6 +3880,41 @@ function ChatApp() {
 
   const handleHistoryGroupSelect = (group: ChatGroup) => {
     setActiveHistoryCompanyId(resolveCompanyWorkspaceHintFromGroup(group));
+  };
+
+  const handleComposerProjectSelect = (project: ProjectInfo | null) => {
+    const context = projectTaskContext(project);
+    if (!activeConversationId || !activeConversation) {
+      setPendingNewTaskContext(context);
+      if (project?.workspaceId) setSelectedCodingWorkspaceId(project.workspaceId);
+      return;
+    }
+
+    const metadata = { ...(activeConversation.metadata ?? {}) };
+    delete metadata.groupId;
+    if (project) {
+      metadata.group_id = project.id;
+      metadata.group_title = project.title;
+      if (project.workspaceId) metadata.workspace_id = project.workspaceId;
+      if (project.workspaceLabel) metadata.workspace_label = project.workspaceLabel;
+      if (project.workspaceRoot) metadata.workspace_root = project.workspaceRoot;
+      if (project.rumiDataPath) metadata.rumi_data_path = project.rumiDataPath;
+    } else {
+      delete metadata.group_id;
+      delete metadata.group_title;
+    }
+
+    setError(null);
+    void api.updateConversation(activeConversationId, {
+      group_id: project?.id ?? null,
+      metadata,
+    }).then((conversation) => {
+      setConversations((current) => current.map((item) => item.id === conversation.id ? { ...conversation, messages: [] } : item));
+      setActiveConversation(conversation);
+      if (project?.workspaceId) setSelectedCodingWorkspaceId(project.workspaceId);
+    }).catch((updateError) => {
+      setError(updateError instanceof Error ? updateError.message : "Project update failed.");
+    });
   };
 
   const closeSpotlight = () => {
@@ -5136,7 +5195,7 @@ function ChatApp() {
   };
 
   const handleDirectorySelect = async () => {
-    const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
+    const selected = await api.selectDirectory("Project に紐づける既存フォルダを選択");
     return selected.cancelled ? null : selected.path;
   };
 
@@ -6668,6 +6727,16 @@ function ChatApp() {
     : {};
   const activeConversationGroupId = cleanOptionalString(activeConversation?.group_id)
     ?? cleanOptionalString(activeConversationMetadata.group_id ?? activeConversationMetadata.groupId);
+  const composerProjects = effectiveGroupId && !projects.some((project) => project.id === effectiveGroupId)
+    ? [{
+        id: effectiveGroupId,
+        title: cleanOptionalString(activeConversationMetadata.group_title ?? activeConversationMetadata.groupTitle) ?? effectiveGroupId,
+        workspaceId: activeConversationWorkspaceContext.workspaceId ?? null,
+        workspaceLabel: activeConversationWorkspaceContext.workspaceLabel ?? null,
+        workspaceRoot: activeConversationWorkspaceContext.workspaceRoot ?? null,
+        rumiDataPath: activeConversationWorkspaceContext.rumiDataPath ?? null,
+      }, ...projects]
+    : projects;
   const activeConversationCompanyId = resolveCompanyWorkspaceHint({
     companyId: activeConversationMetadata.company_id ?? activeConversationMetadata.companyId,
     groupId: activeConversationGroupId,
@@ -6751,10 +6820,13 @@ function ChatApp() {
       modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
+      manualRuntimeModeSelectionEnabled={allowManualRuntimeModeSelection}
       mode={mode}
       codingContext={codingContext}
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
+      projects={composerProjects}
+      selectedProjectId={effectiveGroupId}
       attachedFiles={attachedFiles}
       pendingMentionAttachmentPaths={pendingMentionAttachmentPaths}
       droppedWidgets={activeDroppedWidgets}
@@ -6806,6 +6878,9 @@ function ChatApp() {
       onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
       onCodingWorkspacesRefresh={() => void loadCodingWorkspaces()}
       onCodingContextRefresh={loadCodingContext}
+      onProjectSelect={handleComposerProjectSelect}
+      onProjectDirectorySelect={handleDirectorySelect}
+      onProjectStoragePrepare={handlePrepareChatGroupStorage}
     />;
   };
 

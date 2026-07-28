@@ -432,7 +432,11 @@ def _apply_selector_schema(catalog: dict[str, Any]) -> None:
         if not isinstance(section, dict):
             continue
         for field in section.get("fields", []):
-            if isinstance(field, dict) and field.get("type") in {"model_select", "provider_select"}:
+            if isinstance(field, dict) and field.get("type") in {
+                "model_select",
+                "provider_select",
+                "model_api_routes",
+            }:
                 field["selector_schema"] = deepcopy(selector_schema)
 
 

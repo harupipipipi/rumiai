@@ -3460,6 +3460,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/ambient/transcriptions
+  legacy_block_module: blocks.ambient.transcription
+  replacement_function_id: ''
+  owner: ambient
+  reason: transient, same-origin composer audio transcription route
+  remove_after: v2.4
+- method: POST
   pattern: /api/ambient/approval/approve
   legacy_block_module: blocks.ambient.approval
   replacement_function_id: ''

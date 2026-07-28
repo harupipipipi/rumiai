@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { TobkiriLoadingScreen } from "../components/TobkiriLoadingScreen";
 import { defaultspackApiFetch } from "../lib/api";
 import { DynamicFrontendHost } from "./DynamicFrontendHost";
 import type {
@@ -92,7 +93,7 @@ export function HostBootstrap({
   }, [catalog]);
 
   if (failed) return <>{fallback}</>;
-  if (!catalog || !capabilities) return <main role="status">Loading selected interface…</main>;
+  if (!catalog || !capabilities) return <TobkiriLoadingScreen />;
   const hasRoute = catalog.contributions.some(
     (item) => item.kind === "route" && item.route === route,
   );
@@ -106,4 +107,3 @@ export function HostBootstrap({
     />
   );
 }
-

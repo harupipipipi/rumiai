@@ -1289,6 +1289,8 @@ export type ModelProfile = {
   supports_thinking?: boolean;
   supports_vision?: boolean;
   supports_image_input?: boolean;
+  supports_audio?: boolean;
+  supports_audio_input?: boolean;
   supports_tool_calling?: boolean;
   supports_fast?: boolean;
   thinking_levels?: string[];
@@ -1496,6 +1498,9 @@ export type SidebarFieldOption = {
   provider_display_name?: string;
   model_id?: string;
   qualified_model_id?: string;
+  requires_api_key?: boolean;
+  api_key_required?: boolean;
+  api_key_configured?: boolean;
   configured?: boolean;
   local?: boolean;
   supports_vision?: boolean;
@@ -1525,7 +1530,9 @@ export type SidebarField = {
   provider_id?: string;
   configured_field?: string;
   advanced?: boolean;
+  control_center_section?: string;
   api_keys?: Array<Record<string, unknown>>;
+  selector_schema?: Record<string, unknown>;
 };
 
 export type ContinuityNode = {

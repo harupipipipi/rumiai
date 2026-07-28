@@ -41,6 +41,13 @@ import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
 import { ConversationSearchBar } from './history/ConversationSearchBar';
 import { ConversationTagFilter } from './history/ConversationTagFilter';
 import { WarmActionIcon } from './WarmActionIcon';
+import {
+  PROJECTS_CHANGED_EVENT,
+  loadProjects,
+  newProjectId,
+  saveProjects,
+  type ProjectInfo,
+} from '../features/projects/projectStorage';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -149,14 +156,8 @@ export type ChatGroup = {
   rumiDataPath?: string | null;
 };
 
-export type CustomGroupInfo = {
-  id: string;
-  title: string;
-  workspaceId?: string | null;
-  workspaceLabel?: string | null;
-  workspaceRoot?: string | null;
-  rumiDataPath?: string | null;
-};
+/** @deprecated API/storage compatibility alias. Use ProjectInfo in new UI code. */
+export type CustomGroupInfo = ProjectInfo;
 
 export type HistoryBoardNewTaskOptions = {
   groupId?: string;
@@ -298,46 +299,16 @@ function hasWorkspaceGroupingMetadata(chat: ChatItem): boolean {
   return Boolean(chat.isPinned || chat.isStarred || chatTags(chat).length || isCompanyChat(chat) || isCodingChat(chat));
 }
 
-const CUSTOM_GROUPS_STORAGE_KEY = 'rumi-history-custom-groups';
-
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function customGroupFromStorageItem(item: unknown): CustomGroupInfo | null {
-  if (!item || typeof item !== "object") return null;
-  const record = item as Record<string, unknown>;
-  const id = stringOrNull(record.id);
-  const title = stringOrNull(record.title);
-  if (!id || !title) return null;
-  return {
-    id,
-    title,
-    workspaceId: stringOrNull(record.workspaceId ?? record.workspace_id),
-    workspaceLabel: stringOrNull(record.workspaceLabel ?? record.workspace_label),
-    workspaceRoot: stringOrNull(record.workspaceRoot ?? record.workspace_root ?? record.rootPath),
-    rumiDataPath: stringOrNull(record.rumiDataPath ?? record.rumi_data_path ?? record.rumiDPPath),
-  };
-}
-
 export function loadCustomGroups(): CustomGroupInfo[] {
-  try {
-    const raw = localStorage.getItem(CUSTOM_GROUPS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.map(customGroupFromStorageItem).filter((item): item is CustomGroupInfo => Boolean(item))
-      : [];
-  } catch {
-    return [];
-  }
+  return loadProjects();
 }
 
 function saveCustomGroups(groups: CustomGroupInfo[]) {
-  try {
-    localStorage.setItem(CUSTOM_GROUPS_STORAGE_KEY, JSON.stringify(groups));
-  } catch {
-    // localStorage can be unavailable in restricted contexts.
-  }
+  saveProjects(groups);
 }
 
 function collectGroupIds(groups: ChatGroup[], ids = new Set<string>()): Set<string> {
@@ -967,7 +938,7 @@ function SubGroup({ group, activeChatId, selectedChatId = null, selectionMode = 
         <button
           onClick={(e) => { e.stopPropagation(); onUngroup(group.id); }}
           className="flex h-5 w-5 items-center justify-center text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/folder:opacity-100 transition-all"
-          title="Ungroup"
+          title="Remove from project"
         >
           <X size={11} />
         </button>
@@ -1095,7 +1066,7 @@ function DroppableColumn({ group, activeChatId, selectedChatId = null, selection
               "flex h-5 w-3 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
               group.isCollapsed ? "opacity-100" : "opacity-0 group-hover/colheader:opacity-100"
             )}
-            title="Drag group"
+            title="Drag project"
           >
             <GripVertical size={10} />
           </div>
@@ -1135,7 +1106,7 @@ function DroppableColumn({ group, activeChatId, selectedChatId = null, selection
           <span className="ml-auto text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
         </div>
         <div className="flex items-center gap-0.5 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => onNewTask(group.id)} className="flex h-5 w-5 items-center justify-center text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
+          <button onClick={() => onNewTask(group.id)} className="flex h-5 w-5 items-center justify-center text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in project">
             <Plus size={13} />
           </button>
         </div>
@@ -1506,6 +1477,12 @@ export function HistoryBoard({
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isSelectingGroupDirectory, setIsSelectingGroupDirectory] = useState(false);
 
+  useEffect(() => {
+    const refreshProjects = () => setCustomGroups(loadProjects());
+    window.addEventListener(PROJECTS_CHANGED_EVENT, refreshProjects);
+    return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, refreshProjects);
+  }, []);
+
   const selectedCodingWorkspace = useMemo(
     () => codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId) ?? null,
     [codingWorkspaces, selectedCodingWorkspaceId],
@@ -1696,11 +1673,9 @@ export function HistoryBoard({
   const handleRenameGroup = (id: string, newTitle: string) => {
     const sourceGroupId = findGroupById(groups, id)?.sourceGroupId ?? id;
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, title: newTitle } : g));
-    setCustomGroups((prev) => {
-      const next = prev.map((group) => group.id === sourceGroupId ? { ...group, title: newTitle } : group);
-      saveCustomGroups(next);
-      return next;
-    });
+    const nextCustomGroups = customGroups.map((group) => group.id === sourceGroupId ? { ...group, title: newTitle } : group);
+    saveCustomGroups(nextCustomGroups);
+    setCustomGroups(nextCustomGroups);
   };
 
   const handleToggleCollapse = (id: string) => {
@@ -1743,7 +1718,7 @@ export function HistoryBoard({
   };
 
   const openCreateGroup = () => {
-    setNewGroupTitle(`Group ${groups.length + 1}`);
+    setNewGroupTitle(`Project ${customGroups.length + 1}`);
     setNewGroupStep("details");
     setNewGroupWorkspaceChoice("none");
     setNewGroupCustomPath("");
@@ -1767,11 +1742,9 @@ export function HistoryBoard({
   };
 
   const createCustomGroup = (customGroup: CustomGroupInfo) => {
-    setCustomGroups((prev) => {
-      const next = [...prev, customGroup];
-      saveCustomGroups(next);
-      return next;
-    });
+    const nextCustomGroups = [...customGroups, customGroup];
+    saveCustomGroups(nextCustomGroups);
+    setCustomGroups(nextCustomGroups);
     const newGroup: ChatGroup = {
       ...customGroup,
       chats: [],
@@ -1808,7 +1781,7 @@ export function HistoryBoard({
     if (isCreatingGroup) return;
     setIsCreatingGroup(true);
     setNewGroupError(null);
-    const title = newGroupTitle.trim() || `Group ${groups.length + 1}`;
+    const title = newGroupTitle.trim() || `Project ${customGroups.length + 1}`;
     let workspace: Pick<CodingWorkspaceRecord, "workspace_id" | "label" | "root_path"> | null = null;
     let rumiDataPath: string | null = null;
     try {
@@ -1862,7 +1835,7 @@ export function HistoryBoard({
       }
 
       const customGroup: CustomGroupInfo = {
-        id: `group-${Date.now()}`,
+        id: newProjectId(),
         title,
         workspaceId: workspace?.workspace_id ?? null,
         workspaceLabel: workspace?.label ?? null,
@@ -1872,7 +1845,7 @@ export function HistoryBoard({
       createCustomGroup(customGroup);
       setIsCreateGroupOpen(false);
     } catch (error) {
-      setNewGroupError(error instanceof Error ? error.message : "Failed to create group.");
+      setNewGroupError(error instanceof Error ? error.message : "Failed to create project.");
     } finally {
       setIsCreatingGroup(false);
     }
@@ -1932,7 +1905,7 @@ export function HistoryBoard({
     : "";
   const createGroupForm = isCreateGroupOpen ? (
     <form
-      data-new-group-flow="progressive"
+      data-new-project-flow="progressive"
       onSubmit={(event) => {
         if (newGroupStep === "details") {
           event.preventDefault();
@@ -1949,13 +1922,13 @@ export function HistoryBoard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-zinc-100">New Group</span>
+            <span className="font-semibold text-zinc-100">New Project</span>
             <span className="rounded-full border border-zinc-700/80 bg-zinc-900/80 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-zinc-500">
               Step {newGroupStep === "details" ? "1" : "2"} / 2
             </span>
           </div>
           <p className="mt-1 text-[10px] text-zinc-500">
-            {newGroupStep === "details" ? "Name this conversation space." : "Attach a workspace when it helps."}
+            {newGroupStep === "details" ? "Name this project." : "Link an existing folder when it helps."}
           </p>
         </div>
         <button
@@ -1963,12 +1936,12 @@ export function HistoryBoard({
           onClick={closeCreateGroup}
           disabled={isCreatingGroup}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
-          aria-label="Close new group form"
+          aria-label="Close new project form"
         >
           <X size={13} />
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-1" aria-label="New group setup progress">
+      <div className="grid grid-cols-2 gap-1" aria-label="New project setup progress">
         {([
           ["details", "Name"],
           ["workspace", "Workspace"],
@@ -2000,18 +1973,18 @@ export function HistoryBoard({
       {newGroupStep === "details" ? (
         <>
           <label className="flex flex-col gap-1.5 text-[10px] font-medium text-zinc-400" htmlFor="new-history-group-title">
-            Group name
+            Project name
             <input
               id="new-history-group-title"
               autoFocus
               value={newGroupTitle}
               onChange={(event) => setNewGroupTitle(event.target.value)}
               className="h-9 rounded-lg border border-zinc-800 bg-black/20 px-2.5 text-[12px] font-medium text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
-              placeholder={`Group ${groups.length + 1}`}
+              placeholder={`Project ${customGroups.length + 1}`}
             />
           </label>
           <p className="rounded-lg border border-zinc-800/80 bg-black/15 px-2.5 py-2 text-[10px] leading-relaxed text-zinc-500">
-            You can keep this as a regular group or attach it to a coding workspace next.
+            Keep it standalone or link it to an existing workspace folder.
           </p>
           <button
             type="button"
@@ -2024,9 +1997,9 @@ export function HistoryBoard({
         </>
       ) : (
         <>
-          <div role="radiogroup" aria-label="Workspace for the new group" className="flex flex-col gap-1.5">
+          <div role="radiogroup" aria-label="Workspace for the new project" className="flex flex-col gap-1.5">
             {([
-              ["none", "No workspace", "Keep this as a standalone group"],
+              ["none", "No workspace", "Keep this as a standalone project"],
               ["current", "Current workspace", currentWorkspaceText || "No coding workspace selected"],
               ["custom", "Choose a folder", "Create or reuse a coding workspace"],
             ] as const).map(([value, label, description]) => {
@@ -2110,7 +2083,7 @@ export function HistoryBoard({
               disabled={isCreatingGroup}
               className="h-9 rounded-lg bg-zinc-100 px-2.5 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:cursor-wait disabled:opacity-60"
             >
-              {isCreatingGroup ? "Creating..." : "Create Group"}
+              {isCreatingGroup ? "Creating..." : "Create Project"}
             </button>
           </div>
         </>
@@ -2143,12 +2116,12 @@ export function HistoryBoard({
               >
                 <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
               </button>
-              <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center">
                 <button
                   onClick={openCreateGroup}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                  title="New Group"
-                  aria-label="New Group"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                  title="New Project"
+                  aria-label="New Project"
                   aria-expanded={isCreateGroupOpen}
                 >
                   <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
@@ -2301,16 +2274,6 @@ export function HistoryBoard({
                   <WarmActionIcon kind="newChat" size="sm" />
                   <span className="truncate">New Chat</span>
                 </button>
-                <button
-                  onClick={openCreateGroup}
-                  className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
-                  title="New Group"
-                  aria-expanded={isCreateGroupOpen}
-                >
-                  <WarmActionIcon kind="group" size="sm" />
-                  <span className="truncate">New Group</span>
-                </button>
-                {createGroupForm}
               </div>
               <button
                 type="button"
@@ -2372,6 +2335,29 @@ export function HistoryBoard({
         {/* Columns */}
         <SortableContext items={allSortableIds} strategy={verticalListSortingStrategy}>
           <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto pb-12">
+            {!selectionMode && (
+              <div className="relative border-b border-zinc-800/70 bg-[#09090b] px-3 py-2">
+                <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <FolderOpen size={15} className="shrink-0 text-zinc-500" aria-hidden="true" />
+                    <span className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      Projects
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openCreateGroup}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/70 text-zinc-400 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+                    title="New Project"
+                    aria-label="New Project"
+                    aria-expanded={isCreateGroupOpen}
+                  >
+                    <Plus size={18} aria-hidden="true" />
+                  </button>
+                </div>
+                {createGroupForm}
+              </div>
+            )}
             {groups.map((group) => (
               <DraggableColumnHandle key={group.id} group={group}>
                 {(dragHandleProps) => (

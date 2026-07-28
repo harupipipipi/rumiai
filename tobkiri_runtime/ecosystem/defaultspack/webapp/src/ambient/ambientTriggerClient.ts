@@ -121,14 +121,59 @@ export type AmbientEventPayload = {
   attachments?: Array<Record<string, unknown>>;
 };
 
+export type AmbientAudioTranscriptionPayload = {
+  audio_data_url: string;
+  audio_mime_type?: string;
+  audio_size?: number;
+  audio_name?: string;
+  model?: string;
+  profile_id?: string;
+  params?: {
+    language?: string;
+    model?: string;
+    profile_id?: string;
+    [key: string]: unknown;
+  };
+  metadata?: Record<string, unknown>;
+};
+
+export type AmbientAudioTranscriptionResult = {
+  transcript?: string;
+  transcription?: Record<string, unknown>;
+};
+
+export function explainAmbientNetworkFailure(error: unknown): Error {
+  if (
+    typeof DOMException !== "undefined"
+    && error instanceof DOMException
+    && error.name === "AbortError"
+  ) {
+    return new Error("文字起こしリクエストがキャンセルされました。");
+  }
+  const raw = error instanceof Error ? error.message : String(error || "");
+  if (/failed to fetch|networkerror|network request failed|load failed/i.test(raw)) {
+    return new Error(
+      "文字起こしサーバーへ接続できません。Tobkiri Launcher が起動中か、"
+      + "この画面を開いたホスト（localhost または 127.0.0.1）がLauncherのURLと一致しているか確認してください。",
+    );
+  }
+  return error instanceof Error ? error : new Error(raw || "ambient request failed");
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await defaultspackApiFetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await defaultspackApiFetch(path, {
+      ...init,
+      credentials: init?.credentials ?? "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    throw explainAmbientNetworkFailure(error);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.status === "error") {
     const message = payload?.error?.message || payload?.error || response.statusText;
@@ -190,6 +235,13 @@ export const ambientTriggerClient = {
 
   submitEvent(payload: AmbientEventPayload) {
     return requestJson<Record<string, unknown>>("/api/ambient/events", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  transcribeAudio(payload: AmbientAudioTranscriptionPayload) {
+    return requestJson<AmbientAudioTranscriptionResult>("/api/ambient/transcriptions", {
       method: "POST",
       body: JSON.stringify(payload),
     });

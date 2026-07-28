@@ -893,6 +893,73 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(mocked.call_count, 1)
 
+    def test_all_invokable_non_catalog_profiles_are_user_selectable(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = FrontendRegistry(pack_root=Path(tmpdir))
+
+            self.assertTrue(
+                registry._is_user_selectable_profile(
+                    {
+                        "profile_id": "opencode-zen/minimax-m3-free",
+                        "provider_id": "opencode-zen",
+                        "model_id": "minimax-m3-free",
+                        "type": "chat",
+                        "availability": {
+                            "configured": False,
+                            "catalog_only": False,
+                            "supports_invoke": True,
+                        },
+                    }
+                )
+            )
+            self.assertFalse(
+                registry._is_user_selectable_profile(
+                    {
+                        "profile_id": "catalog/example",
+                        "provider_id": "catalog",
+                        "model_id": "example",
+                        "type": "chat",
+                        "availability": {
+                            "catalog_only": True,
+                            "supports_invoke": True,
+                        },
+                    }
+                )
+            )
+
+    def test_model_route_options_include_search_and_capability_metadata(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = FrontendRegistry(pack_root=Path(tmpdir))
+            with patch.object(
+                registry,
+                "_selectable_model_profiles",
+                return_value=[
+                    {
+                        "profile_id": "opencode-zen/minimax-m3-free",
+                        "display_name": "MiniMax M3 Free",
+                        "provider_id": "opencode-zen",
+                        "provider_display_name": "OpenCode Zen",
+                        "model_id": "minimax-m3-free",
+                        "supports_tool_calling": True,
+                        "capability_tags": ["tools"],
+                        "availability": {
+                            "configured": False,
+                            "supports_invoke": True,
+                        },
+                    }
+                ],
+            ):
+                options = registry._model_route_options()
+
+        self.assertEqual(options[0]["provider_display_name"], "OpenCode Zen")
+        self.assertTrue(options[0]["requires_api_key"])
+        self.assertTrue(options[0]["supports_tool_calling"])
+        self.assertEqual(options[0]["capability_tags"], ["tools"])
+
     def test_computer_use_haze_settings_are_exposed_and_sanitized(self):
         from domain.frontend.registry import FrontendRegistry
 
@@ -951,6 +1018,24 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         }
         self.assertTrue(general["keyboard_button_navigation"])
         self.assertIn("keyboard_button_navigation", field_ids)
+        self.assertFalse(general["manual_runtime_mode_selection"])
+        self.assertIn("manual_runtime_mode_selection", field_ids)
+
+    def test_manual_runtime_mode_selection_requires_explicit_boolean_true(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            registry = FrontendRegistry(pack_root=pack_root)
+            enabled = registry.update_settings(
+                {"general": {"manual_runtime_mode_selection": True}}
+            )
+            malformed = registry.update_settings(
+                {"general": {"manual_runtime_mode_selection": "true"}}
+            )
+
+        self.assertTrue(enabled["general"]["manual_runtime_mode_selection"])
+        self.assertFalse(malformed["general"]["manual_runtime_mode_selection"])
 
     def test_keyboard_navigation_migrates_legacy_default_once(self):
         from domain.frontend.registry import FrontendRegistry

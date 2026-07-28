@@ -93,6 +93,29 @@ test("webhook and channel plumbing is advanced by default", () => {
   assert.equal(field?.advanced, true);
 });
 
+test("manual runtime mode selection stays in the advanced settings surface", () => {
+  const sections = buildControlCenterSections([
+    {
+      id: "general",
+      label: "General",
+      fields: [{
+        id: "manual_runtime_mode_selection",
+        label: "Manual Runtime Mode Selection",
+        type: "toggle",
+        default: false,
+        advanced: true,
+        control_center_section: "advanced",
+      }],
+    },
+  ] as SettingsSection[], "ja");
+
+  const field = sections.find((section) => section.id === "advanced")?.fields[0];
+  assert.equal(field?.id, "manual_runtime_mode_selection");
+  assert.equal(field?.label, "実行モードを手動選択できるようにする");
+  assert.equal(field?.advanced, true);
+  assert.equal(field?.default, false);
+});
+
 test("Japanese settings use task-oriented copy while preserving technical search aliases", () => {
   const sections = buildControlCenterSections([
     {

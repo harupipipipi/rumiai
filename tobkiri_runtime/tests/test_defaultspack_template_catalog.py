@@ -109,13 +109,15 @@ def test_model_selector_schema_is_projected_to_every_model_and_provider_field():
         field
         for section in catalog["settings_sections"]
         for field in section.get("fields", [])
-        if field.get("type") in {"model_select", "provider_select"}
+        if field.get("type") in {"model_select", "provider_select", "model_api_routes"}
     ]
 
     assert selector_fields
     selector_schema = selector_fields[0]["selector_schema"]
     assert selector_schema["version"] == 1
     assert selector_schema["layout"]["provider_confirm_key"] == "Tab"
+    assert selector_schema["layout"]["show_search"] is True
+    assert selector_schema["layout"]["trigger_height_px"] == 44
     assert selector_schema["filters"]["exclude_model_ids"] == []
     assert all(field["selector_schema"] == selector_schema for field in selector_fields)
 
@@ -143,6 +145,14 @@ def test_template_catalog_projects_composer_surface_pieces():
     context_policy = next(
         item for item in catalog["context_policies"] if item.get("id") == "materialize_txt"
     )
+    general_section = next(
+        section for section in catalog["settings_sections"] if section["id"] == "general"
+    )
+    manual_mode_field = next(
+        field
+        for field in general_section["fields"]
+        if field.get("id") == "manual_runtime_mode_selection"
+    )
 
     assert command["execution"] == {
         "type": "pack_block",
@@ -159,8 +169,18 @@ def test_template_catalog_projects_composer_surface_pieces():
     assert shell_renderer["component"] == "Composer"
     assert shell_renderer["regions"] == ["composer"]
     assert context_policy["mode"] == "materialize_txt"
+    assert manual_mode_field["default"] is False
+    assert manual_mode_field["advanced"] is True
+    assert manual_mode_field["control_center_section"] == "advanced"
 
-    projected = [command, composer_input, shell_region, shell_renderer, context_policy]
+    projected = [
+        command,
+        composer_input,
+        shell_region,
+        shell_renderer,
+        context_policy,
+        manual_mode_field,
+    ]
     assert {item["template_id"] for item in projected} == {"rumi.composer.default"}
     assert {item["trust_level"] for item in projected} == {"builtin"}
     assert all(item["projected_id"].startswith("rumi.composer.default:") for item in projected)

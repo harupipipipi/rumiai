@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
 import { cn } from "../../../lib/cn";
-import { buildApiKeySavePayload, collectApiProviderOptions } from "../../../features/apiKeys/apiKeySetup";
+import {
+  buildApiKeySavePayload,
+  collectApiProviderOptions,
+  filterApiProviderOptionsByScope,
+  filterRegisteredApiRowsByScope,
+  normalizeApiProviderScope,
+} from "../../../features/apiKeys/apiKeySetup";
 import { settingsApiResources } from "../../../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../../../features/settings/resources/useModelAvailability";
 import type { SettingsFieldRendererProps } from "../fieldRendererRegistry";
@@ -19,11 +25,20 @@ import {
 export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionValues, onChange }: SettingsFieldRendererProps) {
   const targetFieldId = apiKeySetupTargetFieldId(field);
   const providers = fieldProviderRows(field, sectionValues);
-  const providerOptions = collectApiProviderOptions([
+  const providerScope = normalizeApiProviderScope((field as unknown as Record<string, unknown>).provider_scope);
+  const allProviderOptions = useMemo(() => collectApiProviderOptions([
     ...fieldOptionProviderRows(field),
     ...providers,
-  ]);
-  const registeredApis = registeredApiRows(providers);
+  ]), [field, providers]);
+  const providerOptions = useMemo(
+    () => filterApiProviderOptionsByScope(allProviderOptions, providerScope),
+    [allProviderOptions, providerScope],
+  );
+  const registeredApis = filterRegisteredApiRowsByScope(
+    registeredApiRows(providers),
+    allProviderOptions,
+    providerScope,
+  );
   const [providerId, setProviderId] = useState(String(field.provider_id ?? providerOptions[0]?.provider_id ?? "google"));
   const [apiName, setApiName] = useState("main");
   const [secret, setSecret] = useState("");
@@ -40,6 +55,11 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
   const selectedProviderOption = providerOptions.find((option) => option.provider_id === providerId);
   const selectedKind = selectedProviderKind(providerId, providerOptions);
   const feedback = saveState === "saved" ? availabilityCopy(availability) : null;
+
+  useEffect(() => {
+    if (providerOptions.some((option) => option.provider_id === providerId)) return;
+    setProviderId(providerOptions[0]?.provider_id ?? "");
+  }, [providerId, providerOptions]);
 
   const resetFeedback = () => {
     setSaveState("idle");
@@ -93,7 +113,11 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
 
   return (
     <SettingsFieldShell field={field}>
-      <div className="space-y-3" data-settings-renderer="api_key_setup">
+      <div
+        className="space-y-3"
+        data-settings-renderer="api_key_setup"
+        data-provider-scope={providerScope}
+      >
         {registeredApis.length > 0 && (
           <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
             {registeredApis.map((api) => (

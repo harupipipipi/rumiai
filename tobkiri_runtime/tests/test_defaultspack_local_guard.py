@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import http.client
 import json
 import re
+import socket
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -435,6 +437,117 @@ def test_ambient_browser_qa_context_reaches_function_routes(monkeypatch):
     assert captured["args"] == {"input_text": "hello"}
     assert captured["context"]["_tool_server_approved"] is True
     assert captured["context"]["source"] == "ambient_browser_qa"
+
+
+def test_composer_transcription_requires_exact_loopback_same_origin_without_bearer_auth():
+    from transport.http import _composer_transcription_request_error
+
+    same_origin_headers = {
+        "Host": "127.0.0.1:8766",
+        "Origin": "http://127.0.0.1:8766",
+    }
+    assert _composer_transcription_request_error(
+        same_origin_headers,
+        ("127.0.0.1", 54321),
+    ) is None
+
+    assert _composer_transcription_request_error(
+        {**same_origin_headers, "Origin": "http://127.0.0.1:8767"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "composer transcription origin does not match the local server",
+        "ORIGIN_DENIED",
+    )
+    assert _composer_transcription_request_error(
+        {"Host": "example.test:8766", "Origin": "http://example.test:8766"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "composer transcription requires a valid loopback same-origin request",
+        "ORIGIN_DENIED",
+    )
+    assert _composer_transcription_request_error(
+        same_origin_headers,
+        ("203.0.113.7", 54321),
+    ) == (
+        403,
+        "composer transcription requires a loopback client",
+        "LOCAL_ONLY_REQUIRED",
+    )
+    assert _composer_transcription_request_error(
+        {"Host": "127.0.0.1:8766"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "composer transcription requires a valid loopback same-origin request",
+        "ORIGIN_DENIED",
+    )
+
+
+def test_composer_transcription_http_guard_rejects_cross_port_and_oversize_body_early(monkeypatch):
+    from transport.http import (
+        DefaultsHttpServer,
+        _COMPOSER_TRANSCRIPTION_MAX_REQUEST_BYTES,
+    )
+
+    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DEFAULTS_HTTP_PORT", "0")
+    server = DefaultsHttpServer(None)
+    server.start()
+    try:
+        port = server._server.server_address[1]
+        body = json.dumps({"audio_data_url": "not-a-data-url"})
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request(
+            "POST",
+            "/api/ambient/transcriptions",
+            body=body,
+            headers={
+                "Origin": f"http://127.0.0.1:{port}",
+                "Content-Type": "application/json",
+            },
+        )
+        direct_response = connection.getresponse()
+        direct_payload = json.loads(direct_response.read().decode("utf-8"))
+        connection.close()
+        assert direct_response.status == 400
+        assert direct_payload["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request(
+            "POST",
+            "/api/ambient/transcriptions",
+            body=body,
+            headers={
+                "Origin": f"http://127.0.0.1:{port + 1}",
+                "Content-Type": "application/json",
+            },
+        )
+        cross_port_response = connection.getresponse()
+        cross_port_payload = json.loads(cross_port_response.read().decode("utf-8"))
+        connection.close()
+        assert cross_port_response.status == 403
+        assert cross_port_payload["error"]["code"] == "ORIGIN_DENIED"
+
+        raw_request = (
+            b"POST /api/ambient/transcriptions HTTP/1.1\r\n"
+            + f"Host: 127.0.0.1:{port}\r\n".encode("ascii")
+            + f"Origin: http://127.0.0.1:{port}\r\n".encode("ascii")
+            + b"Content-Type: application/json\r\n"
+            + f"Content-Length: {_COMPOSER_TRANSCRIPTION_MAX_REQUEST_BYTES + 1}\r\n".encode(
+                "ascii"
+            )
+            + b"Connection: close\r\n\r\n"
+        )
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(raw_request)
+            response = sock.recv(65536).decode("utf-8", errors="replace")
+        assert "HTTP/1.1 413" in response
+        assert "AUDIO_PAYLOAD_TOO_LARGE" in response
+    finally:
+        server.stop()
 
 
 def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(monkeypatch):

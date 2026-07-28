@@ -7,9 +7,46 @@ test.use({ viewport: { width: 1440, height: 900 } });
 const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
+test("bootstrap loading state uses the Tobkiri Launcher animation and honors reduced motion", async ({ page }) => {
+  let releaseCatalogRequest: (() => void) | undefined;
+  const catalogGate = new Promise<void>((resolve) => {
+    releaseCatalogRequest = resolve;
+  });
+  await page.route("**/api/ui/catalog", async (route) => {
+    await catalogGate;
+    await route.abort();
+  });
+
+  await page.goto("/");
+
+  const loader = page.locator("[data-tobkiri-loading-screen]");
+  await expect(loader).toBeVisible();
+  await expect(loader).toHaveAttribute("role", "status");
+  await expect(loader).toHaveAttribute("aria-live", "polite");
+  await expect(loader).toHaveAttribute("aria-label", "Tobkiriを読み込んでいます…");
+  await expect(loader).toHaveCSS("background-color", "rgb(9, 9, 11)");
+
+  const animation = loader.locator('img[data-loading-scene="launcher"]');
+  await expect(animation).toBeVisible();
+  await expect(animation).toHaveAttribute(
+    "src",
+    /\/assets\/tobkiri-startup-blade-cut\.svg$/,
+  );
+  await expect.poll(
+    () => animation.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0),
+  ).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(animation).toBeHidden();
+  await expect(loader.locator("[data-reduced-motion-wordmark]")).toBeVisible();
+
+  releaseCatalogRequest?.();
+});
+
 type ApiMockOptions = {
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
   initialSettingsValues?: Record<string, Record<string, unknown>>;
+  onConversationCreate?: (payload: Record<string, unknown>) => void;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
   conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
@@ -358,6 +395,19 @@ const settingsValues = {
 
 const settingsSections = [
   {
+    id: "general",
+    label: "General",
+    description: "App behavior.",
+    fields: [{
+      id: "manual_runtime_mode_selection",
+      label: "Manual Runtime Mode Selection",
+      type: "toggle",
+      default: false,
+      advanced: true,
+      control_center_section: "advanced",
+    }],
+  },
+  {
     id: "tools",
     label: "機能と接続",
     description: "機能の選定、接続、実行時権限を管理します。",
@@ -541,13 +591,67 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === "/api/ui/settings" && method === "PUT") {
       const payload = request.postDataJSON() as {
         values?: Record<string, Record<string, unknown>>;
+        patches?: Array<{ section: string; field: string; value: unknown }>;
       };
-      currentSettingsValues = JSON.parse(JSON.stringify(payload.values ?? currentSettingsValues));
+      if (payload.values) {
+        currentSettingsValues = JSON.parse(JSON.stringify(payload.values));
+      } else {
+        for (const patch of payload.patches ?? []) {
+          currentSettingsValues[patch.section] = {
+            ...(currentSettingsValues[patch.section] ?? {}),
+            [patch.field]: patch.value,
+          };
+        }
+      }
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
     if (path === "/api/ui/settings") {
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
+    }
+
+    if (path === "/api/command-protocol/v1/catalog") {
+      const protocolCommand = (
+        id: string,
+        label: string,
+        risk: "low" | "medium",
+        operationRef: string,
+      ) => ({
+        canonical_id: `defaultspack:${id}`,
+        pack_id: "defaultspack",
+        pack_generation: 1,
+        command_version: "1.0.0",
+        identity: { id, name: id, aliases: [] },
+        presentation: {
+          label: { fallback: label },
+          description: { fallback: `Toggle ${label}.` },
+          category: "mode",
+          visibility: "default",
+          input: { kind: "action" },
+          mounts: [],
+        },
+        execution: { kind: "host_operation", operation_ref: `host:${operationRef}` },
+        authorization: {
+          risk,
+          permissions: [],
+          approval_required: false,
+          approval_policy: "never",
+          executor_policy_ref: "defaultspack.e2e",
+        },
+        constraints: { modes: ["chat", "coding", "agent"] },
+        availability: { status: "available" },
+      });
+      return fulfill(route, {
+        api_version: "tobkiri.commands/v1",
+        kind: "ResolvedCommandCatalog",
+        catalog_revision: "e2e-revision-1",
+        commands: [
+          protocolCommand("coding", "Coding Mode", "low", "set_mode_coding"),
+          protocolCommand("yolo", "Full Access (YOLO)", "medium", "toggle_ultra_yolo"),
+        ],
+        state_snapshots: [],
+        diagnostics: [],
+      });
     }
 
     if (path === "/api/ui/commands") {
@@ -636,7 +740,15 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/chat/conversations" && method === "POST") {
+      options.onConversationCreate?.(request.postDataJSON() as Record<string, unknown>);
       return fulfill(route, conversation);
+    }
+
+    if (path === "/api/command-protocol/v1/invocations/events/query" && method === "POST") {
+      return fulfill(route, {
+        api_version: "command-protocol/v1",
+        pending_approvals: [],
+      });
     }
 
     if (path === "/api/chat/conversations/c-smoke/stream" && method === "POST") {
@@ -943,6 +1055,69 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
+
+test("manual runtime mode control is hidden by default and available after explicit opt-in", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+  await expect(page.getByRole("status", { name: "現在の実行オプション" })).toHaveCount(0);
+
+  await page.getByTitle("Settings").last().click();
+  await page.getByRole("button", { name: "Advanced Settings" }).click();
+  await page.getByRole("button", { name: "Change settings display mode" }).click();
+  await page.locator("main#settings-content details summary").click();
+  await page.getByRole("button", { name: "Manual Runtime Mode Selection" }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
+
+  await expect(page.getByRole("status", { name: "現在の実行オプション" })).toBeVisible();
+});
+
+test("manual runtime mode control opens the mode selector when enabled", async ({ page }) => {
+  await openDefaultspack(page, "/chat", {
+    initialSettingsValues: {
+      general: { manual_runtime_mode_selection: true },
+    },
+  });
+
+  const runtimeOptions = page.getByRole("status", { name: "現在の実行オプション" });
+  await expect(runtimeOptions).toBeVisible();
+  await runtimeOptions.getByRole("button", { name: "実行モード: 自律エージェント" }).click();
+  await expect(page.getByText("モード選択")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Coding/ })).toBeVisible();
+  await page.getByRole("button", { name: /^Chat/ }).click();
+  await expect(runtimeOptions.getByRole("button", { name: "実行モード: 通常チャット" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-app-mode"))).toBe('"chat"');
+});
+
+test("projects replace New Group and are searchable from the composer", async ({ page }) => {
+  const conversationCreates: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onConversationCreate: (payload) => conversationCreates.push(payload),
+  });
+
+  await expect(page.getByText("Projects", { exact: true })).toBeVisible();
+  await expect(page.getByText("New Group", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "New Chat", exact: true }).click();
+  const projectButton = page.getByRole("button", { name: "Project: None" });
+  await expect(projectButton).toHaveCSS("min-height", "44px");
+  await projectButton.click();
+  await expect(page.getByRole("textbox", { name: "Search projects" })).toBeVisible();
+  await page.getByRole("button", { name: "New Project" }).last().click();
+  await page.getByPlaceholder("Project name").fill("E2E Project");
+  await page.getByRole("button", { name: "Create Project", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: "Project: E2E Project" })).toBeVisible();
+  const persistedProject = await page.evaluate(() => {
+    const projects = JSON.parse(localStorage.getItem("rumi-history-custom-groups") || "[]") as Array<Record<string, unknown>>;
+    return projects.find((project) => project.title === "E2E Project") ?? null;
+  });
+  expect(persistedProject).toMatchObject({ title: "E2E Project" });
+  expect(String(persistedProject?.id ?? "")).toMatch(/^group-\d+$/);
+
+  await page.getByRole("combobox", { name: "Rumiにメッセージを送信" }).fill("Project scoped message");
+  await page.locator(".rumi-send-button").click();
+  await expect.poll(() => conversationCreates.length).toBe(1);
+  expect(conversationCreates[0].group_id).toBe(persistedProject?.id);
+  expect((conversationCreates[0].metadata as Record<string, unknown>).group_id).toBe(persistedProject?.id);
+});
 
 test("document scroll fallback survives small and keyboard-like viewports", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 520 });
@@ -1442,7 +1617,7 @@ test("composer supplementary-plane mention keeps textarea and parser indices ali
   ]);
 });
 
-test("composer keeps a no-space mention disabled after its chip is toggled off", async ({ page }) => {
+test("composer removes a no-space mention atomically without leaving tool state", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
@@ -1451,11 +1626,15 @@ test("composer keeps a no-space mention disabled after its chip is toggled off",
 
   await composer.fill("Use @𐐀");
   await composer.press("Enter");
-  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await expect(composer).toHaveValue("Use @𐐀tool ");
+  await expect(page.getByRole("button", { name: "𐐀tool", exact: true })).toHaveCount(0);
+  await composer.press("End");
+  await composer.press("Backspace");
+  await composer.press("Backspace");
+  await expect(composer).toHaveValue("Use ");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
     .toBe("[]");
-  await composer.press("End");
-  await composer.pressSequentially(" and summarize the result");
+  await composer.pressSequentially("and summarize the result");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => streamRequests.length).toBe(1);
 
@@ -1467,7 +1646,7 @@ test("composer keeps a no-space mention disabled after its chip is toggled off",
   expect(metadata.dropped_widgets).toEqual([]);
 });
 
-test("editing and reselecting a dismissed no-space mention restores it", async ({ page }) => {
+test("editing and reselecting an atomically deleted no-space mention restores it", async ({ page }) => {
   const streamRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
@@ -1476,7 +1655,10 @@ test("editing and reselecting a dismissed no-space mention restores it", async (
 
   await composer.fill("Use @𐐀");
   await composer.press("Enter");
-  await page.getByRole("button", { name: "𐐀tool", exact: true }).click();
+  await composer.press("End");
+  await composer.press("Backspace");
+  await composer.press("Backspace");
+  await expect(composer).toHaveValue("Use ");
   await composer.fill("Use again @𐐀");
   await composer.press("Enter");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
@@ -1784,7 +1966,25 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
       clipboardData: dataTransfer,
     }));
   });
-  await expect(page.getByRole("button", { name: "clipboard.txt を削除" })).toBeVisible();
+  const removeClipboardAttachment = page.getByRole("button", { name: "clipboard.txt を削除" });
+  await expect(removeClipboardAttachment).toBeVisible();
+  const removeAttachmentBox = await removeClipboardAttachment.boundingBox();
+  expect(removeAttachmentBox).not.toBeNull();
+  expect(removeAttachmentBox!.width).toBeGreaterThanOrEqual(44);
+  expect(removeAttachmentBox!.height).toBeGreaterThanOrEqual(44);
+  const attachmentRegion = page.locator("[data-composer-attachment-region]");
+  const composerPanel = page.locator(".rumi-composer-main-panel");
+  await expect(attachmentRegion).toHaveAttribute("data-attachment-state", "expanded");
+  await expect(composerPanel.locator("[data-composer-attachment-region]")).toHaveCount(1);
+  const regionBox = await attachmentRegion.boundingBox();
+  const inputBoxAfterAttachment = await composer.boundingBox();
+  expect(regionBox).not.toBeNull();
+  expect(inputBoxAfterAttachment).not.toBeNull();
+  expect(regionBox!.y).toBeLessThan(inputBoxAfterAttachment!.y);
+  const attachmentTransition = await attachmentRegion.evaluate(
+    (element) => getComputedStyle(element).transitionProperty,
+  );
+  expect(attachmentTransition).toContain("grid-template-rows");
 
   await page.locator("main").evaluate((target) => {
     const dataTransfer = new DataTransfer();
@@ -1807,6 +2007,10 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
   });
   await expect(page.getByRole("status", { name: "ファイルをここにドロップ" })).toBeHidden();
   await expect(page.getByRole("button", { name: "workspace-drop.txt を削除" })).toBeVisible();
+  await removeClipboardAttachment.click();
+  await page.getByRole("button", { name: "workspace-drop.txt を削除" }).click();
+  await expect(attachmentRegion).toHaveAttribute("data-attachment-state", "collapsed");
+  await expect.poll(async () => (await attachmentRegion.boundingBox())?.height ?? -1).toBe(0);
 });
 
 test("composer mentions paste portably and delete as one semantic unit", async ({ page }) => {
@@ -2013,13 +2217,13 @@ test("model picker search supports @provider filters", async ({ page }) => {
   await openDefaultspack(page);
 
   await page.getByRole("button", { name: /Stub Default/ }).click();
-  const search = page.getByPlaceholder("モデルを検索... @google");
+  const search = page.getByPlaceholder(/モデルを検索/);
   await search.fill("@opencode");
-  await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeVisible();
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByRole("option", { name: /@OpenCode Go/ })).toBeVisible();
+  await expect(page.getByRole("option", { name: /@OpenCode Zen/ })).toBeVisible();
   await expect(page.getByText("Gemini 2.5 Flash")).toBeHidden();
 
-  await search.fill("@opencode zen");
+  await page.getByRole("option", { name: /@OpenCode Zen/ }).click();
   await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
 
@@ -2032,7 +2236,7 @@ test("model picker keeps unconfigured opencode zen visible for first-run setup",
   await openDefaultspack(page);
 
   await page.getByRole("button", { name: /Stub Default/ }).click();
-  const search = page.getByPlaceholder("モデルを検索... @google");
+  const search = page.getByPlaceholder(/モデルを検索/);
   await search.fill("minimax");
   await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
 });

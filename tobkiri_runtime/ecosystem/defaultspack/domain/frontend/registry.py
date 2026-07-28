@@ -1001,6 +1001,18 @@ class FrontendRegistry:
                         "default": False,
                         "help": "ON の時は入力文に「文字起こしして:」を付けて、モデルへ文字起こしタスクとして渡します。",
                     },
+                    {
+                        "id": "manual_runtime_mode_selection",
+                        "label": "Manual Runtime Mode Selection",
+                        "type": "toggle",
+                        "default": False,
+                        "help": (
+                            "高度な設定: composerに実行モード選択を表示します。"
+                            "OFFでは自律エージェントを使用します。"
+                        ),
+                        "advanced": True,
+                        "control_center_section": "advanced",
+                    },
                 ],
             },
             {
@@ -2918,6 +2930,7 @@ class FrontendRegistry:
                 "spotlight_shortcut": "Ctrl+K",
                 "spotlight_shortcut_text_input": True,
                 "language": "ja",
+                "manual_runtime_mode_selection": False,
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "calendar": {
@@ -3120,24 +3133,53 @@ class FrontendRegistry:
                 provider_id, inferred_model = profile_id.split("/", 1)
                 model_id = model_id or inferred_model
             availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+            configured = bool(
+                availability.get("configured")
+                or availability.get("active")
+                or str(availability.get("status", "")).lower() in {"configured", "active"}
+            )
+            local = bool(
+                profile.get("local")
+                or availability.get("local")
+                or availability.get("offline")
+                or provider_id in {"stub", "ollama", "lmstudio", "vllm"}
+            )
+            requires_api_key = bool(
+                provider_id
+                and provider_id not in {"stub", "rumi"}
+                and not local
+                and not configured
+            )
             options.append(
                 {
                     "value": profile_id,
                     "label": self._model_option_label(profile),
                     "provider_id": provider_id,
+                    "provider_display_name": str(
+                        profile.get("provider_display_name") or provider_id
+                    ),
                     "model_id": model_id,
                     "qualified_model_id": str(profile.get("qualified_model_id") or profile_id),
-                    "configured": bool(
-                        availability.get("configured")
-                        or availability.get("active")
-                        or str(availability.get("status", "")).lower() in {"configured", "active"}
+                    "configured": configured,
+                    "local": local,
+                    "requires_api_key": requires_api_key,
+                    "api_key_required": requires_api_key,
+                    "api_key_configured": configured,
+                    "supports_vision": bool(profile.get("supports_vision")),
+                    "supports_image_input": bool(
+                        profile.get("supports_image_input")
+                        or profile.get("supports_vision")
                     ),
-                    "local": bool(
-                        profile.get("local")
-                        or availability.get("local")
-                        or availability.get("offline")
-                        or provider_id in {"stub", "ollama", "lmstudio", "vllm"}
-                    ),
+                    "supports_tool_calling": bool(profile.get("supports_tool_calling")),
+                    "supports_thinking": bool(profile.get("supports_thinking")),
+                    "supports_fast": bool(profile.get("supports_fast")),
+                    "speed_tier": str(profile.get("speed_tier") or ""),
+                    "quality_tier": str(profile.get("quality_tier") or ""),
+                    "cost_tier": str(profile.get("cost_tier") or ""),
+                    "knowledge_level": profile.get("knowledge_level"),
+                    "capability_tags": list(profile.get("capability_tags") or []),
+                    "recommended_roles": list(profile.get("recommended_roles") or []),
+                    "notes": str(profile.get("notes") or ""),
                 }
             )
         return options or [{"value": "stub/default", "label": "Stub Default", "provider_id": "stub", "model_id": "default", "local": True}]
@@ -3216,8 +3258,8 @@ class FrontendRegistry:
         provider_id: str,
         availability: dict[str, Any],
     ) -> bool:
-        """Expose direct cloud models as selectable setup targets without enabling runtime calls."""
-        if provider_id not in {"openai", "anthropic", "google", "genspark"}:
+        """Expose every invokable catalog model as a setup target without enabling calls."""
+        if not provider_id:
             return False
         if availability.get("configured") or availability.get("active"):
             return False
@@ -3549,6 +3591,9 @@ class FrontendRegistry:
         general["spotlight_shortcut_text_input"] = self._setting_bool(
             general.get("spotlight_shortcut_text_input"),
             True,
+        )
+        general["manual_runtime_mode_selection"] = (
+            general.get("manual_runtime_mode_selection") is True
         )
 
         tools = refreshed.setdefault("tools", {})
