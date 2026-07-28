@@ -62,7 +62,7 @@ class OpencodeZenProvider(AnthropicProvider):
             for item in self._model_inventory_cache
             if isinstance(item, dict)
         }
-        if model_id not in self.MODEL_IDS | discovered:
+        if model_id not in self.MODEL_IDS | self.VERIFIED_TOOL_MODELS | discovered:
             raise RuntimeError(f"unsupported model: {model_id}")
         return model_id
 

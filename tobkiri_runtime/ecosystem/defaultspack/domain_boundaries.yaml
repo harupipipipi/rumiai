@@ -116,6 +116,7 @@ domains:
     - domain/tool_policy
     path: domain/company
     public_imports:
+    - domain/agent/placement_catalog
     - domain/mention
   components:
     may_import: []
