@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -10,35 +11,52 @@ from core_runtime.capability_binding_registration import _ProcessContractOperati
 pytestmark = pytest.mark.contract
 
 
-def test_process_contract_disables_bytecode_with_isolated_python(monkeypatch, tmp_path):
+def test_process_contract_routes_through_managed_sandbox(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
-    def fake_run(command, **kwargs):
-        captured["command"] = command
-        captured["env"] = kwargs["env"]
-        return SimpleNamespace(stdout=json.dumps({"status": "ok", "value": {}}))
+    class FakeSupervisor:
+        def execute_pack_process(self, request):
+            captured["request"] = request
+            return {
+                "success": True,
+                "stdout": json.dumps({"status": "ok", "value": {}}),
+            }
+
+    def fake_supervisor():
+        return FakeSupervisor()
 
     monkeypatch.setattr(
-        "core_runtime.capability_binding_registration.subprocess.run",
-        fake_run,
+        "core_runtime.capability_binding_registration._managed_sandbox_supervisor",
+        fake_supervisor,
     )
-    location = SimpleNamespace(pack_dir=tmp_path / "ecosystem" / "sample_pack")
+    location = SimpleNamespace(
+        pack_id="sample_pack",
+        pack_dir=tmp_path / "ecosystem" / "sample_pack",
+    )
 
     _ProcessContractOperation(
         module="ecosystem.sample_pack.runtime.process",
         pack_location=location,
     )("list", {})
 
-    command = captured["command"]
-    assert command[1:4] == ["-B", "-s", "-E"]
-    assert captured["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+    request = captured["request"]
+    assert request["module"] == "ecosystem.sample_pack.runtime.process"
+    assert request["pack_id"] == "sample_pack"
+    assert json.loads(request["stdin"]) == {"operation": "list", "payload": {}}
 
 
+@pytest.mark.skipif(
+    os.environ.get("RUMI_RUN_LIMA_INTEGRATION") != "1",
+    reason="real Lima sandbox integration is opt-in",
+)
 def test_process_contract_real_child_keeps_bundle_tree_bytecode_free(
     monkeypatch,
     tmp_path,
 ):
     runtime_root = tmp_path / "runtime-root"
+    core_runtime = runtime_root / "core_runtime"
+    core_runtime.mkdir(parents=True)
+    (core_runtime / "__init__.py").write_text("", encoding="utf-8")
     pack_dir = runtime_root / "ecosystem" / "sample_pack"
     module_dir = pack_dir / "runtime"
     module_dir.mkdir(parents=True)
@@ -59,13 +77,11 @@ def test_process_contract_real_child_keeps_bundle_tree_bytecode_free(
         "}}))\n",
         encoding="utf-8",
     )
-    user_data = tmp_path / "Application Support" / "Tobkiri"
-    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     monkeypatch.setenv("PROCESS_CONTRACT_TEST_SECRET", "must-not-leak")
 
     result = _ProcessContractOperation(
         module="ecosystem.sample_pack.runtime.process",
-        pack_location=SimpleNamespace(pack_dir=pack_dir),
+        pack_location=SimpleNamespace(pack_id="sample_pack", pack_dir=pack_dir),
     )("inspect", {})
 
     assert result == {
@@ -73,8 +89,34 @@ def test_process_contract_real_child_keeps_bundle_tree_bytecode_free(
         "dont_write_bytecode": True,
         "ignore_environment": 1,
         "no_user_site": 1,
-        "user_data": str(user_data),
+        "user_data": "/data",
         "secret_visible": False,
     }
     assert not list(runtime_root.rglob("__pycache__"))
     assert not list(runtime_root.rglob("*.pyc"))
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUMI_RUN_LIMA_INTEGRATION") != "1",
+    reason="real Lima sandbox integration is opt-in",
+)
+def test_real_shipped_process_pack_runs_with_curated_kernel_code() -> None:
+    from core_runtime.paths import discover_pack_locations
+
+    location = next(
+        item
+        for item in discover_pack_locations()
+        if item.pack_id == "rumi_model_registry_pack"
+    )
+    result = _ProcessContractOperation(
+        module="ecosystem.rumi_model_registry_pack.runtime.process",
+        pack_location=location,
+    )("list", {"profile_id": "sandbox-integration-read"})
+
+    assert result == {
+        "version": "rumi.model-registry.store.v1",
+        "profile_id": "sandbox-integration-read",
+        "revision": 0,
+        "profiles": [],
+        "aliases": {},
+    }

@@ -35,6 +35,13 @@ from ..models import (
     model_to_dict,
 )
 from ..policy import validate_workspace_relative_path
+from ..isolation.lima_runtime import (
+    LIMA_GUEST_WORKSPACE_ROOT,
+    LIMA_GUEST_PACK_DATA_ROOT,
+    build_guest_bwrap_argv,
+    resolve_limactl_path,
+    save_lima_runtime_state,
+)
 from .base import ProgressSink
 
 
@@ -50,9 +57,20 @@ MANAGED_UBUNTU_CAPABILITIES = frozenset(
         "sandbox.snapshot",
     }
 )
-GUEST_WORKDIR = "/workspace"
-GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare")
-APT_PACKAGES = ("xvfb", "openbox", "xdotool", "imagemagick", "python3", "xterm", "x11-utils", "ca-certificates", "util-linux")
+GUEST_WORKDIR = LIMA_GUEST_WORKSPACE_ROOT
+GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare", "bwrap")
+APT_PACKAGES = (
+    "xvfb",
+    "openbox",
+    "xdotool",
+    "imagemagick",
+    "python3",
+    "xterm",
+    "x11-utils",
+    "ca-certificates",
+    "util-linux",
+    "bubblewrap",
+)
 DEFAULT_DISPLAY = ":98"
 GUEST_DISPLAY_MIN = 98
 GUEST_DISPLAY_MAX = 199
@@ -525,6 +543,14 @@ class ManagedUbuntuProvider:
             f"{SUDO_BOOTSTRAP_SCRIPT}"
             "$RUMI_SUDO apt-get update\n"
             f"$RUMI_SUDO apt-get install -y {packages}\n"
+            "RUMI_GUEST_USER=\"$(id -un)\"\n"
+            "RUMI_GUEST_GROUP=\"$(id -gn)\"\n"
+            "$RUMI_SUDO install -d -m 0755 /workspace\n"
+            "$RUMI_SUDO install -d -m 0755 /data\n"
+            f"$RUMI_SUDO install -d -m 0711 -o \"$RUMI_GUEST_USER\" "
+            f"-g \"$RUMI_GUEST_GROUP\" {GUEST_WORKDIR}\n"
+            f"$RUMI_SUDO install -d -m 0711 -o \"$RUMI_GUEST_USER\" "
+            f"-g \"$RUMI_GUEST_GROUP\" {LIMA_GUEST_PACK_DATA_ROOT}\n"
         )
         if update:
             script += f"$RUMI_SUDO apt-get install --only-upgrade -y {packages} || true\n"
@@ -731,6 +757,59 @@ class MacLimaProvider(ManagedUbuntuProvider):
     provider_id = "mac_lima"
     _host_platform = "darwin"
     _launcher_command = "limactl"
+
+    def _command_path(self) -> str | None:
+        if self._configured_command_path:
+            return self._configured_command_path
+        return resolve_limactl_path()
+
+    def _setup_message(
+        self,
+        *,
+        launcher_missing: bool = False,
+        missing_capabilities: Sequence[str] = (),
+    ) -> str:
+        if launcher_missing:
+            return (
+                "Install Lima with `brew install lima`, then open runtime setup "
+                "to provision Tobkiri's hardened Ubuntu guest."
+            )
+        return super()._setup_message(
+            launcher_missing=launcher_missing,
+            missing_capabilities=missing_capabilities,
+        )
+
+    def ensure(self, request: EnsureRuntimeRequest, progress: ProgressSink) -> OperationResult:
+        result = super().ensure(request, progress)
+        if not result.ok:
+            return result
+        command_path = self._require_command()
+        try:
+            save_lima_runtime_state(
+                command_path,
+                self._runtime_name,
+                runner=self._runner,
+            )
+        except (OSError, ValueError) as exc:
+            return OperationResult(
+                ok=False,
+                provider_id=self.provider_id,
+                operation_id=f"{self.provider_id}-ensure",
+                status="failed",
+                diagnostics=(
+                    Diagnostic(
+                        code=RUNTIME_PROVIDER_UNAVAILABLE,
+                        message=f"Lima sandbox config attestation failed: {exc}",
+                        severity="error",
+                    ),
+                ),
+                requires_user_action=True,
+                user_action=(
+                    "Recreate the Tobkiri managed Lima runtime with the current "
+                    "hardened configuration."
+                ),
+            )
+        return result
 
     def _guest_exists(self, command_path: str) -> bool:
         result = self._run((command_path, "list", "--format", "{{.Name}}"), timeout=10)
@@ -1011,7 +1090,7 @@ class ManagedUbuntuGuestAgent:
         request = GuestExecRequest.from_payload(payload)
         timeout_ms = min(request.timeout_ms, self._timeout_ms) if self._timeout_ms else request.timeout_ms
         argv = _exec_argv(
-            self._workspace_dir,
+            "/workspace",
             request.cwd,
             request.env,
             request.argv,
@@ -1019,8 +1098,11 @@ class ManagedUbuntuGuestAgent:
             provider_instance_id=self._provider_instance_id,
         )
         argv = _resource_limited_argv(argv, memory_mb=self._memory_mb, cpu_count=self._cpu_count, pids=self._pids)
-        if self._network_disabled:
-            argv = _network_disabled_argv(argv)
+        argv = self._sandbox_argv(
+            sandbox_id,
+            argv,
+            network_enabled=not self._network_disabled,
+        )
         result = self._run(argv, input_text=request.stdin, timeout=max(1, timeout_ms / 1000))
         stdout, stdout_truncated = _bounded_output(result.stdout, self._output_bytes)
         stderr, stderr_truncated = _bounded_output(result.stderr, self._output_bytes)
@@ -1045,9 +1127,22 @@ class ManagedUbuntuGuestAgent:
         for operation in operations:
             path = str(operation["path"])
             content = operation["content"]
-            parent = _container_parent(self._workspace_dir, path)
+            if not isinstance(content, bytes):
+                raise SandboxContractError(
+                    "INVALID_EXEC_REQUEST",
+                    "Sandbox file patch content must be bytes.",
+                    status_code=400,
+                )
+            parent = _container_parent("/workspace", path)
             if parent:
-                mkdir = self._run(("mkdir", "-p", parent), timeout=30)
+                mkdir = self._run(
+                    self._sandbox_argv(
+                        sandbox_id,
+                        ("mkdir", "-p", parent),
+                        network_enabled=False,
+                    ),
+                    timeout=30,
+                )
                 if mkdir.returncode != 0:
                     return _guest_error(sandbox_id, "SANDBOX_FILES_FAILED", "Sandbox file patch could not create parent directory.", mkdir)
             encoded = base64.b64encode(content).decode("ascii")
@@ -1056,7 +1151,15 @@ class ManagedUbuntuGuestAgent:
                 "path = pathlib.Path(sys.argv[1])\n"
                 "path.write_bytes(base64.b64decode(sys.stdin.read().encode('ascii')))\n"
             )
-            write = self._run(("python3", "-c", script, _container_path(self._workspace_dir, path)), input_text=encoded, timeout=60)
+            write = self._run(
+                self._sandbox_argv(
+                    sandbox_id,
+                    ("python3", "-c", script, _container_path("/workspace", path)),
+                    network_enabled=False,
+                ),
+                input_text=encoded,
+                timeout=60,
+            )
             if write.returncode != 0:
                 return _guest_error(sandbox_id, "SANDBOX_FILES_FAILED", "Sandbox file patch could not write content.", write)
             applied.append({"path": path, "bytes": len(content)})
@@ -1164,6 +1267,25 @@ class ManagedUbuntuGuestAgent:
             return self._run((*prefix, "key", str(request.key or "")), timeout=10)
         return GuestCommandResult(returncode=1, stderr="Unsupported desktop input action.")
 
+    def _sandbox_argv(
+        self,
+        sandbox_id: str,
+        argv: Sequence[str],
+        *,
+        network_enabled: bool,
+    ) -> tuple[str, ...]:
+        return build_guest_bwrap_argv(
+            workspace=self._workspace_dir,
+            cwd="/workspace",
+            argv=argv,
+            env={
+                "HOME": "/home",
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "RUMI_SANDBOX_ID": sandbox_id,
+            },
+            network_enabled=network_enabled,
+        )
+
     def _run(self, argv: Sequence[str], input_text: str | None = None, timeout: float | None = None) -> GuestCommandResult:
         try:
             return self._runner((*self._command_prefix, *argv), input_text, timeout)
@@ -1213,13 +1335,30 @@ def _unprivileged_userns_available() -> bool:
 
 
 def _write_lima_config() -> str:
-    content = """images:
+    content = """minimumLimaVersion: "2.0.0"
+vmType: vz
+images:
 - location: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
   arch: x86_64
 - location: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img
   arch: aarch64
 mounts: []
 networks: []
+containerd:
+  system: false
+  user: false
+ssh:
+  forwardAgent: false
+  forwardX11: false
+  forwardX11Trusted: false
+propagateProxyEnv: false
+hostResolver:
+  enabled: false
+portForwards:
+- guestIP: 0.0.0.0
+  guestPortRange: [1, 65535]
+  proto: any
+  ignore: true
 provision:
 - mode: system
   script: |
@@ -1227,7 +1366,11 @@ provision:
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y xvfb openbox xdotool imagemagick python3 xterm x11-utils ca-certificates
+    apt-get install -y xvfb openbox xdotool imagemagick python3 xterm x11-utils ca-certificates util-linux bubblewrap
+    install -d -m 0755 /workspace
+    install -d -m 0755 /data
+    install -d -m 0711 -o {{.User}} -g {{.User}} /var/lib/rumi/workspaces
+    install -d -m 0711 -o {{.User}} -g {{.User}} /var/lib/rumi/pack-data
 """
     handle = tempfile.NamedTemporaryFile(prefix="rumi-lima-", suffix=".yaml", delete=False)
     try:

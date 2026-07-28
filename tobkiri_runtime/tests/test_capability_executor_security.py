@@ -13,8 +13,8 @@ import time
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
-from dataclasses import dataclass, field
+from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -25,12 +25,19 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from core_runtime.capability_executor import (
+from core_runtime.capability_executor import (  # noqa: E402
     CapabilityExecutor,
     CapabilityResponse,
     _sanitize_error,
-    _get_secure_tmp_dir,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_real_lima_runtime(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RUMI_SANDBOX_LIMA_STATE",
+        str(tmp_path / "missing-lima-state.json"),
+    )
 
 
 # ---------------------------------------------------------------------------

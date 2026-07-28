@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import hashlib
 import json
 import os
 import platform
@@ -23,6 +22,12 @@ from ..errors import (
 from ..policy import validate_workspace_relative_path
 from .bubblewrap_builder import build_bubblewrap_argv
 from .cgroup import build_systemd_run_argv, probe_systemd_user_scope
+from .lima_runtime import (
+    LIMA_GUEST_WORKSPACE_ROOT,
+    LIMA_GUEST_PACK_DATA_ROOT,
+    build_guest_bwrap_argv,
+    resolve_attested_lima_runtime,
+)
 from .spec import BubblewrapSandboxSpec, CgroupLimits, WorkspaceMount
 
 
@@ -35,8 +40,6 @@ MAX_CODING_WORKSPACE_EXPORT_BYTES = 128 * 1024 * 1024
 MAX_CODING_WORKSPACE_EXPORT_FILES = 8000
 MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
-LIMA_NETWORK_ATTEST_ENV = "RUMI_SANDBOX_LIMA_NETWORK_ISOLATED"
-LIMA_CONFIG_HASH_ENV = "RUMI_SANDBOX_LIMA_CONFIG_HASH"
 
 
 class ManagedSandboxSupervisor:
@@ -49,6 +52,8 @@ class ManagedSandboxSupervisor:
         return bool(diagnose_sandbox_environment()["ready"])
 
     def execute_capability(self, request: dict[str, Any]) -> dict[str, Any]:
+        if platform.system().lower() == "darwin":
+            return self._execute_capability_lima(request)
         diagnostics = diagnose_sandbox_environment(request)
         if not diagnostics["ready"]:
             failed = _first_failed_sandbox_check(diagnostics)
@@ -82,12 +87,18 @@ class ManagedSandboxSupervisor:
             )
             runner_path = self._stage_runner(request, workspace)
             input_path = workspace / "input.json"
+            context_payload: dict[str, Any] = (
+                request["context"] if isinstance(request.get("context"), dict) else {}
+            )
+            args_payload: dict[str, Any] = (
+                request["args"] if isinstance(request.get("args"), dict) else {}
+            )
             input_path.write_text(
                 _runner_payload(
                     module_path=f"/workspace/function/{module_rel.as_posix()}",
                     callable_name=callable_name,
-                    context=request.get("context") if isinstance(request.get("context"), dict) else {},
-                    args=request.get("args") if isinstance(request.get("args"), dict) else {},
+                    context=context_payload,
+                    args=args_payload,
                 ),
                 encoding="utf-8",
             )
@@ -144,12 +155,148 @@ class ManagedSandboxSupervisor:
 
             return self._response_from_process(proc, stage_audit=stage_audit)
 
+    def _execute_capability_lima(self, request: dict[str, Any]) -> dict[str, Any]:
+        try:
+            limactl, instance = resolve_attested_lima_runtime()
+        except ValueError as exc:
+            return self._unavailable(
+                request,
+                str(exc),
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+                diagnostics=diagnose_sandbox_environment(request),
+            )
+        timeout = _bounded_timeout(request.get("timeout_seconds"))
+        sandbox_id = _sandbox_id(request)
+        remote_root = (
+            f"{LIMA_GUEST_WORKSPACE_ROOT}/.rumi-capability-{uuid.uuid4().hex}"
+        )
+        try:
+            with tempfile.TemporaryDirectory(prefix=f"{sandbox_id}-") as tmp:
+                workspace = Path(tmp) / "workspace"
+                function_target = workspace / "function"
+                workspace.mkdir(mode=0o700)
+                module_rel, callable_name, stage_audit = self._stage_function(
+                    request=request,
+                    function_target=function_target,
+                )
+                runner_path = self._stage_runner(request, workspace)
+                context_payload: dict[str, Any] = (
+                    request["context"] if isinstance(request.get("context"), dict) else {}
+                )
+                args_payload: dict[str, Any] = (
+                    request["args"] if isinstance(request.get("args"), dict) else {}
+                )
+                (workspace / "input.json").write_text(
+                    _runner_payload(
+                        module_path=f"/workspace/function/{module_rel.as_posix()}",
+                        callable_name=callable_name,
+                        context=context_payload,
+                        args=args_payload,
+                    ),
+                    encoding="utf-8",
+                )
+                import_proc = _lima_import_workspace(
+                    limactl=limactl,
+                    instance=instance,
+                    remote_root=remote_root,
+                    archive=_tar_directory(workspace),
+                    timeout=timeout,
+                )
+                if import_proc.returncode != 0:
+                    return self._unavailable(
+                        request,
+                        _decode_bytes(import_proc.stderr) or "Could not stage the Lima sandbox workspace",
+                        error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+                    )
+                guest_argv = build_guest_bwrap_argv(
+                    workspace=remote_root,
+                    cwd="/workspace",
+                    argv=("python3", f"/workspace/{runner_path.name}", "--input-file", "/workspace/input.json"),
+                    env={
+                        "HOME": "/home",
+                        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                        "PYTHONDONTWRITEBYTECODE": "1",
+                        "PYTHONNOUSERSITE": "1",
+                        "RUMI_PROFILE_RUNTIME": str(request.get("profile_runtime") or ""),
+                        "RUMI_SANDBOX_ID": sandbox_id,
+                    },
+                    network_enabled=False,
+                )
+                guest_argv = _guest_resource_limited_argv(
+                    guest_argv,
+                    timeout=timeout,
+                    memory_mb=512,
+                    pids=128,
+                )
+                proc = subprocess.run(
+                    [limactl, "shell", instance, "--", *guest_argv],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 2,
+                    close_fds=True,
+                )
+                return self._response_from_process(proc, stage_audit=stage_audit)
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "ok": False,
+                "error": "Managed sandbox execution timed out",
+                "error_type": "timeout",
+                "execution_boundary": "managed_sandbox",
+            }
+        except Exception as exc:
+            return self._unavailable(request, str(exc), error_type=SANDBOX_RUNTIME_UNAVAILABLE)
+        finally:
+            _lima_remove_workspace(limactl, instance, remote_root)
+
     def execute_coding_terminal(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run a coding command inside an isolated staged workspace."""
         system = platform.system().lower()
         if system == "darwin":
             return self._execute_coding_terminal_lima(request)
         return self._execute_coding_terminal_bwrap(request)
+
+    def execute_pack_process(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Stage one Pack tree and run its declared process entrypoint."""
+        pack_dir = _required_dir(request.get("pack_dir"), "pack_dir")
+        pack_id = str(request.get("pack_id") or pack_dir.name).strip()
+        module = str(request.get("module") or "").strip()
+        if not pack_id or not module:
+            raise ValueError("pack_id and module are required")
+        with tempfile.TemporaryDirectory(prefix="rumi-pack-process-") as tmp:
+            workspace = Path(tmp)
+            target = workspace / "ecosystem" / pack_id
+            target.parent.mkdir(parents=True, mode=0o700)
+            stage_audit = _stage_regular_tree(pack_dir, target)
+            runtime_root = pack_dir.parent.parent
+            core_runtime = _required_dir(runtime_root / "core_runtime", "core_runtime")
+            core_audit = _stage_regular_tree(core_runtime, workspace / "core_runtime")
+            stage_audit = {
+                "files": stage_audit["files"] + core_audit["files"],
+                "bytes": stage_audit["bytes"] + core_audit["bytes"],
+            }
+            if stage_audit["files"] > MAX_STAGE_FILES:
+                raise ValueError("Pack process stage has too many files")
+            if stage_audit["bytes"] > MAX_STAGE_TOTAL_BYTES:
+                raise ValueError("Pack process stage is too large")
+            response = self.execute_coding_terminal(
+                {
+                    "workspace_root": str(workspace),
+                    "cwd": ".",
+                    "argv": ["python3", "-B", "-s", "-E", "-m", module],
+                    "stdin": str(request.get("stdin") or ""),
+                    "timeout_seconds": request.get("timeout_seconds"),
+                    "network_enabled": False,
+                    "immutable_root": request.get("immutable_root"),
+                    "profile_runtime": request.get("profile_runtime"),
+                    "pack_id": pack_id,
+                    "guest_data_dir": (
+                        f"{LIMA_GUEST_PACK_DATA_ROOT}/{_safe_guest_name(pack_id)}"
+                    ),
+                }
+            )
+            response["sandbox_stage"] = stage_audit
+            return response
 
     def _execute_coding_terminal_bwrap(self, request: dict[str, Any]) -> dict[str, Any]:
         diagnostics = diagnose_sandbox_environment(request)
@@ -232,47 +379,35 @@ class ManagedSandboxSupervisor:
         )
 
     def _execute_coding_terminal_lima(self, request: dict[str, Any]) -> dict[str, Any]:
-        limactl = shutil.which("limactl")
-        instance = str(os.environ.get("RUMI_SANDBOX_LIMA_INSTANCE") or "").strip()
-        if limactl is None:
+        try:
+            limactl, instance = resolve_attested_lima_runtime()
+        except ValueError as exc:
             return self._unavailable(
                 request,
-                "Lima sandbox runtime is not installed",
-                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
-            )
-        if not instance:
-            return self._unavailable(
-                request,
-                "Lima sandbox instance is not configured; set RUMI_SANDBOX_LIMA_INSTANCE",
-                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
-            )
-        if str(os.environ.get(LIMA_NETWORK_ATTEST_ENV) or "").strip().lower() not in {"1", "true", "yes", "on"}:
-            return self._unavailable(
-                request,
-                "Lima sandbox network isolation is not attested; set RUMI_SANDBOX_LIMA_NETWORK_ISOLATED=true for a networkless VM",
-                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
-            )
-        attestation_error = _verify_lima_instance_attestation(limactl, instance)
-        if attestation_error:
-            return self._unavailable(
-                request,
-                attestation_error,
+                str(exc),
                 error_type=SANDBOX_RUNTIME_UNAVAILABLE,
             )
         sandbox_id = _sandbox_id(request)
         timeout = _bounded_timeout(request.get("timeout_seconds"))
         workspace = _required_dir(request.get("workspace_root"), "workspace_root")
         cwd = validate_workspace_relative_path(request.get("cwd", "."), field="cwd")
-        remote_root = f"/tmp/rumi-sandbox-coding/{sandbox_id}"
+        remote_root = f"{LIMA_GUEST_WORKSPACE_ROOT}/.rumi-coding-{uuid.uuid4().hex}"
+        guest_data_dir = str(request.get("guest_data_dir") or "").strip() or None
         try:
+            if guest_data_dir is not None:
+                _lima_ensure_data_dir(
+                    limactl=limactl,
+                    instance=instance,
+                    data_dir=guest_data_dir,
+                    timeout=timeout,
+                )
             archive = _tar_directory(workspace)
-            import_script = f"rm -rf {shlex.quote(remote_root)} && mkdir -p {shlex.quote(remote_root)} && tar -xf - -C {shlex.quote(remote_root)}"
-            import_proc = subprocess.run(
-                [limactl, "shell", instance, "--", "sh", "-lc", import_script],
-                input=archive,
-                capture_output=True,
-                timeout=timeout + 2,
-                close_fds=True,
+            import_proc = _lima_import_workspace(
+                limactl=limactl,
+                instance=instance,
+                remote_root=remote_root,
+                archive=archive,
+                timeout=timeout,
             )
             if import_proc.returncode != 0:
                 return _coding_terminal_response(
@@ -284,16 +419,29 @@ class ManagedSandboxSupervisor:
                     timed_out=False,
                     success=False,
                 )
-            remote_cwd = remote_root if cwd == "." else remote_root.rstrip("/") + "/" + cwd
-            exec_script = (
-                f"cd {shlex.quote(remote_cwd)} && "
-                f"HOME=/tmp PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "
-                f"RUMI_SANDBOX_ID={shlex.quote(sandbox_id)} "
-                + _remote_shell_command(request)
+            remote_cwd = "/workspace" if cwd == "." else "/workspace/" + cwd
+            sandbox_env = _coding_sandbox_env(sandbox_id)
+            if guest_data_dir is not None:
+                sandbox_env["RUMI_USER_DATA"] = "/data"
+            guest_argv = build_guest_bwrap_argv(
+                workspace=remote_root,
+                cwd=remote_cwd,
+                argv=_coding_command_argv(request),
+                env=sandbox_env,
+                network_enabled=bool(request.get("network_enabled") is True),
+                data_dir=guest_data_dir,
+            )
+            guest_argv = _guest_resource_limited_argv(
+                guest_argv,
+                timeout=timeout,
+                memory_mb=_bounded_positive_int(request.get("memory_mb"), 512, 128, 8192),
+                pids=_bounded_positive_int(request.get("pids"), 128, 16, 1024),
             )
             proc = subprocess.run(
-                [limactl, "shell", instance, "--", "sh", "-lc", exec_script],
+                [limactl, "shell", instance, "--", *guest_argv],
+                input=str(request.get("stdin") or ""),
                 capture_output=True,
+                text=True,
                 timeout=timeout + 2,
                 close_fds=True,
             )
@@ -313,7 +461,7 @@ class ManagedSandboxSupervisor:
                             sandbox_id=sandbox_id,
                             command=request.get("command") or request.get("argv"),
                             returncode=1,
-                            stdout=_decode_bytes(proc.stdout),
+                            stdout=proc.stdout or "",
                             stderr="Lima sandbox export exceeded workspace size quota",
                             timed_out=False,
                             success=False,
@@ -331,12 +479,14 @@ class ManagedSandboxSupervisor:
             )
         except Exception as exc:
             return self._unavailable(request, str(exc), error_type=SANDBOX_RUNTIME_UNAVAILABLE)
+        finally:
+            _lima_remove_workspace(limactl, instance, remote_root)
         return _coding_terminal_response(
             sandbox_id=sandbox_id,
             command=request.get("command") or request.get("argv"),
             returncode=proc.returncode,
-            stdout=_decode_bytes(proc.stdout),
-            stderr=_decode_bytes(proc.stderr),
+            stdout=proc.stdout or "",
+            stderr=proc.stderr or "",
             timed_out=False,
             provider_id="lima_ubuntu",
         )
@@ -444,6 +594,34 @@ class ManagedSandboxSupervisor:
 
 def diagnose_sandbox_environment(request: dict[str, Any] | None = None) -> dict[str, Any]:
     request = request if isinstance(request, dict) else {}
+    if platform.system().lower() == "darwin":
+        try:
+            limactl, instance = resolve_attested_lima_runtime()
+        except ValueError as exc:
+            return {
+                "ready": False,
+                "checks": [
+                    {
+                        "name": "lima_guest_sandbox",
+                        "ok": False,
+                        "code": SANDBOX_RUNTIME_UNAVAILABLE,
+                        "message": str(exc),
+                    }
+                ],
+            }
+        return {
+            "ready": True,
+            "checks": [
+                {
+                    "name": "lima_guest_sandbox",
+                    "ok": True,
+                    "path": limactl,
+                    "instance": instance,
+                    "code": SANDBOX_RUNTIME_UNAVAILABLE,
+                    "message": "Attested Lima guest sandbox is ready",
+                }
+            ],
+        }
     checks: list[dict[str, Any]] = []
 
     bwrap_path = shutil.which("bwrap")
@@ -649,16 +827,6 @@ def _coding_command_argv(request: dict[str, Any]) -> list[str]:
     return ["/bin/sh", "-lc", command]
 
 
-def _remote_shell_command(request: dict[str, Any]) -> str:
-    argv = request.get("argv")
-    if isinstance(argv, list) and argv:
-        return shlex.join(str(item) for item in argv)
-    command = str(request.get("command") or "").strip()
-    if not command:
-        raise ValueError("command or argv is required")
-    return "/bin/sh -lc " + shlex.quote(command)
-
-
 def _coding_sandbox_env(sandbox_id: str) -> dict[str, str]:
     return {
         "HOME": "/home",
@@ -714,67 +882,124 @@ def _decode_bytes(value: bytes | str | None) -> str:
     return str(value or "")
 
 
-def _verify_lima_instance_attestation(limactl: str, instance: str) -> str | None:
-    expected_hash = str(os.environ.get(LIMA_CONFIG_HASH_ENV) or "").strip().lower()
-    if not expected_hash:
-        return "Lima sandbox config is not attested; set RUMI_SANDBOX_LIMA_CONFIG_HASH for the approved instance config"
-    try:
-        current_hash = _lima_instance_config_hash(limactl, instance)
-    except Exception as exc:
-        return "Lima sandbox config attestation failed: " + str(exc)
-    if current_hash != expected_hash:
-        return "Lima sandbox config changed; refusing to run untrusted coding tools"
-    return None
-
-
-def _lima_instance_config_hash(limactl: str, instance: str) -> str:
-    proc = subprocess.run(
-        [limactl, "list", instance, "--format", "json"],
+def _lima_import_workspace(
+    *,
+    limactl: str,
+    instance: str,
+    remote_root: str,
+    archive: bytes,
+    timeout: float,
+) -> subprocess.CompletedProcess[bytes]:
+    if not _is_lima_workspace_path(remote_root):
+        raise ValueError("invalid Lima sandbox workspace path")
+    import_script = (
+        f"rm -rf {shlex.quote(remote_root)} && "
+        f"mkdir -p {shlex.quote(remote_root)} && "
+        f"chmod 700 {shlex.quote(remote_root)} && "
+        f"tar -xf - -C {shlex.quote(remote_root)}"
+    )
+    return subprocess.run(
+        [limactl, "shell", instance, "--", "sh", "-lc", import_script],
+        input=archive,
         capture_output=True,
-        timeout=5,
+        timeout=timeout + 2,
+        close_fds=True,
+    )
+
+
+def _lima_remove_workspace(limactl: str, instance: str, remote_root: str) -> None:
+    if not _is_lima_workspace_path(remote_root):
+        return
+    try:
+        subprocess.run(
+            [limactl, "shell", instance, "--", "rm", "-rf", "--", remote_root],
+            capture_output=True,
+            timeout=10,
+            close_fds=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _is_lima_workspace_path(value: str) -> bool:
+    path = Path(value)
+    return (
+        path.is_absolute()
+        and path.parent == Path(LIMA_GUEST_WORKSPACE_ROOT)
+        and path.name.startswith(".rumi-")
+        and path.name not in {".rumi-", ".", ".."}
+    )
+
+
+def _lima_ensure_data_dir(
+    *,
+    limactl: str,
+    instance: str,
+    data_dir: str,
+    timeout: float,
+) -> None:
+    data_path = Path(data_dir)
+    if (
+        not data_path.is_absolute()
+        or data_path.parent != Path(LIMA_GUEST_PACK_DATA_ROOT)
+        or data_path.name in {"", ".", ".."}
+    ):
+        raise ValueError("invalid Lima Pack data path")
+    proc = subprocess.run(
+        [
+            limactl,
+            "shell",
+            instance,
+            "--",
+            "sh",
+            "-lc",
+            f"mkdir -p {shlex.quote(data_dir)} && chmod 700 {shlex.quote(data_dir)}",
+        ],
+        capture_output=True,
+        timeout=timeout + 2,
         close_fds=True,
     )
     if proc.returncode != 0:
-        raise ValueError(_decode_bytes(proc.stderr) or "limactl list failed")
-    try:
-        payload = json.loads(_decode_bytes(proc.stdout))
-    except json.JSONDecodeError as exc:
-        raise ValueError("limactl returned invalid JSON") from exc
-    return _stable_lima_config_hash(instance, payload)
-
-
-def _stable_lima_config_hash(instance: str, payload: Any) -> str:
-    relevant = _stable_lima_config_payload(instance, payload)
-    encoded = json.dumps(relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _stable_lima_config_payload(instance: str, payload: Any) -> dict[str, Any]:
-    item: dict[str, Any]
-    if isinstance(payload, list):
-        item = next(
-            (
-                entry
-                for entry in payload
-                if isinstance(entry, dict)
-                and str(entry.get("name") or entry.get("instance") or entry.get("inst") or "").strip() == instance
-            ),
-            payload[0] if payload and isinstance(payload[0], dict) else {},
+        raise ValueError(
+            _decode_bytes(proc.stderr) or "Could not prepare Lima Pack data"
         )
-    elif isinstance(payload, dict):
-        item = payload
-    else:
-        item = {}
-    return {
-        "instance": instance,
-        "config": item.get("config") if isinstance(item.get("config"), dict) else {},
-        "mounts": item.get("mounts") if isinstance(item.get("mounts"), list) else [],
-        "networks": item.get("networks") if isinstance(item.get("networks"), list) else [],
-        "network": item.get("network") if isinstance(item.get("network"), dict) else {},
-        "mountType": item.get("mountType"),
-        "vmType": item.get("vmType"),
-        "arch": item.get("arch"),
-    }
+
+
+def _safe_guest_name(value: str) -> str:
+    safe = "".join(
+        character
+        if character.isascii() and (character.isalnum() or character in {"-", "_", "."})
+        else "-"
+        for character in value
+    ).strip(".-")
+    if not safe:
+        raise ValueError("Pack ID is invalid for guest storage")
+    return safe[:128]
+
+
+def _guest_resource_limited_argv(
+    argv: tuple[str, ...],
+    *,
+    timeout: float,
+    memory_mb: int,
+    pids: int,
+) -> tuple[str, ...]:
+    return (
+        "prlimit",
+        f"--as={int(memory_mb) * 1024 * 1024}",
+        f"--nproc={int(pids)}",
+        f"--cpu={max(1, int(timeout))}",
+        "--",
+        *argv,
+    )
+
+
+def _bounded_positive_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
 
 
 def _tar_directory(root: Path) -> bytes:
