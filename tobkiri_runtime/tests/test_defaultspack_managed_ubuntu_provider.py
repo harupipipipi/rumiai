@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import tarfile
 from collections.abc import Sequence
 
@@ -23,7 +24,6 @@ from ecosystem.defaultspack.backend.sandbox.models import (
     WorkspaceBinding,
 )
 from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
-from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.sandbox.providers.base import NullProgressSink
 from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
     DEFAULT_DISPLAY,
@@ -34,6 +34,14 @@ from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
     WSL_ROOTFS_ENV,
     WindowsWslProvider,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_lima_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RUMI_SANDBOX_LIMA_STATE",
+        str(tmp_path / "lima-runtime.json"),
+    )
 
 
 class FakeManagedUbuntuCli:
@@ -75,6 +83,39 @@ class FakeManagedUbuntuCli:
             return GuestCommandResult(returncode=0, stdout="limactl version 1.0\n")
         if cmd[1:3] == ["list", "--format"]:
             return GuestCommandResult(returncode=0, stdout=f"{self.runtime_name}\n" if self.guest_exists else "")
+        if cmd[1:3] == ["list", self.runtime_name] and cmd[3:] == ["--format", "json"]:
+            if not self.guest_exists:
+                return GuestCommandResult(returncode=1, stderr="instance not found")
+            return GuestCommandResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "name": self.runtime_name,
+                        "status": "Running",
+                        "vmType": "vz",
+                        "arch": "aarch64",
+                        "config": {
+                            "vmType": "vz",
+                            "mounts": [],
+                            "containerd": {"system": False, "user": False},
+                            "ssh": {
+                                "forwardAgent": False,
+                                "forwardX11": False,
+                                "forwardX11Trusted": False,
+                            },
+                            "propagateProxyEnv": False,
+                            "hostResolver": {"enabled": False},
+                            "portForwards": [
+                                {
+                                    "guestIP": "0.0.0.0",
+                                    "guestPortRange": [1, 65535],
+                                    "ignore": True,
+                                }
+                            ],
+                        },
+                    }
+                ),
+            )
         if cmd[1:4] == ["start", "--name", self.runtime_name]:
             self.guest_exists = True
             self.deps_installed = True
@@ -114,6 +155,8 @@ class FakeManagedUbuntuCli:
         return GuestCommandResult(returncode=1, stderr=f"unexpected wsl command: {cmd}")
 
     def _guest(self, argv: list[str], input_text: str | None) -> GuestCommandResult:
+        if argv[:1] == ["bwrap"] and "--" in argv:
+            return self._guest(argv[argv.index("--") + 1 :], input_text)
         if argv[:5] == ["unshare", "--user", "--map-root-user", "--net", "--"]:
             return self._guest(argv[5:], input_text)
         if argv[:2] == ["env", "-i"]:
@@ -194,7 +237,10 @@ class FakeManagedUbuntuCli:
 
 def test_managed_provider_without_launcher_does_not_advertise_capabilities(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
-    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.resolve_limactl_path",
+        lambda: None,
+    )
     provider = MacLimaProvider()
 
     status = provider.doctor(RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES))
@@ -203,7 +249,7 @@ def test_managed_provider_without_launcher_does_not_advertise_capabilities(monke
     assert status.ready is False
     assert status.capabilities == frozenset()
     assert "command:limactl" in status.missing_requirements
-    assert "Install limactl first" in str(status.user_action)
+    assert "brew install lima" in str(status.user_action)
 
 
 def test_managed_provider_does_not_advertise_host_port_forwarding(monkeypatch) -> None:
@@ -328,7 +374,9 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert "sudo apt-get" not in install_script
     assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
-    assert started.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
+    assert started.opaque_state["guest_workspace"].startswith(
+        "/var/lib/rumi/workspaces/mac_lima-"
+    )
 
 
 def test_managed_ubuntu_guest_agent_rejects_exec_cwd_before_guest_command(monkeypatch) -> None:
@@ -482,7 +530,9 @@ def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch
     assert executed["stdout"] == "hello\n"
     assert fake.command_containing("--import", DEFAULT_WSL_RUNTIME_NAME, str(install_dir), str(rootfs), "--version", "2")
     assert fake.command_containing("-d", DEFAULT_WSL_RUNTIME_NAME, "--", "echo", "hello")[-2:] == ["echo", "hello"]
-    assert started.opaque_state["guest_workspace"].startswith("/workspace/windows_wsl-")
+    assert started.opaque_state["guest_workspace"].startswith(
+        "/var/lib/rumi/workspaces/windows_wsl-"
+    )
     install_script = next(script for script in fake.guest_scripts if "$RUMI_SUDO apt-get install -y xvfb" in script)
     assert "\\$RUMI_SUDO" not in install_script
 
@@ -540,7 +590,7 @@ def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkey
     )
     exec_call = next(call for call in fake.calls if "exec-env" not in str(call) and "printenv" in call[0])
 
-    assert pwd["stdout"] == f"{started.opaque_state['guest_workspace']}\n"
+    assert pwd["stdout"] == "/workspace\n"
     assert pwd["resolved_cwd"] == started.opaque_state["guest_workspace"]
     assert env["stdout"] == "from-request\n"
     assert ambient["exit_code"] == 1
@@ -549,7 +599,7 @@ def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkey
     assert "rumi-exec" in exec_call[0]
     assert f"/tmp/rumi-managed-runtime/{started.provider_instance_id}" in exec_call[0]
     assert f"RUMI_SANDBOX_INSTANCE={started.provider_instance_id}" in exec_call[0]
-    assert f"RUMI_SANDBOX_WORKSPACE={started.opaque_state['guest_workspace']}" in exec_call[0]
+    assert "RUMI_SANDBOX_WORKSPACE=/workspace" in exec_call[0]
     assert all(not part.startswith("HOST_SECRET=") for part in exec_call[0])
 
 
@@ -647,14 +697,26 @@ def test_managed_ubuntu_instances_bind_agent_operations_to_distinct_workspaces(m
     python_writes = [call for call in fake.calls if len(call[0]) > 2 and call[0][-3:-1] == ["-c", "import base64, pathlib, sys\npath = pathlib.Path(sys.argv[1])\npath.write_bytes(base64.b64decode(sys.stdin.read().encode('ascii')))\n"]]
 
     assert first.opaque_state["guest_workspace"] != second.opaque_state["guest_workspace"]
-    assert first.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
-    assert second.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
+    assert first.opaque_state["guest_workspace"].startswith(
+        "/var/lib/rumi/workspaces/mac_lima-"
+    )
+    assert second.opaque_state["guest_workspace"].startswith(
+        "/var/lib/rumi/workspaces/mac_lima-"
+    )
     seed_scripts = [script for script in fake.guest_scripts if "RUMI_WORKSPACE_SEED_MODE=overlay" in script]
     assert len(seed_scripts) >= 2
     assert str(first.opaque_state["guest_workspace"]) in seed_scripts[-2]
     assert str(second.opaque_state["guest_workspace"]) in seed_scripts[-1]
-    assert any(str(first.opaque_state["guest_workspace"]) + "/src/app.py" in " ".join(call[0]) for call in python_writes)
-    assert any(str(second.opaque_state["guest_workspace"]) + "/src/app.py" in " ".join(call[0]) for call in python_writes)
+    assert any(
+        str(first.opaque_state["guest_workspace"]) in call[0]
+        and "/workspace/src/app.py" in call[0]
+        for call in python_writes
+    )
+    assert any(
+        str(second.opaque_state["guest_workspace"]) in call[0]
+        and "/workspace/src/app.py" in call[0]
+        for call in python_writes
+    )
 
 
 def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(monkeypatch) -> None:
@@ -835,7 +897,8 @@ def test_managed_ubuntu_exec_enforces_template_output_and_timeout_limits(monkeyp
     assert executed["stdout_truncated"] is True
     assert executed["stderr_truncated"] is True
     assert exec_call[2] == 2
-    assert "unshare" in exec_call[0]
+    assert "bwrap" in exec_call[0]
+    assert "--unshare-net" in exec_call[0]
     assert any("ulimit -v" in part for part in exec_call[0])
     assert any("ulimit -u" in part for part in exec_call[0])
     assert any("taskset -c" in part for part in exec_call[0])
@@ -859,7 +922,7 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
         )
     )
     started = provider.start(instance)
-    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL=" in script)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL_ORIGINAL=" in script)
 
     assert ensured.ok is True
     assert started.state == "ready"
@@ -910,11 +973,11 @@ def test_managed_ubuntu_desktop_browser_starter_opens_browser_without_url(monkey
     ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
     instance = provider.create(_create_spec(_template(), startup={"starter": "browser"}))
     started = provider.start(instance)
-    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL=" in script)
+    start_script = next(script for script in fake.guest_scripts if "BROWSER_URL_ORIGINAL=" in script)
 
     assert ensured.ok is True
     assert started.state == "ready"
-    assert "BROWSER_URL=''" in start_script
+    assert "BROWSER_URL_ORIGINAL=''" in start_script
     assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
     assert 'elif [ -n "$BROWSER_URL" ]; then' in start_script
     assert "run_detached" in start_script

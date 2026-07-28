@@ -52,6 +52,7 @@ def test_non_core_user_function_fails_closed_when_managed_sandbox_unavailable(tm
     from core_runtime.execution_boundary import SANDBOX_RUNTIME_UNAVAILABLE
 
     monkeypatch.setenv("RUMI_ALLOW_HOST_FALLBACK", "true")
+    monkeypatch.setenv("RUMI_SANDBOX_LIMA_STATE", str(tmp_path / "missing-lima-state.json"))
     executor = _executor()
     entry = _entry(tmp_path)
 
@@ -76,6 +77,7 @@ def test_development_host_flag_is_ignored_for_profile_principal(tmp_path, monkey
 
     monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
     monkeypatch.setenv("RUMI_ALLOW_DEVELOPMENT_HOST_EXECUTION", "true")
+    monkeypatch.setenv("RUMI_SANDBOX_LIMA_STATE", str(tmp_path / "missing-lima-state.json"))
     executor = _executor()
     entry = _entry(tmp_path)
 
@@ -433,6 +435,7 @@ def test_sandbox_doctor_reports_rootfs_and_controller_readiness(tmp_path, monkey
 
     monkeypatch.setattr("shutil.which", fake_which)
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(supervisor_module.platform, "system", lambda: "Linux")
 
     ready = supervisor_module.diagnose_sandbox_environment({"immutable_root": str(root)})
     assert ready["ready"] is True
@@ -538,7 +541,10 @@ def test_bwrap_provider_doctor_requires_working_user_systemd(tmp_path, monkeypat
 
 def test_sandbox_execution_reports_controller_probe_failure(tmp_path, monkeypatch):
     from ecosystem.defaultspack.backend.sandbox.errors import SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE
-    from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+    from ecosystem.defaultspack.backend.sandbox.isolation import (
+        ManagedSandboxSupervisor,
+        supervisor as supervisor_module,
+    )
 
     root = tmp_path / "rootfs"
     root.mkdir()
@@ -553,6 +559,7 @@ def test_sandbox_execution_reports_controller_probe_failure(tmp_path, monkeypatc
 
     monkeypatch.setattr("shutil.which", fake_which)
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(supervisor_module.platform, "system", lambda: "Linux")
 
     result = ManagedSandboxSupervisor().execute_capability(
         {
@@ -609,7 +616,10 @@ def test_sandbox_wrapper_opens_seccomp_fd_inside_cgroup_command(tmp_path):
 
 
 def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path, monkeypatch):
-    from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+    from ecosystem.defaultspack.backend.sandbox.isolation import (
+        ManagedSandboxSupervisor,
+        supervisor as supervisor_module,
+    )
 
     function_dir = tmp_path / "function"
     function_dir.mkdir()
@@ -649,6 +659,7 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
 
     monkeypatch.setattr("shutil.which", fake_which)
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(supervisor_module.platform, "system", lambda: "Linux")
 
     result = ManagedSandboxSupervisor().execute_capability(
         {

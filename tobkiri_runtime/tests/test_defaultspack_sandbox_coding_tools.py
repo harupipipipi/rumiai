@@ -624,28 +624,6 @@ def test_lima_export_tar_is_capped_before_replacing_workspace(tmp_path, monkeypa
     assert (root / "keep.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_lima_attestation_binds_instance_config(monkeypatch):
-    from backend.sandbox.isolation import supervisor
-
-    payload = {
-        "name": "rumi-safe",
-        "config": {"mounts": [{"location": "/tmp/work", "writable": True}], "networks": []},
-        "mounts": [{"location": "/tmp/work", "writable": True}],
-        "networks": [],
-        "network": {"enabled": False},
-        "vmType": "qemu",
-        "arch": "aarch64",
-    }
-    expected_hash = supervisor._stable_lima_config_hash("rumi-safe", payload)
-
-    monkeypatch.setenv(supervisor.LIMA_CONFIG_HASH_ENV, expected_hash)
-    monkeypatch.setattr(supervisor, "_lima_instance_config_hash", lambda limactl, instance: expected_hash)
-    assert supervisor._verify_lima_instance_attestation("/usr/bin/limactl", "rumi-safe") is None
-
-    monkeypatch.setattr(supervisor, "_lima_instance_config_hash", lambda limactl, instance: "changed")
-    assert "config changed" in supervisor._verify_lima_instance_attestation("/usr/bin/limactl", "rumi-safe")
-
-
 def test_untrusted_tool_context_cannot_supply_sandbox_session_id():
     from domain.tool_policy.internal_context import sanitize_untrusted_tool_context
 

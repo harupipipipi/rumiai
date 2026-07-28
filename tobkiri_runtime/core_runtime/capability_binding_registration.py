@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -197,21 +196,6 @@ def _register_v3_contract_bindings(
         result,
         pack_id,
     )
-    host_allowed, host_reason = _host_registration_allowed(
-        pack_id,
-        pack_location,
-        ecosystem_manifest,
-    )
-    if not host_allowed:
-        result.diagnostics.append(
-            _diagnostic(
-                "warning",
-                "v3_process_host_execution_required",
-                f"Pack process activation skipped: {host_reason}",
-                pack_id=pack_id,
-            )
-        )
-        return True, False
     integrity_ok, integrity_diagnostics = verify_declared_artifacts(
         pack_location.pack_subdir,
         ecosystem_manifest,
@@ -286,6 +270,22 @@ def _register_v3_contract_bindings(
                 pack_location=pack_location,
             )
         else:
+            host_allowed, host_reason = _host_registration_allowed(
+                pack_id,
+                pack_location,
+                ecosystem_manifest,
+            )
+            if not host_allowed:
+                result.diagnostics.append(
+                    _diagnostic(
+                        "warning",
+                        "v3_python_host_execution_required",
+                        f"Python Pack activation skipped: {host_reason}",
+                        pack_id=pack_id,
+                        contract_id=contract_id,
+                    )
+                )
+                continue
             try:
                 operation = _load_python_contract_operation(
                     module=module,
@@ -364,51 +364,60 @@ def _register_v3_contract_bindings(
 
 
 class _ProcessContractOperation:
-    """Invoke a declared pack process with a minimal non-secret environment."""
+    """Invoke a declared Pack process inside the managed sandbox."""
 
     def __init__(self, *, module: str, pack_location: PackLocation) -> None:
         self.module = module
         self.pack_location = pack_location
 
     def __call__(self, operation: str, payload: Dict[str, Any]) -> Any:
-        runtime_root = self.pack_location.pack_dir.parent.parent
-        environment = {
-            "PATH": os.environ.get("PATH", ""),
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        }
-        user_data_root = str(os.environ.get("RUMI_USER_DATA") or "").strip()
-        if user_data_root:
-            environment["RUMI_USER_DATA"] = user_data_root
-        completed = subprocess.run(
-            # ``-E`` intentionally ignores PYTHON* environment variables for
-            # process isolation, including PYTHONDONTWRITEBYTECODE.  ``-B`` is
-            # therefore required as an interpreter flag so a process-backed
-            # pack can never add bytecode files to a signed application bundle.
-            [sys.executable, "-B", "-s", "-E", "-m", self.module],
-            input=json.dumps(
-                {"operation": operation, "payload": dict(payload)},
-                ensure_ascii=False,
-            ),
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=False,
-            cwd=str(runtime_root),
-            env=environment,
+        supervisor = _managed_sandbox_supervisor()
+        result = supervisor.execute_pack_process(
+            {
+                "pack_id": self.pack_location.pack_id,
+                "pack_dir": str(self.pack_location.pack_dir),
+                "module": self.module,
+                "stdin": json.dumps(
+                    {"operation": operation, "payload": dict(payload)},
+                    ensure_ascii=False,
+                ),
+                "timeout_seconds": 30,
+            }
         )
+        if not result.get("success"):
+            raise GlobalContractInvocationError(
+                str(result.get("error_type") or "provider_unavailable"),
+                str(result.get("error") or result.get("stderr") or "Pack sandbox failed"),
+            )
+        stdout = str(result.get("stdout") or "")
         try:
-            response = json.loads(completed.stdout)
+            response = json.loads(stdout)
         except json.JSONDecodeError as exc:
             raise RuntimeError("pack process returned invalid JSON") from exc
         if not isinstance(response, dict) or response.get("status") != "ok":
             diagnostics = response.get("diagnostics") if isinstance(response, dict) else []
+            if not isinstance(diagnostics, list):
+                diagnostics = [diagnostics]
             code = str(response.get("error_code") or "provider_unavailable")
             raise GlobalContractInvocationError(
                 code,
                 "; ".join(str(item) for item in diagnostics),
             )
         return response.get("value")
+
+
+def _managed_sandbox_supervisor() -> Any:
+    from .di_container import get_container
+
+    supervisor = get_container().get_or_none("managed_sandbox_supervisor")
+    if supervisor is None or not callable(
+        getattr(supervisor, "execute_pack_process", None)
+    ):
+        raise GlobalContractInvocationError(
+            "provider_unavailable",
+            "Managed sandbox supervisor is unavailable",
+        )
+    return supervisor
 
 
 def _load_python_contract_operation(
