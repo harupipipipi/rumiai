@@ -2321,12 +2321,6 @@ function SettingsField({
       };
       control = (
         <div className="space-y-4" data-settings-renderer="model_routing">
-          <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3">
-            <p className="text-sm font-medium text-zinc-200">モデルが使う接続先を変更</p>
-            <p className="mt-1 text-xs leading-5 text-zinc-500">
-              通常は変更不要です。特定のモデルで別のAPIキーを使いたい場合だけ、モデルとキーを選びます。
-            </p>
-          </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
             <label className="space-y-1.5">
               <span className="text-[11px] font-medium text-zinc-500">1. 設定するモデル</span>
@@ -2347,17 +2341,7 @@ function SettingsField({
             </div>
           </div>
 
-          {isLocalModel ? (
-            <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3">
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-xs text-emerald-300">✓</span>
-              <div>
-                <p className="text-sm font-medium text-emerald-100">追加設定は不要です</p>
-                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  このモデルはローカルまたはStub接続で動作するため、APIキーを割り当てる必要はありません。
-                </p>
-              </div>
-            </div>
-          ) : (
+          {!isLocalModel && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-medium text-zinc-500">2. 使用するAPIキー</span>
