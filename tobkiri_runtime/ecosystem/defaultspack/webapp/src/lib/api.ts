@@ -628,6 +628,14 @@ export type CompanyAgent = {
   aliases?: string[];
   system_prompt?: string;
   status?: string;
+  agent_kind?: "main" | "subagent";
+  runtime_kind?: "agent_run" | "utility_model_call" | "human_task" | "remote_agent" | "composite_team";
+  subagent_role?: string;
+  placement_id?: string;
+  placement_revision?: string;
+  placement_map_id?: string;
+  effective_plan_hash?: string;
+  protocol_membership?: string[];
   metadata?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;

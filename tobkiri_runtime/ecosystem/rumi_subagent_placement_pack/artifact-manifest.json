@@ -3,7 +3,12 @@
   "artifacts": [
     {
       "path": "runtime/compiler.py",
-      "sha256": "b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f",
+      "sha256": "79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df",
+      "role": "runtime"
+    },
+    {
+      "path": "runtime/topology.py",
+      "sha256": "ff18e35ef82970ccea62c2296b8b9ffabd1a0a1819818216571d6ffb5fd70227",
       "role": "runtime"
     }
   ]

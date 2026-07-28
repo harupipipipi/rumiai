@@ -11,7 +11,10 @@
   "required_permissions": [
     "subagent.catalog.read",
     "subagent.placement.read",
-    "subagent.placement.compile"
+    "subagent.placement.compile",
+    "subagent.topology.compile",
+    "subagent.placement.patch",
+    "subagent.runtime.assign"
   ],
   "conflicts_with": [],
   "compatibility": {
@@ -30,6 +33,7 @@
   "security_notes": [
     "CapabilityPlan remains the execution authority.",
     "Compiler stages cannot widen authority or budgets.",
-    "Unknown required Placement features fail closed."
+    "Unknown required Placement features fail closed.",
+    "Existing runs remain pinned when a Placement Map revision changes."
   ]
 }

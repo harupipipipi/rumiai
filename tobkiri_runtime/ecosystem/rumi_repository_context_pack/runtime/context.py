@@ -1240,6 +1240,15 @@ def _model_json(value: Any, phase: str) -> dict[str, Any]:
     output = value.get("output") if isinstance(value, Mapping) else None
     if isinstance(output, Mapping):
         candidate = output.get("content") or output
+    elif isinstance(output, list):
+        # The provider-neutral gateway represents text as typed output
+        # blocks. Structured-output validation still applies to the joined
+        # text; this only normalizes the transport shape.
+        candidate = "".join(
+            str(item.get("text") or "")
+            for item in output
+            if isinstance(item, Mapping) and item.get("type") == "text"
+        )
     else:
         candidate = output
     if isinstance(candidate, Mapping):
@@ -1279,21 +1288,35 @@ def _validate_model_result(
         )
     normalized = []
     for item in selected:
-        if not isinstance(item, Mapping) or set(item) != {
-            "path",
-            "relevance_score",
-            "summary",
-            "evidence",
-        }:
+        if not isinstance(item, Mapping):
             raise RepositoryContextError(
                 f"utility model returned invalid {phase} file entry"
             )
-        path = _safe_model_text(str(item.get("path") or ""), "path")
+        path_value = item.get("path") or item.get("file_path") or item.get("file")
+        summary_value = (
+            item.get("summary")
+            or item.get("reason")
+            or item.get("description")
+        )
+        evidence = (
+            item.get("evidence")
+            or item.get("snippets")
+            or item.get("quotes")
+        )
+        score_value = (
+            item.get("relevance_score")
+            if item.get("relevance_score") is not None
+            else item.get("score", item.get("confidence"))
+        )
+        if not path_value or summary_value is None or evidence is None or score_value is None:
+            raise RepositoryContextError(
+                f"utility model returned invalid {phase} file entry"
+            )
+        path = _safe_model_text(str(path_value), "path")
         summary = _safe_model_text(
-            str(item.get("summary") or ""),
+            str(summary_value),
             "file summary",
         )
-        evidence = item.get("evidence")
         if (
             not isinstance(evidence, list)
             or len(evidence) > 32
@@ -1307,7 +1330,7 @@ def _validate_model_result(
             for value in evidence
         ]
         try:
-            score = float(item.get("relevance_score"))
+            score = float(score_value)
         except (TypeError, ValueError) as exc:
             raise RepositoryContextError(
                 f"utility model returned invalid {phase} relevance_score"

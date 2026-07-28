@@ -44,6 +44,42 @@
         "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
         "isolation": "in_process",
         "required_capabilities": ["subagent.placement.read"]
+      },
+      {
+        "id": "rumi.service.subagent.topology.compile.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.topology",
+        "cardinality": "one",
+        "security": "restricted",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.topology.compile"]
+      },
+      {
+        "id": "rumi.service.subagent.placement.patch.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.patch",
+        "cardinality": "one",
+        "security": "restricted",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.placement.patch"]
+      },
+      {
+        "id": "rumi.service.subagent.runtime.assignment.v1",
+        "version": "1.0.0",
+        "provider_instance_id": "subagent-placement.assignment",
+        "cardinality": "one",
+        "security": "restricted",
+        "failure": "fail_closed",
+        "lifecycle": {"introduced": "1.0.0", "deprecated": false, "data_owner": "rumi_subagent_placement_pack"},
+        "schemas": {"input": {"type": "object"}, "output": {"type": "object"}},
+        "isolation": "in_process",
+        "required_capabilities": ["subagent.runtime.assign"]
       }
     ],
     "requires": [
@@ -86,7 +122,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_compile_operation",
-      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
+      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
     },
     {
       "id": "subagent-placement-core-stage",
@@ -94,7 +130,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_core_stage",
-      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
+      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
     },
     {
       "id": "subagent-placement-protocols",
@@ -102,7 +138,31 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_protocol_catalog",
-      "artifact_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f"
+      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
+    },
+    {
+      "id": "subagent-placement-topology",
+      "contract_id": "rumi.service.subagent.topology.compile.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.topology",
+      "symbol": "create_topology_operation",
+      "artifact_hash": "sha256:ff18e35ef82970ccea62c2296b8b9ffabd1a0a1819818216571d6ffb5fd70227"
+    },
+    {
+      "id": "subagent-placement-patch",
+      "contract_id": "rumi.service.subagent.placement.patch.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.topology",
+      "symbol": "create_patch_operation",
+      "artifact_hash": "sha256:ff18e35ef82970ccea62c2296b8b9ffabd1a0a1819818216571d6ffb5fd70227"
+    },
+    {
+      "id": "subagent-placement-assignment",
+      "contract_id": "rumi.service.subagent.runtime.assignment.v1",
+      "loader": "python",
+      "module": "ecosystem.rumi_subagent_placement_pack.runtime.topology",
+      "symbol": "create_assignment_operation",
+      "artifact_hash": "sha256:ff18e35ef82970ccea62c2296b8b9ffabd1a0a1819818216571d6ffb5fd70227"
     }
   ],
   "resources": [],
@@ -111,10 +171,13 @@
     {"capability": "subagent.catalog.read", "access": "read", "approval_required": false},
     {"capability": "subagent.placement.read", "access": "read", "approval_required": false},
     {"capability": "subagent.placement.compile", "access": "execute", "approval_required": false},
+    {"capability": "subagent.topology.compile", "access": "execute", "approval_required": false},
+    {"capability": "subagent.placement.patch", "access": "execute", "approval_required": true},
+    {"capability": "subagent.runtime.assign", "access": "execute", "approval_required": false},
     {"capability": "host.authority.consume", "access": "control", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:b0e50bff387487be09d7798ba83937dbf3490389a5a18973de4d8b726f22520f",
+    "content_hash": "sha256:1e7aaecba46b5c381970d1835fa2c65bb08ea452ab177bf4be4559f0a9fed612",
     "build_identity": "rumi-subagent-placement-pack:1.0.0",
     "trust_class": "local",
     "signature": null

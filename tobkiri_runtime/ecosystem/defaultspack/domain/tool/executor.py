@@ -280,6 +280,15 @@ class ToolExecutor:
                 "rejected_by_security": True,
             }
 
+        context, delegated_review_response = _preflight_delegated_approval(
+            tool_name,
+            tool_def,
+            arguments,
+            context,
+        )
+        if delegated_review_response is not None:
+            return delegated_review_response
+
         context, permission_response = _preflight_profile_tool_permission(
             tool_name,
             tool_def,
@@ -572,12 +581,17 @@ class ToolExecutor:
                     ).encode("utf-8")
                 ).hexdigest()
             except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
-                return {
-                    "result": f"Active workspace binding failed: {exc}",
-                    "is_error": True,
-                    "widget": None,
-                    "error_type": "workspace_binding_invalid",
-                }
+                workspace_binding = _trusted_full_access_workspace_binding(
+                    context,
+                    context_workspace_id,
+                )
+                if workspace_binding is None:
+                    return {
+                        "result": f"Active workspace binding failed: {exc}",
+                        "is_error": True,
+                        "widget": None,
+                        "error_type": "workspace_binding_invalid",
+                    }
         payload = {
             **arguments,
             "profile_id": plan.profile_id,
@@ -2219,6 +2233,158 @@ def _preflight_profile_tool_permission(tool_name, tool_def, arguments, context, 
     if status == "allowed":
         return _context_with_profile_tool_permission_allow(context, tool_def, arguments, decision)
     return context, None
+
+
+def _trusted_full_access_workspace_binding(
+    context,
+    workspace_id,
+):
+    """Create a scoped binding when the optional workspace provider is absent.
+
+    This compatibility path is only available to the authenticated local UI in
+    full-access mode. It never accepts a path supplied in tool arguments.
+    """
+
+    if not isinstance(context, dict):
+        return None
+    policy = policy_from_context(context)
+    if (
+        context.get("_defaultspack_local_ui_authenticated") is not True
+        or str(policy.get("action_approval_mode") or "").strip().lower()
+        != "full"
+        or not _truthy(policy.get("full_access"))
+    ):
+        return None
+    raw_root = str(context.get("workspace_root") or "").strip()
+    if not raw_root or not Path(raw_root).is_absolute():
+        return None
+    try:
+        root = Path(raw_root).resolve(strict=True)
+        if not root.is_dir():
+            return None
+        root_stat = root.stat()
+    except OSError:
+        return None
+    binding = {
+        "workspace_id": str(workspace_id),
+        "access": "read_only",
+        "mount_revision": "authenticated-local-ui-full-access",
+        "canonical_root": str(root),
+        "root_st_dev": int(root_stat.st_dev),
+        "root_st_ino": int(root_stat.st_ino),
+        "binding_source": "authenticated_local_ui_fallback",
+    }
+    binding["root_identity"] = hashlib.sha256(
+        json.dumps(
+            binding,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return binding
+
+
+def _preflight_delegated_approval(
+    tool_name,
+    tool_def,
+    arguments,
+    context,
+):
+    """Resolve ``agent`` mode through an isolated reviewer, never blanket-yolo."""
+
+    from domain.tool.approval_reviewer import (
+        delegated_approval_requested,
+        review_tool_action,
+    )
+
+    next_context = dict(context or {}) if isinstance(context, dict) else {}
+    if not delegated_approval_requested(next_context):
+        return next_context, None
+    if isinstance(tool_def, dict) and (
+        is_safe_first_party_memo_tool(tool_def)
+        or is_sandbox_capability_tool(tool_def)
+    ):
+        return next_context, None
+    needs_review = bool(
+        _requires_approval(tool_def)
+        or _frontend_permission_resolver_failure_requires_approval(
+            tool_def,
+            tool_name,
+        )
+    )
+    if not needs_review:
+        try:
+            needs_review = (
+                ToolPermissionResolver().resolve(
+                    tool_def,
+                    context=next_context,
+                ).get("permission")
+                == "confirm"
+            )
+        except Exception:
+            needs_review = False
+    if not needs_review:
+        return next_context, None
+    review = review_tool_action(
+        tool_name,
+        tool_def if isinstance(tool_def, dict) else {},
+        arguments if isinstance(arguments, dict) else {},
+        next_context,
+    )
+    audit_tool_policy(
+        next_context,
+        "delegated_approval_review",
+        {
+            "tool_name": tool_name,
+            "decision": review.get("decision"),
+            "reason": review.get("reason"),
+            "review_id": review.get("review_id"),
+            "history_json_path": review.get("history_json_path"),
+        },
+    )
+    decision = str(review.get("decision") or "").strip().lower()
+    if decision == "approve":
+        sealed = seal_tool_context(
+            next_context,
+            {
+                "allowed": True,
+                "action": "allow",
+                "source": "approval_reviewer",
+                "review_id": review.get("review_id"),
+            },
+        )
+        mark_tool_server_approval_context(sealed)
+        sealed["_delegated_approval_review"] = dict(review)
+        return sealed, None
+    if decision == "deny":
+        return next_context, {
+            "result": "Delegated reviewer denied tool '{}': {}".format(
+                tool_name,
+                review.get("reason") or "unsafe action",
+            ),
+            "is_error": True,
+            "widget": {
+                "type": "tool_execution_denied",
+                "tool_name": tool_name,
+                "reason": review.get("reason"),
+                "delegated_review": review,
+            },
+            "error_type": "delegated_approval_denied",
+        }
+    response = _approval_required_tool_response(
+        tool_def,
+        arguments or {},
+        next_context,
+    )
+    if isinstance(response.get("widget"), dict):
+        response["widget"]["delegated_review"] = review
+        response["widget"]["display_summary"] = str(
+            review.get("reason")
+            or response["widget"].get("display_summary")
+            or "Delegated reviewer requested user approval."
+        )
+    return next_context, response
 
 
 def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context, policy):

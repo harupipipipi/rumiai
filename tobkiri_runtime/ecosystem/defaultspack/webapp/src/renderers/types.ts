@@ -160,6 +160,8 @@ export type ChatMessagesRendererProps = {
   pendingToolStartedAt?: Record<string, number>;
   messages: ChatUiMessage[];
   messagesEndRef: MutableRefObject<HTMLDivElement | null>;
+  messagesScrollRef?: MutableRefObject<HTMLDivElement | null>;
+  onMessagesScroll?: () => void;
   unknownBlockStrategy: string;
   showActivityInMessages: boolean;
   showWidgets: boolean;

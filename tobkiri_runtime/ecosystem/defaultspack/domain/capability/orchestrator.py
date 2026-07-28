@@ -550,6 +550,15 @@ def _tool_capability_grants(tool: dict[str, Any]) -> list[str]:
         "rumi.service.subagent.placement.compile.v1": (
             "subagent.placement.compile"
         ),
+        "rumi.service.subagent.topology.compile.v1": (
+            "subagent.topology.compile"
+        ),
+        "rumi.service.subagent.placement.patch.v1": (
+            "subagent.placement.patch"
+        ),
+        "rumi.service.subagent.runtime.assignment.v1": (
+            "subagent.runtime.assign"
+        ),
     }
     normalized.update(
         connection_capabilities[item]

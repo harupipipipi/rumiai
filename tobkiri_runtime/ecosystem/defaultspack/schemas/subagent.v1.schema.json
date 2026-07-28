@@ -19,7 +19,7 @@
   ],
   "properties": {
     "schema_version": {"const": "tobkiri.subagent/v1"},
-    "kind": {"const": "subagent"},
+    "kind": {"enum": ["main", "subagent"]},
     "id": {"$ref": "#/$defs/id"},
     "version": {"$ref": "#/$defs/semver"},
     "display_name": {"type": "string", "minLength": 1},
@@ -32,7 +32,8 @@
         "driver_contract": {"type": "string", "minLength": 1},
         "driver_key": {"type": "string", "minLength": 1},
         "supported_isolation": {"$ref": "#/$defs/stringList"},
-        "state_modes": {"$ref": "#/$defs/stringList"}
+        "state_modes": {"$ref": "#/$defs/stringList"},
+        "endpoint": {"type": "string", "minLength": 1}
       }
     },
     "interfaces": {
@@ -100,7 +101,15 @@
     },
     "limits": {"type": "object"},
     "governance": {"type": "object"},
-    "enforcement": {"type": "object", "additionalProperties": {"type": "string"}}
+    "enforcement": {"type": "object", "additionalProperties": {"type": "string"}},
+    "remote_card_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "topology_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
   },
   "$defs": {
     "id": {

@@ -1182,6 +1182,7 @@ test("composer renders action approval control and review card", () => {
   assert.match(html, /aria-label="Project: Main Repo"/);
   assert.match(html, />Main Repo</);
   assert.match(html, /アクションの承認方法/);
+  assert.doesNotMatch(html, /Codex アクションの承認方法/);
   assert.match(html, /承認/);
   assert.match(html, /使用する機能を確認/);
   assert.match(html, /この内容で続ける/);

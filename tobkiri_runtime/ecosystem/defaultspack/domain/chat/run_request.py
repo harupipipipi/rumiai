@@ -444,7 +444,10 @@ def prepare_chat_run(
     raw_tool_policy = params.get("tool_policy")
     if isinstance(raw_tool_policy, dict):
         sanitized_tool_policy, ignored_tool_policy_keys = _sanitize_untrusted_chat_tool_policy(
-            raw_tool_policy
+            raw_tool_policy,
+            trusted_local_ui=bool(
+                request_context.get("_defaultspack_local_ui_authenticated")
+            ),
         )
         if ignored_tool_policy_keys:
             params["tool_policy"] = sanitized_tool_policy
@@ -490,6 +493,12 @@ def prepare_chat_run(
             ),
             **tool_policy,
         }
+        if (
+            str(tool_policy.get("action_approval_mode") or "").strip().lower()
+            == "full"
+            and tool_policy.get("full_access") is True
+        ):
+            request_context["full_access"] = True
         policy_profile_id = str(tool_policy.get("profile_id") or "").strip()
         if policy_profile_id and not request_context.get("profile_id"):
             request_context["profile_id"] = policy_profile_id
@@ -1462,9 +1471,14 @@ def _client_policy_value_false(value: Any) -> bool:
     return str(value).strip().lower() in {"0", "false", "no", "off"}
 
 
-def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _sanitize_untrusted_chat_tool_policy(
+    policy: dict[str, Any],
+    *,
+    trusted_local_ui: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
     sanitized: dict[str, Any] = {}
     ignored: list[str] = []
+    requested_mode = str(policy.get("action_approval_mode") or "").strip().lower()
     for key, value in policy.items():
         key_text = str(key or "").strip()
         lower_key = key_text.lower()
@@ -1476,16 +1490,50 @@ def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[s
         if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value):
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value):
+        if (
+            lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS
+            and _client_policy_value_truthy(value)
+            and not (trusted_local_ui and requested_mode == "full")
+        ):
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value):
+        if (
+            lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS
+            and _client_policy_value_false(value)
+            and not (trusted_local_ui and requested_mode == "full")
+        ):
             ignored.append(key_text)
             continue
-        if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full":
+        if (
+            lower_key == "action_approval_mode"
+            and str(value or "").strip().lower() == "full"
+            and not trusted_local_ui
+        ):
             ignored.append(key_text)
             continue
         sanitized[key] = value
+    if trusted_local_ui and requested_mode == "full":
+        sanitized.update(
+            {
+                "action_approval_mode": "full",
+                "allow_file_write": True,
+                "allow_network": True,
+                "allow_shell": True,
+                "full_access": True,
+                "write_actions_require_approval": False,
+                "yolo_mode": True,
+            }
+        )
+    elif requested_mode == "agent":
+        # Delegated approval must never inherit the legacy blanket-yolo bypass.
+        for key in (
+            "allow_file_write",
+            "allow_network",
+            "allow_shell",
+            "full_access",
+            "yolo_mode",
+        ):
+            sanitized.pop(key, None)
     return sanitized, ignored
 
 

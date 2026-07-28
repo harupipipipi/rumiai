@@ -77,6 +77,7 @@ class SubagentPlacementCompiler:
         _require_capability_plan(capability_plan)
         feature_warnings = self._validate_features(placement)
         bindings = _bindings(placement)
+        _validate_binding_policies(definition, bindings)
         protocols = self._validate_protocols(placement, definition)
         authority = _compile_authority(
             definition,
@@ -117,11 +118,29 @@ class SubagentPlacementCompiler:
                 "revision": revisions["placement_revision"],
             },
             "presentation": dict(placement.get("presentation") or {}),
+            "agent_kind": str(definition.get("kind") or "subagent"),
+            "runtime_kind": _runtime_kind(definition),
             "role": dict(placement["role"]),
             "bindings": bindings,
+            "model": _binding_projection(bindings, "model"),
+            "tool_bindings": _binding_projection(bindings, "tools"),
+            "skill_bindings": _binding_projection(bindings, "skills"),
+            "memory_bindings": [
+                dict(item)
+                for item in bindings
+                if str(item.get("slot") or "").startswith("memory")
+            ],
+            "workspace_binding": _binding_projection(
+                bindings,
+                "workspace",
+            ),
             "protocol_bindings": protocols,
             "capability_plan_ref": _capability_ref(capability_plan),
             "effective_authority": authority,
+            "authority_envelope": {
+                "source": "host_intersection",
+                "capabilities": authority,
+            },
             "budgets": budgets,
             "approval": approval,
             "behavior": behavior,
@@ -470,6 +489,64 @@ def _bindings(placement: Mapping[str, Any]) -> list[dict[str, Any]]:
         result.append(dict(binding))
     result.sort(key=lambda item: str(item["slot"]))
     return result
+
+
+def _binding_projection(
+    bindings: Iterable[Mapping[str, Any]],
+    slot: str,
+) -> dict[str, Any]:
+    for binding in bindings:
+        if str(binding.get("slot") or "") == slot:
+            return dict(binding)
+    return {}
+
+
+def _runtime_kind(definition: Mapping[str, Any]) -> str:
+    runtime = _object(definition.get("runtime"), "subagent.runtime")
+    driver = str(runtime.get("driver_key") or "").lower()
+    supported = {
+        "agent_run",
+        "utility_model_call",
+        "human_task",
+        "remote_agent",
+        "composite_team",
+    }
+    if driver in supported:
+        return driver
+    if "utility" in driver:
+        return "utility_model_call"
+    if "remote" in driver or "a2a" in driver:
+        return "remote_agent"
+    if "human" in driver:
+        return "human_task"
+    if "team" in driver or "composite" in driver:
+        return "composite_team"
+    return "agent_run"
+
+
+def _validate_binding_policies(
+    definition: Mapping[str, Any],
+    bindings: Iterable[Mapping[str, Any]],
+) -> None:
+    ports = _object(definition.get("ports"), "subagent.ports")
+    provided = {
+        str(binding.get("slot") or "")
+        for binding in bindings
+    }
+    for slot, raw in ports.items():
+        port = _object(raw, f"subagent.ports.{slot}")
+        policy = str(port.get("binding_policy") or "")
+        candidates = {
+            value for value in provided if value == slot or value.startswith(slot + ".")
+        }
+        if policy in {"placement", "placement_required"} and not candidates:
+            raise PlacementCompileError(
+                f"Placement requires binding for Subagent port: {slot}"
+            )
+        if policy == "forbidden" and candidates:
+            raise PlacementCompileError(
+                f"Placement binds forbidden Subagent port: {slot}"
+            )
 
 
 def _compile_authority(

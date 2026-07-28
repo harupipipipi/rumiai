@@ -1690,6 +1690,8 @@ export function ChatMessagesRenderer({
   pendingToolStartedAt = {},
   messages,
   messagesEndRef,
+  messagesScrollRef,
+  onMessagesScroll,
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
@@ -1752,7 +1754,11 @@ export function ChatMessagesRenderer({
       ) : isNewConversation ? (
         <div className="flex-1" />
       ) : (
-        <div className="rumi-messages-scroll flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 lg:px-8">
+        <div
+          ref={messagesScrollRef}
+          onScroll={onMessagesScroll}
+          className="rumi-messages-scroll flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 lg:px-8"
+        >
           <div className="mx-auto w-full max-w-[980px] min-w-0 space-y-5">
             {visibleMessages.map((message) => {
               const toolActivity = showActivityInMessages && message.role === "agent"

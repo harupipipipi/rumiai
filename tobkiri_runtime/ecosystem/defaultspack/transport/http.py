@@ -1565,6 +1565,7 @@ _COMPOSER_TRANSCRIPTION_PATH = "/api/ambient/transcriptions"
 _COMPOSER_TRANSCRIPTION_MAX_REQUEST_BYTES = 36 * 1024 * 1024
 _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
+_LOCAL_UI_AUTH_CONTEXT_FLAG = "_defaultspack_local_ui_authenticated"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
     "/api/agent/subagent": {"POST"},
@@ -2030,6 +2031,8 @@ def _apply_ambient_browser_qa_context(context, payload):
 def _apply_defaultspack_local_ui_context(context, payload):
     if not isinstance(context, dict) or not isinstance(payload, dict):
         return
+    if payload.pop(_LOCAL_UI_AUTH_CONTEXT_FLAG, False) is True:
+        context[_LOCAL_UI_AUTH_CONTEXT_FLAG] = True
     if payload.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, False) is not True:
         return
     # This flag is only injected after a local bearer token has been verified
@@ -2295,6 +2298,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 return
             request_data.pop(_AMBIENT_BROWSER_QA_CONTEXT_FLAG, None)
             request_data.pop(_LOCAL_UI_APPROVAL_CONTEXT_FLAG, None)
+            request_data.pop(_LOCAL_UI_AUTH_CONTEXT_FLAG, None)
+            if _local_auth_token_authorized(self.headers):
+                request_data[_LOCAL_UI_AUTH_CONTEXT_FLAG] = True
             if _ambient_browser_test_token_authorized(method, path, self.headers, request_data):
                 request_data[_AMBIENT_BROWSER_QA_CONTEXT_FLAG] = True
             if _local_ui_approval_route_authorized(method, path, self.headers, request_data):

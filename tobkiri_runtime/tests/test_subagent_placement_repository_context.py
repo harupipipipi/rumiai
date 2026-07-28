@@ -679,6 +679,79 @@ def test_repository_context_rejects_prose_wrapped_fenced_json() -> None:
         )
 
 
+def test_repository_context_accepts_gateway_text_blocks() -> None:
+    assert _model_json(
+        {
+            "output": [
+                {
+                    "type": "text",
+                    "text": '{"summary":"ok","selected_files":[]}',
+                }
+            ]
+        },
+        "reduce",
+    ) == {"summary": "ok", "selected_files": []}
+
+
+def test_repository_context_ignores_safe_extra_file_fields() -> None:
+    assert _model_json(
+        {
+            "output": json.dumps(
+                {
+                    "selected_files": [
+                        {
+                            "path": "src/auth.py",
+                            "relevance_score": 0.9,
+                            "summary": "Auth implementation.",
+                            "evidence": ["def verify_token(token):"],
+                            "reason": "Matches the query.",
+                        }
+                    ]
+                }
+            )
+        },
+        "map",
+    ) == {
+        "selected_files": [
+            {
+                "path": "src/auth.py",
+                "relevance_score": 0.9,
+                "summary": "Auth implementation.",
+                "evidence": ["def verify_token(token):"],
+            }
+        ]
+    }
+
+
+def test_repository_context_normalizes_common_utility_model_aliases() -> None:
+    assert _model_json(
+        {
+            "output": json.dumps(
+                {
+                    "selected_files": [
+                        {
+                            "file_path": "src/auth.py",
+                            "confidence": 0.8,
+                            "reason": "Authentication implementation.",
+                            "snippets": ["def verify_token(token):"],
+                        }
+                    ]
+                }
+            )
+        },
+        "map",
+    ) == {
+        "selected_files": [
+            {
+                "path": "src/auth.py",
+                "relevance_score": 0.8,
+                "summary": "Authentication implementation.",
+                "evidence": ["def verify_token(token):"],
+            }
+        ]
+    }
+
+
 def test_repository_context_rejects_ambiguous_json_documents() -> None:
     with pytest.raises(Exception, match="invalid reduce JSON"):
         _model_json(
@@ -1042,15 +1115,15 @@ def test_pack_entrypoint_and_provenance_hashes_match_declared_artifacts(
     entrypoint_hashes = {
         str(item["artifact_hash"]) for item in pack["entrypoints"]
     }
-    assert len(entrypoint_hashes) == 1
-    [declared_hash] = entrypoint_hashes
-    runtime_hash = declared_hash.removeprefix("sha256:")
     manifest = _json(pack_root / "artifact-manifest.json")
     declared_artifacts = {
         str(item["sha256"]).removeprefix("sha256:")
         for item in manifest["artifacts"]
     }
-    assert runtime_hash in declared_artifacts
+    assert entrypoint_hashes
+    assert {
+        value.removeprefix("sha256:") for value in entrypoint_hashes
+    }.issubset(declared_artifacts)
     integrity = ecosystem.get("metadata", {}).get("integrity", {})
     if integrity.get("artifact_manifest"):
         index_hash = "sha256:" + hashlib.sha256(
@@ -1059,6 +1132,8 @@ def test_pack_entrypoint_and_provenance_hashes_match_declared_artifacts(
         assert pack["provenance"]["content_hash"] == index_hash
         assert ecosystem["provenance"]["content_hash"] == index_hash
     else:
+        assert len(entrypoint_hashes) == 1
+        [declared_hash] = entrypoint_hashes
         assert pack["provenance"]["content_hash"] == declared_hash
         assert ecosystem["provenance"]["content_hash"] == declared_hash
 

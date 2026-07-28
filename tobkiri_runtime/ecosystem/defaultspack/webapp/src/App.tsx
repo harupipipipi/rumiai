@@ -74,6 +74,7 @@ import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeAp
 import { browserApprovalViewModel, runtimeApprovalViewModel, type ApprovalViewModel } from "./lib/approvalPresentation";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
+import { isMessageScrollerNearBottom } from "./lib/chatScroll";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
@@ -201,6 +202,16 @@ type SubmitOverride = {
 type RetryableSubmission = SubmitOverride & {
   errorMessage: string;
 };
+
+type ConversationScrollState = {
+  follow: boolean;
+  scrollTop: number;
+};
+
+// The shell may remount ChatApp while refreshing its resolved UI catalog.
+// Keep the user's reading position outside the component so a remount cannot
+// silently restore the default "follow bottom" behavior.
+const conversationScrollState = new Map<string, ConversationScrollState>();
 
 function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
   const ids: string[] = [];
@@ -2566,6 +2577,8 @@ function ChatApp() {
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const shouldFollowMessagesRef = useRef(true);
   const isUnloadingRef = useRef(false);
   const humanOperatorAutoOpenedPreviewRef = useRef<string | null>(null);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
@@ -3226,8 +3239,38 @@ function ChatApp() {
   }, [codingDirectory, effectiveWorkspaceId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isGenerating]);
+    if (!activeConversationId) {
+      shouldFollowMessagesRef.current = false;
+      return;
+    }
+    const saved = conversationScrollState.get(activeConversationId);
+    shouldFollowMessagesRef.current = saved?.follow ?? true;
+    if (!saved || saved.follow) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (messagesScrollRef.current) {
+        messagesScrollRef.current.scrollTop = saved.scrollTop;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversationId]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const scroller = messagesScrollRef.current;
+    if (!scroller) return;
+    const follow = isMessageScrollerNearBottom(scroller);
+    shouldFollowMessagesRef.current = follow;
+    if (activeConversationId) {
+      conversationScrollState.set(activeConversationId, {
+        follow,
+        scrollTop: scroller.scrollTop,
+      });
+    }
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (!shouldFollowMessagesRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [activeConversationId, messages, isGenerating]);
 
   useEffect(() => {
     const markUnloading = () => {
@@ -5409,7 +5452,8 @@ function ChatApp() {
         tool_policy: {
           ...templatePolicyReferencePayload,
           action_approval_mode: actionApprovalMode,
-          ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          // Delegated approval is reviewed server-side; only full access uses yolo.
+          ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
@@ -5988,6 +6032,13 @@ function ChatApp() {
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
     const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
     if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
+    shouldFollowMessagesRef.current = true;
+    if (activeConversationId) {
+      conversationScrollState.set(activeConversationId, {
+        follow: true,
+        scrollTop: messagesScrollRef.current?.scrollTop ?? 0,
+      });
+    }
     setRetryableSubmission(null);
 
     const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
@@ -7118,6 +7169,8 @@ function ChatApp() {
                 pendingToolStartedAt={pendingRequest?.toolStartedAt ?? {}}
                 messages={messages}
                 messagesEndRef={messagesEndRef}
+                messagesScrollRef={messagesScrollRef}
+                onMessagesScroll={handleMessagesScroll}
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
