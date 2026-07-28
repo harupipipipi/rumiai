@@ -89,13 +89,13 @@ def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
     assert all(model["metadata"]["inventory_source"] == "live" for model in models)
     assert models[0]["metadata"]["transport"] == "openai_chat_completions"
     assert all(model["capabilities"]["tool_calling"] is False for model in models)
+    assert all(model["capabilities"]["image_input"] is False for model in models)
+    assert all(model["capabilities"]["vision"] is False for model in models)
     assert all(model["metadata"]["tool_calling_verified"] is False for model in models)
 
 
 @pytest.mark.parametrize("payload", [{"data": []}, {"unexpected": []}])
-def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(
-    monkeypatch, payload
-):
+def test_opencode_zen_model_inventory_falls_back_when_live_inventory_is_empty(monkeypatch, payload):
     provider = _provider(monkeypatch)
 
     with patch.object(
@@ -161,9 +161,7 @@ def test_opencode_zen_reasoning_complete_uses_live_openai_model_and_token_floor(
     monkeypatch,
 ):
     provider = _provider(monkeypatch)
-    provider._model_inventory_cache = [
-        {"model_id": "deepseek-v4-flash-free"}
-    ]
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
     captured = {}
 
     def fake_request_openai_json(path, body, **kwargs):
@@ -306,9 +304,7 @@ def test_opencode_zen_reasoning_stream_omits_tools_and_applies_token_floor(
     monkeypatch,
 ):
     provider = _provider(monkeypatch)
-    provider._model_inventory_cache = [
-        {"model_id": "deepseek-v4-flash-free"}
-    ]
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
     captured = {}
     response = _FakeSseResponse(
         [
@@ -634,20 +630,76 @@ def test_opencode_zen_rejects_unknown_model(monkeypatch):
     provider = _provider(monkeypatch)
 
     with pytest.raises(RuntimeError, match="unsupported model"):
-        provider.complete("opencode-zen/not-a-real-model", [{"role": "user", "content": "hi"}], [], {})
+        provider.complete(
+            "opencode-zen/not-a-real-model", [{"role": "user", "content": "hi"}], [], {}
+        )
+
+
+@pytest.mark.parametrize("method_name", ["complete", "stream"])
+@pytest.mark.parametrize(
+    "image_block",
+    [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "AA==",
+            },
+        },
+        {"type": "input_image", "image_url": "https://example.invalid/image.png"},
+    ],
+)
+def test_opencode_zen_rejects_image_input_before_network(monkeypatch, method_name, image_block):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "mimo-v2.5-free"}]
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image"},
+                image_block,
+            ],
+        }
+    ]
+
+    with (
+        patch.object(provider, "_request_openai_json") as request_json,
+        patch.object(provider, "_request_openai_stream") as request_stream,
+        pytest.raises(RuntimeError, match="text-only"),
+    ):
+        result = getattr(provider, method_name)(
+            "opencode-zen/mimo-v2.5-free",
+            messages,
+            [],
+            {},
+        )
+        if method_name == "stream":
+            list(result)
+
+    request_json.assert_not_called()
+    request_stream.assert_not_called()
 
 
 def _live_enabled():
-    return os.environ.get("RUMI_OPENCODE_ZEN_LIVE_TEST") == "1" and bool(os.environ.get("OPENCODE_ZEN_API_KEY"))
+    return os.environ.get("RUMI_OPENCODE_ZEN_LIVE_TEST") == "1" and bool(
+        os.environ.get("OPENCODE_ZEN_API_KEY")
+    )
 
 
 @pytest.mark.live
-@pytest.mark.skipif(not _live_enabled(), reason="set RUMI_OPENCODE_ZEN_LIVE_TEST=1 and OPENCODE_ZEN_API_KEY")
+@pytest.mark.skipif(
+    not _live_enabled(), reason="set RUMI_OPENCODE_ZEN_LIVE_TEST=1 and OPENCODE_ZEN_API_KEY"
+)
 def test_opencode_zen_live_inventory_and_free_model_complete():
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
 
     provider = OpencodeZenProvider()
-    model_ids = [model["model_id"] for model in provider.list_models()]
+    models = provider.list_models()
+    model_ids = [model["model_id"] for model in models]
+    assert all(model["capabilities"]["image_input"] is False for model in models)
+    assert all(model["capabilities"]["vision"] is False for model in models)
     preferred = ["mimo-v2.5-free", "deepseek-v4-flash-free"]
     model_id = next(
         (candidate for candidate in preferred if candidate in model_ids),

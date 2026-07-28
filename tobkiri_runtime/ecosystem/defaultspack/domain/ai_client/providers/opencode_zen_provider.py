@@ -38,9 +38,7 @@ class OpencodeZenProvider(AnthropicProvider):
     _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
     def __init__(self) -> None:
-        self._api_key = str(
-            read_provider_api_key("opencode-zen", "default") or ""
-        )
+        self._api_key = str(read_provider_api_key("opencode-zen", "default") or "")
         self._ssl_ctx = ssl.create_default_context()
         self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
         self._model_inventory_cache: List[Dict[str, Any]] = []
@@ -157,10 +155,7 @@ class OpencodeZenProvider(AnthropicProvider):
                 )
             elif isinstance(raw_capabilities, list):
                 tool_calling = tool_calling or bool(
-                    {
-                        str(value).strip().casefold()
-                        for value in raw_capabilities
-                    }
+                    {str(value).strip().casefold() for value in raw_capabilities}
                     & {"tool_calling", "tools", "function_calling"}
                 )
             model = {
@@ -177,6 +172,8 @@ class OpencodeZenProvider(AnthropicProvider):
                     "text_output": True,
                     "streaming": True,
                     "tool_calling": tool_calling,
+                    "image_input": False,
+                    "vision": False,
                 },
                 "metadata": {
                     "transport": "openai_chat_completions",
@@ -350,13 +347,10 @@ class OpencodeZenProvider(AnthropicProvider):
                                 "name": current.get("name", ""),
                             }
             if finish_reason == "tool_calls" and not any(
-                current.get("started")
-                for current in tool_call_state.values()
+                current.get("started") for current in tool_call_state.values()
             ):
                 recovery_body = {
-                    key: value
-                    for key, value in body.items()
-                    if key != "stream_options"
+                    key: value for key, value in body.items() if key != "stream_options"
                 }
                 recovered = OpenAIProvider.parse_response(
                     self,
@@ -368,8 +362,7 @@ class OpencodeZenProvider(AnthropicProvider):
                 )
                 recovered_usage = recovered.get("usage") or {}
                 usage = {
-                    key: int(usage.get(key) or 0)
-                    + int(recovered_usage.get(key) or 0)
+                    key: int(usage.get(key) or 0) + int(recovered_usage.get(key) or 0)
                     for key in (
                         "input_tokens",
                         "output_tokens",
@@ -377,10 +370,7 @@ class OpencodeZenProvider(AnthropicProvider):
                     )
                 }
                 for item in recovered.get("content") or []:
-                    if (
-                        not isinstance(item, dict)
-                        or item.get("type") != "tool_use"
-                    ):
+                    if not isinstance(item, dict) or item.get("type") != "tool_use":
                         continue
                     call_id = str(item.get("id") or "tool_call_recovered")
                     name = str(item.get("name") or "")
@@ -420,6 +410,7 @@ class OpencodeZenProvider(AnthropicProvider):
 
     def complete(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
+        self._assert_text_only_messages(messages)
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             del tools
             return super().complete(model_id, messages, [], self._params_with_token_floor(params))
@@ -432,6 +423,7 @@ class OpencodeZenProvider(AnthropicProvider):
 
     def stream(self, model, messages, tools, params):
         model_id = self._assert_supported_model(model)
+        self._assert_text_only_messages(messages)
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             del tools
             yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
@@ -444,14 +436,41 @@ class OpencodeZenProvider(AnthropicProvider):
         yield from self._stream_openai_chat(model_id, messages, tools, next_params)
 
     @staticmethod
+    def _assert_text_only_messages(messages: Any) -> None:
+        for message in messages if isinstance(messages, list) else []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            blocks = content if isinstance(content, list) else [content]
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get("type") or "").strip().casefold()
+                source = block.get("source")
+                source_media_type = (
+                    str(source.get("media_type") or "").strip().casefold()
+                    if isinstance(source, dict)
+                    else ""
+                )
+                media_type = (
+                    str(block.get("media_type") or block.get("mime_type") or "").strip().casefold()
+                )
+                if (
+                    block_type in {"image", "image_url", "input_image"}
+                    or source_media_type.startswith("image/")
+                    or media_type.startswith("image/")
+                ):
+                    raise RuntimeError(
+                        "OpenCode Zen is configured as text-only; image input is not supported"
+                    )
+
+    @staticmethod
     def _normalize_openai_tools(tools):
         normalized = []
         for raw in tools if isinstance(tools, list) else []:
             if not isinstance(raw, dict):
                 raise RuntimeError("OpenCode Zen Tool must be an object")
-            if raw.get("type") == "function" and isinstance(
-                raw.get("function"), dict
-            ):
+            if raw.get("type") == "function" and isinstance(raw.get("function"), dict):
                 function = dict(raw["function"])
                 if not function.get("name"):
                     raise RuntimeError("OpenCode Zen Tool name is required")
@@ -459,16 +478,12 @@ class OpencodeZenProvider(AnthropicProvider):
                     "parameters",
                     {"type": "object", "properties": {}},
                 )
-                normalized.append(
-                    {"type": "function", "function": function}
-                )
+                normalized.append({"type": "function", "function": function})
                 continue
             name = str(raw.get("name") or "").strip()
             schema = raw.get("input_schema")
             if not name or not isinstance(schema, dict):
-                raise RuntimeError(
-                    "OpenCode Zen Tool must use a supported function schema"
-                )
+                raise RuntimeError("OpenCode Zen Tool must use a supported function schema")
             normalized.append(
                 {
                     "type": "function",
