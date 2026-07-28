@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
 
 import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
 import { cn } from "../../../lib/cn";
@@ -41,7 +40,6 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
     providerScope,
   );
   const [providerId, setProviderId] = useState(String(field.provider_id ?? ""));
-  const [formOpen, setFormOpen] = useState(false);
   const [apiName, setApiName] = useState("main");
   const [secret, setSecret] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -108,7 +106,6 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
       setQuotaLabel("");
       setNotes("");
       setSaveState("saved");
-      setFormOpen(false);
     } catch (saveErrorValue) {
       setSaveState("idle");
       setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : "API key save failed.");
@@ -135,35 +132,11 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
             ))}
           </div>
         )}
-        {registeredApis.length === 0 && !formOpen && (
-          <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-3 text-xs text-zinc-500">
-            登録済みのAI APIキーはありません。
+        <div className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3">
+          <p className="text-xs leading-5 text-zinc-500">
+            使いたいAIプロバイダーを選び、識別用の名前とAPIキーを入力します。
           </p>
-        )}
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              setFormOpen((current) => !current);
-              resetFeedback();
-            }}
-            className={cn(
-              "inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors",
-              formOpen
-                ? "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/70 hover:bg-emerald-500/15",
-            )}
-          >
-            {formOpen ? <X size={16} aria-hidden /> : <Plus size={16} aria-hidden />}
-            {formOpen ? "追加をやめる" : "APIキーを追加"}
-          </button>
-        </div>
-        {formOpen && (
-          <div className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3">
-            <p className="text-xs leading-5 text-zinc-500">
-              使いたいAIプロバイダーを選び、識別用の名前とAPIキーを入力します。
-            </p>
-            <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
+          <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
               <SearchableProviderField
                 value={providerId}
                 options={providerOptions}
@@ -227,19 +200,18 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
               >
                 {saveState === "saving" ? "Saving" : "Save"}
               </button>
-            </div>
-            <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
-              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">詳細設定（任意）</summary>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); resetFeedback(); }} placeholder="base_url (optional)" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-                <input value={defaultModel} onChange={(event) => { setDefaultModel(event.target.value); resetFeedback(); }} placeholder="default model for this API" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-                <input value={allowedModels} onChange={(event) => { setAllowedModels(event.target.value); resetFeedback(); }} placeholder="allowed models, comma separated" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-                <input value={quotaLabel} onChange={(event) => { setQuotaLabel(event.target.value); resetFeedback(); }} placeholder="quota label" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
-                <textarea value={notes} onChange={(event) => { setNotes(event.target.value); resetFeedback(); }} placeholder="notes for routing" className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2" />
-              </div>
-            </details>
           </div>
-        )}
+          <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
+            <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">詳細設定（任意）</summary>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); resetFeedback(); }} placeholder="base_url (optional)" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+              <input value={defaultModel} onChange={(event) => { setDefaultModel(event.target.value); resetFeedback(); }} placeholder="default model for this API" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+              <input value={allowedModels} onChange={(event) => { setAllowedModels(event.target.value); resetFeedback(); }} placeholder="allowed models, comma separated" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+              <input value={quotaLabel} onChange={(event) => { setQuotaLabel(event.target.value); resetFeedback(); }} placeholder="quota label" className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none" />
+              <textarea value={notes} onChange={(event) => { setNotes(event.target.value); resetFeedback(); }} placeholder="notes for routing" className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2" />
+            </div>
+          </details>
+        </div>
         {feedback?.text && (
           <div className={cn(
             "rounded-lg border px-3 py-2 text-[11px]",

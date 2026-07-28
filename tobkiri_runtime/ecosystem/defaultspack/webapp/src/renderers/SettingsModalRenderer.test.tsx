@@ -673,9 +673,9 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
 
   assert.match(html, /data-settings-renderer="api_key_setup"/);
   assert.match(html, /openai:main:\*\*\*/);
-  assert.match(html, />APIキーを追加</);
-  assert.doesNotMatch(html, /placeholder="openai API key"/);
-  assert.doesNotMatch(html, />Save</);
+  assert.doesNotMatch(html, />APIキーを追加</);
+  assert.match(html, /placeholder="openai API key"/);
+  assert.match(html, />Save</);
 });
 
 test("Connections API credential template excludes AI provider keys", () => {
