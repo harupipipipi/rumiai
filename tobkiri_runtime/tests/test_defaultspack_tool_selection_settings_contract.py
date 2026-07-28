@@ -365,7 +365,13 @@ def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
     )
 
     decision = service_module.ToolSelectionService(
-        settings={"tools": {"selection_strategy": "semantic", "embedding_model": ""}}
+        settings={
+            "tools": {
+                "selection_strategy": "semantic",
+                "embedding_model": "",
+                "auto_discover_embedding_model": True,
+            }
+        }
     ).select(
         "search the web",
         _tools(),
@@ -374,6 +380,21 @@ def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
 
     assert captured["model"] == "google/text-embedding-004"
     assert [tool["tool_id"] for tool in decision.selected_tools] == ["web_search"]
+
+
+def test_semantic_default_does_not_scan_provider_catalog(monkeypatch):
+    from domain.chat import tool_selection_service as service_module
+
+    def unexpected_search(_filters):
+        raise AssertionError("provider catalog must not be scanned in the chat hot path")
+
+    monkeypatch.setattr(service_module, "search_models", unexpected_search)
+
+    service = service_module.ToolSelectionService(
+        settings={"tools": {"selection_strategy": "semantic", "embedding_model": ""}}
+    )
+
+    assert service._embedding_model() == ""
 
 
 def test_embedding_index_calls_ai_client_embed_with_selected_model(tmp_path, monkeypatch):

@@ -587,6 +587,22 @@ class DefaultsHttpServer:
         *,
         fallback_block_module="",
     ):
+        # A live SSE iterator cannot cross the subprocess function boundary:
+        # serializing it either stringifies the generator or waits for the
+        # complete agent run before the HTTP response starts. Keep the
+        # declarative flow available to non-HTTP callers, while the HTTP
+        # adapter uses the compatibility block that preserves incremental
+        # tool-selection, tool-call, and assistant events.
+        if (
+            flow_id == "defaultspack.chat_stream_turn"
+            and fallback_block_module == "blocks.chat.stream"
+        ):
+            return self._invoke_fallback_block(
+                fallback_block_module,
+                request_data,
+                path_params,
+                inject,
+            )
         payload = dict(request_data or {})
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")

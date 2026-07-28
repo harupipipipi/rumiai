@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +30,25 @@ def run_defaultspack_function(
         args = ensure_dict(input_data)
         ctx = dict(context or {})
         handler = get_handler(function_id)
-        return normalize_output(handler(args, ctx))
+        return normalize_output(_materialize_stream_output(handler(args, ctx)))
     except FunctionNotFoundError as exc:
         return error(str(exc), "FUNCTION_NOT_FOUND")
     except Exception as exc:
         return normalize_exception(exc)
+
+
+def _materialize_stream_output(value: Any) -> Any:
+    """Make subprocess-backed SSE results safe to cross the JSON boundary."""
+    if not isinstance(value, dict) or not value.get("_sse"):
+        return value
+    events = value.get("events")
+    if events is None or isinstance(events, (list, str, bytes)):
+        return value
+    if not isinstance(events, Iterable):
+        return value
+    materialized = dict(value)
+    materialized["events"] = list(events)
+    return materialized
 
 
 def get_handler(function_id: str):

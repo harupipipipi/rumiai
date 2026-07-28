@@ -973,26 +973,27 @@ def test_http_chat_stream_flow_route_falls_back_when_sse_events_are_stringified(
     ]
 
 
-def test_http_chat_stream_flow_route_returns_compatible_sse_output():
+def test_http_chat_stream_route_uses_live_sse_fallback_without_starting_flow():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-    from ecosystem.defaultspack.domain.flow.result import FlowResult
 
     server = DefaultsHttpServer.__new__(DefaultsHttpServer)
     server._build_context = lambda: {"request_id": "req-1"}
+    calls = []
 
-    class FakeEngine:
-        def execute(self, flow_id, trigger_input, context=None):
-            return FlowResult(
-                status="completed",
-                output={"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}},
-                metadata={"flow_id": flow_id},
-            )
+    def fake_fallback(module_name, request_data, path_params, inject=None):
+        calls.append((module_name, request_data, path_params, inject or {}))
+        return {"_sse": True, "events": iter([{"type": "done"}])}
 
-    server._invoke_fallback_block = lambda *_args, **_kwargs: {"status": "error"}
+    server._invoke_fallback_block = fake_fallback
     import domain.flow as flow_module
 
     original = flow_module.FlowEngine
-    flow_module.FlowEngine = FakeEngine
+
+    class UnexpectedFlowEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            raise AssertionError("live HTTP SSE must not enter the subprocess flow")
+
+    flow_module.FlowEngine = UnexpectedFlowEngine
     try:
         result = server._invoke_flow_route(
             "defaultspack.chat_stream_turn",
@@ -1004,7 +1005,16 @@ def test_http_chat_stream_flow_route_returns_compatible_sse_output():
     finally:
         flow_module.FlowEngine = original
 
-    assert result == {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+    assert result["_sse"] is True
+    assert list(result["events"]) == [{"type": "done"}]
+    assert calls == [
+        (
+            "blocks.chat.stream",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+        )
+    ]
 
 
 def test_stdio_chat_message_uses_canonical_chat_turn_flow():

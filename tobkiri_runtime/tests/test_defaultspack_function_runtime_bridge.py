@@ -423,6 +423,35 @@ def test_dispatcher_runs_template_backed_function_piece():
     assert result["data"]["estimated_tokens"] > 0
 
 
+def test_dispatcher_materializes_sse_events_for_subprocess_json_boundary():
+    import domain.function_runtime.dispatcher as dispatcher
+
+    def event_stream():
+        yield {"type": "tool_selection_started"}
+        yield {"type": "tool_call", "name": "repository_context"}
+        yield {"type": "done"}
+
+    with patch.object(
+        dispatcher,
+        "get_handler",
+        return_value=lambda _args, _context: {"_sse": True, "events": event_stream()},
+    ):
+        result = dispatcher.run_defaultspack_function("chat_stream", {}, {})
+
+    assert result == {
+        "status": "ok",
+        "data": {
+            "_sse": True,
+            "events": [
+                {"type": "tool_selection_started"},
+                {"type": "tool_call", "name": "repository_context"},
+                {"type": "done"},
+            ],
+        },
+    }
+    assert json.loads(json.dumps(result)) == result
+
+
 def test_dispatcher_runs_thinking_level_function(tmp_path, monkeypatch):
     from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
     import domain.function_runtime.dispatcher as dispatcher

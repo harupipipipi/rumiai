@@ -251,9 +251,6 @@ class ToolSelectionService:
                 cache_hit=bool(hints.get("cache_hit")),
             )
 
-        semantic = self._semantic_candidates(user_text, eligible, context=context)
-        semantic_ids = list(semantic.get("tool_ids") or [])
-        semantic_candidates = self._tools_by_ids(eligible, semantic_ids)
         if strategy == "lexical":
             lexical_ids = recommend_tool_ids(user_text, eligible, limit=self._final_limit(), threshold=0.0)
             candidates = self._tools_by_ids(eligible, lexical_ids)
@@ -269,6 +266,9 @@ class ToolSelectionService:
                 unknown_targets=unknown_targets,
                 permission_entries=permission_entries,
             )
+        semantic = self._semantic_candidates(user_text, eligible, context=context)
+        semantic_ids = list(semantic.get("tool_ids") or [])
+        semantic_candidates = self._tools_by_ids(eligible, semantic_ids)
         if strategy == "semantic":
             selected = self._stable_merge(included, semantic_candidates)[: self._final_limit()]
             return self._decision(
@@ -409,6 +409,14 @@ class ToolSelectionService:
         configured = str(self._tool_settings.get("embedding_model") or "").strip()
         if configured:
             return configured
+        # Provider discovery walks every model and OAuth connection manifest.
+        # Doing that synchronously on each chat turn delays the first SSE event
+        # and can deadlock against managed-runtime workspace synchronization.
+        # Keep automatic discovery available as an explicit opt-in; the normal
+        # hot path uses the deterministic lexical prefilter and still lets the
+        # utility model make the final AI selection.
+        if not bool(self._tool_settings.get("auto_discover_embedding_model", False)):
+            return ""
         try:
             result = search_models({"type": "embedding", "configured_only": True, "max_results": 1})
         except Exception:

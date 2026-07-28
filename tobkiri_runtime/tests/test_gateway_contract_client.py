@@ -127,6 +127,102 @@ def test_contract_gateway_projects_tool_intents_to_legacy_content(
     assert result["tool_calls"] == [intent]
 
 
+def test_contract_gateway_stream_falls_back_to_configured_legacy_provider(
+    monkeypatch,
+) -> None:
+    class FakeClient:
+        def stream(self, model, messages, tools, params):
+            assert model == "opencode-zen/mimo-v2.5-free"
+            assert messages == [{"role": "user", "content": "inspect"}]
+            assert tools == [{"name": "read_file"}]
+            assert params == {"temperature": 0}
+            return iter([{"type": "stream_end", "finish_reason": "stop"}])
+
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "stream",
+        lambda _payload: (_ for _ in ()).throw(
+            gateway_contract_client.GlobalContractInvocationError(
+                "not_configured",
+                "provider connection is not configured",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.client.AIClient",
+        lambda: FakeClient(),
+    )
+
+    result = list(
+        ContractLLMGateway().stream(
+            {
+                "model": "opencode-zen/mimo-v2.5-free",
+                "messages": [{"role": "user", "content": "inspect"}],
+                "tools": [{"name": "read_file"}],
+                "params": {"temperature": 0},
+            }
+        )
+    )
+
+    assert result == [{"type": "stream_end", "finish_reason": "stop"}]
+
+
+def test_contract_gateway_complete_falls_back_to_configured_legacy_provider(
+    monkeypatch,
+) -> None:
+    expected = {"content": "done", "tool_calls": []}
+
+    class FakeClient:
+        def complete(self, model, messages, tools, params):
+            assert model == "opencode-zen/mimo-v2.5-free"
+            assert messages == [{"role": "user", "content": "inspect"}]
+            assert tools == [{"name": "read_file"}]
+            assert params == {"temperature": 0}
+            return expected
+
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "generate",
+        lambda _payload: (_ for _ in ()).throw(
+            gateway_contract_client.GlobalContractInvocationError(
+                "not_configured",
+                "provider connection is not configured",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.client.AIClient",
+        lambda: FakeClient(),
+    )
+
+    result = ContractLLMGateway().complete(
+        {
+            "model": "opencode-zen/mimo-v2.5-free",
+            "messages": [{"role": "user", "content": "inspect"}],
+            "tools": [{"name": "read_file"}],
+            "params": {"temperature": 0},
+        }
+    )
+
+    assert result == expected
+
+
+def test_contract_gateway_does_not_fallback_after_denial(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gateway_contract_client,
+        "stream",
+        lambda _payload: (_ for _ in ()).throw(
+            gateway_contract_client.GlobalContractInvocationError(
+                "denied",
+                "provider access denied",
+            )
+        ),
+    )
+
+    with pytest.raises(gateway_contract_client.GlobalContractInvocationError):
+        list(ContractLLMGateway().stream({"model": "opencode-zen/test"}))
+
+
 def test_provider_adapter_stream_preserves_tool_intents() -> None:
     intent = {
         "id": "call-1",
