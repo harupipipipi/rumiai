@@ -434,8 +434,22 @@ fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&s
         );
     }
 
+    let hash_start = if tokens.get(1) == Some(&";") {
+        let marker = tokens.get(1..5).unwrap_or_default();
+        if !is_supported_python_version_marker(marker) {
+            bail!(
+                "{}:{} contains an unsupported environment marker; automatic installation only permits a simple python_version comparison",
+                req_path.display(),
+                line_number
+            );
+        }
+        5
+    } else {
+        1
+    };
+
     let mut hash_count = 0usize;
-    for token in &tokens[1..] {
+    for token in &tokens[hash_start..] {
         if !token.starts_with("--hash=sha256:") {
             bail!(
                 "{}:{} contains unsupported requirement token {token:?}; only --hash=sha256:<64hex> is permitted after the package pin",
@@ -463,6 +477,32 @@ fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&s
     }
 
     Ok(())
+}
+
+fn is_supported_python_version_marker(tokens: &[&str]) -> bool {
+    if tokens.len() != 4 || tokens[0] != ";" || tokens[1] != "python_version" {
+        return false;
+    }
+    if !matches!(tokens[2], "<" | "<=" | "==" | "!=" | ">=" | ">") {
+        return false;
+    }
+
+    let quoted_version = tokens[3];
+    if quoted_version.len() < 5 {
+        return false;
+    }
+    let quote = quoted_version.as_bytes()[0];
+    if !matches!(quote, b'\'' | b'"') || quoted_version.as_bytes().last() != Some(&quote) {
+        return false;
+    }
+    let version = &quoted_version[1..quoted_version.len() - 1];
+    version.contains('.')
+        && version
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+        && !version.starts_with('.')
+        && !version.ends_with('.')
+        && !version.contains("..")
 }
 
 fn is_exact_package_pin(token: &str) -> bool {
@@ -655,6 +695,54 @@ mod tests {
         .unwrap();
 
         validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_accepts_python_version_markers() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_marker_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            concat!(
+                "rpds-py==2026.6.3 ; python_version >= \"3.11\" ",
+                "--hash=sha256:0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5\n",
+            ),
+        )
+        .unwrap();
+
+        validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_rejects_arbitrary_environment_markers() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_bad_marker_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            concat!(
+                "pyyaml==6.0.2 ; sys_platform == \"darwin\" ",
+                "--hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
+            ),
+        )
+        .unwrap();
+
+        let err = validate_hashed_requirements(&req_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("unsupported environment marker"));
         fs::remove_dir_all(root).ok();
     }
 

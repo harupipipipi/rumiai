@@ -88,6 +88,14 @@ def test_safe_get_bootstrap_timeout_returns_error_while_health_stays_green():
     assert health["data"]["status"] == "healthy"
 
 
+def test_safe_get_bootstrap_default_timeout_allows_cold_start_projections():
+    from transport.http import DefaultsHttpServer
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("RUMI_DEFAULTSPACK_SAFE_GET_TIMEOUT_SECONDS", None)
+        assert DefaultsHttpServer._safe_get_fallback_timeout_seconds() == 30.0
+
+
 def test_root_shell_chunk_compat_route_serves_static_asset():
     from transport.http import DefaultsHttpServer
 

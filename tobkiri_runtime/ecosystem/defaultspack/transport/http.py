@@ -90,7 +90,13 @@ _DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.provider_health",
     "blocks.ui.settings",
 }
-_DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS = 10.0
+# The initial shell requests the catalog, settings, profiles, and command
+# protocol together.  On a cold runtime those read-only projections contend
+# for the same registries and can legitimately take a little over ten seconds.
+# Keep the fallback bounded, but allow the loading screen to wait for the
+# canonical startup data instead of turning a healthy cold start into a
+# BOOTSTRAP_API_TIMEOUT.
+_DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS = 30.0
 
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
