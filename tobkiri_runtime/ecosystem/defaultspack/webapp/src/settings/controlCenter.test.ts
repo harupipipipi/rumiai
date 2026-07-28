@@ -8,7 +8,9 @@ import {
   buildAccountConnectionPrelude,
   buildControlCenterSections,
   controlCenterSectionForField,
+  controlCenterSectionMeta,
   localizedSettingsSourceLabel,
+  mapSettingsSectionId,
   safeSettingsLabel,
 } from "./controlCenter";
 
@@ -30,6 +32,12 @@ test("settings control center keeps the required section order", () => {
   ]);
 });
 
+test("control center canonical section ids round-trip through settings navigation", () => {
+  for (const section of controlCenterSectionMeta("ja")) {
+    assert.equal(mapSettingsSectionId(section.id), section.id);
+  }
+});
+
 test("AI API setup is shared with models while connections keeps the source field", () => {
   const sections = buildControlCenterSections([
     {
@@ -49,7 +57,7 @@ test("AI API setup is shared with models while connections keeps the source fiel
 
   const modelsApi = sections.find((section) => section.id === "models_api");
   const connections = sections.find((section) => section.id === "accounts_connections");
-  assert.deepEqual(modelsApi?.fields.map((field) => field.id), ["provider_select", "api_keys", "model_api_routes"]);
+  assert.deepEqual(modelsApi?.fields.map((field) => field.id), ["api_keys", "provider_select", "model_api_routes"]);
   const aiApiKeys = modelsApi?.fields.find((field) => field.sourceSectionId === "apis" && field.id === "api_keys");
   assert.equal(aiApiKeys?.type, "api_key_setup");
   assert.equal((aiApiKeys as unknown as Record<string, unknown>)?.provider_scope, "llm");

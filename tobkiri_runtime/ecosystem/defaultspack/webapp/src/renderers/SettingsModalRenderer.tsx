@@ -2321,9 +2321,15 @@ function SettingsField({
       };
       control = (
         <div className="space-y-4" data-settings-renderer="model_routing">
+          <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3">
+            <p className="text-sm font-medium text-zinc-200">モデルが使う接続先を変更</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              通常は変更不要です。特定のモデルで別のAPIキーを使いたい場合だけ、モデルとキーを選びます。
+            </p>
+          </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
             <label className="space-y-1.5">
-              <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Model</span>
+              <span className="text-[11px] font-medium text-zinc-500">1. 設定するモデル</span>
               <SettingsModelSearchSelect
                 value={selectedModel}
                 options={routeOptions.map(modelFieldOptionToOption)}
@@ -2336,19 +2342,25 @@ function SettingsField({
               />
             </label>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Provider</p>
+              <p className="text-[11px] font-medium text-zinc-500">接続プロバイダー</p>
               <p className="mt-1 font-mono text-sm text-zinc-300">{selectedProvider || "unknown"}</p>
             </div>
           </div>
 
           {isLocalModel ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-sm text-zinc-400">
-              ローカル/StubモデルはAPIキーのルーティング不要です。
+            <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-xs text-emerald-300">✓</span>
+              <div>
+                <p className="text-sm font-medium text-emerald-100">追加設定は不要です</p>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  このモデルはローカルまたはStub接続で動作するため、APIキーを割り当てる必要はありません。
+                </p>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">使用する API key</span>
+                <span className="text-[11px] font-medium text-zinc-500">2. 使用するAPIキー</span>
                 <span className="text-[11px] text-zinc-500">選んだ API key ごとに別 model 扱いになります</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4109,6 +4121,7 @@ export function SettingsModalRenderer({
   const settingsFieldAnchorId = (field: ControlCenterField) => `settings-field-${field.sourceSectionId}-${field.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
   const openSearchMatch = (sectionId: ControlCenterSection["id"], field: ControlCenterField) => {
     setActiveSectionId(sectionId);
+    onOpenSection?.(sectionId);
     requestAnimationFrame(() => {
       const target = document.getElementById(settingsFieldAnchorId(field));
       target?.scrollIntoView({ block: "center", behavior: prefersReducedMotion ? "auto" : "smooth" });
@@ -4945,7 +4958,7 @@ export function SettingsModalRenderer({
                             <button
                               key={section.id}
                               type="button"
-                              onClick={() => setActiveSectionId(section.id)}
+                              onClick={() => openSection(section.id)}
                               aria-current={activeSection?.id === section.id ? "page" : undefined}
                               className={cn(
                                 "group relative mb-0 flex min-h-11 min-w-[154px] shrink-0 items-center justify-between gap-3 overflow-hidden border-l-2 px-3 py-2.5 text-left text-xs transition-colors lg:mb-0.5 lg:min-w-0 lg:w-full",
