@@ -666,7 +666,26 @@ class FlowEngine:
         return hashlib.sha256(encoded).hexdigest()
 
     def _execute_loop_step(self, flow_id, step, values, outputs, flow_context):
-        max_iterations = int(step["max_iterations"])
+        declared_max_iterations = int(step["max_iterations"])
+        max_iterations = declared_max_iterations
+        parent_context = flow_context._parent_context
+        overrides = (
+            parent_context.get("_flow_loop_max_iterations")
+            if isinstance(parent_context, dict)
+            and isinstance(parent_context.get("_flow_loop_max_iterations"), dict)
+            else {}
+        )
+        try:
+            requested_max_iterations = int(overrides.get(step["id"]))
+        except (TypeError, ValueError):
+            requested_max_iterations = declared_max_iterations
+        if requested_max_iterations > 0:
+            # A caller may shrink a declarative loop budget for this run, but
+            # cannot widen the bound audited in the flow definition.
+            max_iterations = min(
+                declared_max_iterations,
+                requested_max_iterations,
+            )
         seen = set()
         body_outputs = {}
         stop_reason = "max_iterations"

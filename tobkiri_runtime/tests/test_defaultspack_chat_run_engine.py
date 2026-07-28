@@ -2992,6 +2992,9 @@ def test_stream_engine_provider_compiler_is_default_and_legacy_flag_opts_out(mon
     monkeypatch.delenv("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", raising=False)
     monkeypatch.delenv("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", raising=False)
     assert ChatRunEngine._use_provider_compiler(prepared) is True
+    prepared.params["deepthink_enabled"] = True
+    assert ChatRunEngine._use_provider_compiler(prepared) is False
+    prepared.params.clear()
     assert ChatRunEngine._use_provider_compiler(
         prepared,
         SimpleNamespace(complete=lambda _request: {}),

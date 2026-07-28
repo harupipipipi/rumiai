@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -127,14 +128,27 @@ def _connection_manifest_root(pack_root: Path | None = None) -> Path:
     return _pack_root() / "config" / "settings_control_center" / "providers"
 
 
-def _connection_registry(pack_root: Path | None = None):
+@lru_cache(maxsize=16)
+def _cached_connection_registry(root_value: str, root_mtime_ns: int):
     from core_runtime.connections.registry import ConnectionsRegistry
 
+    del root_mtime_ns
     registry = ConnectionsRegistry()
-    root = _connection_manifest_root(pack_root)
+    root = Path(root_value)
     if root.exists():
         registry.load_manifest_dir(root)
     return registry
+
+
+def _connection_registry(pack_root: Path | None = None):
+    root = _connection_manifest_root(pack_root)
+    try:
+        resolved = root.resolve()
+        root_mtime_ns = resolved.stat().st_mtime_ns
+    except OSError:
+        resolved = root
+        root_mtime_ns = 0
+    return _cached_connection_registry(str(resolved), root_mtime_ns)
 
 
 def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
@@ -163,8 +177,9 @@ def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
     return ids
 
 
-def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:
-    root = pack_root or _pack_root()
+@lru_cache(maxsize=32)
+def _cached_dotenv_candidates(root_value: str) -> tuple[Path, ...]:
+    root = Path(root_value)
     candidates = [
         root / ".env",
         root / "config" / "settings_control_center" / "oauth.env",
@@ -181,14 +196,29 @@ def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:
             continue
         seen.add(resolved)
         ordered.append(candidate)
-    return ordered
+    return tuple(ordered)
 
 
-def _parse_dotenv_file(path: Path) -> dict[str, str]:
+def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:
+    root = pack_root or _pack_root()
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        root_value = str(root.resolve())
     except OSError:
-        return {}
+        root_value = str(root)
+    return list(_cached_dotenv_candidates(root_value))
+
+
+@lru_cache(maxsize=64)
+def _cached_dotenv_file(
+    path_value: str,
+    modified_ns: int,
+    size: int,
+) -> tuple[tuple[str, str], ...]:
+    del modified_ns, size
+    try:
+        lines = Path(path_value).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ()
     values: dict[str, str] = {}
     for raw_line in lines:
         line = raw_line.strip()
@@ -209,7 +239,21 @@ def _parse_dotenv_file(path: Path) -> dict[str, str]:
         else:
             value = value.split(" #", 1)[0].strip()
         values[key] = value
-    return values
+    return tuple(values.items())
+
+
+def _parse_dotenv_file(path: Path) -> dict[str, str]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    return dict(
+        _cached_dotenv_file(
+            str(path.resolve()),
+            stat.st_mtime_ns,
+            stat.st_size,
+        )
+    )
 
 
 def _env_value(name: str, *, pack_root: Path | None = None) -> str:
@@ -504,9 +548,13 @@ def _reset_ai_client() -> None:
         pass
 
 
-def provider_supports_oauth(provider_id: str) -> bool:
+def provider_supports_oauth(
+    provider_id: str,
+    *,
+    pack_root: Path | None = None,
+) -> bool:
     provider_id = str(provider_id or "").strip()
-    provider = _connection_provider(provider_id)
+    provider = _connection_provider(provider_id, pack_root=pack_root)
     return provider is not None and provider.oauth is not None
 
 
@@ -1328,7 +1376,7 @@ def provider_oauth_status(
     provider_id = str(provider_id or "").strip()
     provider = _connection_provider(provider_id, pack_root=pack_root)
     provider_label = _localized_provider_label(provider.display_name, provider_id) if provider else provider_id
-    supported = provider_supports_oauth(provider_id)
+    supported = provider is not None and provider.oauth is not None
     client = load_provider_client_config(provider_id, pack_root=pack_root) if supported else None
     metadata = _provider_metadata(provider_id, pack_root=pack_root) if supported else {}
     if supported:

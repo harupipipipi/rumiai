@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+from copy import deepcopy
 from pathlib import Path
 
 from ..components.registry import DomainComponentRegistry, build_domain_component_roots
@@ -349,11 +350,10 @@ class ToolRegistry:
             if tool_def is not None:
                 self.register(tool_def)
                 loaded += 1
-        for manifest_path in sorted((pack_root / "extensions" / "tools").glob("*/manifest.json")):
-            tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
-            if tool_def is not None:
-                self.register(tool_def)
-                loaded += 1
+        # Extension tools are loaded once through ``_load_extension_tools``.
+        # Re-reading the same manifests from each selected pack registers an
+        # identical tool twice and makes bootstrap fail closed on a false
+        # collision.
         return loaded
 
     def _load_component_tools(self) -> int:
@@ -370,11 +370,13 @@ class ToolRegistry:
             if tool_def.get("tool_id") != component.id:
                 continue
             existing = self.get(tool_def["tool_id"])
-            if existing is not None and not self._component_may_annotate_existing_tool(
-                existing,
-                component.source_pack_id,
-            ):
-                continue
+            if existing is not None:
+                if not self._component_may_annotate_existing_tool(
+                    existing,
+                    component.source_pack_id,
+                ):
+                    continue
+                tool_def = deepcopy(existing)
             metadata = dict(tool_def.get("metadata", {}))
             metadata["source"] = "pack"
             metadata["source_pack_id"] = component.source_pack_id
@@ -383,7 +385,11 @@ class ToolRegistry:
             metadata["component_manifest_path"] = manifest.get("source_path", "")
             tool_def["metadata"] = metadata
             tool_def["source_pack_id"] = component.source_pack_id
-            self.register(tool_def)
+            if existing is None:
+                self.register(tool_def)
+            else:
+                with self._lock:
+                    self._tools[tool_def["tool_id"]] = tool_def
             loaded += 1
         return loaded
 

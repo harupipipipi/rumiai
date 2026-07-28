@@ -127,7 +127,7 @@ class FrontendRegistry:
             },
             "settings": {
                 "sections": settings_sections,
-                "values": self._read_settings(),
+                "values": self._read_settings(lightweight=lightweight),
             },
             "chat_rendering": {
                 "renderers": chat_renderers,
@@ -184,7 +184,7 @@ class FrontendRegistry:
                 template_catalog.get("settings_sections", []),
                 hydrate_dynamic=not lightweight,
             ),
-            "values": self._read_settings(),
+            "values": self._read_settings(lightweight=lightweight),
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
@@ -2807,7 +2807,7 @@ class FrontendRegistry:
             deduped[value] = item
         return [deduped[value] for value in order]
 
-    def _read_settings(self) -> dict[str, Any]:
+    def _read_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
         values = self._default_settings()
         try:
             saved = self._settings_store.read()
@@ -2815,9 +2815,17 @@ class FrontendRegistry:
             try:
                 raw_settings = self._settings_path.read_bytes()
             except OSError:
-                return self._refresh_derived_settings(values)
+                return (
+                    values
+                    if lightweight
+                    else self._refresh_derived_settings(values)
+                )
             self._backup_corrupt_settings(raw_settings)
-            return self._refresh_derived_settings(values)
+            return (
+                values
+                if lightweight
+                else self._refresh_derived_settings(values)
+            )
         saved, migrated = self._migrate_legacy_keyboard_navigation(saved)
         if migrated:
             saved = self._settings_store.update(
@@ -2829,6 +2837,8 @@ class FrontendRegistry:
             saved.pop(STATE_REVISIONS_KEY, None)
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
+        if lightweight:
+            return values
         return self._refresh_derived_settings(values)
 
     def _backup_corrupt_settings(self, content: bytes) -> None:
@@ -3958,11 +3968,6 @@ class FrontendRegistry:
             ),
         )
         refreshed.pop("external_inputs", None)
-        models = refreshed.setdefault("models", {})
-        if isinstance(models, dict):
-            refreshed["models"] = ModelRuntimeSettingsService(
-                self._pack_root
-            ).refresh_models_settings(models)
         return refreshed
 
     def _input_profile_options(self) -> list[dict[str, str]]:

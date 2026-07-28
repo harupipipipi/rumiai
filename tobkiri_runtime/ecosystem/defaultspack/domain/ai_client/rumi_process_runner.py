@@ -261,9 +261,16 @@ class RumiProcessRunner:
             default=rumi_process.RUMI_DEEPTHINK_MAX_SECTIONS,
             upper=rumi_process.RUMI_DEEPTHINK_MAX_SECTIONS,
         )
+        max_iterations = self._positive_int(
+            params.get("deepthink_max_review_iterations")
+            or budget.get("deepthink_max_review_iterations")
+            or max_reviews,
+            default=max_reviews,
+            upper=8,
+        )
         process["watchdog"].update(
             {
-                "max_review_rounds": 8,
+                "max_review_rounds": max_iterations,
                 "deepthink_max_sections": max_sections,
                 "flow_id": "defaultspack.deepthink",
             }
@@ -376,7 +383,11 @@ class RumiProcessRunner:
             response = self._complete(
                 generator_model,
                 phase_messages,
-                tools if phase_tools is None else phase_tools,
+                # Host-visible tools are not model tools by default. DeepThink
+                # first plans against catalogs, then exposes only the tools
+                # selected for a phase. This keeps planning usable with models
+                # that do not implement provider-native tool calling.
+                [] if phase_tools is None else phase_tools,
                 next_params,
             )
             record_usage(response)
@@ -472,7 +483,14 @@ class RumiProcessRunner:
                 "deepthink.synthesize": ("synthesizing", "回答を統合しています"),
                 "deepthink.review": ("reviewing", "回答をレビューしています"),
                 "deepthink.revise": ("revising", "レビューを反映しています"),
-                "deepthink.finalize": ("completed", "DeepThinkが完了しました"),
+                "deepthink.finalize": (
+                    "completed"
+                    if bool((data.get("review") or {}).get("pass"))
+                    else "failed",
+                    "DeepThinkが完了しました"
+                    if bool((data.get("review") or {}).get("pass"))
+                    else "レビューを通過しなかったため回答を隔離しました",
+                ),
             }.get(function_name)
             if callable(callback) and phase_status is not None:
                 callback(
@@ -875,7 +893,15 @@ class RumiProcessRunner:
                     ],
                     phase_tools=phase_tools,
                 )
-                return ok(output.strip())
+                revised = output.strip()
+                if not revised:
+                    revised = str(data.get("draft") or "").strip()
+                    emit_phase(
+                        "deepthink_revision_fallback",
+                        generator_model,
+                        metadata={"reason": "empty_revision", "preserved_previous_draft": True},
+                    )
+                return ok(revised)
             if function_name == "deepthink.finalize":
                 review = data.get("review") or {}
                 loop = data.get("loop") or {}
@@ -889,7 +915,11 @@ class RumiProcessRunner:
                 }
                 return ok(
                     self._text_response(
-                        str(data.get("draft") or ""),
+                        (
+                            str(data.get("draft") or "")
+                            if approved
+                            else rumi_process.RUMI_QUARANTINE_MESSAGE
+                        ),
                         "stop" if approved else "review_quarantine",
                         process,
                     )
@@ -910,6 +940,9 @@ class RumiProcessRunner:
                         "deepthink_timeout_seconds",
                         budget.get("deepthink_timeout_seconds", 21600),
                     ),
+                },
+                "_flow_loop_max_iterations": {
+                    "review_loop": max_iterations,
                 },
                 "source": "rumi:deepthink",
             }
@@ -1523,7 +1556,29 @@ class RumiProcessRunner:
         parsed = rumi_process.parse_deepthink_review_strict(repaired or "")
         if parsed is not None:
             return parsed, repaired
-        return None, repaired
+        # A malformed reviewer response must not abort the durable flow. Treat
+        # it as a conservative failed review so the normal revision/checkpoint
+        # loop can recover on the next iteration. This keeps invalid model
+        # output fail-closed without turning a transient formatting failure
+        # into a terminal DeepThink error.
+        fallback = rumi_process.sanitize_deepthink_review(
+            {
+                "pass": False,
+                "score": 0,
+                "issues": ["The reviewer response could not be parsed as valid JSON."],
+                "required_changes": [
+                    "Re-check the answer against the original request and produce a complete revision."
+                ],
+            }
+        )
+        process["events"].append(
+            rumi_process.phase_event(
+                "review_json_fallback",
+                reviewer_model,
+                metadata={"label": label, "fail_closed": True},
+            )
+        )
+        return fallback, repaired
 
     def _repair_json(
         self,

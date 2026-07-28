@@ -240,12 +240,12 @@ def _restore_active_profile_contracts() -> None:
         from core_runtime.di_container import get_container
         from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
-        pack_ids = _active_startup_profile_pack_ids()
-        _enable_approved_profile_host_execution(pack_ids)
         plan = persisted_resolved_profile()
         if plan is None:
             _write_launch_event("profile_contract_restore_skipped", reason="no_plan")
             return
+        pack_ids = _active_startup_profile_pack_ids()
+        _enable_approved_profile_host_execution(pack_ids)
         interface_registry = get_container().get("interface_registry")
         result = register_pack_binding_handlers(
             interface_registry=interface_registry,

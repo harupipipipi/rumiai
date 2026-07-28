@@ -59,9 +59,9 @@ def test_deepthink_runs_declarative_flow_and_revises_until_approved(
 
     def complete(model, messages, tools, params):
         nonlocal review_round
-        del tools, params
+        del params
         system = str(messages[0]["content"])
-        calls.append({"model": model, "system": system})
+        calls.append({"model": model, "system": system, "tools": list(tools)})
         if "Plan the response before writing it" in system:
             text = json.dumps(
                 {
@@ -117,7 +117,16 @@ def test_deepthink_runs_declarative_flow_and_revises_until_approved(
         generator_model="demo/conversation-model",
         reviewer_model="demo/conversation-model",
         messages=[{"role": "user", "content": "Give a robust answer"}],
-        tools=[],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "host_search",
+                    "description": "Host-side discovery",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
         params={"deepthink_enabled": True},
         context={
             "mode": "deepthink",
@@ -142,6 +151,10 @@ def test_deepthink_runs_declarative_flow_and_revises_until_approved(
     assert "deepthink_revising" in phases
     assert all(event.get("output_preview", "") == "" for event in metadata["events"])
     assert {call["model"] for call in calls} == {"demo/conversation-model"}
+    planner_call = next(
+        call for call in calls if "Plan the response before writing it" in call["system"]
+    )
+    assert planner_call["tools"] == []
     assert [event["deepthink_phase"] for event in activity_events] == [
         "preflight",
         "planning",
@@ -170,6 +183,101 @@ def test_deepthink_runs_declarative_flow_and_revises_until_approved(
     assert run["status"] == "completed"
     assert run["budget"]["used_tokens"] == len(calls) * 5
     assert any(item["phase"] == "review_loop" for item in run["checkpoints"])
+
+
+def test_deepthink_flow_recovers_when_reviewer_and_json_repair_are_malformed(
+    tmp_path,
+    monkeypatch,
+):
+    from domain.ai_client.rumi_process_runner import RumiProcessRunner
+    from domain.ai_client import deepthink_extensions
+    from domain.flow import FlowEngine
+
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_FLOW_RUN_STORE",
+        str(tmp_path / "flow-runs.json"),
+    )
+    FlowEngine.reset_instance()
+    monkeypatch.setattr(
+        deepthink_extensions,
+        "deepthink_extension_contract",
+        lambda: {
+            "discovery_tools": [],
+            "phases": [],
+            "perspectives": [],
+            "presentation": {},
+        },
+    )
+    review_round = 0
+
+    def complete(model, messages, tools, params):
+        nonlocal review_round
+        del model, tools, params
+        system = str(messages[0]["content"])
+        if "Repair malformed JSON" in system:
+            text = "still not JSON"
+        elif "Plan the response before writing it" in system:
+            text = json.dumps(
+                {"structure": ["Answer"], "key_points": ["Precise"], "risks": []}
+            )
+        elif "Write one visible pseudo DeepThinking step" in system:
+            text = json.dumps({"thinking": "Check.", "output": "Proceed."})
+        elif "stateless third-party reviewer" in system.lower():
+            review_round += 1
+            text = (
+                "not JSON"
+                if review_round == 1
+                else json.dumps(
+                    {
+                        "pass": True,
+                        "score": 90,
+                        "issues": [],
+                        "required_changes": [],
+                    }
+                )
+            )
+        elif "section only" in system.lower():
+            text = "Section draft"
+        elif "stand alone" in system.lower():
+            text = "Revised answer" if review_round else "Initial answer"
+        else:
+            text = "Initial answer"
+        return {"content": [{"type": "text", "text": text}], "usage": {}}
+
+    process = {
+        "trace_id": "trace-review-recovery",
+        "deepthink_enabled": True,
+        "events": [],
+        "watchdog": {},
+    }
+    runner = RumiProcessRunner(
+        complete=complete,
+        response_text=_response_text,
+        error_kind=lambda exc: type(exc).__name__,
+    )
+    response = runner.run_review_chain(
+        composite={"budget": {"deepthink_max_sections": 1}},
+        generator_member={"metadata": {}},
+        reviewer_member={"metadata": {}},
+        generator_model="demo/model",
+        reviewer_model="demo/model",
+        messages=[{"role": "user", "content": "Give a robust answer"}],
+        tools=[],
+        params={"deepthink_enabled": True},
+        context={"mode": "deepthink", "harness_tool_selection": {}},
+        process=process,
+        max_reviews=2,
+    )
+
+    metadata = response["metadata"]["rumi_process"]
+    assert response["finish_reason"] == "stop"
+    assert response["content"][0]["text"] == "Revised answer"
+    assert metadata["review"]["approved"] is True
+    assert any(
+        event["phase"] == "review_json_fallback"
+        and event["metadata"]["fail_closed"] is True
+        for event in metadata["events"]
+    )
 
 
 def test_deepthink_flow_contract_has_safe_bounded_review_loop():
@@ -206,6 +314,42 @@ def test_deepthink_flow_contract_has_safe_bounded_review_loop():
     assert review_input["evidence"] == "{{evidence}}"
     assert review_input["integrations"] == "{{integrations}}"
     assert review_input["profile_phase_outputs"] == "{{profile_phase_outputs}}"
+
+
+def test_deepthink_runtime_can_shrink_but_not_widen_review_loop():
+    from domain.flow.context import FlowContext
+    from domain.flow.engine import FlowEngine
+
+    engine = FlowEngine()
+    step = {
+        "id": "review_loop",
+        "type": "loop",
+        "max_iterations": 8,
+        "until": False,
+        "dedupe_key": "{{loop.iteration}}",
+        "on_exhausted": "return_last",
+        "steps": [],
+    }
+    shrunk = FlowContext(
+        flow_id="test",
+        trigger_input={},
+        flow_config={},
+        execution_id="shrink",
+        parent_context={"_flow_loop_max_iterations": {"review_loop": 2}},
+    )
+    widened = FlowContext(
+        flow_id="test",
+        trigger_input={},
+        flow_config={},
+        execution_id="widen",
+        parent_context={"_flow_loop_max_iterations": {"review_loop": 20}},
+    )
+
+    shrunk_result = engine._execute_loop_step("test", step, {}, {}, shrunk)
+    widened_result = engine._execute_loop_step("test", step, {}, {}, widened)
+
+    assert shrunk_result["data"]["iterations"] == 2
+    assert widened_result["data"]["iterations"] == 8
 
 
 def test_deepthink_plan_segments_preserve_every_planned_section():
