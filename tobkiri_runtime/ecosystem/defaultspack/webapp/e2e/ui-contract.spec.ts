@@ -23,7 +23,7 @@ test("bootstrap loading state uses the Tobkiri Launcher animation and honors red
   await expect(loader).toBeVisible();
   await expect(loader).toHaveAttribute("role", "status");
   await expect(loader).toHaveAttribute("aria-live", "polite");
-  await expect(loader).toHaveAttribute("aria-label", "Tobkiriを読み込んでいます…");
+  await expect(loader).toHaveAttribute("aria-label", "インターフェース本体を読み込んでいます…");
   await expect(loader).toHaveCSS("background-color", "rgb(9, 9, 11)");
 
   const animation = loader.locator('img[data-loading-scene="launcher"]');
@@ -43,7 +43,37 @@ test("bootstrap loading state uses the Tobkiri Launcher animation and honors red
   releaseCatalogRequest?.();
 });
 
+test("keeps the startup boundary until slash commands and mention sources are ready", async ({ page }) => {
+  let releaseCommands: (() => void) | undefined;
+  const commandGate = new Promise<void>((resolve) => {
+    releaseCommands = resolve;
+  });
+  await installDefaultspackApiMocks(page, {
+    beforeCommandCatalogResponse: () => commandGate,
+  });
+
+  await page.goto("/chat");
+
+  const loader = page.locator("[data-tobkiri-loading-screen]");
+  await expect(loader).toBeVisible();
+  await expect(loader.locator('[data-startup-step="commands"]')).toHaveAttribute("data-status", "loading");
+  await expect(page.locator("textarea.rumi-composer-textarea")).toHaveCount(0);
+
+  releaseCommands?.();
+
+  await expect(loader).toBeHidden();
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await expect(composer).toBeVisible();
+
+  await composer.fill("/");
+  await expect(page.getByTestId("composer-slash-command-candidates")).toContainText("/coding");
+
+  await composer.fill("@web");
+  await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
+});
+
 type ApiMockOptions = {
+  beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
   initialSettingsValues?: Record<string, Record<string, unknown>>;
   onConversationCreate?: (payload: Record<string, unknown>) => void;
@@ -611,6 +641,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/command-protocol/v1/catalog") {
+      await options.beforeCommandCatalogResponse?.();
       const protocolCommand = (
         id: string,
         label: string,

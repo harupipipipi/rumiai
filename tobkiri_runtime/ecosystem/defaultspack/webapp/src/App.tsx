@@ -26,6 +26,10 @@ import {
   type TransientAlertTone,
 } from "./components/TransientAlert";
 import { WarmActionIcon } from "./components/WarmActionIcon";
+import {
+  TobkiriLoadingScreen,
+  type TobkiriLoadingStep,
+} from "./components/TobkiriLoadingScreen";
 import { SubagentTeamWorkspace } from "./subagentTeam";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -136,6 +140,13 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type BackendConnectionState = "online" | "degraded" | "offline";
+
+type CatalogRefreshResult = {
+  catalog: UICatalog | null;
+  ready: boolean;
+  degraded: boolean;
+  errorMessage: string | null;
+};
 
 type PendingMentionAttachmentRequest = {
   generation: number;
@@ -2517,6 +2528,13 @@ function ChatApp() {
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupSteps, setStartupSteps] = useState<TobkiriLoadingStep[]>([
+    { id: "backend", label: "バックエンドとの接続を確認しています…", status: "loading" },
+    { id: "capabilities", label: "ツール・スキル・@候補を読み込みます", status: "pending" },
+    { id: "commands", label: "/コマンド・モデル・設定を準備します", status: "pending" },
+    { id: "conversations", label: "会話とワークスペースを復元します", status: "pending" },
+  ]);
   const [error, setError] = useState<string | null>(null);
   const [transientAlert, setTransientAlert] = useState<TransientAlertItem | null>(null);
   const transientAlertSequenceRef = useRef(0);
@@ -3477,7 +3495,7 @@ function ChatApp() {
     void refreshCatalog().catch(console.error);
   }
 
-  async function refreshCatalog() {
+  async function refreshCatalog(): Promise<CatalogRefreshResult | null> {
     const requestSequence = ++refreshCatalogSequenceRef.current;
     setSettingsLoadState({ status: "loading" });
     setModelProfilesLoadState({ status: "loading" });
@@ -3547,7 +3565,22 @@ function ChatApp() {
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
     }
-    return nextCatalog;
+    const fallbackCommandsAvailable = Boolean(nextCatalog?.commands?.length);
+    const commandReady = commandsResult.status === "fulfilled" || fallbackCommandsAvailable;
+    const readinessFailures = [
+      !nextCatalog ? "UIカタログ" : "",
+      settingsResult.status === "rejected" ? "設定" : "",
+      profilesResult.status === "rejected" ? "モデル" : "",
+      !commandReady ? "コマンド" : "",
+    ].filter(Boolean);
+    return {
+      catalog: nextCatalog,
+      ready: readinessFailures.length === 0,
+      degraded: commandsResult.status === "rejected" && fallbackCommandsAvailable,
+      errorMessage: readinessFailures.length > 0
+        ? `${readinessFailures.join("・")}の初期化を完了できませんでした。`
+        : null,
+    };
   }
 
   async function refreshOperationsStatus() {
@@ -3634,6 +3667,23 @@ function ChatApp() {
 
     async function bootstrap() {
       setIsLoading(true);
+      setStartupError(null);
+      setStartupSteps([
+        { id: "backend", label: "バックエンドとの接続を確認しています…", status: "loading" },
+        { id: "capabilities", label: "ツール・スキル・@候補を読み込みます", status: "pending" },
+        { id: "commands", label: "/コマンド・モデル・設定を準備します", status: "pending" },
+        { id: "conversations", label: "会話とワークスペースを復元します", status: "pending" },
+      ]);
+      const updateStartupStep = (
+        id: string,
+        status: TobkiriLoadingStep["status"],
+        label?: string,
+      ) => {
+        if (cancelled) return;
+        setStartupSteps((current) => current.map((step) => (
+          step.id === id ? { ...step, status, ...(label ? { label } : {}) } : step
+        )));
+      };
       const pendingConversationId = chatIdFromLocation();
       if (pendingConversationId && isPendingInLocation()) {
         // A reload can arrive through the pending URL after the transport has
@@ -3651,42 +3701,76 @@ function ChatApp() {
           recoveredFromLocation: true,
         });
       }
-      const shellBootstrap = Promise.all([refreshHealth("bootstrap"), refreshCatalog()])
-        .then(([, nextCatalog]) => {
-          if (cancelled) return;
+      const backendBootstrap = refreshHealth("bootstrap").then(() => {
+        updateStartupStep("backend", "ready", "バックエンドの接続状態を確認しました");
+      });
+      updateStartupStep("capabilities", "loading", "ツール・スキル・@候補を読み込んでいます…");
+      updateStartupStep("commands", "loading", "/コマンド・モデル・設定を読み込んでいます…");
+      const interfaceBootstrap = refreshCatalog()
+        .then(async (result) => {
+          if (cancelled) return null;
+          if (!result?.ready || !result.catalog) {
+            updateStartupStep("capabilities", "error", "ツール・スキル・@候補を準備できませんでした");
+            updateStartupStep("commands", "error", "/コマンド・モデル・設定を準備できませんでした");
+            throw new Error(
+              result?.errorMessage
+              ?? "インターフェース情報を取得できませんでした。バックエンド接続を確認してください。",
+            );
+          }
+          updateStartupStep("capabilities", "ready", "ツール・スキル・@候補を準備しました");
+          updateStartupStep(
+            "commands",
+            "ready",
+            result.degraded
+              ? "/コマンドを互換カタログから準備しました"
+              : "/コマンド・モデル・設定を準備しました",
+          );
           const statusRefreshes: Array<Promise<unknown>> = [];
-          if (hasOperationsProfile(nextCatalog)) {
+          if (hasOperationsProfile(result.catalog)) {
             statusRefreshes.push(refreshOperationsStatus());
           }
-          if (hasMimoCodingProfile(nextCatalog)) {
+          if (hasMimoCodingProfile(result.catalog)) {
             statusRefreshes.push(refreshMimoCodingStatus());
           }
           if (statusRefreshes.length > 0) {
-            return Promise.all(statusRefreshes);
+            await Promise.all(statusRefreshes);
           }
-          return undefined;
-        })
-        .catch((shellError) => {
-          if (!cancelled) console.error(shellError);
+          return result;
         });
+      updateStartupStep("conversations", "loading", "会話とワークスペースを復元しています…");
+      const conversationBootstrap = refreshConversations(null).then(() => {
+        updateStartupStep("conversations", "ready", "会話とワークスペースを復元しました");
+      });
       try {
+        const [, interfaceResult] = await Promise.all([
+          backendBootstrap,
+          interfaceBootstrap,
+          conversationBootstrap,
+        ]);
         if (!cancelled) {
-          await refreshConversations(null);
+          setIsLoading(false);
+          if (interfaceResult?.degraded) {
+            transientAlertSequenceRef.current += 1;
+            setTransientAlert({
+              id: `startup-degraded-${transientAlertSequenceRef.current}`,
+              message: "最新のコマンド経路を取得できなかったため、互換カタログを使用しています。",
+              tone: "warning",
+              durationMs: 6000,
+            });
+          }
         }
       } catch (bootstrapError) {
         if (!cancelled) {
-          setError(
-            bootstrapError instanceof Error
-              ? bootstrapError.message
-              : "defaultspack の読み込みに失敗しました。",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
+          const message = bootstrapError instanceof Error
+            ? bootstrapError.message
+            : "起動準備を完了できませんでした。";
+          setStartupError(message);
+          setError(message);
+          setStartupSteps((current) => current.map((step) => (
+            step.status === "loading" ? { ...step, status: "error" } : step
+          )));
         }
       }
-      void shellBootstrap;
     }
 
     void bootstrap();
@@ -6934,6 +7018,16 @@ function ChatApp() {
       onProjectStoragePrepare={handlePrepareChatGroupStorage}
     />;
   };
+
+  if (isLoading) {
+    return (
+      <TobkiriLoadingScreen
+        error={startupError}
+        onRetry={startupError ? () => window.location.reload() : undefined}
+        steps={startupSteps}
+      />
+    );
+  }
 
   return (
     <RendererBoundary>

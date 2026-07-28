@@ -25,6 +25,42 @@ test("renders the Tobkiri Launcher animation as the accessible shell loading sta
   assert.doesNotMatch(markup, /Loading selected interface/);
 });
 
+test("shows detailed startup readiness without leaving the loading boundary", () => {
+  const markup = renderToStaticMarkup(
+    <TobkiriLoadingScreen
+      steps={[
+        { id: "backend", label: "バックエンドとの接続を確認しました", status: "ready" },
+        { id: "capabilities", label: "ツール・スキル・@候補を読み込んでいます…", status: "loading" },
+        { id: "commands", label: "/コマンドとモデル設定を準備します", status: "pending" },
+      ]}
+    />,
+  );
+
+  assert.match(markup, /aria-label="ツール・スキル・@候補を読み込んでいます…"/);
+  assert.match(markup, /data-startup-readiness-steps=""/);
+  assert.match(markup, /data-startup-step="backend" data-status="ready"/);
+  assert.match(markup, /data-startup-step="capabilities" data-status="loading"/);
+  assert.match(markup, /data-startup-step="commands" data-status="pending"/);
+  assert.doesNotMatch(markup, /Tobkiriを読み込んでいます/);
+});
+
+test("keeps failures inside the startup boundary and offers a retry", () => {
+  const markup = renderToStaticMarkup(
+    <TobkiriLoadingScreen
+      error="ツール情報を取得できませんでした。"
+      onRetry={() => undefined}
+      steps={[
+        { id: "capabilities", label: "ツール・スキル・@候補を準備できませんでした", status: "error" },
+      ]}
+    />,
+  );
+
+  assert.match(markup, /role="alert"/);
+  assert.match(markup, /ツール情報を取得できませんでした/);
+  assert.match(markup, /起動準備を再試行/);
+  assert.match(markup, /data-status="error"/);
+});
+
 test("uses the branded loading screen while the dynamic interface catalog loads", () => {
   const markup = renderToStaticMarkup(
     <HostBootstrap route="/chat" fallback={<div>Fallback</div>} />,
