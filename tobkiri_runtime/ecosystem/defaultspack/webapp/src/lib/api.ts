@@ -1333,6 +1333,7 @@ export type ModelCandidate = {
 };
 
 export type ModelAvailabilityAfterKeySave =
+  | { status: "saved" }
   | { status: "models_available"; profiles: ModelProfile[]; selected_profile_id: string }
   | { status: "route_required"; provider_id: string; api_id: string; candidate_models: ModelCandidate[]; reason: string };
 

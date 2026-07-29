@@ -2557,13 +2557,7 @@ function SettingsField({
             notes: apiNotes.trim() || undefined,
             kind: selectedKind,
           });
-          setApiAvailability(result.model_availability ?? {
-            status: "route_required",
-            provider_id: apiProvider,
-            api_id: apiName,
-            candidate_models: [],
-            reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
-          });
+          setApiAvailability(result.model_availability ?? { status: "saved" });
           setApiSecret("");
           setApiBaseUrl("");
           setApiAllowedModels("");
