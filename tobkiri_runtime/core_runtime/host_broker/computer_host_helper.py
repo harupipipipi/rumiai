@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,11 @@ from core_runtime.host_broker.computer_delivery import (  # noqa: E402
     safe_type_diagnostic_facts,
     safe_window_selection_facts,
 )
+from core_runtime.global_contracts.computer_trace import (  # noqa: E402
+    computer_action_trace,
+    emit_computer_trace,
+    result_trace_facts,
+)
 
 
 def main() -> int:
@@ -33,59 +39,94 @@ def main() -> int:
     action = str(request.get("function_id") or "").strip()
     payload = dict(request.get("args") or {})
     viewer_host_approved = bool(request.get("viewer_host_approved"))
+    started = time.monotonic()
 
     try:
         artifact_root = _validated_artifact_root(request.get("artifact_root"))
-        if action.startswith("browser."):
-            from ecosystem.rumi_browser_host_service_pack.runtime.runner import (
-                run_browser_host_action,
-            )
+        trace_context = (
+            request.get("trace_context")
+            if isinstance(request.get("trace_context"), dict)
+            else {}
+        )
+        with computer_action_trace(
+            action,
+            run_id=str(trace_context.get("run_id") or ""),
+            action_id=str(trace_context.get("action_id") or ""),
+        ):
+            if action.startswith("browser."):
+                from ecosystem.rumi_browser_host_service_pack.runtime.runner import (
+                    run_browser_host_action,
+                )
 
-            result = run_browser_host_action(
+                result = run_browser_host_action(
+                    action,
+                    payload,
+                    viewer_host_approved=viewer_host_approved,
+                    artifact_root=artifact_root,
+                )
+            elif action.startswith("computer.clipboard."):
+                from ecosystem.rumi_clipboard_host_service_pack.runtime.runner import (
+                    run_clipboard_host_action,
+                )
+
+                result = run_clipboard_host_action(
+                    action,
+                    payload,
+                    viewer_host_approved=viewer_host_approved,
+                )
+            else:
+                from ecosystem.rumi_default_tools_pack.domain.computer import (
+                    create_default_computer_tool_service,
+                )
+
+                result = _run_desktop_action(
+                    create_default_computer_tool_service(),
+                    action,
+                    payload,
+                    viewer_host_approved=viewer_host_approved,
+                )
+            envelope = _computer_result_envelope(
                 action,
-                payload,
-                viewer_host_approved=viewer_host_approved,
+                result,
                 artifact_root=artifact_root,
+                request_args=payload,
             )
-        elif action.startswith("computer.clipboard."):
-            from ecosystem.rumi_clipboard_host_service_pack.runtime.runner import (
-                run_clipboard_host_action,
-            )
-
-            result = run_clipboard_host_action(
+            facts = result_trace_facts(envelope)
+            facts["approval_replay"] = viewer_host_approved
+            facts["result_ok"] = envelope.get("ok") is True
+            if envelope.get("error_code"):
+                facts["error_code"] = envelope.get("error_code")
+            emit_computer_trace(
+                "helper.result",
                 action,
-                payload,
-                viewer_host_approved=viewer_host_approved,
+                duration_ms=(time.monotonic() - started) * 1000,
+                **facts,
             )
-        else:
-            from ecosystem.rumi_default_tools_pack.domain.computer import (
-                create_default_computer_tool_service,
-            )
-
-            result = _run_desktop_action(
-                create_default_computer_tool_service(),
-                action,
-                payload,
-                viewer_host_approved=viewer_host_approved,
-            )
-    except ValueError as exc:
+    except ValueError:
         print(
             json.dumps(
-                {"ok": False, "error_code": "INVALID_ARTIFACT_ROOT", "error": str(exc)},
+                {
+                    "ok": False,
+                    "error_code": "INVALID_ARTIFACT_ROOT",
+                    "error": "The artifact root is invalid.",
+                },
                 ensure_ascii=False,
             )
         )
         return 0
-    except Exception as exc:  # pragma: no cover - caller converts to broker error
-        print(json.dumps({"ok": False, "error_code": "VIEWER_HOST_FAILED", "error": str(exc)}, ensure_ascii=False))
+    except Exception:  # pragma: no cover - caller converts to broker error
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error_code": "VIEWER_HOST_FAILED",
+                    "error": "Viewer host helper failed.",
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
-    envelope = _computer_result_envelope(
-        action,
-        result,
-        artifact_root=artifact_root,
-        request_args=payload,
-    )
     print(json.dumps(envelope, ensure_ascii=False))
     return 0
 

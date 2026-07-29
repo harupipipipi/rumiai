@@ -28,6 +28,15 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator, Mapping, TextIO
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from debug_secret_environment import (  # noqa: E402
+    copy_process_environment,
+    process_environment,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUMI_AI_ROOT = REPO_ROOT / "tobkiri_runtime"
@@ -71,7 +80,7 @@ _SMOKE_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 # Provider credentials and endpoint overrides are data-plane authority.  A
-# smoke child starts from ``os.environ.copy()``, so the allowlist must remove
+# smoke child starts from a detached environment snapshot, so the allowlist must remove
 # every provider namespace supported by Defaultspack before restoring the one
 # selected code-owned key.  Runtime necessities such as PATH remain intact.
 _SMOKE_PROVIDER_ENV_PREFIXES = (
@@ -815,13 +824,6 @@ _DIRECT_PROBE_COUNT_CAPS = {
     "semantic_unlisted_attribute_capability_known_count": 64,
     "semantic_unlisted_under_toolbar_count": 64,
     "semantic_unlisted_related_allowed_role_count": 64,
-    "semantic_unlisted_value_settable_count": 64,
-    "semantic_unlisted_selected_text_settable_count": 64,
-    "semantic_unlisted_selected_range_settable_count": 64,
-    "semantic_unlisted_focus_settable_count": 64,
-    "semantic_unlisted_attribute_capability_known_count": 64,
-    "semantic_unlisted_under_toolbar_count": 64,
-    "semantic_unlisted_related_allowed_role_count": 64,
     "semantic_final_candidate_count": 8,
     "semantic_preinvalidation_candidate_count": 8,
     "semantic_navigation_order_fallback_attempted_count": 8,
@@ -1236,7 +1238,7 @@ def isolated_smoke_provider_preflight(
     """
 
     profile = _smoke_provider_profile(profile_name)
-    source = os.environ if parent_env is None else parent_env
+    source = process_environment() if parent_env is None else parent_env
     credential_present = bool(str(source.get(profile["credential_env"]) or "").strip())
     return {
         "provider_id": profile["provider_id"],
@@ -1265,7 +1267,7 @@ def apply_isolated_smoke_provider_env(
     """
 
     profile = _smoke_provider_profile(profile_name)
-    # Remove every allowlisted provider namespace first. ``os.environ.copy()``
+    # Remove every allowlisted provider namespace first. The inherited snapshot
     # must not silently select another credential or a custom endpoint.
     for key in tuple(child_env):
         if key in _SMOKE_PROVIDER_ENV_KEYS or key.startswith(
@@ -1532,7 +1534,7 @@ def _redact_string(value: str, *, secrets_to_hide: tuple[str, ...] = ()) -> str:
 
 
 def default_connection_path() -> Path:
-    env_path = os.environ.get("RUMI_VIEWER_HOST_BROKER_CONNECTION", "").strip()
+    env_path = process_environment().get("RUMI_VIEWER_HOST_BROKER_CONNECTION", "").strip()
     if env_path:
         return Path(env_path).expanduser()
     return (
@@ -1576,7 +1578,11 @@ def _optional_int(value: Any) -> int | None:
 
 
 def configured_viewer_broker_port(explicit: int | None = None) -> int:
-    raw: Any = explicit if explicit is not None else os.environ.get("RUMI_VIEWER_BROKER_PORT")
+    raw: Any = (
+        explicit
+        if explicit is not None
+        else process_environment().get("RUMI_VIEWER_BROKER_PORT")
+    )
     if raw is None:
         return DEFAULT_VIEWER_BROKER_PORT
     text = str(raw)
@@ -2030,7 +2036,6 @@ def _pending_from_message(message: dict[str, Any]) -> dict[str, Any] | None:
 def pending_approval_status(chat_store: Path | None) -> dict[str, Any]:
     latest: tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
     for conversation in _conversation_items(chat_store):
-        conversation_id = str(conversation.get("id") or conversation.get("conversation_id") or "")
         for message in conversation.get("messages") or []:
             if not isinstance(message, dict):
                 continue
@@ -2330,7 +2335,9 @@ def _stream_worker_environment() -> dict[str, str]:
         "TMPDIR",
         "WINDIR",
     }
-    environment = {key: value for key, value in os.environ.items() if key in allowed}
+    environment = {
+        key: value for key, value in process_environment().items() if key in allowed
+    }
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
     return environment
@@ -5295,13 +5302,13 @@ def smoke_chat(args: argparse.Namespace) -> dict[str, Any]:
             raise SmokeRunnerError("--max-turns must be between 1 and 4")
         configuration = load_smoke_configuration(args.port)
         preflight = isolated_smoke_provider_preflight(
-            os.environ, profile_name=MIMO_CHAT_PROFILE
+            process_environment(), profile_name=MIMO_CHAT_PROFILE
         )
     except Exception as exc:
         safe_error = _redact_string(str(exc))
         bootstrap_reporter.emit("chat_smoke_failed", ok=False, error=safe_error)
         return {"ok": False, "error": safe_error}
-    api_key = str(os.environ.get("OPENCODE_ZEN_API_KEY") or "").strip()
+    api_key = str(process_environment().get("OPENCODE_ZEN_API_KEY") or "").strip()
     client = DebugHttpClient(
         configuration["base_url"],
         configuration["api_token"],
@@ -5838,7 +5845,7 @@ def viewer_build_environment(
 ) -> dict[str, str]:
     if min_free_mb <= 0:
         raise ValueError("Viewer debug build minimum free space must be positive")
-    env = os.environ.copy()
+    env = copy_process_environment()
     # These are accepted only by the debug-build native lifecycle gate.  Do
     # not let a caller's shell values select an arbitrary existing instance.
     env.pop(VIEWER_DEBUG_INSTANCE_ID_ENV, None)
@@ -6220,7 +6227,7 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
                 "--viewer-broker-port for debug instance isolation"
             ),
         }
-    provider_preflight = isolated_smoke_provider_preflight(os.environ)
+    provider_preflight = isolated_smoke_provider_preflight(process_environment())
     if not provider_preflight["credential_present"]:
         return {
             "ok": False,
@@ -6324,7 +6331,7 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
             defaultspack_state_root=defaultspack_state_root,
             defaultspack_http_port=http_reservation.port,
             kernel_port=kernel_reservation.port,
-            isolated_provider_parent_env=os.environ,
+            isolated_provider_parent_env=process_environment(),
         )
         broker = wait_for_viewer_broker(
             connection_path,
@@ -6351,7 +6358,7 @@ def viewer_smoke_computer_use(args: argparse.Namespace) -> dict[str, Any]:
             defaultspack_debug_nonce=instance_nonce,
             defaultspack_debug_state_root=defaultspack_state_root,
             defaultspack_kernel_port=kernel_reservation.port,
-            isolated_provider_parent_env=os.environ,
+            isolated_provider_parent_env=process_environment(),
         )
         http_reservation.release()
         if port_is_open(http_reservation.port):
@@ -6686,7 +6693,10 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
             }
     connection_path = Path(args.connection).expanduser() if args.connection else default_connection_path()
     explicit_broker_port = getattr(args, "viewer_broker_port", None)
-    if explicit_broker_port is None and "RUMI_VIEWER_BROKER_PORT" in os.environ:
+    if (
+        explicit_broker_port is None
+        and "RUMI_VIEWER_BROKER_PORT" in process_environment()
+    ):
         explicit_broker_port = configured_viewer_broker_port()
     elif explicit_broker_port is not None:
         explicit_broker_port = configured_viewer_broker_port(explicit_broker_port)
@@ -6762,7 +6772,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     for path in (user_data, chat_store.parent, direct_artifact_root, log_path.parent):
         path.mkdir(parents=True, exist_ok=True)
 
-    env = os.environ.copy()
+    env = copy_process_environment()
     env.pop("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", None)
     # The native debug lifecycle gate is Viewer-only. Defaultspack receives
     # only the broker endpoint it must authenticate to, never a way to disable
@@ -6826,7 +6836,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
         return {"ok": False, "error": "provider-profile isolation context was not created"}
     if debug_state_root_value is not None:
         # A harness-owned run must not reuse production control-plane secrets
-        # inherited through os.environ.copy().
+        # inherited through the detached process-environment snapshot.
         env["RUMI_API_TOKEN"] = secrets.token_urlsafe(32)
         env["RUMI_PANEL_BOOTSTRAP_SECRET"] = secrets.token_urlsafe(32)
     else:
@@ -7056,7 +7066,7 @@ def main() -> int:
                 }
                 print(json.dumps(result, indent=2, ensure_ascii=False))
                 return 1
-            args.isolated_provider_parent_env = os.environ
+            args.isolated_provider_parent_env = process_environment()
             args.isolated_provider_profile = args.provider_profile
         result = launch(args)
     elif args.command == "status":

@@ -223,15 +223,14 @@ def test_result_trace_facts_are_scalar_allowlisted_diagnostics_only():
 
 def test_helper_trace_exposes_executed_but_unverified_background_type(monkeypatch, tmp_path):
     from core_runtime.host_broker import computer_host_helper
-    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     path = tmp_path / "helper.jsonl"
     monkeypatch.setenv("RUMI_COMPUTER_USE_TRACE_PATH", str(path))
     monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "test-restore-marker")
     monkeypatch.setattr(
-        BrowserComputerController,
-        "run",
-        lambda self, action, payload, yolo_mode=False: {
+        computer_host_helper,
+        "_run_desktop_action",
+        lambda service, action, payload, viewer_host_approved: {
             "action": action,
             "executed": True,
             "background": True,
@@ -261,7 +260,9 @@ def test_helper_trace_exposes_executed_but_unverified_background_type(monkeypatc
     envelope = json.loads(stdout.getvalue())
     assert envelope["ok"] is False
     assert envelope["error_code"] == "TYPE_DIAGNOSTICS_INVALID"
-    event = _events(path)[0]
+    event = next(
+        item for item in _events(path) if item.get("stage") == "helper.result"
+    )
     assert event["stage"] == "helper.result"
     assert event["action_id"] == "host-audit-2"
     assert event["selected_driver"] == "mac_accessibility"

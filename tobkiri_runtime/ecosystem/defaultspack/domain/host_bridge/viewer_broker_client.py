@@ -18,7 +18,7 @@ from core_runtime.host_broker.computer_delivery import (
     safe_type_diagnostic_facts,
     safe_window_selection_facts,
 )
-from ecosystem.rumi_default_tools_pack.domain.computer.trace import (
+from core_runtime.global_contracts.computer_trace import (
     computer_action_trace,
     emit_computer_trace,
     requested_delivery_mode,
