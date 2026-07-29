@@ -98,7 +98,7 @@ def test_provider_trust_uses_only_host_attestation() -> None:
     providers, _, diagnostics = _manifest_contract_metadata(
         ("third-party",),
         {"third-party": manifest},
-        {"third-party": "verified"},
+        verified_pack_trust={"third-party": "verified"},
     )
     assert not diagnostics
     assert providers[0].trust_class == "verified"
