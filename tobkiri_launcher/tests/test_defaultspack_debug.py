@@ -180,7 +180,7 @@ class FakeClient:
         }
 
 
-def test_smoke_uses_ui_approval_endpoints_and_hidden_followups(tmp_path):
+def test_smoke_stops_at_authority_without_impersonating_user(tmp_path):
     client = FakeClient()
     output = io.StringIO()
     reporter = debug.SmokeReporter(output, secrets_to_hide=client.secrets_to_hide)
@@ -198,88 +198,21 @@ def test_smoke_uses_ui_approval_endpoints_and_hidden_followups(tmp_path):
         min_stream_interval_seconds=0,
     )
 
-    result = runner.run()
+    with pytest.raises(
+        debug.SmokeRunnerError, match="automatic Authority approval is disabled"
+    ):
+        runner.run()
 
-    assert result["ok"] is True
-    assert result["turns"] == 3
     assert client.stream_payloads[0]["message"]["content"] == "ordinary prompt"
     assert client.stream_payloads[0]["tools"] == ["browser_computer"]
     assert client.stream_payloads[0]["params"]["tool_policy"] == {
         "action_approval_mode": "ask",
         "selected_tools": ["browser_computer"],
     }
-
-    operator_call = next(call for call in client.calls if call[1] == "/api/authority/browser-ui-operator")
-    assert operator_call[2]["query"] == {
-        "browser_approval_token": client.browser_approval_token
-    }
-    assert operator_call[2]["headers"] == {
-        "X-Rumi-Approval-Browser-Token": client.browser_approval_token
-    }
-    authority_approve = next(
-        call for call in client.calls if call[1] == "/api/authority/requests/auth-1/approve"
+    assert not any(
+        path == "/api/authority/browser-ui-operator" or path.endswith("/approve")
+        for _method, path, _details in client.calls
     )
-    assert authority_approve[2]["payload"]["scope"] == "conversation"
-    assert authority_approve[2]["payload"]["related_permissions"] == [
-        "api_key.use",
-        "network.egress",
-    ]
-    assert "approved" not in authority_approve[2]["payload"]
-
-    authority_resume = client.stream_payloads[1]
-    authority_metadata = authority_resume["message"]["metadata"]
-    assert authority_resume["message"]["content"] == "Internal authority resume."
-    assert authority_metadata["authority_followup"] == {
-        "approval_token": "authority-replay-token-which-must-never-print",
-        "request_id": "auth-1",
-        "permission_id": "model.invoke",
-        "approvals": [
-            {
-                "approval_token": "authority-replay-token-which-must-never-print",
-                "request_id": "auth-1",
-                "permission_id": "model.invoke",
-            },
-            {
-                "approval_token": "related-authority-token-which-must-never-print",
-                "request_id": "auth-related",
-                "permission_id": "api_key.use",
-            },
-        ],
-        "hidden": True,
-    }
-    assert authority_metadata["chat_display"] == {
-        "hidden": True,
-        "reason": "authority_followup",
-    }
-
-    coding_approve = next(
-        call for call in client.calls if call[1] == "/api/coding/approvals/approve"
-    )
-    assert coding_approve[2]["payload"] == {"approval_request_id": "apr-1"}
-    runtime_resume = client.stream_payloads[2]
-    runtime_followup = runtime_resume["message"]["metadata"]["approval_followup"]
-    assert runtime_followup == {
-        "action": "computer.type",
-        "operation": "computer.type",
-        "approval_token": "runtime-replay-token-which-must-never-print",
-        "payload": {"text": "youtube", "app": "Atlas"},
-        "request_id": "apr-1",
-        "tool_call_id": "call-1",
-        "tool_name": "browser_computer",
-    }
-    assert not any("approved" in call[2].get("payload", {}) for call in client.calls)
-
-    printed = output.getvalue()
-    assert client.api_token not in printed
-    assert client.browser_approval_token not in printed
-    assert "authority-replay-token-which-must-never-print" not in printed
-    assert "related-authority-token-which-must-never-print" not in printed
-    assert "runtime-replay-token-which-must-never-print" not in printed
-    assert "youtube" not in printed
-    lines = [json.loads(line) for line in printed.splitlines()]
-    assert lines[-1]["event"] == "smoke_summary"
-    assert lines[-1]["chat_url"] == "http://127.0.0.1:8785/chat?chat=chat-1"
-    assert lines[-1]["history_path"].endswith("/conversations/chat-1/history.json")
 
 
 def _owned_smoke_launch_fixture(tmp_path, monkeypatch):
@@ -325,7 +258,7 @@ def test_load_smoke_configuration_reads_only_owned_manifest_tokens(
 
     assert configuration["base_url"] == "http://127.0.0.1:18799"
     assert configuration["api_token"] == "api-token-from-file"
-    assert configuration["browser_approval_token"] == "browser-token-from-file"
+    assert configuration["browser_approval_token"] == ""
     assert "api_token" not in configuration["artifact"]
     assert "browser_approval_token" not in configuration["artifact"]
 
@@ -453,7 +386,9 @@ def test_compact_type_diagnostics_recognizes_top_level_fixed_error_code_only():
     ) == {"error_code": "TYPE_SEMANTIC_CONTROL_NOT_FOUND"}
 
 
-def test_smoke_paces_only_actual_stream_calls_with_injectable_clock(tmp_path):
+def test_smoke_paces_only_actual_stream_calls_with_injectable_clock(
+    tmp_path, monkeypatch
+):
     class Clock:
         now = 100.0
 
@@ -481,6 +416,16 @@ def test_smoke_paces_only_actual_stream_calls_with_injectable_clock(tmp_path):
         min_stream_interval_seconds=35.0,
         monotonic=clock.monotonic,
         sleep=clock.sleep,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_approve_authority",
+        lambda _request: debug._message_request("delegated authority resume"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_approve_runtime",
+        lambda _request, _events: debug._message_request("delegated runtime resume"),
     )
 
     result = runner.run()
@@ -1546,7 +1491,7 @@ def test_mimo_provider_launch_uses_complete_owned_debug_isolation(
     assert "ANTHROPIC_API_KEY" not in env
     assert env["RUMI_API_TOKEN"] != "ambient-api-token-canary"
     assert env["RUMI_PANEL_BOOTSTRAP_SECRET"] != "ambient-bootstrap-canary"
-    assert env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] != "ambient-browser-token-canary"
+    assert "RUMI_AUTHORITY_BROWSER_TEST_TOKEN" not in env
     assert "ephemeral-zen-canary" not in json.dumps(result["launch"])
     assert "ambient-api-token-canary" not in json.dumps(result["launch"])
 
@@ -1643,7 +1588,7 @@ class FakeMimoChatClient(FakeClient):
         yield {"type": "done", "message": {"finish_reason": "stop"}}
 
 
-def test_chat_only_mimo_uses_production_authority_followup_and_reports_chat(tmp_path):
+def test_chat_only_mimo_stops_for_delegated_authority_approval(tmp_path):
     client = FakeMimoChatClient()
     output = io.StringIO()
     reporter = debug.SmokeReporter(output, secrets_to_hide=client.secrets_to_hide)
@@ -1659,38 +1604,13 @@ def test_chat_only_mimo_uses_production_authority_followup_and_reports_chat(tmp_
         ),
     )
 
-    result = runner.run()
+    with pytest.raises(
+        debug.SmokeRunnerError, match="automatic Authority approval is disabled"
+    ):
+        runner.run()
 
-    assert result["ok"] is True
-    assert result["conversation_id"] == "chat-1"
-    assert result["chat_url"] == "http://127.0.0.1:8785/chat?chat=chat-1"
-    assert result["model"] == "opencode-zen/mimo-v2.5-free"
     assert "tools" not in client.stream_payloads[0]
-    followup = client.stream_payloads[1]["message"]["metadata"]
-    assert followup["authority_followup"]["hidden"] is True
-    assert followup["chat_display"] == {
-        "hidden": True,
-        "reason": "authority_followup",
-    }
-    assert "mimo-authority-token-never-print" not in output.getvalue()
-    approval = next(
-        call
-        for call in client.calls
-        if call[1] == "/api/authority/requests/auth-mimo-1/approve"
-    )
-    assert approval[2]["payload"]["config"] == {
-        "provider_ids": ["opencode-zen"],
-        "api_ids": ["legacy"],
-        "model_ids": ["mimo-v2.5-free"],
-        "domains": ["opencode.ai"],
-        "ports": [443],
-        "allow_stream": True,
-    }
-    assert approval[2]["payload"]["related_permissions"] == [
-        "api_key.use",
-        "network.egress",
-    ]
-    assert "request-config-must-not-be-used.invalid" not in str(approval)
+    assert not any(path.endswith("/approve") for _method, path, _details in client.calls)
 
 
 @pytest.mark.parametrize(
@@ -1754,22 +1674,19 @@ def test_chat_only_mimo_rejects_untrusted_authority_endpoint_before_approval(
         request["config"] = request_config
 
     if resource_update:
-        with pytest.raises(debug.SmokeRunnerError, match="refusing unexpected"):
-            runner._approve_authority(request)
-        assert not any("/approve" in call[1] for call in client.calls)
+        expected_error = "refusing unexpected"
     else:
+        expected_error = "automatic Authority approval is disabled"
+    with pytest.raises(debug.SmokeRunnerError, match=expected_error):
         runner._approve_authority(request)
-        approval = next(call for call in client.calls if "/approve" in call[1])
-        assert approval[2]["payload"]["config"]["domains"] == ["opencode.ai"]
-        assert approval[2]["payload"]["config"]["ports"] == [443]
-        assert "attacker.invalid" not in str(approval)
+    assert not any("/approve" in call[1] for call in client.calls)
     assert credential not in output.getvalue()
 
 
 @pytest.mark.parametrize(
     "permission_id", ["model.invoke", "api_key.use", "network.egress"]
 )
-def test_chat_only_mimo_approves_each_fixed_provider_permission_with_owned_config(
+def test_chat_only_mimo_never_auto_approves_fixed_provider_permissions(
     tmp_path, permission_id
 ):
     client = FakeMimoChatClient()
@@ -1791,18 +1708,12 @@ def test_chat_only_mimo_approves_each_fixed_provider_permission_with_owned_confi
     ][0]
     request["permission_id"] = permission_id
 
-    runner._approve_authority(request)
+    with pytest.raises(
+        debug.SmokeRunnerError, match="automatic Authority approval is disabled"
+    ):
+        runner._approve_authority(request)
 
-    approval = next(call for call in client.calls if "/approve" in call[1])
-    payload = approval[2]["payload"]
-    assert payload["config"]["domains"] == ["opencode.ai"]
-    assert payload["config"]["ports"] == [443]
-    assert permission_id not in payload["related_permissions"]
-    assert set(payload["related_permissions"]) == {
-        "model.invoke",
-        "api_key.use",
-        "network.egress",
-    } - {permission_id}
+    assert not any("/approve" in call[1] for call in client.calls)
 
 
 @contextlib.contextmanager
@@ -2608,6 +2519,31 @@ def test_direct_sequence_uses_background_only_approval_replay_and_boolean_sentin
     client = DirectClient()
     output = io.StringIO()
     reporter = debug.SmokeReporter(output, secrets_to_hide=client.secrets_to_hide)
+
+    def delegated_approval(client, reporter, action, payload):
+        requested = client.post(
+            "/api/tools/browser-computer",
+            {"action": action, "payload": dict(payload)},
+        )
+        request_id = debug._direct_approval_request_id(debug._direct_widget(requested))
+        decision = client.post(
+            "/api/coding/approvals/approve",
+            {"approval_request_id": request_id},
+        )
+        token = decision["token"]
+        client.hide_secrets(token)
+        reporter.hide_secrets(token)
+        replay_started_at = time.time()
+        replay = client.post(
+            "/api/tools/browser-computer",
+            {
+                "action": action,
+                "payload": {**payload, "approval_token": token},
+            },
+        )
+        return debug._direct_widget(replay), True, replay_started_at
+
+    monkeypatch.setattr(debug, "_direct_approved_widget", delegated_approval)
     result = debug.direct_computer_use_sequence(
         client,
         run_dir=tmp_path / "run",
@@ -2689,6 +2625,16 @@ def test_direct_sequence_uses_background_only_approval_replay_and_boolean_sentin
     copied = list((tmp_path / "run" / "evidence" / "screenshots").glob("*.png"))
     assert len(copied) == 1
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in copied)
+
+
+def test_direct_harness_never_auto_approves_mutation():
+    with pytest.raises(debug.SmokeRunnerError, match="automatic smoke approval is disabled"):
+        debug._direct_approved_widget(
+            object(),
+            object(),
+            "computer.type",
+            {"text": "secret"},
+        )
 
 
 def test_direct_probe_only_ready_ax_text_area_contract_stops_before_approval_mutation_screenshot_and_host_audit(

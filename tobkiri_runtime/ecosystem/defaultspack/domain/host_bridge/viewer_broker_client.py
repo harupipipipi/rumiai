@@ -92,6 +92,13 @@ class ViewerBrokerClient:
     def permissions(self) -> dict[str, Any]:
         return self._request("GET", "/api/host/permissions")
 
+    def verify_debug_cli_operator(self, operator: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/host/debug/approval/verify",
+            {"debug_cli_operator": dict(operator)},
+        )
+
     def execute_intent(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request("POST", "/api/host/intent/execute", dict(payload or {}))
 

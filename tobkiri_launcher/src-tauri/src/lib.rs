@@ -4,6 +4,7 @@
 
 mod app_data_migration;
 mod config;
+mod debug_approval;
 mod defaultspack_manager;
 mod desktop_system_info;
 mod health_check;
@@ -34,6 +35,7 @@ use sha2::Sha256;
 use tauri::{AppHandle, Emitter, Manager, Url};
 
 use config::AppConfig;
+use debug_approval::{DebugApprovalManager, DebugApprovalStatus};
 use defaultspack_manager::DefaultspackManager;
 use host_broker::HostBrokerRuntime;
 #[cfg(any(debug_assertions, test))]
@@ -234,6 +236,28 @@ fn get_setup_progress(state: tauri::State<'_, SetupProgress>) -> String {
             "Setup status unavailable".to_string()
         }
     }
+}
+
+#[tauri::command]
+fn debug_approval_status(
+    state: tauri::State<'_, Arc<DebugApprovalManager>>,
+) -> DebugApprovalStatus {
+    state.status()
+}
+
+#[tauri::command]
+fn arm_debug_approval(
+    confirmed: bool,
+    state: tauri::State<'_, Arc<DebugApprovalManager>>,
+) -> Result<DebugApprovalStatus, String> {
+    state.arm(confirmed)
+}
+
+#[tauri::command]
+fn revoke_debug_approval(
+    state: tauri::State<'_, Arc<DebugApprovalManager>>,
+) -> DebugApprovalStatus {
+    state.revoke("user_revoked")
 }
 
 /// Restart the Kernel process.
@@ -2026,11 +2050,16 @@ pub fn run() {
             record_startup_stage(&setup_startup_stage, "loading_panel_bootstrap_secret");
             let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
                 .context("failed to load persisted panel bootstrap secret")?;
+            let debug_approval = Arc::new(DebugApprovalManager::new(
+                config.log_dir.join("debug-approval-audit.jsonl"),
+            ));
             record_startup_stage(&setup_startup_stage, "starting_host_broker");
-            let host_broker = HostBrokerRuntime::start(&config)
+            let host_broker =
+                HostBrokerRuntime::start(&config, Arc::clone(&debug_approval))
                 .context("failed to start Viewer host broker")?;
             record_startup_stage(&setup_startup_stage, "host_broker_running");
             app.manage(host_broker.clone());
+            app.manage(debug_approval);
             #[cfg(debug_assertions)]
             if let Some(policy) = debug_parallel_instance.as_ref() {
                 // A complete debug policy binds every run to an exact reserved
@@ -2186,6 +2215,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_setup_progress,
+            debug_approval_status,
+            arm_debug_approval,
+            revoke_debug_approval,
             restart_kernel,
             reauthorize_panel_session,
             open_external_url,

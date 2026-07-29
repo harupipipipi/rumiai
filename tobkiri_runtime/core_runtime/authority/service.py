@@ -20,6 +20,7 @@ from .approval_challenge_store import (
     DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
 )
 from .device_key_registry import DeviceKeyRegistry
+from .debug_cli_operator import verify_authority_debug_operator
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore, sanitize_authority_resource
@@ -403,6 +404,8 @@ class AuthorityService:
         expires_in_seconds: int | None = None,
         related_permissions: list[str] | tuple[str, ...] | None = None,
         ui_operator: dict[str, Any] | None = None,
+        debug_cli_operator: dict[str, Any] | None = None,
+        expected_digest: str = "",
         actor_principal: Any = None,
         attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -470,7 +473,7 @@ class AuthorityService:
                 }
             mobile_attestation_audit = attestation_result.audit
         confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
-        if self._typed_confirmation_required(request):
+        if self._typed_confirmation_required(request) and debug_cli_operator is None:
             if scope != "once":
                 return {
                     "success": False,
@@ -494,6 +497,22 @@ class AuthorityService:
                 }
         if mobile_approver:
             operator_audit = dict(mobile_attestation_audit)
+        elif debug_cli_operator is not None:
+            if scope != "once" or related_permissions or expires_in_seconds is not None:
+                return {
+                    "success": False,
+                    "error": "Delegated debug approval must be one-shot and unbundled",
+                    "status_code": 400,
+                }
+            operator_ok, operator_error, operator_audit = verify_authority_debug_operator(
+                request, expected_digest, debug_cli_operator
+            )
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_debug_cli_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
             if not operator_ok:
@@ -929,6 +948,8 @@ class AuthorityService:
         reason: str = "",
         persist: bool = False,
         ui_operator: dict[str, Any] | None = None,
+        debug_cli_operator: dict[str, Any] | None = None,
+        expected_digest: str = "",
         actor_principal: Any = None,
         attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -976,6 +997,22 @@ class AuthorityService:
                     "status_code": attestation_result.status_code,
                 }
             operator_audit = dict(attestation_result.audit)
+        elif debug_cli_operator is not None:
+            if persist:
+                return {
+                    "success": False,
+                    "error": "Delegated debug denial cannot be persistent",
+                    "status_code": 400,
+                }
+            operator_ok, operator_error, operator_audit = verify_authority_debug_operator(
+                request, expected_digest, debug_cli_operator
+            )
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_debug_cli_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
             if not operator_ok:

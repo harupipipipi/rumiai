@@ -30,9 +30,9 @@ from typing import Any, Iterator, Mapping, TextIO
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RUMI_AI_ROOT = REPO_ROOT / "rumi_ai_1_10"
+RUMI_AI_ROOT = REPO_ROOT / "tobkiri_runtime"
 DEFAULTSPACK_ROOT = RUMI_AI_ROOT / "ecosystem" / "defaultspack"
-VIEWER_ROOT = REPO_ROOT / "rumi_viewer"
+VIEWER_ROOT = REPO_ROOT / "tobkiri_launcher"
 ECOSYSTEM_JSON = DEFAULTSPACK_ROOT / "ecosystem.json"
 RUN_ROOT = REPO_ROOT / ".tmp" / "rumi-viewer-defaultspack-debug"
 LATEST_JSON = RUN_ROOT / "latest.json"
@@ -1539,7 +1539,7 @@ def default_connection_path() -> Path:
         Path.home()
         / "Library"
         / "Application Support"
-        / "dev.rumiai.app"
+        / "dev.tobkiri.launcher"
         / "user_data"
         / "host_broker"
         / "connection.json"
@@ -2744,19 +2744,12 @@ def load_smoke_configuration(port_override: int | None = None) -> dict[str, Any]
     api_token = _read_owned_debug_token(
         manifest, run_dir, "token_file", ".desktop_api_token", "local API"
     )
-    browser_token = _read_owned_debug_token(
-        manifest,
-        run_dir,
-        "browser_approval_token_file",
-        ".authority_browser_test_token",
-        "browser approval",
-    )
     return {
         "artifact": manifest,
         "base_url": f"http://127.0.0.1:{port}",
         "port": port,
         "api_token": api_token,
-        "browser_approval_token": browser_token,
+        "browser_approval_token": "",
     }
 
 
@@ -3930,32 +3923,19 @@ def _direct_approved_widget(
     action: str,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], bool, float]:
-    """Perform one exact coding approval and one-shot replay without logging its token."""
+    """Refuse the removed harness-owned approval path.
 
-    requested = client.post(
-        "/api/tools/browser-computer",
-        {"action": action, "payload": dict(payload)},
+    Mutating debug actions must now be approved individually by an active,
+    Launcher-bound ``tobkiri debug`` session.  Keeping that decision outside
+    the smoke harness prevents an unattended test from impersonating a user.
+    """
+
+    del client, reporter, payload
+    raise SmokeRunnerError(
+        "automatic smoke approval is disabled; approve the pending "
+        f"{action} request with `tobkiri debug approvals approve "
+        "--expected-digest <digest> <request-id>`"
     )
-    request_id = _direct_approval_request_id(_direct_widget(requested))
-    decision = client.post(
-        "/api/coding/approvals/approve",
-        {"approval_request_id": request_id},
-    )
-    if decision.get("approved") is not True:
-        raise SmokeRunnerError(f"coding approval failed for {action}")
-    token = str(decision.get("token") or "").strip()
-    if not token:
-        raise SmokeRunnerError(f"coding approval returned no one-shot token for {action}")
-    client.hide_secrets(token)
-    reporter.hide_secrets(token)
-    replay_payload = dict(payload)
-    replay_payload["approval_token"] = token
-    replay_started_at = time.time()
-    replay = client.post(
-        "/api/tools/browser-computer",
-        {"action": action, "payload": replay_payload},
-    )
-    return _direct_widget(replay), True, replay_started_at
 
 
 def _direct_unapproved_read_widget(
@@ -4638,7 +4618,7 @@ def _runtime_approval_content(candidate: dict[str, Any], token: str) -> str:
     arguments = {**candidate["payload"], **({"approval_token": token} if token else {})}
     return "\n".join(
         [
-            "The user approved the pending server-side tool operation.",
+            "The delegated debug CLI approved the pending server-side tool operation.",
             "Continue by calling the exact pending tool once with the approved arguments below.",
             "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
             f"Tool: {candidate['tool_name']}",
@@ -4925,103 +4905,16 @@ class ComputerUseSmokeRunner:
         permission_id = str(request.get("permission_id") or "").strip()
         if not request_id or not permission_id:
             raise SmokeRunnerError("pending Authority request is missing its id or permission")
-        display = request.get("display_metadata") if isinstance(request.get("display_metadata"), dict) else {}
-        resource = request.get("resource") if isinstance(request.get("resource"), dict) else {}
-        if display.get("typed_confirmation_required") or resource.get("typed_confirmation_required"):
-            raise SmokeRunnerError(
-                f"Authority request {request_id} needs typed confirmation in the UI"
-            )
         if not self._authority_is_allowed(request):
             raise SmokeRunnerError(
                 f"refusing unexpected Authority permission {permission_id} for smoke chat"
             )
-        approval_context = self.client.post(
-            "/api/authority/browser-ui-operator",
-            {
-                "request_id": request_id,
-                "browser_approval_token": self.client.browser_approval_token,
-            },
-            query={"browser_approval_token": self.client.browser_approval_token},
-            headers={"X-Rumi-Approval-Browser-Token": self.client.browser_approval_token},
+        raise SmokeRunnerError(
+            "automatic Authority approval is disabled; approve request "
+            f"{request_id} individually with `tobkiri debug approvals approve "
+            "--expected-digest <digest> "
+            f"{request_id}`"
         )
-        ui_operator = approval_context.get("ui_operator")
-        if not isinstance(ui_operator, dict):
-            raise SmokeRunnerError("Authority UI operator response is missing its signed context")
-        allowed_scopes = [
-            str(item)
-            for item in request.get("allowed_scopes") or []
-            if str(item) in {"once", "conversation", "profile", "node"}
-        ]
-        scope = (
-            "conversation"
-            if "conversation" in allowed_scopes
-            else (allowed_scopes[0] if allowed_scopes else "once")
-        )
-        decision = self.client.post(
-            f"/api/authority/requests/{urllib.parse.quote(request_id, safe='')}/approve",
-            {
-                "scope": scope,
-                "config": self._authority_approval_config(request),
-                "related_permissions": self._authority_approval_related_permissions(
-                    request
-                ),
-                "ui_operator": ui_operator,
-            },
-        )
-        if decision.get("approved") is not True:
-            raise SmokeRunnerError(f"Authority request {request_id} was not approved")
-        token = str(decision.get("token") or "")
-        related_tokens = [
-            str(item.get("token") or "")
-            for item in decision.get("related_approvals") or []
-            if isinstance(item, dict)
-        ]
-        self.reporter.hide_secrets(token, *related_tokens)
-        hide_client_secrets = getattr(self.client, "hide_secrets", None)
-        if callable(hide_client_secrets):
-            hide_client_secrets(token, *related_tokens)
-        approvals: list[dict[str, str]] = []
-        if token:
-            approvals.append(
-                {
-                    "approval_token": token,
-                    "request_id": request_id,
-                    "permission_id": permission_id,
-                }
-            )
-        for related in decision.get("related_approvals") or []:
-            if not isinstance(related, dict):
-                continue
-            related_token = str(related.get("token") or "")
-            related_request_id = str(related.get("request_id") or "")
-            related_permission_id = str(related.get("permission_id") or "")
-            if related_token and related_request_id and related_permission_id:
-                approvals.append(
-                    {
-                        "approval_token": related_token,
-                        "request_id": related_request_id,
-                        "permission_id": related_permission_id,
-                    }
-                )
-        self.reporter.emit(
-            "authority_approved",
-            request_id=request_id,
-            permission_id=permission_id,
-            scope=scope,
-            related_count=max(0, len(approvals) - (1 if token else 0)),
-        )
-        metadata = {
-            "authority_followup": {
-                **({"approval_token": token} if token else {}),
-                "request_id": request_id,
-                "permission_id": permission_id,
-                "approvals": approvals,
-                "hidden": True,
-            },
-            "chat_display": {"hidden": True, "reason": "authority_followup"},
-            "runtime_content": _authority_runtime_content(request, token),
-        }
-        return _message_request("Internal authority resume.", metadata=metadata)
 
     def _pending_runtime(self, events: list[dict[str, Any]]) -> dict[str, Any] | None:
         response = self.client.get(
@@ -5048,44 +4941,11 @@ class ComputerUseSmokeRunner:
             raise SmokeRunnerError(
                 f"refusing unexpected runtime approval tool {tool_name or '<missing>'} for smoke chat"
             )
-        decision = self.client.post(
-            "/api/coding/approvals/approve",
-            {"approval_request_id": request_id},
-        )
-        if decision.get("approved") is not True:
-            raise SmokeRunnerError(f"runtime approval {request_id} was not approved")
-        token = str(decision.get("token") or "").strip()
-        if not token:
-            raise SmokeRunnerError(f"runtime approval {request_id} returned no replay token")
-        self.reporter.hide_secrets(token)
-        hide_client_secrets = getattr(self.client, "hide_secrets", None)
-        if callable(hide_client_secrets):
-            hide_client_secrets(token)
-        followup = {
-            "action": candidate["action"],
-            "operation": candidate["operation"],
-            "approval_token": token,
-            "payload": candidate["payload"],
-            "request_id": request_id,
-            **({"tool_call_id": candidate["tool_call_id"]} if candidate["tool_call_id"] else {}),
-            "tool_name": tool_name,
-        }
-        self.reporter.emit(
-            "runtime_approved",
-            request_id=request_id,
-            tool_name=tool_name,
-            operation=candidate["operation"],
-            payload=candidate["payload"],
-        )
-        return _message_request(
-            "ユーザーが許可しました。承認済みの操作を続行してください。",
-            metadata={
-                "approval_followup": followup,
-                "runtime_content": _runtime_approval_content(candidate, token),
-                "selected_tools": [tool_name],
-            },
-            tools=[tool_name],
-            params=_smoke_tool_params(required=True, tool_name=tool_name),
+        raise SmokeRunnerError(
+            "automatic runtime approval is disabled; approve request "
+            f"{request_id} individually with `tobkiri debug approvals approve "
+            "--expected-digest <digest> "
+            f"{request_id}`"
         )
 
     def _summary(self, *, ok: bool, turns: int, stop_reason: str) -> dict[str, Any]:
@@ -6899,11 +6759,11 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     direct_artifact_root = direct_workspace / "tools" / "computer"
     log_path = run_dir / "defaultspack.log"
     token_path = run_dir / ".desktop_api_token"
-    browser_approval_token_path = run_dir / ".authority_browser_test_token"
     for path in (user_data, chat_store.parent, direct_artifact_root, log_path.parent):
         path.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
+    env.pop("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", None)
     # The native debug lifecycle gate is Viewer-only. Defaultspack receives
     # only the broker endpoint it must authenticate to, never a way to disable
     # production single-instance handling or reuse the launch nonce.
@@ -6969,20 +6829,14 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
         # inherited through os.environ.copy().
         env["RUMI_API_TOKEN"] = secrets.token_urlsafe(32)
         env["RUMI_PANEL_BOOTSTRAP_SECRET"] = secrets.token_urlsafe(32)
-        env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] = secrets.token_urlsafe(32)
     else:
         env["RUMI_API_TOKEN"] = env.get("RUMI_API_TOKEN") or secrets.token_urlsafe(32)
         env["RUMI_PANEL_BOOTSTRAP_SECRET"] = (
             env.get("RUMI_PANEL_BOOTSTRAP_SECRET") or secrets.token_urlsafe(32)
         )
-        env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"] = (
-            env.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or secrets.token_urlsafe(32)
-        )
     env["RUMI_DEFAULTSPACK_LOCAL_TOKEN"] = env["RUMI_API_TOKEN"]
     token_path.write_text(env["RUMI_API_TOKEN"], encoding="utf-8")
     token_path.chmod(0o600)
-    browser_approval_token_path.write_text(env["RUMI_AUTHORITY_BROWSER_TEST_TOKEN"], encoding="utf-8")
-    browser_approval_token_path.chmod(0o600)
 
     command = str(desktop_app.get("command") or "python defaultspack/desktop_app.py")
     argv = shlex.split(command)
@@ -7028,8 +6882,6 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
         "chat_store": str(chat_store),
         "token_file": str(token_path),
         "token_file_exists": token_path.exists(),
-        "browser_approval_token_file": str(browser_approval_token_path),
-        "browser_approval_token_file_exists": browser_approval_token_path.exists(),
         "broker_connection_path": str(connection_path),
         "broker": broker.get("connection"),
         "env": {
@@ -7039,7 +6891,6 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
             "RUMI_COMPUTER_USE_DEBUG_FOREGROUND": env["RUMI_COMPUTER_USE_DEBUG_FOREGROUND"],
             "RUMI_DEFAULTSPACK_PROVIDER_TRACE": env["RUMI_DEFAULTSPACK_PROVIDER_TRACE"],
             "RUMI_EDGE_HAZE_DISABLED": env.get("RUMI_EDGE_HAZE_DISABLED"),
-            "RUMI_AUTHORITY_BROWSER_TEST_TOKEN_present": bool(env.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN")),
             "PYTHONFAULTHANDLER": env.get("PYTHONFAULTHANDLER"),
             "RUMI_API_TOKEN_present": bool(env.get("RUMI_API_TOKEN")),
             "RUMI_PANEL_BOOTSTRAP_SECRET_present": bool(env.get("RUMI_PANEL_BOOTSTRAP_SECRET")),

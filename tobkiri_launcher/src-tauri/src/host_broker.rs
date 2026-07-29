@@ -17,6 +17,10 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::config::AppConfig;
+use crate::debug_approval::{
+    DebugApprovalManager, DebugOperatorRequest, DebugOperatorVerifyRequest,
+    DebugSessionStartRequest, DebugSessionStopRequest,
+};
 use crate::desktop_system_info;
 use crate::host_audit::{now_epoch_seconds, summarize_args, write_audit_log, HostAuditEntry};
 use crate::host_broker_types::{
@@ -37,6 +41,11 @@ const HOST_INTENT_EXECUTE_PATH: &str = "/api/host/intent/execute";
 const HOST_STREAM_START_PATH: &str = "/api/host/stream/start";
 const HOST_STREAM_STOP_PATH: &str = "/api/host/stream/stop";
 const HOST_STREAM_EVENTS_PREFIX: &str = "/api/host/stream/events/";
+const DEBUG_STATUS_PATH: &str = "/api/host/debug/status";
+const DEBUG_SESSION_START_PATH: &str = "/api/host/debug/session/start";
+const DEBUG_SESSION_STOP_PATH: &str = "/api/host/debug/session/stop";
+const DEBUG_OPERATOR_PATH: &str = "/api/host/debug/approval/operator";
+const DEBUG_OPERATOR_VERIFY_PATH: &str = "/api/host/debug/approval/verify";
 const PERMISSION_SUBJECT: &str = "Tobkiri Launcher";
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
@@ -69,6 +78,7 @@ pub struct HostBrokerRuntime {
 
 struct HostBrokerShared {
     config: AppConfig,
+    debug_approval: Arc<DebugApprovalManager>,
     token: Option<String>,
     status: Mutex<HostBrokerStatus>,
     active_requests: Mutex<usize>,
@@ -120,12 +130,13 @@ impl Drop for RequestSlot {
 }
 
 impl HostBrokerRuntime {
-    pub fn start(config: &AppConfig) -> Result<Self> {
+    pub fn start(config: &AppConfig, debug_approval: Arc<DebugApprovalManager>) -> Result<Self> {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             return Ok(Self {
                 inner: Arc::new(HostBrokerShared {
                     config: config.clone(),
+                    debug_approval,
                     token: None,
                     status: Mutex::new(HostBrokerStatus::disabled(HOST_BROKER_DISABLED_REASON)),
                     active_requests: Mutex::new(0),
@@ -170,6 +181,7 @@ impl HostBrokerRuntime {
             let runtime = Self {
                 inner: Arc::new(HostBrokerShared {
                     config: config.clone(),
+                    debug_approval,
                     token: Some(token),
                     status: Mutex::new(HostBrokerStatus {
                         enabled: true,
@@ -392,6 +404,65 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                     "host_broker": shared.status.lock().map(|status| status.clone()).unwrap_or_else(|_| HostBrokerStatus::disabled("Viewer host broker status is unavailable.")),
                 }),
             )
+        }
+        ("GET", DEBUG_STATUS_PATH) => {
+            if let Err(error) = authorize_request(request, shared) {
+                return unauthorized_response(error);
+            }
+            (
+                200,
+                json!({"ok": true, "status": shared.debug_approval.status()}),
+            )
+        }
+        ("POST", DEBUG_SESSION_START_PATH) => handle_authorized_json(
+            request,
+            shared,
+            |payload: DebugSessionStartRequest| match shared.debug_approval.start_session(payload) {
+                Ok(status) => json!({"ok": true, "status": status}),
+                Err(error) => json!({
+                    "ok": false,
+                    "error": {"code": "DEBUG_SESSION_REJECTED", "message": error}
+                }),
+            },
+        ),
+        ("POST", DEBUG_SESSION_STOP_PATH) => handle_authorized_json(
+            request,
+            shared,
+            |payload: DebugSessionStopRequest| match shared.debug_approval.stop_session(payload) {
+                Ok(status) => json!({"ok": true, "status": status}),
+                Err(error) => json!({
+                    "ok": false,
+                    "error": {"code": "DEBUG_SESSION_REJECTED", "message": error}
+                }),
+            },
+        ),
+        ("POST", DEBUG_OPERATOR_PATH) => handle_authorized_json(
+            request,
+            shared,
+            |payload: DebugOperatorRequest| match shared.debug_approval.sign_operator(payload) {
+                Ok(operator) => json!({"ok": true, "debug_cli_operator": operator}),
+                Err(error) => json!({
+                    "ok": false,
+                    "error": {"code": "DEBUG_OPERATOR_REJECTED", "message": error}
+                }),
+            },
+        ),
+        ("POST", DEBUG_OPERATOR_VERIFY_PATH) => {
+            handle_authorized_json(request, shared, |payload: DebugOperatorVerifyRequest| {
+                match shared.debug_approval.verify_operator(payload) {
+                    Ok(operator) => json!({
+                        "ok": true,
+                        "verified": true,
+                        "decision_source": "delegated_debug_cli",
+                        "debug_cli_operator": operator,
+                    }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "verified": false,
+                        "error": {"code": "DEBUG_OPERATOR_INVALID", "message": error}
+                    }),
+                }
+            })
         }
         ("POST", COMPUTER_RUN_PATH) => handle_authorized_json(request, shared, |run_request| {
             execute_computer_run(shared, run_request)
@@ -2130,7 +2201,9 @@ fn run_computer_helper(
 }
 
 fn trusted_helper_chat_store_path(value: Option<&std::ffi::OsStr>) -> Option<std::ffi::OsString> {
-    value.filter(|path| !path.is_empty()).map(std::ffi::OsStr::to_os_string)
+    value
+        .filter(|path| !path.is_empty())
+        .map(std::ffi::OsStr::to_os_string)
 }
 
 fn wait_for_helper_status(
@@ -2282,8 +2355,12 @@ mod tests {
         .unwrap();
         assert_eq!(request.function_id, "computer.screenshot");
         assert_eq!(
-            trusted_helper_chat_store_path(Some(std::ffi::OsStr::new("/viewer-owned/chat/conversations.json"))),
-            Some(std::ffi::OsString::from("/viewer-owned/chat/conversations.json"))
+            trusted_helper_chat_store_path(Some(std::ffi::OsStr::new(
+                "/viewer-owned/chat/conversations.json"
+            ))),
+            Some(std::ffi::OsString::from(
+                "/viewer-owned/chat/conversations.json"
+            ))
         );
     }
 
@@ -3038,6 +3115,9 @@ mod tests {
 
     fn test_shared(config: AppConfig) -> HostBrokerShared {
         HostBrokerShared {
+            debug_approval: Arc::new(DebugApprovalManager::new(
+                config.log_dir.join("debug-approval-test.jsonl"),
+            )),
             config,
             token: Some("broker-token".to_string()),
             status: Mutex::new(HostBrokerStatus::disabled("test")),

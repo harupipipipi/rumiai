@@ -1,8 +1,21 @@
 import { useState, useEffect, useRef, type KeyboardEvent } from 'react';
 import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
 import { Avatar } from '@/src/components/ui/Avatar';
-import { fetchBackgroundControlStatus, fetchDesktopSystemInfo, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
-import type { BackgroundControlStatus, DesktopPermissionStatus, DesktopSystemInfo } from '@/src/lib/apiTypes';
+import {
+  armDebugApproval,
+  fetchBackgroundControlStatus,
+  fetchDebugApprovalStatus,
+  fetchDesktopSystemInfo,
+  isDesktopShellAvailable,
+  revokeDebugApproval,
+  sendToBackground,
+} from '@/src/lib/api';
+import type {
+  BackgroundControlStatus,
+  DebugApprovalStatus,
+  DesktopPermissionStatus,
+  DesktopSystemInfo,
+} from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/src/components/ui/Card';
@@ -60,6 +73,8 @@ export function Settings() {
   const [desktopInfo, setDesktopInfo] = useState<DesktopSystemInfo | null>(null);
   const [desktopInfoError, setDesktopInfoError] = useState<string | null>(null);
   const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
+  const [debugApproval, setDebugApproval] = useState<DebugApprovalStatus | null>(null);
+  const [debugApprovalBusy, setDebugApprovalBusy] = useState(false);
   const profileTabRef = useRef<HTMLButtonElement>(null);
   const versionTabRef = useRef<HTMLButtonElement>(null);
   const desktopShellAvailable = isDesktopShellAvailable();
@@ -104,6 +119,38 @@ export function Settings() {
     }
   };
 
+  const loadDebugApproval = async () => {
+    if (!desktopShellAvailable) return;
+    try {
+      setDebugApproval(await fetchDebugApprovalStatus());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read Developer Debug Approval';
+      addToast(message, 'error');
+    }
+  };
+
+  const handleDebugApprovalToggle = async (enabled: boolean) => {
+    setDebugApprovalBusy(true);
+    try {
+      if (enabled) {
+        const confirmed = window.confirm(
+          'Developer Debug Approvalを有効にすると、最初の1つのCLI debug session中に、ターミナル上のAIがpending操作を個別にapprove/denyできます。自動一括承認ではなく、各操作はexact digestに束縛されます。有効にしますか？',
+        );
+        if (!confirmed) return;
+        setDebugApproval(await armDebugApproval());
+        addToast('Developer Debug Approval is armed for one CLI session.', 'success');
+      } else {
+        setDebugApproval(await revokeDebugApproval());
+        addToast('Developer Debug Approval was revoked.', 'success');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update Developer Debug Approval';
+      addToast(message, 'error');
+    } finally {
+      setDebugApprovalBusy(false);
+    }
+  };
+
   const handleSendToBackground = async () => {
     setBackgroundBusy(true);
     try {
@@ -128,8 +175,17 @@ export function Settings() {
       loadUpdateSettings();
       void loadBackgroundStatus();
       void loadDesktopInfo();
+      void loadDebugApproval();
     }
   }, [activeTab, loadUpdates, loadUpdateSettings]);
+
+  useEffect(() => {
+    if (activeTab !== 'version' || !desktopShellAvailable) return;
+    const timer = window.setInterval(() => {
+      void loadDebugApproval();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, desktopShellAvailable]);
 
   useEffect(() => {
     const refreshProfile = () => { void loadProfile(); };
@@ -610,6 +666,75 @@ export function Settings() {
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
                       Click Refresh to read macOS permission status from Tobkiri Launcher.
                     </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {desktopShellAvailable && (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle>Developer Debug Approval</CardTitle>
+                    <CardDescription>
+                      Delegate individual, digest-bound approvals to one CLI debug session. This never enables approve-all or YOLO mode.
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge variant={debugApproval?.state === 'active' ? 'success' : debugApproval?.state === 'armed' ? 'warning' : 'secondary'}>
+                      {(debugApproval?.state ?? 'disabled').toUpperCase()}
+                    </Badge>
+                    <Switch
+                      checked={debugApproval?.state === 'armed' || debugApproval?.state === 'active'}
+                      disabled={debugApprovalBusy}
+                      onCheckedChange={(checked) => void handleDebugApprovalToggle(checked)}
+                      aria-label="Developer Debug Approval"
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-lg border border-border bg-bg-main/50 p-4 text-xs leading-5 text-text-muted">
+                    Launcher restart, Revoke now, session stop, expiry, or any workspace/run mismatch immediately disables delegated approval. The AI must still approve or deny every pending request separately.
+                  </div>
+                  {debugApproval?.state === 'armed' && (
+                    <p className="text-sm text-text-main">
+                      Waiting for the first CLI session · {debugApproval.armed_remaining_seconds ?? 0}s remaining
+                    </p>
+                  )}
+                  {debugApproval?.state === 'active' && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border border-border p-3">
+                        <p className="text-xs text-text-muted">Workspace</p>
+                        <p className="mt-1 break-all text-sm text-text-main">{debugApproval.workspace}</p>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <p className="text-xs text-text-muted">Pack / Profile</p>
+                        <p className="mt-1 text-sm text-text-main">{debugApproval.pack_id} / {debugApproval.profile_id}</p>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <p className="text-xs text-text-muted">Run ID</p>
+                        <p className="mt-1 break-all text-sm text-text-main">{debugApproval.run_id}</p>
+                      </div>
+                      <div className="rounded-lg border border-border p-3">
+                        <p className="text-xs text-text-muted">Expires</p>
+                        <p className="mt-1 text-sm text-text-main">
+                          {debugApproval.expires_at ? new Date(debugApproval.expires_at * 1000).toLocaleString() : 'Unknown'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {(debugApproval?.state === 'armed' || debugApproval?.state === 'active') && (
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleDebugApprovalToggle(false)}
+                      disabled={debugApprovalBusy}
+                      loading={debugApprovalBusy}
+                    >
+                      Revoke now
+                    </Button>
+                  )}
+                  {debugApproval?.reason && debugApproval.state === 'disabled' && (
+                    <p className="text-xs text-text-muted">OFF reason: {debugApproval.reason}</p>
                   )}
                 </CardContent>
               </Card>

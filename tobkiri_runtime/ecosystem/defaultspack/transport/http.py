@@ -1367,6 +1367,9 @@ class DefaultsHttpServer:
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
         }
+        if isinstance(request_data.get("debug_cli_operator"), dict):
+            approval_kwargs["debug_cli_operator"] = request_data["debug_cli_operator"]
+            approval_kwargs["expected_digest"] = str(request_data.get("expected_digest") or "")
         if isinstance(request_data.get("attestation"), dict):
             approval_kwargs["attestation"] = request_data.get("attestation")
         if related_permissions:
@@ -1418,6 +1421,12 @@ class DefaultsHttpServer:
                 reason=str(request_data.get("reason") or ""),
                 persist=bool(request_data.get("persist") or request_data.get("remember")),
                 ui_operator=ui_operator,
+                debug_cli_operator=(
+                    request_data.get("debug_cli_operator")
+                    if isinstance(request_data.get("debug_cli_operator"), dict)
+                    else None
+                ),
+                expected_digest=str(request_data.get("expected_digest") or ""),
                 actor_principal=request_data.get("_authenticated_principal"),
                 **(
                     {"attestation": request_data.get("attestation")}
@@ -1573,6 +1582,8 @@ _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_AUTH_CONTEXT_FLAG = "_defaultspack_local_ui_authenticated"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
+    "/api/coding/approvals/approve": {"POST"},
+    "/api/coding/approvals/deny": {"POST"},
     "/api/ai/provider-key": {"POST"},
     "/api/agent/subagent": {"POST"},
     "/api/connections/codex": {"POST"},
@@ -2012,6 +2023,19 @@ def _local_ui_approval_route_authorized(method, path, headers, request_data=None
         for pattern, pattern_methods in _LOCAL_UI_APPROVAL_METHOD_PATTERNS
     ):
         return False
+    if normalized_path in {
+        "/api/coding/approvals/approve",
+        "/api/coding/approvals/deny",
+    }:
+        origin = _strict_local_origin(_header_value(headers, "Origin"))
+        fetch_site = _header_value(headers, "Sec-Fetch-Site").strip().lower()
+        fetch_mode = _header_value(headers, "Sec-Fetch-Mode").strip().lower()
+        return bool(
+            origin
+            and fetch_site in {"same-origin", "same-site"}
+            and fetch_mode in {"cors", "same-origin"}
+            and _local_auth_token_authorized(headers)
+        )
     return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
 
 

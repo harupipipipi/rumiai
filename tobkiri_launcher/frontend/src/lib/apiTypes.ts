@@ -227,6 +227,27 @@ export interface ApiUpdateSettings {
   updated_at: string | null;
 }
 
+export type DebugApprovalState =
+  | 'disabled'
+  | 'armed'
+  | 'active'
+  | 'expired'
+  | 'revoked';
+
+export interface DebugApprovalStatus {
+  state: DebugApprovalState;
+  reason?: string | null;
+  armed_remaining_seconds?: number | null;
+  session_id?: string | null;
+  run_id?: string | null;
+  workspace?: string | null;
+  workspace_digest?: string | null;
+  pack_id?: string | null;
+  profile_id?: string | null;
+  expires_at?: number | null;
+  instance_nonce: string;
+}
+
 // ============================================================
 // Endpoint-specific response data shapes (inside envelope)
 // ============================================================
