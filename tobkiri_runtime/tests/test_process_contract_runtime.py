@@ -14,8 +14,17 @@ from core_runtime.global_contract_dispatch import GlobalContractInvocationError
 pytestmark = pytest.mark.contract
 
 
+def _force_macos_managed_sandbox(monkeypatch) -> None:
+    """Exercise the Lima-backed branch independently of the CI host OS."""
+    monkeypatch.setattr(
+        "core_runtime.capability_binding_registration.platform.system",
+        lambda: "Darwin",
+    )
+
+
 def test_process_contract_routes_through_managed_sandbox(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
+    _force_macos_managed_sandbox(monkeypatch)
 
     class FakeSupervisor:
         def execute_pack_process(self, request):
@@ -69,6 +78,8 @@ def test_process_contract_rejects_pack_self_reported_attestation(
     monkeypatch,
     tmp_path,
 ):
+    _force_macos_managed_sandbox(monkeypatch)
+
     class FakeSupervisor:
         @staticmethod
         def execute_pack_process(_request):
@@ -114,6 +125,8 @@ def test_process_contract_preserves_denied_envelope_on_nonzero_exit(
     monkeypatch,
     tmp_path,
 ):
+    _force_macos_managed_sandbox(monkeypatch)
+
     class FakeSupervisor:
         @staticmethod
         def execute_pack_process(_request):
@@ -154,6 +167,8 @@ def test_process_contract_preserves_unavailable_envelope_on_nonzero_exit(
     monkeypatch,
     tmp_path,
 ):
+    _force_macos_managed_sandbox(monkeypatch)
+
     class FakeSupervisor:
         @staticmethod
         def execute_pack_process(_request):
@@ -195,6 +210,7 @@ def test_process_contract_passes_validated_active_profile_context(
     tmp_path,
 ):
     captured: dict[str, object] = {}
+    _force_macos_managed_sandbox(monkeypatch)
     user_data = tmp_path / "user-data"
     marker = user_data / "profiles" / "active_profile.json"
     marker.parent.mkdir(parents=True)
