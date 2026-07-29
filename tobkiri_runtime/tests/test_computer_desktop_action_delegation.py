@@ -90,6 +90,7 @@ def test_seat_executed_fallback_does_not_rerun_legacy(controller, monkeypatch):
 
 
 def test_type_tries_background_safe_seat_before_focus(controller, monkeypatch):
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     svc = MagicMock()
     svc.background_action.return_value = asdict(
         ActionResult(
@@ -100,6 +101,7 @@ def test_type_tries_background_safe_seat_before_focus(controller, monkeypatch):
             can_parallel_user_work=True,
             requires_foreground=False,
             uses_physical_input=False,
+            data={"completion_verified": True},
         )
     )
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}

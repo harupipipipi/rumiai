@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 
 def _controller(root: Path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (

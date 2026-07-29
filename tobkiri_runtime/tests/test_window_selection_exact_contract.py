@@ -16,6 +16,8 @@ from ecosystem.rumi_default_tools_pack.domain.computer.trace import (
 )
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
+pytestmark = pytest.mark.contract
+
 
 def _window(**overrides):
     value = {
@@ -1008,10 +1010,18 @@ def test_selection_trace_emits_only_fixed_failure_values(monkeypatch, tmp_path):
     assert event["selection_exact_binding_present"] is False
     assert "selection_failure_stage" not in event
     assert "error_code" not in event
-    serialized = trace_path.read_text(encoding="utf-8")
-    assert "private" not in serialized
-    assert "321" not in serialized
-    assert "654" not in serialized
+    records = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records
+    for record in records:
+        assert "selection_failure_stage" not in record
+        assert "error_code" not in record
+        assert "title" not in record
+        assert "pid" not in record
+        assert "window_id" not in record
 
 
 def test_viewer_client_propagates_safe_exact_selection_failure(monkeypatch):

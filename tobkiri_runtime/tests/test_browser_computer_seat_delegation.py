@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from dataclasses import asdict
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,11 +15,11 @@ for path in (ROOT, DEFAULTSPACK_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.computer.models import (
+from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.computer.models import (  # noqa: E402
     ActionResult,
     ObserveResult,
 )
-from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
+from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (  # noqa: E402
     BrowserComputerController,
 )
 
@@ -297,7 +297,7 @@ def test_foreground_type_seat_success_returns_submit_guidance(controller):
 def test_legacy_type_success_returns_submit_guidance(controller, monkeypatch):
     desktop_actions = []
     monkeypatch.setattr(
-        "rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.platform.system",
+        "tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.platform.system",
         lambda: "Windows",
     )
     monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
