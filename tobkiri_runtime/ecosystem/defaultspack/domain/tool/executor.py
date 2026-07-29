@@ -24,6 +24,10 @@ from domain.tool_policy.internal_context import (
 )
 from domain.tool_policy.profile_permission import resolve_profile_tool_permission
 from domain.tool_policy.risk import resolve_tool_risk
+from core_runtime.capability_plan import (
+    CapabilityPlanValidationError,
+    validate_capability_plan,
+)
 from pathlib import Path
 import hashlib
 import inspect
@@ -129,6 +133,16 @@ def _capability_plan_tool_rejection(tool_name, tool_def, context):
     plan = context.get("capability_plan")
     if not isinstance(plan, dict):
         return None
+    if plan.get("schema_version"):
+        try:
+            plan = validate_capability_plan(plan)
+        except CapabilityPlanValidationError:
+            return {
+                "result": "CapabilityPlan authority is invalid",
+                "is_error": True,
+                "widget": None,
+                "error_type": "capability_plan_invalid",
+            }
     tools = plan.get("tools")
     if not isinstance(tools, dict):
         return {
@@ -700,6 +714,39 @@ class ToolExecutor:
                 separators=(",", ":"),
                 default=str,
             )
+            idempotency_dimensions = {
+                "query": str(arguments.get("query") or ""),
+                "model": str(
+                    arguments.get("model")
+                    or context.get("model")
+                    or context.get("selected_model")
+                    or ""
+                ),
+                "prompt_hash": str(
+                    context.get("prompt_hash")
+                    or context.get("prompt_revision")
+                    or ""
+                ),
+                "file_hashes": sorted(
+                    str(value)
+                    for value in (
+                        arguments.get("file_hashes")
+                        or context.get("file_hashes")
+                        or []
+                    )
+                    if str(value).strip()
+                ),
+                "batch": {
+                    "max_candidates": arguments.get("max_candidates"),
+                    "max_selected": arguments.get("max_selected"),
+                    "max_file_bytes": arguments.get("max_file_bytes"),
+                    "total_read_bytes": arguments.get("total_read_bytes"),
+                },
+                "budget": {
+                    "timeout_ms": timeout_ms,
+                    "maximum_cost": arguments.get("maximum_cost"),
+                },
+            }
             payload["_invocation_key"] = hashlib.sha256(
                 json.dumps(
                     {
@@ -714,6 +761,7 @@ class ToolExecutor:
                             else ""
                         ),
                         "registry_revision": payload["registry_revision"],
+                        "dimensions": idempotency_dimensions,
                     },
                     ensure_ascii=False,
                     sort_keys=True,
@@ -734,6 +782,7 @@ class ToolExecutor:
                             else ""
                         ),
                         "registry_revision": payload["registry_revision"],
+                        "dimensions": idempotency_dimensions,
                     },
                     ensure_ascii=False,
                     sort_keys=True,

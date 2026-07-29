@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from pathlib import Path
 import json
+from hashlib import sha256
 from dataclasses import replace
 from threading import RLock
 from typing import TYPE_CHECKING
@@ -22,7 +23,8 @@ _ACTIVE_PROFILE: ContextVar[ResolvedProfile | None] = ContextVar(
     default=None,
 )
 _PERSISTED_PROFILE_LOCK = RLock()
-_PERSISTED_PROFILE_CACHE: tuple[tuple[int, int], ResolvedProfile] | None = None
+_PERSISTED_PROFILE_CACHE: tuple[tuple[str, ...], ResolvedProfile] | None = None
+_PERSISTED_PROFILE_INVALIDATION_REVISION = 0
 
 
 def activate_resolved_profile(plan: ResolvedProfile) -> Token[ResolvedProfile | None]:
@@ -38,6 +40,16 @@ def restore_resolved_profile(token: Token[ResolvedProfile | None]) -> None:
 def active_resolved_profile() -> ResolvedProfile | None:
     """Return the current plan, or ``None`` before startup resolution."""
     return _ACTIVE_PROFILE.get()
+
+
+def invalidate_persisted_resolved_profile() -> None:
+    """Explicitly invalidate worker caches after Host authority mutations."""
+
+    global _PERSISTED_PROFILE_CACHE
+    global _PERSISTED_PROFILE_INVALIDATION_REVISION
+    with _PERSISTED_PROFILE_LOCK:
+        _PERSISTED_PROFILE_INVALIDATION_REVISION += 1
+        _PERSISTED_PROFILE_CACHE = None
 
 
 def persisted_resolved_profile() -> ResolvedProfile | None:
@@ -61,13 +73,9 @@ def persisted_resolved_profile() -> ResolvedProfile | None:
         )
 
         state_path = Path(USER_DATA_DIR) / "settings" / "startup_profiles.json"
-        stat = state_path.stat()
-        cache_key = (stat.st_mtime_ns, stat.st_size)
-        with _PERSISTED_PROFILE_LOCK:
-            cached = _PERSISTED_PROFILE_CACHE
-            if cached is not None and cached[0] == cache_key:
-                return cached[1]
-        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state_bytes = state_path.read_bytes()
+        startup_revision = sha256(state_bytes).hexdigest()
+        state = json.loads(state_bytes.decode("utf-8"))
         active_profile_id = str(state.get("active_profile_id") or "")
         profiles = state.get("profiles")
         profile = next(
@@ -85,6 +93,54 @@ def persisted_resolved_profile() -> ResolvedProfile | None:
         verified_pack_trust = approval_manager.get_verified_pack_trust(
             provisional.selected_pack_ids
         )
+        approval_revision = _stable_hash(
+            {
+                "authorized_pack_ids": sorted(verified_pack_trust),
+                "verified_pack_trust": sorted(
+                    verified_pack_trust.items()
+                ),
+            }
+        )
+        install_revision = _stable_hash(
+            [
+                (pack.pack_id, pack.version, pack.available)
+                for pack in provisional.packs
+            ]
+        )
+        content_revision = _stable_hash(
+            [
+                (
+                    pack.pack_id,
+                    pack.manifest_hash,
+                    pack.content_hash,
+                )
+                for pack in provisional.packs
+            ]
+        )
+        registry_revision = _stable_hash(
+            [
+                (
+                    provider.contract_id,
+                    provider.provider_instance_id,
+                    provider.source_pack_id,
+                    provider.version,
+                    provider.content_hash,
+                )
+                for provider in provisional.providers
+            ]
+        )
+        with _PERSISTED_PROFILE_LOCK:
+            cache_key = (
+                startup_revision,
+                approval_revision,
+                install_revision,
+                content_revision,
+                registry_revision,
+                str(_PERSISTED_PROFILE_INVALIDATION_REVISION),
+            )
+            cached = _PERSISTED_PROFILE_CACHE
+            if cached is not None and cached[0] == cache_key:
+                return cached[1]
         resolution_input = resolution_input_from_startup_profile(
             profile,
             verified_pack_trust=verified_pack_trust,
@@ -100,6 +156,17 @@ def persisted_resolved_profile() -> ResolvedProfile | None:
         return resolved
     except Exception:
         return None
+
+
+def _stable_hash(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def _persisted_startup_pack_ids() -> list[str]:
