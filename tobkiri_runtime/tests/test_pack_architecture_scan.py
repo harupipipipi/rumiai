@@ -153,6 +153,16 @@ def test_ast_fingerprint_survives_line_relocation(tmp_path: Path) -> None:
     assert relocated.identity == original.identity
 
 
+def test_ast_fingerprint_is_stable_across_empty_field_dump_versions() -> None:
+    scanner = _scanner()
+    node = scanner.ast.parse(
+        "if template.get('source_pack_id') != 'rumi_sandbox_runtime_pack':\n"
+        "    raise RuntimeError\n"
+    ).body[0].test
+
+    assert scanner._ast_fingerprint(node) == "ast-v1:1a3a6d9506a9664e6f96"
+
+
 def test_generated_tauri_runtime_is_not_scanned(tmp_path: Path) -> None:
     scanner = _scanner()
     _pack(tmp_path, "pack_b")

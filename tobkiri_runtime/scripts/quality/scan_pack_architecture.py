@@ -561,9 +561,31 @@ def _literal_string(node: ast.AST) -> str | None:
 
 def _ast_fingerprint(node: ast.AST) -> str:
     """Return a location-independent Python AST fingerprint for one edge."""
+    try:
+        dumped = ast.dump(
+            node,
+            annotate_fields=True,
+            include_attributes=False,
+            show_empty=False,
+        )
+    except TypeError:
+        # Python 3.13 added ``show_empty`` and stopped rendering empty list
+        # fields by default. Normalize older runtimes to that representation
+        # so exact-edge identities remain stable across the supported CI
+        # Python versions.
+        dumped = ast.dump(
+            node,
+            annotate_fields=True,
+            include_attributes=False,
+        )
+        previous = None
+        while dumped != previous:
+            previous = dumped
+            dumped = re.sub(r"(?<=\()\w+=\[\], ", "", dumped)
+            dumped = re.sub(r", \w+=\[\](?=[,)])", "", dumped)
     return _value_fingerprint(
         "ast-v1",
-        ast.dump(node, annotate_fields=True, include_attributes=False),
+        dumped,
     )
 
 
