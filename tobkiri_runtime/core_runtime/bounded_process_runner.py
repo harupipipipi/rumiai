@@ -95,6 +95,18 @@ class BoundedProcessResult:
         return self.exit_code is not None
 
 
+class ProcessExecutionCancelled(RuntimeError):
+    """A Host-owned process was cancelled after its process tree was reaped.
+
+    ``result`` retains only the normal bounded and redacted output.  It is
+    ``None`` when cancellation was requested before a child process started.
+    """
+
+    def __init__(self, result: BoundedProcessResult | None = None) -> None:
+        super().__init__("Host process execution was cancelled.")
+        self.result = result
+
+
 @dataclass
 class _CappedBytes:
     limit: int
@@ -139,7 +151,18 @@ class HostBoundedProcessRunner:
         timeout_seconds: float,
         environment: Mapping[str, str],
         policy: ProcessExecutionPolicy,
+        cancel_event: threading.Event | None = None,
     ) -> BoundedProcessResult:
+        """Run one exact command, or raise after a requested cancellation.
+
+        When ``cancel_event`` is set while the command is live, the Host
+        terminates and reaps its entire process tree before raising
+        :class:`ProcessExecutionCancelled`.  The exception carries the normal
+        bounded, redacted result.  A timeout remains a distinct successful
+        return value with ``timed_out=True``.
+        """
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessExecutionCancelled()
         request = self._validate_request(
             argv=argv,
             cwd=cwd,
@@ -155,11 +178,7 @@ class HostBoundedProcessRunner:
             "args": request["argv"],
             "cwd": request["cwd"],
             "env": request["environment"],
-            "stdin": (
-                subprocess.PIPE
-                if request["stdin"] is not None
-                else subprocess.DEVNULL
-            ),
+            "stdin": (subprocess.PIPE if request["stdin"] is not None else subprocess.DEVNULL),
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
             "close_fds": True,
@@ -196,11 +215,25 @@ class HostBoundedProcessRunner:
         for io_thread in io_threads:
             io_thread.start()
         timed_out = False
-        try:
-            process.wait(timeout=request["timeout_seconds"])
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            self._terminate_process_tree(process)
+        cancelled = False
+        process_tree_termination_failed = False
+        deadline = time.monotonic() + request["timeout_seconds"]
+        while process.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                process_tree_termination_failed = not self._terminate_process_tree(process)
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                process_tree_termination_failed = not self._terminate_process_tree(process)
+                break
+            try:
+                # Polling keeps the cancellation latency bounded without
+                # moving process ownership out of this Host boundary.
+                process.wait(timeout=min(remaining, 0.05))
+            except subprocess.TimeoutExpired:
+                continue
         self._reap_process(process)
         self._join_io_threads(io_threads)
         stdout_incomplete = io_threads[0].is_alive()
@@ -209,11 +242,11 @@ class HostBoundedProcessRunner:
             authority=self.AUTHORITY,
             boundary="bounded_host_process",
             sandboxed=False,
-            process_tree_kill=(
-                "posix_process_group" if os.name == "posix" else "windows_process_tree"
+            process_tree_kill=self._process_tree_kill_attestation(
+                termination_failed=process_tree_termination_failed,
             ),
         )
-        return self._result(
+        result = self._result(
             exit_code=process.returncode,
             stdout=bytes(stdout_buffer.data),
             stderr=bytes(stderr_buffer.data),
@@ -232,6 +265,12 @@ class HostBoundedProcessRunner:
             transport_error=None,
             policy=policy,
         )
+        # Preserve the historical cancellation contract: a cancellation that
+        # races with normal child completion is still reported as cancelled.
+        # A timeout observed first remains a timeout, not a cancellation.
+        if not timed_out and (cancelled or (cancel_event is not None and cancel_event.is_set())):
+            raise ProcessExecutionCancelled(result)
+        return result
 
     def run_attested_backend(
         self,
@@ -294,9 +333,7 @@ class HostBoundedProcessRunner:
         transport_error = None
         if exit_code is None:
             raw_transport_error = str(
-                payload.get("error_type")
-                or payload.get("error")
-                or "provider_unavailable"
+                payload.get("error_type") or payload.get("error") or "provider_unavailable"
             )
             transport_error, _ = self._redacted_bounded_text(
                 raw_transport_error.encode("utf-8", errors="replace"),
@@ -361,17 +398,14 @@ class HostBoundedProcessRunner:
             policy.max_stderr_bytes + self._redaction_lookahead_bytes(policy)
         )
         timed_out = False
+        process_tree_termination_failed = False
         with output_path.open("xb") as output_handle:
             stdout_file = _CappedFile(output_handle, policy.max_stdout_bytes)
             popen_kwargs: dict[str, Any] = {
                 "args": request["argv"],
                 "cwd": request["cwd"],
                 "env": request["environment"],
-                "stdin": (
-                    subprocess.PIPE
-                    if request["stdin"] is not None
-                    else subprocess.DEVNULL
-                ),
+                "stdin": (subprocess.PIPE if request["stdin"] is not None else subprocess.DEVNULL),
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
                 "close_fds": True,
@@ -411,7 +445,7 @@ class HostBoundedProcessRunner:
                 process.wait(timeout=request["timeout_seconds"])
             except subprocess.TimeoutExpired:
                 timed_out = True
-                self._terminate_process_tree(process)
+                process_tree_termination_failed = not self._terminate_process_tree(process)
             self._reap_process(process)
             self._join_io_threads(io_threads)
             output_handle.flush()
@@ -434,9 +468,9 @@ class HostBoundedProcessRunner:
                 boundary="bounded_host_process_file_sink",
                 sandboxed=False,
                 process_tree_kill=(
-                    "posix_process_group"
-                    if os.name == "posix"
-                    else "windows_process_tree"
+                    self._process_tree_kill_attestation(
+                        termination_failed=process_tree_termination_failed,
+                    )
                 ),
             ),
             transport_error=None,
@@ -497,28 +531,19 @@ class HostBoundedProcessRunner:
             or not isinstance(normalized_argv[0], str)
             or not normalized_argv[0]
             or len(normalized_argv) > _MAX_ARGV_ITEMS
-            or any(
-                not isinstance(item, str) or "\x00" in item
-                for item in normalized_argv
-            )
-            or sum(len(item.encode("utf-8")) for item in normalized_argv)
-            > _MAX_ARG_BYTES
+            or any(not isinstance(item, str) or "\x00" in item for item in normalized_argv)
+            or sum(len(item.encode("utf-8")) for item in normalized_argv) > _MAX_ARG_BYTES
         ):
             raise ValueError("process argv violates the bounded schema")
         if normalized_argv[0] not in policy.allowed_executables:
             raise PermissionError("process executable is not allowlisted")
-        if (
-            not policy.allow_path_search
-            and not Path(normalized_argv[0]).is_absolute()
-        ):
+        if not policy.allow_path_search and not Path(normalized_argv[0]).is_absolute():
             raise PermissionError("process executable must be an absolute path")
         if normalized_argv not in policy.allowed_argv:
             raise PermissionError("process arguments are not exactly allowlisted")
         raw_cwd = Path(cwd)
         if not raw_cwd.is_absolute() or raw_cwd.is_symlink():
-            raise PermissionError(
-                "process cwd must be an absolute non-symlink directory"
-            )
+            raise PermissionError("process cwd must be an absolute non-symlink directory")
         normalized_cwd = raw_cwd.resolve()
         allowed_cwds = tuple(Path(item).resolve() for item in policy.allowed_cwds)
         if normalized_cwd not in allowed_cwds or not normalized_cwd.is_dir():
@@ -547,9 +572,7 @@ class HostBoundedProcessRunner:
             ):
                 raise ValueError("process environment violates the bounded schema")
             if key not in policy.allowed_environment:
-                raise PermissionError(
-                    f"process environment key is not allowlisted: {key}"
-                )
+                raise PermissionError(f"process environment key is not allowlisted: {key}")
             normalized_environment[key] = value
         return {
             "argv": normalized_argv,
@@ -563,11 +586,7 @@ class HostBoundedProcessRunner:
     def _validate_backend_result(payload: Mapping[str, Any]) -> None:
         if not isinstance(payload, Mapping):
             raise ValueError("process backend output must be an object")
-        if (
-            "exit_code" not in payload
-            or "stdout" not in payload
-            or "stderr" not in payload
-        ):
+        if "exit_code" not in payload or "stdout" not in payload or "stderr" not in payload:
             raise ValueError("process backend output is missing required fields")
         unknown_keys = set(payload) - _BACKEND_RESULT_KEYS
         if unknown_keys:
@@ -577,9 +596,7 @@ class HostBoundedProcessRunner:
             isinstance(exit_code, bool) or not isinstance(exit_code, int)
         ):
             raise ValueError("process backend exit_code must be an integer or null")
-        if not isinstance(payload["stdout"], str) or not isinstance(
-            payload["stderr"], str
-        ):
+        if not isinstance(payload["stdout"], str) or not isinstance(payload["stderr"], str):
             raise ValueError("process backend stdout and stderr must be strings")
         timed_out = payload.get("timed_out", False)
         if not isinstance(timed_out, bool):
@@ -601,17 +618,13 @@ class HostBoundedProcessRunner:
             if returncode is not None and (
                 isinstance(returncode, bool) or not isinstance(returncode, int)
             ):
-                raise ValueError(
-                    "process backend returncode must be an integer or null"
-                )
+                raise ValueError("process backend returncode must be an integer or null")
             if returncode != exit_code:
                 raise ValueError("process backend returncode conflicts with exit_code")
         if exit_code is None and not (
             timed_out or payload.get("error") or payload.get("error_type")
         ):
-            raise ValueError(
-                "process backend null exit_code requires timeout or transport error"
-            )
+            raise ValueError("process backend null exit_code requires timeout or transport error")
         if timed_out and exit_code == 0:
             raise ValueError("process backend timeout conflicts with exit_code")
         if "success" in payload and "ok" in payload:
@@ -619,15 +632,11 @@ class HostBoundedProcessRunner:
                 raise ValueError("process backend success conflicts with ok")
         if payload.get("success") is True or payload.get("ok") is True:
             if exit_code != 0 or timed_out:
-                raise ValueError(
-                    "process backend success conflicts with process outcome"
-                )
+                raise ValueError("process backend success conflicts with process outcome")
         if "process_failed" in payload:
             expected_process_failed = exit_code not in (0, None)
             if payload["process_failed"] != expected_process_failed:
-                raise ValueError(
-                    "process backend process_failed conflicts with exit_code"
-                )
+                raise ValueError("process backend process_failed conflicts with exit_code")
 
     @staticmethod
     def _drain(stream: Any, output: _CappedBytes | _CappedFile) -> None:
@@ -655,13 +664,19 @@ class HostBoundedProcessRunner:
             stream.close()
 
     @classmethod
-    def _terminate_process_tree(cls, process: subprocess.Popen[Any]) -> None:
+    def _terminate_process_tree(cls, process: subprocess.Popen[Any]) -> bool:
         if os.name == "posix":
             process_group = process.pid
             try:
                 os.killpg(process_group, signal.SIGTERM)
             except ProcessLookupError:
-                return
+                return True
+            except OSError:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                return False
             deadline = time.monotonic() + _PROCESS_TERM_GRACE_SECONDS
             while time.monotonic() < deadline:
                 process.poll()
@@ -673,20 +688,59 @@ class HostBoundedProcessRunner:
                     os.killpg(process_group, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            return
+            return not cls._posix_process_group_exists(process_group)
+        taskkill = cls._windows_taskkill_path()
+        if taskkill is not None:
+            try:
+                completed = subprocess.run(
+                    [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    close_fds=True,
+                    timeout=_PROCESS_TERM_GRACE_SECONDS,
+                )
+                if completed.returncode == 0:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                pass
+        # Do not leave the direct child alive merely because taskkill could
+        # not be verified.  The caller records this as an unverified tree
+        # termination rather than claiming the Windows tree guarantee.
         try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=_PROCESS_TERM_GRACE_SECONDS,
-            )
-        except (OSError, subprocess.SubprocessError):
+            if process.poll() is None:
+                process.kill()
+        except OSError:
             pass
-        if process.poll() is None:
-            process.kill()
+        return False
+
+    @staticmethod
+    def _windows_taskkill_path() -> Path | None:
+        """Resolve taskkill from Windows itself, never through PATH."""
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = int(ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer)))
+            if length <= 0 or length >= len(buffer):
+                return None
+            candidate = Path(buffer.value) / "taskkill.exe"
+            if not candidate.is_file() or not os.access(candidate, os.X_OK):
+                return None
+            return candidate
+        except (AttributeError, OSError):
+            return None
+
+    @staticmethod
+    def _process_tree_kill_attestation(*, termination_failed: bool) -> str:
+        if os.name == "posix":
+            return "posix_process_group"
+        if termination_failed:
+            return "windows_process_tree_unverified"
+        return "windows_process_tree"
 
     @staticmethod
     def _posix_process_group_exists(process_group: int) -> bool:

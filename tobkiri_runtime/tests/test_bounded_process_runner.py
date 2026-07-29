@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from core_runtime.bounded_process_runner import (
     BoundedProcessResult,
     HostBoundedProcessRunner,
+    ProcessExecutionCancelled,
     ProcessExecutionPolicy,
 )
 
@@ -222,15 +224,102 @@ def test_runner_timeout_kills_descendant_process_tree(tmp_path: Path) -> None:
     assert not sentinel.exists()
 
 
+def test_runner_cancellation_kills_descendant_process_tree_and_keeps_bounded_result(
+    tmp_path: Path,
+) -> None:
+    started = tmp_path / "parent-started"
+    sentinel = tmp_path / "descendant-survived"
+    child = (
+        "import pathlib,signal,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "time.sleep(0.7); "
+        f"pathlib.Path({str(sentinel)!r}).write_text('alive')"
+    )
+    parent = (
+        "import pathlib,subprocess,sys,time; "
+        f"pathlib.Path({str(started)!r}).write_text('started'); "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
+        "sys.stdout.write('token=cancel-secret\\n'); sys.stdout.flush(); "
+        "time.sleep(10)"
+    )
+    argv = (sys.executable, "-c", parent)
+    cancel_event = threading.Event()
+    outcome: dict[str, object] = {}
+
+    def execute() -> None:
+        try:
+            HostBoundedProcessRunner().run_local(
+                argv=argv,
+                cwd=tmp_path,
+                stdin=None,
+                timeout_seconds=2,
+                environment={},
+                policy=_policy(argv, tmp_path, redact_values=("cancel-secret",)),
+                cancel_event=cancel_event,
+            )
+        except ProcessExecutionCancelled as exc:
+            outcome["exception"] = exc
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and not started.exists():
+        time.sleep(0.01)
+    assert started.exists()
+    cancel_event.set()
+    worker.join(timeout=3)
+    time.sleep(0.8)
+
+    assert not worker.is_alive()
+    exc = outcome.get("exception")
+    assert isinstance(exc, ProcessExecutionCancelled)
+    assert exc.result is not None
+    assert exc.result.timed_out is False
+    assert "cancel-secret" not in exc.result.stdout
+    assert "[REDACTED]" in exc.result.stdout
+    assert not sentinel.exists()
+
+
+def test_runner_never_attests_unverified_windows_tree_termination(monkeypatch) -> None:
+    import core_runtime.bounded_process_runner as runner_module
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 123
+            self.killed = False
+
+        def poll(self):
+            return None
+
+        def kill(self) -> None:
+            self.killed = True
+
+    monkeypatch.setattr(runner_module.os, "name", "nt")
+    monkeypatch.setattr(
+        HostBoundedProcessRunner,
+        "_windows_taskkill_path",
+        staticmethod(lambda: None),
+    )
+    process = FakeProcess()
+
+    verified = HostBoundedProcessRunner._terminate_process_tree(process)  # type: ignore[arg-type]
+
+    assert verified is False
+    assert process.killed is True
+    assert (
+        HostBoundedProcessRunner._process_tree_kill_attestation(
+            termination_failed=True,
+        )
+        == "windows_process_tree_unverified"
+    )
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX pipe inheritance test")
 def test_runner_does_not_wait_unbounded_for_descendant_pipe_holders(
     tmp_path: Path,
 ) -> None:
     child = "import time; time.sleep(2)"
-    parent = (
-        "import subprocess,sys; "
-        f"subprocess.Popen([sys.executable, '-c', {child!r}])"
-    )
+    parent = f"import subprocess,sys; subprocess.Popen([sys.executable, '-c', {child!r}])"
     argv = (sys.executable, "-c", parent)
 
     started = time.monotonic()

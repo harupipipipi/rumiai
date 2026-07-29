@@ -10,6 +10,7 @@ import platform
 import re
 import sys
 import threading
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -307,6 +308,10 @@ def _register_v3_contract_bindings(
                 operation = _load_python_contract_operation(
                     module=module,
                     symbol=str(entrypoint.get("symbol") or ""),
+                    activation_mode=str(
+                        entrypoint.get("activation_mode")
+                        or "construction_pure"
+                    ),
                     pack_location=pack_location,
                     client=GlobalContractClient(
                         interface_registry=interface_registry,
@@ -483,7 +488,8 @@ class _ProcessContractOperation:
         from .profile_paths import active_profile_id
 
         resolved_profile_id = active_profile_id(Path(USER_DATA_DIR))
-        if platform.system().lower() == "darwin":
+        host_system = platform.system().lower()
+        if host_system in {"darwin", "linux"}:
             argv = ("python3", "-B", "-s", "-E", "-m", self.module)
             environment = {"RUMI_USER_DATA": "/data"}
             if resolved_profile_id:
@@ -510,33 +516,28 @@ class _ProcessContractOperation:
                         "stdin": stdin,
                         "timeout_seconds": timeout_seconds,
                         "host_user_data_dir": str(Path(USER_DATA_DIR).resolve()),
+                        "host_pack_data_dir": (
+                            str(self._local_pack_data_dir(resolved_profile_id))
+                            if host_system == "linux"
+                            else ""
+                        ),
                         "active_profile_id": resolved_profile_id or "",
                     }
                 ),
-                boundary="lima_bubblewrap",
+                boundary=(
+                    "lima_bubblewrap"
+                    if host_system == "darwin"
+                    else "bubblewrap_systemd_cgroup"
+                ),
                 sandboxed=True,
                 process_tree_kill="bubblewrap_pid_namespace",
             )
         else:
-            user_data = self._local_pack_data_dir()
-            environment = {
-                "PATH": os.defpath,
-                "RUMI_USER_DATA": str(user_data),
-            }
-            if resolved_profile_id:
-                environment["RUMI_ACTIVE_PROFILE_ID"] = resolved_profile_id
-            argv = (sys.executable, "-B", "-s", "-E", "-m", self.module)
-            result = runner.run_local(
-                argv=argv,
-                cwd=runtime_root,
-                stdin=stdin,
-                timeout_seconds=timeout_seconds,
-                environment=environment,
-                policy=self._policy(
-                    argv=argv,
-                    cwd=runtime_root,
-                    environment=environment,
-                    timeout_seconds=timeout_seconds,
+            raise GlobalContractInvocationError(
+                "SANDBOX_RUNTIME_UNAVAILABLE",
+                (
+                    f"Process Pack isolation is unavailable on "
+                    f"{platform.system() or 'this host'}"
                 ),
             )
 
@@ -667,20 +668,46 @@ class _ProcessContractOperation:
             allow_path_search=not Path(argv[0]).is_absolute(),
         )
 
-    def _local_pack_data_dir(self) -> Path:
+    def _local_pack_data_dir(self, profile_id: str | None = None) -> Path:
         pack_id = str(self.pack_location.pack_id)
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", pack_id):
             raise GlobalContractInvocationError(
                 "provider_unavailable",
                 "Pack identifier is invalid for Host-owned storage",
             )
-        path = (USER_DATA_DIR / "packs" / "process" / pack_id).resolve()
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root = Path(USER_DATA_DIR).resolve()
+        components = (
+            ("profiles", profile_id, "packs", "process", pack_id)
+            if profile_id
+            else ("packs", "process", pack_id)
+        )
+        current = root
         try:
-            path.chmod(0o700)
-        except OSError:
-            pass
-        return path
+            current.mkdir(parents=True, exist_ok=True, mode=0o700)
+            for component in components:
+                if not component:
+                    raise ValueError("Pack data path component is empty")
+                candidate = current / component
+                if candidate.is_symlink():
+                    raise ValueError("Pack data path contains a symlink")
+                candidate.mkdir(mode=0o700, exist_ok=True)
+                if not candidate.is_dir() or candidate.is_symlink():
+                    raise ValueError("Pack data path is not a real directory")
+                current = candidate
+            current.chmod(0o700)
+        except (OSError, ValueError) as exc:
+            raise GlobalContractInvocationError(
+                "provider_unavailable",
+                f"Host-owned Pack storage is unsafe: {exc}",
+            ) from exc
+        try:
+            current.relative_to(root)
+        except ValueError as exc:
+            raise GlobalContractInvocationError(
+                "provider_unavailable",
+                "Host-owned Pack storage escaped its root",
+            ) from exc
+        return current
 
 
 def _managed_sandbox_supervisor() -> Any:
@@ -701,12 +728,23 @@ def _load_python_contract_operation(
     *,
     module: str,
     symbol: str,
+    activation_mode: str = "construction_pure",
     pack_location: PackLocation,
     client: GlobalContractClient,
 ) -> Any:
-    """Import one verified activation factory and return its operation only."""
+    """Import one verified activation factory and return its managed operation.
+
+    ``construction_pure`` preserves the original callable factory contract.
+    Such factories must not acquire external resources while being constructed.
+    ``context_manager`` is the reversible contract: calling the factory must be
+    inert and return a context manager whose ``__enter__`` yields the operation.
+    A generator-based context manager can put acquisition and cleanup in one
+    ``try/finally``, including failures raised before its first yield.
+    """
     if not symbol.isidentifier():
         raise ValueError("python entrypoint symbol is invalid")
+    if activation_mode not in {"construction_pure", "context_manager"}:
+        raise ValueError("python entrypoint activation_mode is invalid")
     runtime_root = pack_location.pack_dir.parent.parent
     added_path = str(runtime_root)
     inserted = added_path not in sys.path
@@ -717,7 +755,30 @@ def _load_python_contract_operation(
         factory = getattr(activated_module, symbol)
         if not callable(factory):
             raise TypeError("python entrypoint factory is not callable")
-        operation = factory(client)
+        if activation_mode == "construction_pure":
+            operation = factory(client)
+        else:
+            activation = factory(client)
+            if not (
+                callable(getattr(activation, "__enter__", None))
+                and callable(getattr(activation, "__exit__", None))
+            ):
+                raise TypeError(
+                    "context_manager python entrypoint did not return "
+                    "a context manager"
+                )
+            stack = ExitStack()
+            try:
+                operation = stack.enter_context(activation)
+                if not callable(operation):
+                    raise TypeError(
+                        "python entrypoint context manager did not yield "
+                        "an operation"
+                    )
+            except BaseException:
+                stack.close()
+                raise
+            operation = _ManagedPythonOperation(operation, stack)
     finally:
         if inserted:
             try:
@@ -727,6 +788,30 @@ def _load_python_contract_operation(
     if not callable(operation):
         raise TypeError("python entrypoint did not return an operation")
     return operation
+
+
+class _ManagedPythonOperation:
+    """Keep one context-managed Python provider alive until deactivation."""
+
+    def __init__(self, operation: Any, activation_stack: ExitStack) -> None:
+        self._operation = operation
+        self._activation_stack = activation_stack
+        self._activation_lock = threading.RLock()
+        self._active = True
+
+    def __call__(self, operation: str, payload: Dict[str, Any]) -> Any:
+        with self._activation_lock:
+            if not self._active:
+                raise RuntimeError("python provider is deactivated")
+            return self._operation(operation, payload)
+
+    def __rumi_deactivate__(self) -> None:
+        with self._activation_lock:
+            if not self._active:
+                return
+            self._active = False
+            activation_stack = self._activation_stack
+        activation_stack.close()
 
 
 def _module_owned_by_pack(module: str, pack_id: str) -> bool:

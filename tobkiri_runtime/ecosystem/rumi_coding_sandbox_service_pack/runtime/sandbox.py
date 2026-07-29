@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import stat
-import subprocess
 import tempfile
 import threading
 import time
@@ -15,6 +14,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from core_runtime.bounded_process_runner import (
+    BoundedProcessResult,
+    HostBoundedProcessRunner,
+    ProcessExecutionPolicy,
+)
 from core_runtime.paths import USER_DATA_DIR
 
 AUTHORITY = "rumi.service.host.authorize.v1"
@@ -189,18 +193,17 @@ class CodingSandboxRuntime:
         image = str(arguments["image"])
         if not _IMAGE.fullmatch(image):
             raise ValueError("sandbox image must be digest pinned")
-        inspect = subprocess.run(
-            ["docker", "image", "inspect", image],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=20,
-            check=False,
+        docker = _docker_executable()
+        inspect = _run_docker_command(
+            (docker, "image", "inspect", image),
+            cwd=sandbox["work"],
+            timeout_seconds=20,
         )
-        if inspect.returncode != 0:
+        if inspect.timed_out or inspect.exit_code != 0:
             raise RuntimeError("pinned sandbox image is not available locally")
         container_name = "rumi-coding-" + sandbox["id"].replace("-", "")[:20]
-        command = [
-            "docker",
+        command = (
+            docker,
             "run",
             "--rm",
             "--name",
@@ -226,31 +229,34 @@ class CodingSandboxRuntime:
             "/workspace",
             image,
             *arguments["command"],
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                timeout=arguments["timeout"],
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                timeout=20,
-                check=False,
-            )
+        )
+        completed = _run_docker_command(
+            command,
+            cwd=sandbox["work"],
+            timeout_seconds=float(arguments["timeout"]),
+        )
+        if completed.timed_out:
+            # The bounded Host runner has already killed the docker CLI's full
+            # process tree. Docker can leave its detached container behind, so
+            # always make one separately bounded best-effort cleanup attempt.
+            try:
+                _run_docker_command(
+                    (docker, "rm", "-f", container_name),
+                    cwd=sandbox["work"],
+                    timeout_seconds=20,
+                )
+            except OSError:
+                pass
             raise RuntimeError("sandbox execution timed out and was cancelled")
+        if completed.exit_code is None:
+            raise RuntimeError("sandbox execution transport failed")
         sandbox["updated_at"] = time.time()
         return {
             "sandbox_id": sandbox["id"],
             "image": image,
-            "exit_code": completed.returncode,
-            "stdout": _output(completed.stdout),
-            "stderr": _output(completed.stderr),
+            "exit_code": completed.exit_code,
+            "stdout": _bounded_output(completed.stdout, completed.stdout_truncated),
+            "stderr": _bounded_output(completed.stderr, completed.stderr_truncated),
             "network": "none",
             "host_downgrade": False,
             "host_modified": False,
@@ -447,10 +453,43 @@ def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _output(value: bytes) -> str:
-    return value[:_MAX_OUTPUT].decode("utf-8", errors="replace") + (
-        "\n[truncated]\n" if len(value) > _MAX_OUTPUT else ""
+def _docker_executable() -> str:
+    executable = shutil.which("docker")
+    if executable is None:
+        raise RuntimeError("Docker CLI is unavailable")
+    return str(Path(executable).resolve())
+
+
+def _run_docker_command(
+    argv: tuple[str, ...],
+    *,
+    cwd: Path,
+    timeout_seconds: float,
+) -> BoundedProcessResult:
+    """Run one exact Docker CLI command through the Host process boundary."""
+    process_cwd = Path(cwd).resolve()
+    environment = {"PATH": os.defpath}
+    return HostBoundedProcessRunner().run_local(
+        argv=argv,
+        cwd=process_cwd,
+        stdin=None,
+        timeout_seconds=timeout_seconds,
+        environment=environment,
+        policy=ProcessExecutionPolicy(
+            allowed_executables=frozenset({argv[0]}),
+            allowed_argv=(argv,),
+            allowed_cwds=(process_cwd,),
+            allowed_environment=frozenset(environment),
+            max_stdin_bytes=1,
+            max_stdout_bytes=_MAX_OUTPUT,
+            max_stderr_bytes=_MAX_OUTPUT,
+            max_timeout_seconds=timeout_seconds,
+        ),
     )
+
+
+def _bounded_output(value: str, truncated: bool) -> str:
+    return value + ("\n[truncated]\n" if truncated else "")
 
 
 def _string_list(value: Any) -> list[str]:

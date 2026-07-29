@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import sys
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -500,7 +502,9 @@ def test_high_risk_operation_plan_binds_workspace_and_git_state(
     )
 
     assert approved["cwd"] == str(workspace.resolve())
-    assert approved["argv"] == ["true"]
+    assert Path(approved["argv"][0]).name == "true"
+    assert approved["argv"][0] == approved["executable"]["path"]
+    assert approved["executable"]["sha256"].startswith("sha256:")
     assert approved["plan_sha256"] != changed["plan_sha256"]
 
     patch_text = (
@@ -522,8 +526,10 @@ def test_high_risk_operation_plan_binds_workspace_and_git_state(
         {"paths": "tracked.txt"},
         context,
     )
-    assert patch["argv"][:2] == ["git", "apply"]
-    assert restore["argv"][:3] == ["git", "restore", "--worktree"]
+    assert Path(patch["argv"][0]).name == "git"
+    assert patch["argv"][1] == "apply"
+    assert Path(restore["argv"][0]).name == "git"
+    assert restore["argv"][1:3] == ["restore", "--worktree"]
     applied = protocol.operations._execute_high_risk_host_operation(
         {"id": "patch"},
         "request_patch_approval",
@@ -532,6 +538,71 @@ def test_high_risk_operation_plan_binds_workspace_and_git_state(
     )
     assert applied["status"] == "ok"
     assert (workspace / "new.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_high_risk_terminal_rejects_path_executable_swap_after_approval(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.name", "Test"],
+        check=True,
+    )
+    (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-qm", "seed"],
+        check=True,
+    )
+    executable_a_dir = tmp_path / "bin-a"
+    executable_b_dir = tmp_path / "bin-b"
+    executable_a_dir.mkdir()
+    executable_b_dir.mkdir()
+    executable_name = "python.exe" if os.name == "nt" else "python"
+    executable_a = executable_a_dir / executable_name
+    executable_b = executable_b_dir / executable_name
+    shutil.copy2(sys.executable, executable_a)
+    shutil.copy2(sys.executable, executable_b)
+    executable_a.chmod(0o755)
+    executable_b.chmod(0o755)
+    original_path = os.environ.get("PATH", os.defpath)
+    operations = CommandProtocolRegistry(DEFAULTSPACK_ROOT).operations
+    context = {
+        "workspace_path": str(workspace),
+        "authorized_workspace_roots": [str(workspace)],
+    }
+
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join((str(executable_a_dir), original_path)),
+    )
+    approved = operations.prepare_high_risk_plan(
+        "request_terminal_approval",
+        {"cmd": 'python -c "open(\'ran.txt\', \'w\').write(\'ran\')"'},
+        context,
+    )
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join((str(executable_b_dir), original_path)),
+    )
+    result = operations._execute_high_risk_host_operation(
+        {"id": "terminal"},
+        "request_terminal_approval",
+        {"cmd": 'python -c "open(\'ran.txt\', \'w\').write(\'ran\')"'},
+        {**context, "_approved_operation_plan": approved},
+    )
+
+    assert approved["argv"][0] == str(executable_a.resolve())
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "APPROVED_OPERATION_PLAN_CHANGED"
+    assert not (workspace / "ran.txt").exists()
 
 
 def test_high_risk_host_policy_requires_authoritative_roots_and_executable(
@@ -603,6 +674,36 @@ def test_high_risk_host_policy_requires_authoritative_roots_and_executable(
                 "authorized_workspace_roots": [str(workspace)],
             },
         )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real Windows environment test")
+def test_windows_host_process_gets_required_curated_environment(
+    tmp_path: Path,
+) -> None:
+    operations = CommandProtocolRegistry(DEFAULTSPACK_ROOT).operations
+    probe = operations._run_host_process(
+        argv=(
+            "python",
+            "-c",
+            (
+                "import json, os; "
+                "print(json.dumps({'path': os.environ.get('PATH'), "
+                "'system_root': os.environ.get('SystemRoot')}))"
+            ),
+        ),
+        cwd=tmp_path,
+        stdin=None,
+        timeout_seconds=10,
+        command_class="terminal",
+        allowed_cwds=(tmp_path,),
+    )
+
+    assert probe.exit_code == 0
+    environment = json.loads(probe.stdout)
+    assert environment["system_root"] == str(Path(os.environ["SystemRoot"]).resolve())
+    path_entries = environment["path"].split(os.pathsep)
+    assert path_entries
+    assert all(entry and entry != "." and Path(entry).is_absolute() for entry in path_entries)
 
 
 def test_command_protocol_routes_are_registered() -> None:

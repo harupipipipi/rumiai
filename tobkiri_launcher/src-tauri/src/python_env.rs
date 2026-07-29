@@ -756,12 +756,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_hashed_requirements_accepts_generated_interpreter_markers() {
+    fn validate_hashed_requirements_accepts_uv_implementation_markers() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("rumi_generated_marker_{unique}"));
+        let root = std::env::temp_dir().join(format!("rumi_uv_marker_requirements_{unique}"));
         let req_path = root.join("requirements.txt");
         fs::create_dir_all(&root).unwrap();
         fs::write(
@@ -771,7 +771,7 @@ mod tests {
                 "--hash=sha256:02cb7ff33ded4f1532476731f89ede53e2e488a8e6205515a82144246ffa7dcc\n",
                 "pycparser==3.0 ; implementation_name != 'PyPy' and ",
                 "platform_python_implementation != 'PyPy' ",
-                "--hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5\n",
+                "--hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29\n",
                 "rpds-py==2026.6.3 ; python_full_version >= '3.11' ",
                 "--hash=sha256:0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5\n",
             ),
@@ -784,9 +784,10 @@ mod tests {
 
     #[test]
     fn bundled_runtime_requirements_pass_launcher_validation() {
-        let requirements =
+        let req_path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tobkiri_runtime/requirements.txt");
-        validate_hashed_requirements(&requirements).unwrap();
+
+        validate_hashed_requirements(&req_path).unwrap();
     }
 
     #[test]

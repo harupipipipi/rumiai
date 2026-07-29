@@ -55,8 +55,9 @@ def _exercise_denial_contract(
 
 
 def _file_write_payload(tmp_path: Path) -> dict[str, Any]:
+    del tmp_path
     return {
-        "workspace_root": str(tmp_path),
+        "workspace_id": "trusted",
         "path": "notes.txt",
         "content": "after\n",
     }
@@ -82,9 +83,13 @@ def _http_server_without_starting_listener(facade: object | None = None):
 
 def test_coding_file_write_denial_parity_across_direct_and_function_entrypoints(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from blocks.coding.file_write import run as block_file_write
     from domain.function_runtime.dispatcher import run_defaultspack_function
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
+
+    bind_verified_coding_contracts(monkeypatch, tmp_path)
 
     cases: list[Entrypoint] = [
         lambda payload, context: block_file_write(payload, context),
@@ -128,7 +133,11 @@ def test_tool_create_is_retired_across_direct_and_function_entrypoints(
 
 def test_legacy_http_fallback_denies_forged_coding_write_approval(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
+
+    bind_verified_coding_contracts(monkeypatch, tmp_path)
     server = _http_server_without_starting_listener(facade=None)
 
     def entrypoint(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -152,7 +161,9 @@ def test_http_function_route_adapter_preserves_function_denial_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from domain.function_runtime import dispatcher
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
 
+    bind_verified_coding_contracts(monkeypatch, tmp_path)
     server = _http_server_without_starting_listener(facade=object())
 
     def fake_invoke_function(

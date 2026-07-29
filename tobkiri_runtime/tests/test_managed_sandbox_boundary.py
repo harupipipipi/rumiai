@@ -132,14 +132,17 @@ def test_bubblewrap_builder_uses_policy_not_raw_command(tmp_path):
 
     root = tmp_path / "root"
     workspace = tmp_path / "workspace"
+    data = tmp_path / "data"
     root.mkdir()
     workspace.mkdir()
+    data.mkdir()
     spec = BubblewrapSandboxSpec(
         sandbox_id="sbx_test",
         profile_id="work",
         immutable_root=root,
         workspace=WorkspaceMount(source=workspace),
         argv=("python3", "/workspace/main.py"),
+        data=WorkspaceMount(source=data, target="/data"),
         env={"RUMI_SANDBOX_ID": "sbx_test"},
         network_enabled=False,
         seccomp_fd=7,
@@ -154,6 +157,8 @@ def test_bubblewrap_builder_uses_policy_not_raw_command(tmp_path):
     assert str(root.resolve()) in argv
     assert str(workspace.resolve()) in argv
     assert "/workspace" in argv
+    assert str(data.resolve()) in argv
+    assert "/data" in argv
     assert argv[argv.index("--seccomp") + 1] == "7"
     assert argv[argv.index("--setenv") + 1] == "HOME"
 
