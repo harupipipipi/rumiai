@@ -405,6 +405,10 @@ class ManagedSandboxSupervisor:
         module = str(request.get("module") or "").strip()
         if not pack_id or not module:
             raise ValueError("pack_id and module are required")
+        active_profile_id = _validated_profile_context(
+            request.get("active_profile_id")
+        )
+        data_scope = f"{active_profile_id or 'legacy'}--{pack_id}"
         with tempfile.TemporaryDirectory(prefix="rumi-pack-process-") as tmp:
             workspace = Path(tmp)
             target = workspace / "ecosystem" / pack_id
@@ -433,9 +437,10 @@ class ManagedSandboxSupervisor:
                     "profile_runtime": request.get("profile_runtime"),
                     "active_profile_id": request.get("active_profile_id"),
                     "host_user_data_dir": request.get("host_user_data_dir"),
+                    "host_pack_data_dir": request.get("host_pack_data_dir"),
                     "pack_id": pack_id,
                     "guest_data_dir": (
-                        f"{LIMA_GUEST_PACK_DATA_ROOT}/{_safe_guest_name(pack_id)}"
+                        f"{LIMA_GUEST_PACK_DATA_ROOT}/{_safe_guest_name(data_scope)}"
                     ),
                     # This workspace is an ephemeral staged Pack tree. Pack
                     # state persists only through guest_data_dir, so copying
@@ -475,13 +480,32 @@ class ManagedSandboxSupervisor:
         command_argv = _coding_command_argv(request)
         try:
             immutable_root = _immutable_root(request)
+            host_pack_data = str(request.get("host_pack_data_dir") or "").strip()
+            data_mount = None
+            sandbox_env = _coding_sandbox_env(sandbox_id)
+            if host_pack_data:
+                data_path = _required_dir(host_pack_data, "host_pack_data_dir")
+                if data_path.is_symlink():
+                    raise ValueError("host_pack_data_dir must not be a symlink")
+                data_mount = WorkspaceMount(
+                    source=data_path,
+                    target="/data",
+                    read_only=False,
+                )
+                sandbox_env["RUMI_USER_DATA"] = "/data"
+            active_profile = _validated_profile_context(
+                request.get("active_profile_id")
+            )
+            if active_profile:
+                sandbox_env["RUMI_ACTIVE_PROFILE_ID"] = active_profile
             spec = BubblewrapSandboxSpec(
                 sandbox_id=sandbox_id,
                 profile_id=str(request.get("profile_runtime") or request.get("principal_id") or "coding"),
                 immutable_root=immutable_root,
                 workspace=WorkspaceMount(source=workspace, read_only=False),
                 argv=tuple(command_argv),
-                env=_coding_sandbox_env(sandbox_id),
+                data=data_mount,
+                env=sandbox_env,
                 network_enabled=bool(request.get("network_enabled") is True),
             )
             bwrap_argv = build_bubblewrap_argv(spec)

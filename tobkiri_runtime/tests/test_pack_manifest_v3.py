@@ -76,6 +76,29 @@ def test_schema_is_valid_and_example_passes() -> None:
     assert not list(Draft202012Validator(schema).iter_errors(manifest))
 
 
+def test_python_entrypoint_accepts_context_manager_activation_mode() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["entrypoints"][0]["activation_mode"] = "context_manager"
+
+    assert not list(Draft202012Validator(schema).iter_errors(manifest))
+
+
+def test_non_python_entrypoint_rejects_activation_mode() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["entrypoints"][0].update(
+        {
+            "loader": "process",
+            "activation_mode": "context_manager",
+        }
+    )
+
+    errors = list(Draft202012Validator(schema).iter_errors(manifest))
+
+    assert any("'python' was expected" in error.message for error in errors)
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [

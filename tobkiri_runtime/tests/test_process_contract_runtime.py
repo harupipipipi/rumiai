@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -265,24 +266,27 @@ def test_explicit_active_profile_environment_is_validated(
         active_profile_id()
 
 
-def test_process_contract_non_macos_keeps_pack_scoped_persistence(
+def test_process_contract_linux_routes_through_sandbox_with_profile_storage(
     monkeypatch,
     tmp_path,
 ):
+    captured: list[dict[str, object]] = []
     runtime_root = tmp_path / "runtime-root"
     pack_dir = runtime_root / "ecosystem" / "sample_pack"
-    module_dir = pack_dir / "runtime"
-    module_dir.mkdir(parents=True)
-    for package_dir in (runtime_root / "ecosystem", pack_dir, module_dir):
-        (package_dir / "__init__.py").write_text("", encoding="utf-8")
-    (module_dir / "process.py").write_text(
-        "import json, os, pathlib\n"
-        "counter = pathlib.Path(os.environ['RUMI_USER_DATA']) / 'counter'\n"
-        "value = int(counter.read_text() if counter.exists() else '0') + 1\n"
-        "counter.write_text(str(value))\n"
-        "print(json.dumps({'status': 'ok', 'value': value}))\n",
-        encoding="utf-8",
-    )
+    pack_dir.mkdir(parents=True)
+
+    class FakeSupervisor:
+        @staticmethod
+        def execute_pack_process(request):
+            captured.append(dict(request))
+            return {
+                "success": True,
+                "exit_code": 0,
+                "stdout": json.dumps({"status": "ok", "value": "sandboxed"}),
+                "stderr": "",
+                "timed_out": False,
+            }
+
     monkeypatch.setattr(
         "core_runtime.capability_binding_registration.platform.system",
         lambda: "Linux",
@@ -291,40 +295,50 @@ def test_process_contract_non_macos_keeps_pack_scoped_persistence(
         "core_runtime.capability_binding_registration.USER_DATA_DIR",
         tmp_path / "user-data",
     )
+    marker = tmp_path / "user-data" / "profiles" / "active_profile.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps({"active_profile_id": "work-profile"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "core_runtime.capability_binding_registration._managed_sandbox_supervisor",
+        lambda: FakeSupervisor(),
+    )
     operation = _ProcessContractOperation(
         module="ecosystem.sample_pack.runtime.process",
         pack_location=SimpleNamespace(pack_id="sample_pack", pack_dir=pack_dir),
     )
 
-    assert operation("increment", {}) == 1
-    assert operation("increment", {}) == 2
+    assert operation("inspect", {}) == "sandboxed"
+    request = captured[0]
+    assert request["active_profile_id"] == "work-profile"
+    assert request["host_pack_data_dir"] == str(
+        tmp_path
+        / "user-data"
+        / "profiles"
+        / "work-profile"
+        / "packs"
+        / "process"
+        / "sample_pack"
+    )
+    assert operation._local_pack_data_dir("other-profile") != Path(
+        str(request["host_pack_data_dir"])
+    )
+    assert operation.last_host_attestation()["boundary"] == (
+        "bubblewrap_systemd_cgroup"
+    )
+    assert operation.last_host_attestation()["sandboxed"] is True
 
 
-def test_process_contract_windows_uses_bounded_local_runner(
+def test_process_contract_windows_fails_closed_without_isolated_provider(
     monkeypatch,
     tmp_path,
 ):
-    captured: dict[str, object] = {}
-
     class FakeRunner:
         @staticmethod
-        def run_local(**kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(
-                exit_code=0,
-                stdout=json.dumps({"status": "ok", "value": "ok"}),
-                stderr="",
-                timed_out=False,
-                stdout_truncated=False,
-                stderr_truncated=False,
-                transport_error=None,
-                attestation=HostProcessAttestation(
-                    authority="core_runtime.bounded_process_runner",
-                    boundary="bounded_host_process",
-                    sandboxed=False,
-                    process_tree_kill="windows_process_tree",
-                ),
-            )
+        def run_local(**_kwargs):
+            raise AssertionError("Windows must not run a Process Pack on Host")
 
         @staticmethod
         def run_attested_backend(**_kwargs):
@@ -346,24 +360,59 @@ def test_process_contract_windows_uses_bounded_local_runner(
     pack_dir = runtime_root / "ecosystem" / "sample_pack"
     pack_dir.mkdir(parents=True)
 
-    result = _ProcessContractOperation(
-        module="ecosystem.sample_pack.runtime.process",
-        pack_location=SimpleNamespace(pack_id="sample_pack", pack_dir=pack_dir),
-    )("list", {})
+    with pytest.raises(GlobalContractInvocationError) as raised:
+        _ProcessContractOperation(
+            module="ecosystem.sample_pack.runtime.process",
+            pack_location=SimpleNamespace(pack_id="sample_pack", pack_dir=pack_dir),
+        )("list", {})
 
-    assert result == "ok"
-    assert captured["environment"]["RUMI_USER_DATA"].endswith(
-        "/packs/process/sample_pack"
+    assert raised.value.code == "SANDBOX_RUNTIME_UNAVAILABLE"
+
+
+def test_process_contract_rejects_symlinked_pack_storage(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.capability_binding_registration.platform.system",
+        lambda: "Linux",
     )
+    user_data = tmp_path / "user-data"
+    process_root = user_data / "packs" / "process"
+    process_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (process_root / "sample_pack").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+    except OSError:
+        pytest.skip("host does not permit test directory symlinks")
+    monkeypatch.setattr(
+        "core_runtime.capability_binding_registration.USER_DATA_DIR",
+        user_data,
+    )
+    pack_dir = tmp_path / "runtime" / "ecosystem" / "sample_pack"
+    pack_dir.mkdir(parents=True)
+
+    with pytest.raises(GlobalContractInvocationError) as raised:
+        _ProcessContractOperation(
+            module="ecosystem.sample_pack.runtime.process",
+            pack_location=SimpleNamespace(pack_id="sample_pack", pack_dir=pack_dir),
+        )("list", {})
+
+    assert raised.value.code == "provider_unavailable"
+    assert not any(outside.iterdir())
 
 
-def test_process_contract_rejects_truncated_local_response(
+def test_process_contract_rejects_truncated_sandbox_response(
     monkeypatch,
     tmp_path,
 ):
     class FakeRunner:
         @staticmethod
-        def run_local(**_kwargs):
+        def run_attested_backend(**_kwargs):
             return SimpleNamespace(
                 exit_code=0,
                 stdout=json.dumps({"status": "ok", "value": []}),
@@ -374,9 +423,9 @@ def test_process_contract_rejects_truncated_local_response(
                 transport_error=None,
                 attestation=HostProcessAttestation(
                     authority="core_runtime.bounded_process_runner",
-                    boundary="bounded_host_process",
-                    sandboxed=False,
-                    process_tree_kill="posix_process_group",
+                    boundary="bubblewrap_systemd_cgroup",
+                    sandboxed=True,
+                    process_tree_kill="bubblewrap_pid_namespace",
                 ),
             )
 
@@ -391,6 +440,10 @@ def test_process_contract_rejects_truncated_local_response(
     monkeypatch.setattr(
         "core_runtime.capability_binding_registration.USER_DATA_DIR",
         tmp_path / "user-data",
+    )
+    monkeypatch.setattr(
+        "core_runtime.capability_binding_registration._managed_sandbox_supervisor",
+        lambda: SimpleNamespace(execute_pack_process=lambda _request: {}),
     )
     pack_dir = tmp_path / "runtime" / "ecosystem" / "sample_pack"
     pack_dir.mkdir(parents=True)
@@ -446,7 +499,7 @@ def test_supervisor_forwards_host_migration_and_profile_context(
     assert captured["active_profile_id"] == "work-profile"
     assert captured["guest_data_dir"].endswith(
         "--"
-        + hashlib.sha256(b"sample_pack").hexdigest()
+        + hashlib.sha256(b"work-profile--sample_pack").hexdigest()
     )
 
 
