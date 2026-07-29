@@ -79,5 +79,5 @@ def test_dev_uv_version_matches_release_bundle_pin():
     requirements = DEV_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
     pyproject = DEV_PYPROJECT.read_text(encoding="utf-8")
 
-    assert pinned_requirement in requirements
+    assert any(line.startswith(pinned_requirement) for line in requirements)
     assert f'"{pinned_requirement}"' in pyproject

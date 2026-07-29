@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Boxes,
   CheckCircle2,
@@ -47,90 +47,28 @@ import {
   capabilityPortStandards,
   normalizeCapabilityProfileNodes,
 } from '@/src/lib/nodeCatalog';
+import {
+  buildCapabilityPackGroups,
+  capabilityDomains,
+  capabilityPackId,
+  capabilityProfileForStartup,
+  LatestRequestToken,
+  type CapabilityPackGroup,
+} from '@/src/lib/nodeManagerCatalog';
 import { cn } from '@/src/lib/utils';
 import { useAppStore } from '@/src/store';
-
-type CapabilityPackGroup = {
-  packId: string;
-  nodes: ApiCapabilityNode[];
-  enabledCount: number;
-  readyCount: number;
-};
 
 type CapabilityAccessCache = {
   startupProfiles: ApiStartupProfile[];
   capabilityProfiles: ApiCapabilityProfile[];
   capabilityProfileId: string;
+  loadedCapabilityProfileId: string;
   nodes: ApiCapabilityNode[];
   selectedPackId: string;
   selectedNodeId: string;
 };
 
 let capabilityAccessCache: CapabilityAccessCache | null = null;
-
-function recordValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
-}
-
-export function capabilityPackId(node: ApiCapabilityNode): string {
-  const fromMetadata = node.metadata?.pack_id;
-  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return fromMetadata;
-  return node.node_id.split('.')[0] ?? 'unknown';
-}
-
-export function capabilityDomains(node: ApiCapabilityNode): string[] {
-  const metadata = recordValue(node.metadata);
-  const requirements = recordValue(node.requirements);
-  const permissions = recordValue(node.permissions);
-  const requirementNetwork = recordValue(requirements.network);
-  const permissionNetwork = recordValue(permissions.network);
-  return [...new Set([
-    ...stringList(metadata.allowed_domains),
-    ...stringList(metadata.network_domains),
-    ...stringList(requirementNetwork.domains),
-    ...stringList(requirementNetwork.allowed_domains),
-    ...stringList(permissionNetwork.domains),
-    ...stringList(permissionNetwork.allowed_domains),
-  ])].sort();
-}
-
-export function capabilityProfileForStartup(
-  startupProfile: ApiStartupProfile | null,
-  capabilityProfiles: ApiCapabilityProfile[],
-): string {
-  const candidates = [
-    startupProfile?.capability_profile_id,
-    startupProfile?.default_graph,
-    startupProfile?.graph_id,
-  ].filter((value): value is string => Boolean(value));
-  return candidates.find((candidate) => (
-    capabilityProfiles.some((profile) => profile.profile_id === candidate)
-  )) ?? capabilityProfiles[0]?.profile_id ?? '';
-}
-
-function buildPackGroups(nodes: ApiCapabilityNode[]): CapabilityPackGroup[] {
-  const groups = new Map<string, ApiCapabilityNode[]>();
-  nodes.forEach((node) => {
-    const packId = capabilityPackId(node);
-    groups.set(packId, [...(groups.get(packId) ?? []), node]);
-  });
-  return [...groups.entries()]
-    .map(([packId, packNodes]) => ({
-      packId,
-      nodes: packNodes.sort((left, right) => capabilityNodeLabel(left).localeCompare(capabilityNodeLabel(right))),
-      enabledCount: packNodes.filter((node) => node.state?.enabled).length,
-      readyCount: packNodes.filter((node) => node.state?.status === 'ready').length,
-    }))
-    .sort((left, right) => left.packId.localeCompare(right.packId));
-}
 
 export function NodeManager() {
   const addToast = useAppStore((state) => state.addToast);
@@ -144,6 +82,9 @@ export function NodeManager() {
   );
   const [capabilityProfileId, setCapabilityProfileId] = useState(
     () => capabilityAccessCache?.capabilityProfileId ?? '',
+  );
+  const [loadedCapabilityProfileId, setLoadedCapabilityProfileId] = useState(
+    () => capabilityAccessCache?.loadedCapabilityProfileId ?? '',
   );
   const [nodes, setNodes] = useState<ApiCapabilityNode[]>(
     () => capabilityAccessCache?.nodes ?? [],
@@ -160,6 +101,12 @@ export function NodeManager() {
   const [initialError, setInitialError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
+  const capabilityProfilesRef = useRef(capabilityProfiles);
+  const profileRequestToken = useRef(new LatestRequestToken());
+
+  useEffect(() => {
+    capabilityProfilesRef.current = capabilityProfiles;
+  }, [capabilityProfiles]);
 
   const selectedStartupProfile = startupProfiles.find(
     (profile) => profile.profile_id === selectedStartupProfileId,
@@ -202,34 +149,48 @@ export function NodeManager() {
     setCapabilityProfileId(capabilityProfileForStartup(selectedStartupProfile, capabilityProfiles));
   }, [capabilityProfiles, selectedStartupProfile]);
 
-  const loadProfileNodes = async (profileId: string) => {
-    if (!profileId) return;
+  const loadProfileNodes = useCallback(async (profileId: string): Promise<boolean> => {
+    if (!profileId) return false;
+    const requestToken = profileRequestToken.current.begin();
     setProfileLoading(true);
     try {
       const response = await fetchCapabilityProfileNodes(profileId);
+      if (!profileRequestToken.current.isCurrent(requestToken)) return false;
       const normalized = normalizeCapabilityProfileNodes(
         response,
-        capabilityProfiles.find((profile) => profile.profile_id === profileId) ?? null,
+        capabilityProfilesRef.current.find((profile) => profile.profile_id === profileId) ?? null,
       );
       setNodes(normalized.nodes);
-      const groups = buildPackGroups(normalized.nodes);
+      const groups = buildCapabilityPackGroups(normalized.nodes);
       setSelectedPackId((current) => groups.some((group) => group.packId === current)
         ? current
         : groups[0]?.packId ?? '');
       setSelectedNodeId((current) => normalized.nodes.some((node) => node.node_id === current)
         ? current
         : normalized.nodes[0]?.node_id ?? '');
+      setLoadedCapabilityProfileId(profileId);
       setProfileError(null);
+      return true;
     } catch (error) {
+      if (!profileRequestToken.current.isCurrent(requestToken)) return false;
       setProfileError(error instanceof Error ? error.message : 'Failed to load profile capability access');
+      return false;
     } finally {
-      setProfileLoading(false);
+      if (profileRequestToken.current.isCurrent(requestToken)) {
+        setProfileLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
+    if (!capabilityProfileId) {
+      profileRequestToken.current.invalidate();
+      setProfileLoading(false);
+      return;
+    }
     void loadProfileNodes(capabilityProfileId);
-  }, [capabilityProfileId]);
+    return () => profileRequestToken.current.invalidate();
+  }, [capabilityProfileId, loadProfileNodes]);
 
   useEffect(() => {
     if (!startupProfiles.length || !capabilityProfiles.length || !capabilityProfileId) return;
@@ -237,13 +198,22 @@ export function NodeManager() {
       startupProfiles,
       capabilityProfiles,
       capabilityProfileId,
+      loadedCapabilityProfileId,
       nodes,
       selectedPackId,
       selectedNodeId,
     };
-  }, [startupProfiles, capabilityProfiles, capabilityProfileId, nodes, selectedPackId, selectedNodeId]);
+  }, [
+    startupProfiles,
+    capabilityProfiles,
+    capabilityProfileId,
+    loadedCapabilityProfileId,
+    nodes,
+    selectedPackId,
+    selectedNodeId,
+  ]);
 
-  const packGroups = useMemo(() => buildPackGroups(nodes), [nodes]);
+  const packGroups = useMemo(() => buildCapabilityPackGroups(nodes), [nodes]);
   const selectedPack = packGroups.find((group) => group.packId === selectedPackId) ?? null;
   const visibleNodes = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -259,13 +229,14 @@ export function NodeManager() {
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId)
     ?? visibleNodes[0]
     ?? null;
+  const profileReady = loadedCapabilityProfileId === capabilityProfileId && !profileLoading;
 
   const refreshProfile = async () => {
     await loadProfileNodes(capabilityProfileId);
   };
 
   const setNodeEnabled = async (node: ApiCapabilityNode, enabled: boolean) => {
-    if (!capabilityProfileId) return;
+    if (!capabilityProfileId || !profileReady) return;
     const previousNodes = nodes;
     setUpdating(node.node_id);
     setNodes((current) => current.map((candidate) => candidate.node_id === node.node_id
@@ -288,6 +259,7 @@ export function NodeManager() {
   };
 
   const setPackEnabled = async (pack: CapabilityPackGroup, enabled: boolean) => {
+    if (!capabilityProfileId || !profileReady) return;
     const changeableNodes = pack.nodes.filter((node) => node.node_id !== 'rumi.start');
     const changeableNodeIds = new Set(changeableNodes.map((node) => node.node_id));
     const previousNodes = nodes;
@@ -312,6 +284,7 @@ export function NodeManager() {
   };
 
   const approveCapabilityPack = async (packId: string) => {
+    if (!profileReady) return;
     setUpdating(`approve:${packId}`);
     try {
       await approvePack(packId);
@@ -349,6 +322,7 @@ export function NodeManager() {
           <select
             aria-label="Capability profile"
             className="rumi-select h-9 min-w-56 rounded-lg border border-border bg-bg-card px-3 pr-9 text-sm text-text-main"
+            disabled={updating !== null}
             onChange={(event) => setSelectedStartupProfileId(event.target.value)}
             value={selectedStartupProfileId}
           >
@@ -356,7 +330,7 @@ export function NodeManager() {
               <option key={profile.profile_id} value={profile.profile_id}>{profile.name}</option>
             ))}
           </select>
-          <Button onClick={() => void refreshProfile()} size="sm" variant="outline">
+          <Button disabled={profileLoading || updating !== null} onClick={() => void refreshProfile()} size="sm" variant="outline">
             <RefreshCw className="h-4 w-4" /> Refresh
           </Button>
         </div>
@@ -413,6 +387,7 @@ export function NodeManager() {
             {selectedPack ? (
               <Button
                 loading={updating === `pack:${selectedPack.packId}`}
+                disabled={!profileReady || updating !== null}
                 onClick={() => void setPackEnabled(selectedPack, !packFullyEnabled)}
                 size="sm"
                 variant={packFullyEnabled ? 'outline' : 'default'}
@@ -474,7 +449,7 @@ export function NodeManager() {
                           'relative h-6 w-11 shrink-0 rounded-full transition',
                           enabled ? 'bg-accent' : 'bg-bg-hover ring-1 ring-border',
                         )}
-                        disabled={updating !== null}
+                        disabled={!profileReady || updating !== null}
                         onClick={(event) => {
                           event.stopPropagation();
                           void setNodeEnabled(node, !enabled);
@@ -490,6 +465,7 @@ export function NodeManager() {
                     ) : (
                       <Button
                         loading={updating === `approve:${capabilityPackId(node)}`}
+                        disabled={!profileReady || updating !== null}
                         onClick={(event) => {
                           event.stopPropagation();
                           void approveCapabilityPack(capabilityPackId(node));

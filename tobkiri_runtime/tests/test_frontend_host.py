@@ -229,3 +229,37 @@ def test_missing_jsonschema_quarantines_frontend_without_crashing(
         and "unavailable" in item.message
         for item in catalog.diagnostics
     )
+
+
+def test_modified_pack_artifact_quarantines_the_entire_frontend_pack(
+    tmp_path: Path,
+) -> None:
+    ecosystem = tmp_path / "ecosystem"
+    pack = _write_ui_pack(
+        ecosystem,
+        "pack-a",
+        [_route("pack-a.route", "/feature")],
+    )
+    plan = _plan(ecosystem, "pack-a")
+    artifact_manifest = pack / "artifact-manifest.json"
+    artifact_manifest.write_text(
+        json.dumps({"artifacts": []}),
+        encoding="utf-8",
+    )
+    manifest_path = pack / "ecosystem.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metadata"] = {
+        "integrity": {"artifact_manifest": "artifact-manifest.json"}
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    catalog = FrontendHostRegistry(
+        plan, ecosystem_dir=ecosystem
+    ).build_catalog()
+
+    assert catalog.contributions == ()
+    assert catalog.quarantined_pack_ids == ("pack-a",)
+    assert any(
+        item.code == "frontend_pack_artifact_integrity_failed"
+        for item in catalog.diagnostics
+    )

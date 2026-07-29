@@ -11,7 +11,7 @@ on:
       - "tobkiri_runtime/**"
       - "tobkiri_launcher/**"
   pull_request:
-    branches: [master, soon, codex/pack-architecture-program-soon]
+    branches: [master, soon]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - ".github/scripts/prepare_tauri_resources.py"
@@ -33,12 +33,6 @@ env:
 
 jobs:
   build-installer:
-    if: >
-      github.event_name != 'pull_request' ||
-      (
-        github.event.pull_request.draft == false &&
-        contains(github.event.pull_request.labels.*.name, 'full-ci')
-      )
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:

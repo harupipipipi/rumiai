@@ -21,6 +21,9 @@ from core_runtime.pack_sdk import (  # noqa: E402
     scaffold_pack,
     validate_pack_manifest,
 )
+from core_runtime.manifest_projection import (  # noqa: E402
+    generate_legacy_ecosystem_projection,
+)
 from core_runtime.pack_templates import (  # noqa: E402
     COMPONENT_KINDS,
     PROFILES,
@@ -94,6 +97,12 @@ def _parser() -> argparse.ArgumentParser:
         default=ROOT / "schemas" / "pack_manifest_v3.schema.json",
     )
     validate.set_defaults(handler=_validate)
+
+    project_legacy = subcommands.add_parser("project-legacy")
+    project_legacy.add_argument("manifest", type=Path)
+    project_legacy.add_argument("output", type=Path)
+    project_legacy.add_argument("--check", action="store_true")
+    project_legacy.set_defaults(handler=_project_legacy)
 
     sign = subcommands.add_parser("sign")
     sign.add_argument("pack_root", type=Path)
@@ -233,6 +242,20 @@ def _validate(args: argparse.Namespace) -> dict[str, object]:
         "valid": True,
         "pack_id": manifest["pack"]["id"],
         "version": manifest["pack"]["version"],
+    }
+
+
+def _project_legacy(args: argparse.Namespace) -> dict[str, object]:
+    """Generate or verify the read-only ecosystem.json compatibility view."""
+    source_identity = generate_legacy_ecosystem_projection(
+        args.manifest,
+        args.output,
+        check=bool(args.check),
+    )
+    return {
+        "output": str(args.output),
+        "check": bool(args.check),
+        "source_content_hash": source_identity,
     }
 
 
