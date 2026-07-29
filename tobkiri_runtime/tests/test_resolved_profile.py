@@ -30,6 +30,18 @@ from core_runtime.resolved_profile_scope import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_profile_resolution_from_pack_install_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """These resolver fixtures model already Host-verified installed Packs."""
+
+    monkeypatch.setattr(
+        "core_runtime.resolved_profile.verify_declared_artifacts",
+        lambda *_args, **_kwargs: (True, ()),
+    )
+
+
 def test_persisted_scope_reads_the_configured_user_data_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

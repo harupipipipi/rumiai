@@ -279,7 +279,7 @@ def resolve_profile(
     )
     projections = _project_resources(effective, manifests)
     manifest_providers, manifest_requirements, manifest_diagnostics = (
-        _manifest_contract_metadata(effective, manifests)
+        _manifest_contract_metadata(effective, manifests, verified_pack_trust)
     )
     diagnostics.extend(manifest_diagnostics)
     requirement_map = {
@@ -884,6 +884,7 @@ def _project_resources(
 def _manifest_contract_metadata(
     effective: tuple[str, ...],
     manifests: Mapping[str, Mapping[str, Any]],
+    verified_pack_trust: Mapping[str, str],
 ) -> tuple[
     tuple[ProviderDescriptor, ...],
     tuple[ContractRequirement, ...],
@@ -935,7 +936,9 @@ def _manifest_contract_metadata(
                     ),
                     content_hash=str(provenance.get("content_hash") or ""),
                     build_identity=str(provenance.get("build_identity") or ""),
-                    trust_class=str(provenance.get("trust_class") or "untrusted"),
+                    # Provider authority is Host-attested. Pack provenance is
+                    # descriptive input and cannot elevate dispatch trust.
+                    trust_class=verified_pack_trust.get(pack_id, "untrusted"),
                     isolation=str(item.get("isolation") or "process"),
                     required_capabilities=tuple(
                         str(value)
