@@ -7,6 +7,8 @@ from typing import Any, Mapping
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
 from core_runtime.resolved_profile_scope import active_resolved_profile
+from domain.adaptive.lease_guard import AdaptiveLeaseConflict, enforce_adaptive_lease
+from domain.coding.workspace_resolver import WorkspaceResolution, WorkspaceResolver
 from domain.safety import approval
 from domain.tool_policy.internal_context import (
     tool_server_approval_context_is_internal,
@@ -97,6 +99,21 @@ def authorize_legacy_coding_operation(
                 "code": verification.code or "APPROVAL_INVALID",
                 "message": verification.message or "approval token is invalid",
             }
+    try:
+        _enforce_canonical_adaptive_lease(
+            selected_workspace_id,
+            input_data,
+            context,
+            operation=legacy_operation,
+        )
+    except AdaptiveLeaseConflict as exc:
+        return {
+            "authorized": False,
+            "reason": "adaptive_lease_held",
+            "code": exc.code,
+            "message": str(exc),
+            "details": dict(exc.details),
+        }
     ctx = dict(context) if isinstance(context, Mapping) else {}
     caller_id = str(
         ctx.get("principal_id")
@@ -151,6 +168,53 @@ def _approval_token(input_data: Mapping[str, Any]) -> str:
             or ""
         ).strip()
     return ""
+
+
+def _enforce_canonical_adaptive_lease(
+    selected_workspace_id: str,
+    input_data: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+    *,
+    operation: str,
+) -> None:
+    """Gate legacy adapters with the same lease before issuing authority.
+
+    The canonical workspace resource is authoritative after startup.  The
+    legacy resolver remains only as a pre-startup compatibility fallback for
+    finite contract tests and migrations; it is never preferred over an
+    active selected provider.
+    """
+
+    request = dict(input_data)
+    ctx = dict(context) if isinstance(context, Mapping) else {}
+    try:
+        mount = invoke_coding_contract(
+            WORKSPACE_RESOURCE,
+            "get",
+            {"workspace_id": selected_workspace_id},
+        )
+        root_path = str(mount.get("root_path") or "").strip()
+        if not root_path:
+            raise RuntimeError("workspace mount is unavailable")
+        resolution = WorkspaceResolution(
+            root_path=root_path,
+            workspace_id=selected_workspace_id,
+            trusted=True,
+            record=dict(mount),
+            source="global_contract",
+        )
+    except RuntimeError:
+        resolution = WorkspaceResolver().resolve(
+            {"workspace_id": selected_workspace_id},
+            ctx,
+            allow_cwd_fallback=False,
+        )
+    enforce_adaptive_lease(
+        resolution,
+        request,
+        ctx,
+        operation=operation,
+    )
 
 
 def _profile_id() -> str:
