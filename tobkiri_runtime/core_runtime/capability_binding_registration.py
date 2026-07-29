@@ -9,12 +9,14 @@ import os
 import platform
 import re
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
 from .bounded_process_runner import (
+    BoundedProcessResult,
     HostBoundedProcessRunner,
     ProcessExecutionPolicy,
 )
@@ -324,7 +326,7 @@ def _register_v3_contract_bindings(
                     )
                 )
                 continue
-        descriptor = {
+        descriptor: Dict[str, Any] = {
             "contract_id": contract_id,
             "version": str(provider.get("version") or ""),
             "provider_instance_id": str(
@@ -355,6 +357,8 @@ def _register_v3_contract_bindings(
             ),
             "operation": operation,
         }
+        if isinstance(operation, _ProcessContractOperation):
+            descriptor["host_attestation"] = operation.last_host_attestation
         pending.append(
             (
                 f"global_contract.provider.{contract_id}",
@@ -369,6 +373,7 @@ def _register_v3_contract_bindings(
         )
 
     if len(pending) != expected:
+        _deactivate_pending_python_operations(pending, result, pack_id)
         result.diagnostics.append(
             _diagnostic(
                 "warning",
@@ -380,17 +385,10 @@ def _register_v3_contract_bindings(
         )
         return True, False
 
-    attempted: list[tuple[str, Dict[str, Any]]] = []
     try:
-        for key, descriptor, meta in pending:
-            attempted.append((key, descriptor))
-            interface_registry.register(key, descriptor, meta=meta)
+        interface_registry.register_batch_atomic(pending)
     except Exception as exc:
-        for key, descriptor in attempted:
-            interface_registry.unregister(
-                key,
-                predicate=lambda entry, value=descriptor: entry.get("value") is value,
-            )
+        _deactivate_pending_python_operations(pending, result, pack_id)
         result.ok = False
         result.diagnostics.append(
             _diagnostic(
@@ -416,12 +414,54 @@ def _register_v3_contract_bindings(
     return True, complete
 
 
+def _deactivate_pending_python_operations(
+    pending: Iterable[tuple[str, Dict[str, Any], Dict[str, Any]]],
+    result: CapabilityBindingRegistrationResult,
+    pack_id: str,
+) -> None:
+    """Release explicitly reversible in-process activation in reverse order.
+
+    Existing callable providers remain source-compatible: teardown is opt-in via
+    ``__rumi_deactivate__``. Factories without that hook must remain
+    construction-side-effect-free; they have not been published to observers.
+    """
+    for _key, descriptor, _meta in reversed(tuple(pending)):
+        if descriptor.get("isolation") != "host_in_process":
+            continue
+        operation = descriptor.get("operation")
+        deactivate = getattr(operation, "__rumi_deactivate__", None)
+        if not callable(deactivate):
+            continue
+        try:
+            deactivate()
+        except Exception as exc:
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_python_deactivation_failed",
+                    f"Python provider teardown failed: {exc}",
+                    pack_id=pack_id,
+                    contract_id=str(descriptor.get("contract_id") or ""),
+                )
+            )
+
+
 class _ProcessContractOperation:
     """Invoke a declared Pack through the Host-owned bounded process runner."""
 
     def __init__(self, *, module: str, pack_location: PackLocation) -> None:
         self.module = module
         self.pack_location = pack_location
+        self._attestation_lock = threading.RLock()
+        self._last_host_attestation: Dict[str, Any] | None = None
+
+    def last_host_attestation(self) -> Dict[str, Any] | None:
+        """Return the latest Host-authored execution measurement."""
+        with self._attestation_lock:
+            if self._last_host_attestation is None:
+                return None
+            return dict(self._last_host_attestation)
 
     def __call__(self, operation: str, payload: Dict[str, Any]) -> Any:
         if (
@@ -440,9 +480,14 @@ class _ProcessContractOperation:
         runner = HostBoundedProcessRunner()
         pack_dir = Path(self.pack_location.pack_dir).resolve()
         runtime_root = pack_dir.parent.parent.resolve()
+        from .profile_paths import active_profile_id
+
+        resolved_profile_id = active_profile_id(Path(USER_DATA_DIR))
         if platform.system().lower() == "darwin":
             argv = ("python3", "-B", "-s", "-E", "-m", self.module)
             environment = {"RUMI_USER_DATA": "/data"}
+            if resolved_profile_id:
+                environment["RUMI_ACTIVE_PROFILE_ID"] = resolved_profile_id
             policy = self._policy(
                 argv=argv,
                 cwd=runtime_root,
@@ -464,6 +509,8 @@ class _ProcessContractOperation:
                         "module": self.module,
                         "stdin": stdin,
                         "timeout_seconds": timeout_seconds,
+                        "host_user_data_dir": str(Path(USER_DATA_DIR).resolve()),
+                        "active_profile_id": resolved_profile_id or "",
                     }
                 ),
                 boundary="lima_bubblewrap",
@@ -476,6 +523,8 @@ class _ProcessContractOperation:
                 "PATH": os.defpath,
                 "RUMI_USER_DATA": str(user_data),
             }
+            if resolved_profile_id:
+                environment["RUMI_ACTIVE_PROFILE_ID"] = resolved_profile_id
             argv = (sys.executable, "-B", "-s", "-E", "-m", self.module)
             result = runner.run_local(
                 argv=argv,
@@ -491,6 +540,15 @@ class _ProcessContractOperation:
                 ),
             )
 
+        self._record_host_attestation(
+            result=result,
+            operation=operation,
+        )
+        if result.stdout_truncated:
+            raise GlobalContractInvocationError(
+                "response_too_large",
+                "Pack process response exceeded the output limit",
+            )
         response: Any = None
         if result.stdout.strip():
             try:
@@ -521,6 +579,44 @@ class _ProcessContractOperation:
         if not isinstance(response, dict) or response.get("status") != "ok":
             raise RuntimeError("pack process returned invalid JSON")
         return response.get("value")
+
+    def _record_host_attestation(
+        self,
+        *,
+        result: BoundedProcessResult,
+        operation: str,
+    ) -> None:
+        """Persist Host measurement separately from untrusted Pack output."""
+        host_attestation = result.attestation
+        record = {
+            "source": "host_runtime",
+            "authority": str(host_attestation.authority),
+            "boundary": str(host_attestation.boundary),
+            "sandboxed": bool(host_attestation.sandboxed),
+            "process_tree_kill": str(host_attestation.process_tree_kill),
+            "pack_id": str(self.pack_location.pack_id),
+            "module": self.module,
+            "operation": operation,
+            "exit_code": result.exit_code,
+            "timed_out": bool(result.timed_out),
+            "transport_error": result.transport_error,
+        }
+        with self._attestation_lock:
+            self._last_host_attestation = record
+        try:
+            from .audit_logger import get_audit_logger
+
+            get_audit_logger().log_security_event(
+                event_type="pack_process_host_attestation",
+                severity="info",
+                description="Host measured a Pack process execution boundary",
+                pack_id=str(self.pack_location.pack_id),
+                details=record,
+            )
+        except Exception:
+            # Audit persistence is best-effort; the in-memory Host measurement
+            # remains authoritative for this provider instance.
+            pass
 
     @staticmethod
     def _validate_response_envelope(response: Any) -> None:

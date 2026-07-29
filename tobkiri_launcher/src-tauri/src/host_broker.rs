@@ -249,6 +249,21 @@ fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> 
     let parent = path
         .parent()
         .context("host broker connection path has no parent directory")?;
+    let temporary = parent.join(format!(".connection-{}.tmp", generate_broker_token()));
+    write_connection_file_with_temporary(path, connection, &temporary)
+}
+
+fn write_connection_file_with_temporary(
+    path: &Path,
+    connection: &HostBrokerConnectionInfo,
+    temporary: &Path,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("host broker connection path has no parent directory")?;
+    if temporary.parent() != Some(parent) {
+        bail!("host broker temporary file must share the connection file directory");
+    }
     fs::create_dir_all(parent).with_context(|| {
         format!(
             "failed to create host broker connection parent directory at {}",
@@ -267,7 +282,7 @@ fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> 
     }
     let body = serde_json::to_vec_pretty(connection)
         .context("failed to serialize host broker connection")?;
-    let temporary = parent.join(format!(".connection-{}.tmp", generate_broker_token()));
+    let mut owns_temporary = false;
     let write_result = (|| -> Result<()> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -282,6 +297,7 @@ fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> 
                 temporary.display()
             )
         })?;
+        owns_temporary = true;
         handle.write_all(&body).with_context(|| {
             format!(
                 "failed to write host broker temporary file at {}",
@@ -303,8 +319,8 @@ fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> 
             .context("failed to sync host broker connection directory")?;
         Ok(())
     })();
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temporary);
+    if owns_temporary && write_result.is_err() {
+        let _ = fs::remove_file(temporary);
     }
     write_result
 }
@@ -2334,6 +2350,43 @@ mod tests {
                 0o700
             );
         }
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn write_connection_file_does_not_delete_unowned_temporary_collision() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("rumi-host-broker-test-{}", generate_broker_token()));
+        fs::create_dir_all(&temp_dir).expect("temporary directory should be created");
+        let path = temp_dir.join("connection.json");
+        let temporary = temp_dir.join(".connection-collision.tmp");
+        let sentinel = b"existing unowned temporary file";
+        fs::write(&temporary, sentinel).expect("collision file should be created");
+        let info = HostBrokerConnectionInfo {
+            version: 1,
+            host: DEFAULT_HOST.to_string(),
+            port: DEFAULT_PORT,
+            url: format!("http://{DEFAULT_HOST}:{DEFAULT_PORT}"),
+            token: "secret".to_string(),
+            permission_subject: PERMISSION_SUBJECT.to_string(),
+            pid: 42,
+            created_at: 123,
+        };
+
+        let error = write_connection_file_with_temporary(&path, &info, &temporary)
+            .expect_err("create_new collision should fail");
+
+        assert!(error
+            .to_string()
+            .contains("failed to create secure host broker temporary file"));
+        assert_eq!(
+            fs::read(&temporary).expect("unowned collision file must remain"),
+            sentinel
+        );
+        assert!(
+            !path.exists(),
+            "failed write must not publish a connection file"
+        );
         let _ = fs::remove_dir_all(temp_dir);
     }
 

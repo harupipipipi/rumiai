@@ -528,6 +528,16 @@ class TestCommandFunctionHostExecutionGuard:
         assert resp.error_type == "host_execution_disabled"
 
 
+def test_pack_host_execution_has_no_independent_subprocess_launcher():
+    """Pack runtimes must use the shared Host-owned bounded runner."""
+    import inspect
+    import core_runtime.capability_executor as capability_executor_module
+
+    source = inspect.getsource(capability_executor_module)
+    assert "subprocess.run(" not in source
+    assert "subprocess.Popen(" not in source
+
+
 class TestCommandFunctionPathTraversal:
     """_execute_command_function のパストラバーサル検証が機能すること"""
 

@@ -97,6 +97,7 @@ class FakeManagedUbuntuCli:
                         "config": {
                             "vmType": "vz",
                             "mounts": [],
+                            "networks": [],
                             "containerd": {"system": False, "user": False},
                             "ssh": {
                                 "forwardAgent": False,

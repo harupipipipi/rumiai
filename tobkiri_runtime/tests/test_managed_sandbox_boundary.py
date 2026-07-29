@@ -659,6 +659,7 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
 
     monkeypatch.setattr("shutil.which", fake_which)
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(supervisor_module, "_run_bounded_process", fake_run)
     monkeypatch.setattr(supervisor_module.platform, "system", lambda: "Linux")
 
     result = ManagedSandboxSupervisor().execute_capability(
@@ -694,6 +695,24 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
     assert "--unshare-net" in captured["bwrap_argv"]
     assert captured["kwargs"]["timeout"] == 12
     assert not Path(captured["workspace"]).exists()
+
+
+def test_managed_sandbox_supervisor_has_no_host_subprocess_bypass():
+    import ast
+    import inspect
+    from ecosystem.defaultspack.backend.sandbox.isolation import supervisor
+
+    tree = ast.parse(inspect.getsource(supervisor))
+    bypasses = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr in {"run", "Popen", "call", "check_call", "check_output"}
+    ]
+    assert bypasses == []
 
 
 def test_actual_bwrap_systemd_run_exec_when_available(tmp_path, monkeypatch):

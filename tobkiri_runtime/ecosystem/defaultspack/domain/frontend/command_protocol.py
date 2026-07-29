@@ -808,19 +808,24 @@ class CommandProtocolRegistry:
         )
         if authority_result is not None:
             return authority_result
+        operation_binding = {
+            "version": int(operation_plan.get("version") or 1),
+            "action": action,
+            "plan_sha256": str(operation_plan["plan_sha256"]),
+        }
         approval_args = {
             "command_ref": resolved["canonical_id"],
             "operation_id": resolved["execution"].get("operation_ref")
             or resolved["canonical_id"],
             "invocation_id": legacy_payload.get("invocation_id"),
-            "args": args,
+            "args_sha256": hash_arguments(args),
             "conversation_id": legacy_payload.get("conversation_id"),
             "mode": legacy_payload.get("mode"),
             "catalog_revision": self.catalog()["catalog_revision"],
             "pack_generation": resolved.get("pack_generation"),
             "owner_key": self._owner_key({}, context),
             "expected_revision": payload.get("expected_revision"),
-            "operation_plan": operation_plan,
+            "operation_binding": operation_binding,
         }
         operation = f"command:{resolved['canonical_id']}"
         approval_token = str(payload.get("approval_token") or "").strip()
@@ -856,11 +861,10 @@ class CommandProtocolRegistry:
                         [],
                     ),
                     "details": {
-                        "args": deepcopy(args),
                         "mode": legacy_payload.get("mode"),
                         "conversation_id": legacy_payload.get("conversation_id"),
                         "operation_ref": resolved["execution"].get("operation_ref"),
-                        "operation_plan": deepcopy(operation_plan),
+                        "operation_binding": deepcopy(operation_binding),
                     },
                 },
                 "message": "Approval is required before this command can resume.",
@@ -951,7 +955,6 @@ class CommandProtocolRegistry:
                 "command_ref": resolved["canonical_id"],
                 "executor_policy_ref": policy_ref,
                 "operation_plan_sha256": operation_plan["plan_sha256"],
-                "cwd": operation_plan["cwd"],
             },
         }
         try:
@@ -1003,7 +1006,13 @@ class CommandProtocolRegistry:
                     "permission_ids": [decision.permission_id],
                     "details": {
                         "executor_policy_ref": policy_ref,
-                        "operation_plan": deepcopy(operation_plan),
+                        "operation_binding": {
+                            "version": int(operation_plan.get("version") or 1),
+                            "action": str(operation_plan.get("action") or ""),
+                            "plan_sha256": str(
+                                operation_plan.get("plan_sha256") or ""
+                            ),
+                        },
                     },
                 },
                 "message": decision.reason,

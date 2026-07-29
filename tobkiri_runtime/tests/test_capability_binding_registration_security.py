@@ -80,15 +80,25 @@ def test_v3_activation_failure_rolls_back_every_provider(
     )
 
     attempted_descriptors: list[dict[str, object]] = []
+    observer_events: list[tuple[str, object, object]] = []
 
     class FailingRegistry(InterfaceRegistry):
-        def register(self, key, value, meta=None):
-            attempted_descriptors.append(value)
-            super().register(key, value, meta)
+        def _append_registration_locked(self, key, entry):
+            attempted_descriptors.append(entry["value"])
+            super()._append_registration_locked(key, entry)
             if key.endswith(".two.v1"):
                 raise RuntimeError("injected registration failure")
 
     registry = FailingRegistry()
+    preexisting = {"owner": "preexisting"}
+    registry.register(
+        f"global_contract.provider.{contract_ids[0]}",
+        preexisting,
+    )
+    registry.observe(
+        "global_contract.provider.*",
+        lambda key, old, new: observer_events.append((key, old, new)),
+    )
     result = registration.CapabilityBindingRegistrationResult()
     location = PackLocation(
         pack_dir=pack_dir,
@@ -107,14 +117,87 @@ def test_v3_activation_failure_rolls_back_every_provider(
     assert handled is True
     assert activated is False
     assert result.ok is False
-    assert registry.find(lambda key, _entry: key.startswith("global_contract.")) == []
+    remaining = registry.find(
+        lambda key, _entry: key.startswith("global_contract.")
+    )
+    assert [entry["value"] for entry in remaining] == [preexisting]
+    assert observer_events == []
     assert attempted_descriptors[0]["trust_class"] == "untrusted"
     assert (
         attempted_descriptors[0]["isolation"]
         == "host_measured_at_invocation"
     )
     assert attempted_descriptors[0]["declared_trust_class"] == "system"
+    host_attestation = attempted_descriptors[0]["host_attestation"]
+    assert callable(host_attestation)
+    assert host_attestation() is None
     assert any(
         item["code"] == "v3_contract_activation_rolled_back"
         for item in result.diagnostics
     )
+
+
+def test_atomic_batch_notifies_only_after_every_entry_is_visible() -> None:
+    registry = InterfaceRegistry()
+    snapshots: list[dict[str, int]] = []
+    registry.observe(
+        "global_contract.provider.*",
+        lambda _key, _old, _new: snapshots.append(
+            registry.list(prefix="global_contract.provider.")
+        ),
+    )
+
+    registry.register_batch_atomic(
+        [
+            ("global_contract.provider.one", {"id": "one"}, {}),
+            ("global_contract.provider.two", {"id": "two"}, {}),
+        ]
+    )
+
+    assert snapshots == [
+        {
+            "global_contract.provider.one": 1,
+            "global_contract.provider.two": 1,
+        },
+        {
+            "global_contract.provider.one": 1,
+            "global_contract.provider.two": 1,
+        },
+    ]
+
+
+def test_failed_python_activation_runs_explicit_teardown_in_reverse_order() -> None:
+    teardown_order: list[str] = []
+
+    class ReversibleOperation:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __call__(self, _operation, _payload):
+            return None
+
+        def __rumi_deactivate__(self) -> None:
+            teardown_order.append(self.name)
+
+    pending: list[tuple[str, dict[str, object], dict[str, object]]] = [
+        (
+            f"global_contract.provider.{name}",
+            {
+                "contract_id": name,
+                "isolation": "host_in_process",
+                "operation": ReversibleOperation(name),
+            },
+            {},
+        )
+        for name in ("one", "two")
+    ]
+    result = registration.CapabilityBindingRegistrationResult()
+
+    registration._deactivate_pending_python_operations(
+        pending,
+        result,
+        "sample_pack",
+    )
+
+    assert result.ok is True
+    assert teardown_order == ["two", "one"]

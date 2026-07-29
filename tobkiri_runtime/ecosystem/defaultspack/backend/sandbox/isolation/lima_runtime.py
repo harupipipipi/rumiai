@@ -12,13 +12,18 @@ from typing import Any, Callable, Mapping, Sequence
 
 import yaml  # type: ignore[import-untyped]
 
+from core_runtime.bounded_process_runner import (
+    HostBoundedProcessRunner,
+    ProcessExecutionPolicy,
+)
+
 
 LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
 
 
 DEFAULT_LIMA_INSTANCE = "rumi-managed-runtime"
 LIMA_STATE_VERSION = 1
-LIMA_CONFIG_POLICY_VERSION = 3
+LIMA_CONFIG_POLICY_VERSION = 4
 LIMA_STATE_ENV = "RUMI_SANDBOX_LIMA_STATE"
 MAX_LIMA_STATE_BYTES = 64 * 1024
 LIMA_GUEST_WORKSPACE_ROOT = "/var/lib/rumi/workspaces"
@@ -133,11 +138,49 @@ def lima_instance_payload(
     runner: LimaRunner | None = None,
 ) -> dict[str, Any]:
     if runner is None:
-        proc = subprocess.run(
-            [limactl, "list", instance, "--format", "json"],
-            capture_output=True,
-            timeout=10,
-            close_fds=True,
+        executable = (
+            str(Path(limactl).resolve())
+            if Path(limactl).is_absolute()
+            else shutil.which(limactl)
+        )
+        if executable is None:
+            raise ValueError("limactl is unavailable")
+        argv = (executable, "list", instance, "--format", "json")
+        cwd = Path.cwd().resolve()
+        environment = {
+            str(key): str(value)
+            for key, value in os.environ.items()
+            if isinstance(key, str)
+            and isinstance(value, str)
+            and key
+            and "=" not in key
+            and "\x00" not in key
+            and "\x00" not in value
+        }
+        result = HostBoundedProcessRunner().run_local(
+            argv=argv,
+            cwd=cwd,
+            stdin=None,
+            timeout_seconds=10,
+            environment=environment,
+            policy=ProcessExecutionPolicy(
+                allowed_executables=frozenset({argv[0]}),
+                allowed_argv=(argv,),
+                allowed_cwds=(cwd,),
+                allowed_environment=frozenset(environment),
+                max_stdin_bytes=1,
+                max_stdout_bytes=MAX_LIMA_STATE_BYTES,
+                max_stderr_bytes=MAX_LIMA_STATE_BYTES,
+                max_timeout_seconds=10,
+            ),
+        )
+        if result.timed_out:
+            raise ValueError("limactl list timed out")
+        proc = subprocess.CompletedProcess(
+            args=list(argv),
+            returncode=result.exit_code if result.exit_code is not None else 1,
+            stdout=result.stdout,
+            stderr=result.stderr or result.transport_error or "",
         )
     else:
         proc = runner((limactl, "list", instance, "--format", "json"), None, 10)
@@ -173,6 +216,8 @@ def validate_lima_instance_config(payload: Mapping[str, Any]) -> str | None:
     mounts = config.get("mounts")
     if mounts != []:
         return "Lima sandbox host mounts must be disabled"
+    if config.get("networks") != []:
+        return "Lima sandbox network attachments must be disabled"
     ssh = config.get("ssh")
     if not isinstance(ssh, Mapping) or ssh.get("forwardAgent") is not False:
         return "Lima sandbox SSH agent forwarding must be disabled"
@@ -291,9 +336,14 @@ def _with_resolved_mounts(
     payload: Mapping[str, Any],
     instance: str,
 ) -> dict[str, Any]:
-    """Fill Lima's omitted mounts field from its Host-owned instance YAML."""
+    """Fill omitted isolation fields from Lima's Host-owned instance YAML."""
     config = payload.get("config")
-    if isinstance(config, Mapping) and "mounts" in config:
+    missing_fields = {
+        field
+        for field in ("mounts", "networks")
+        if not isinstance(config, Mapping) or field not in config
+    }
+    if not missing_fields:
         return dict(payload)
     instance_dir = Path(str(payload.get("dir") or ""))
     if (
@@ -301,28 +351,31 @@ def _with_resolved_mounts(
         or instance_dir.name != instance
         or instance_dir.is_symlink()
     ):
-        raise ValueError("Lima sandbox mount attestation source is unavailable")
+        raise ValueError("Lima sandbox config attestation source is unavailable")
     config_path = instance_dir / "lima.yaml"
     try:
         metadata = config_path.lstat()
     except OSError as exc:
-        raise ValueError("Lima sandbox mount attestation source is unavailable") from exc
+        raise ValueError("Lima sandbox config attestation source is unavailable") from exc
     if (
         not stat.S_ISREG(metadata.st_mode)
         or stat.S_ISLNK(metadata.st_mode)
         or metadata.st_size > MAX_LIMA_STATE_BYTES
         or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
     ):
-        raise ValueError("Lima sandbox mount attestation source is unsafe")
+        raise ValueError("Lima sandbox config attestation source is unsafe")
     try:
         raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ValueError("Lima sandbox mount attestation source is invalid") from exc
-    if not isinstance(raw_config, Mapping) or "mounts" not in raw_config:
-        raise ValueError("Lima sandbox mount attestation is incomplete")
+        raise ValueError("Lima sandbox config attestation source is invalid") from exc
+    if not isinstance(raw_config, Mapping) or any(
+        field not in raw_config for field in missing_fields
+    ):
+        raise ValueError("Lima sandbox config attestation is incomplete")
     resolved = dict(payload)
     resolved_config = dict(config) if isinstance(config, Mapping) else {}
-    resolved_config["mounts"] = raw_config["mounts"]
+    for field in missing_fields:
+        resolved_config[field] = raw_config[field]
     resolved["config"] = resolved_config
     return resolved
 

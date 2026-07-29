@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -18,6 +19,36 @@ _SECRET_ASSIGNMENT = re.compile(
 )
 _MAX_ARGV_ITEMS = 256
 _MAX_ARG_BYTES = 64 * 1024
+_MAX_REDACT_VALUES = 256
+_MAX_REDACT_VALUE_BYTES = 64 * 1024
+_MAX_REDACT_TOTAL_BYTES = 1024 * 1024
+_MAX_POLICY_STREAM_BYTES = 256 * 1024 * 1024
+_PROCESS_TERM_GRACE_SECONDS = 0.5
+_PROCESS_REAP_GRACE_SECONDS = 0.5
+_IO_JOIN_GRACE_SECONDS = 0.5
+_BACKEND_RESULT_KEYS = frozenset(
+    {
+        "command",
+        "diagnostics",
+        "error",
+        "error_type",
+        "execution_boundary",
+        "exit_code",
+        "ok",
+        "process_failed",
+        "provider_id",
+        "request",
+        "returncode",
+        "sandbox_id",
+        "sandbox_stage",
+        "stderr",
+        "stderr_truncated",
+        "stdout",
+        "stdout_truncated",
+        "success",
+        "timed_out",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -77,6 +108,23 @@ class _CappedBytes:
             self.truncated = True
 
 
+@dataclass
+class _CappedFile:
+    handle: Any
+    limit: int
+    written: int = 0
+    truncated: bool = False
+
+    def append(self, chunk: bytes) -> None:
+        remaining = max(0, self.limit - self.written)
+        accepted = chunk[:remaining]
+        if accepted:
+            self.handle.write(accepted)
+            self.written += len(accepted)
+        if len(chunk) > remaining:
+            self.truncated = True
+
+
 class HostBoundedProcessRunner:
     """Validate, execute, cap, redact, and attest Host process requests."""
 
@@ -87,7 +135,7 @@ class HostBoundedProcessRunner:
         *,
         argv: Sequence[str],
         cwd: Path,
-        stdin: str | None,
+        stdin: str | bytes | None,
         timeout_seconds: float,
         environment: Mapping[str, str],
         policy: ProcessExecutionPolicy,
@@ -100,13 +148,18 @@ class HostBoundedProcessRunner:
             environment=environment,
             policy=policy,
         )
-        stdout_buffer = _CappedBytes(policy.max_stdout_bytes)
-        stderr_buffer = _CappedBytes(policy.max_stderr_bytes)
+        redaction_lookahead = self._redaction_lookahead_bytes(policy)
+        stdout_buffer = _CappedBytes(policy.max_stdout_bytes + redaction_lookahead)
+        stderr_buffer = _CappedBytes(policy.max_stderr_bytes + redaction_lookahead)
         popen_kwargs: dict[str, Any] = {
             "args": request["argv"],
             "cwd": request["cwd"],
             "env": request["environment"],
-            "stdin": subprocess.PIPE if request["stdin"] is not None else subprocess.DEVNULL,
+            "stdin": (
+                subprocess.PIPE
+                if request["stdin"] is not None
+                else subprocess.DEVNULL
+            ),
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
             "close_fds": True,
@@ -148,9 +201,10 @@ class HostBoundedProcessRunner:
         except subprocess.TimeoutExpired:
             timed_out = True
             self._terminate_process_tree(process)
-            process.wait()
-        for io_thread in io_threads:
-            io_thread.join()
+        self._reap_process(process)
+        self._join_io_threads(io_threads)
+        stdout_incomplete = io_threads[0].is_alive()
+        stderr_incomplete = io_threads[1].is_alive()
         attestation = HostProcessAttestation(
             authority=self.AUTHORITY,
             boundary="bounded_host_process",
@@ -164,8 +218,16 @@ class HostBoundedProcessRunner:
             stdout=bytes(stdout_buffer.data),
             stderr=bytes(stderr_buffer.data),
             timed_out=timed_out,
-            stdout_truncated=stdout_buffer.truncated,
-            stderr_truncated=stderr_buffer.truncated,
+            stdout_truncated=(
+                stdout_buffer.truncated
+                or len(stdout_buffer.data) > policy.max_stdout_bytes
+                or stdout_incomplete
+            ),
+            stderr_truncated=(
+                stderr_buffer.truncated
+                or len(stderr_buffer.data) > policy.max_stderr_bytes
+                or stderr_incomplete
+            ),
             attestation=attestation,
             transport_error=None,
             policy=policy,
@@ -176,7 +238,7 @@ class HostBoundedProcessRunner:
         *,
         argv: Sequence[str],
         cwd: Path,
-        stdin: str | None,
+        stdin: str | bytes | None,
         timeout_seconds: float,
         environment: Mapping[str, str],
         policy: ProcessExecutionPolicy,
@@ -218,28 +280,44 @@ class HostBoundedProcessRunner:
                 policy=policy,
             )
         self._validate_backend_result(payload)
-        stdout, stdout_truncated = self._bounded_bytes(
-            str(payload["stdout"]).encode("utf-8"),
-            policy.max_stdout_bytes,
+        redaction_lookahead = self._redaction_lookahead_bytes(policy)
+        stdout, stdout_over_limit = self._bounded_bytes(
+            str(payload["stdout"]).encode("utf-8", errors="replace"),
+            policy.max_stdout_bytes + redaction_lookahead,
         )
-        stderr, stderr_truncated = self._bounded_bytes(
-            str(payload["stderr"]).encode("utf-8"),
-            policy.max_stderr_bytes,
+        stderr, stderr_over_limit = self._bounded_bytes(
+            str(payload["stderr"]).encode("utf-8", errors="replace"),
+            policy.max_stderr_bytes + redaction_lookahead,
         )
         exit_code = payload["exit_code"]
         timed_out = bool(payload.get("timed_out"))
         transport_error = None
         if exit_code is None:
-            transport_error = str(
-                payload.get("error_type") or payload.get("error") or "provider_unavailable"
+            raw_transport_error = str(
+                payload.get("error_type")
+                or payload.get("error")
+                or "provider_unavailable"
+            )
+            transport_error, _ = self._redacted_bounded_text(
+                raw_transport_error.encode("utf-8", errors="replace"),
+                policy.max_stderr_bytes,
+                policy,
             )
         return self._result(
             exit_code=exit_code,
             stdout=stdout,
             stderr=stderr,
             timed_out=timed_out,
-            stdout_truncated=stdout_truncated,
-            stderr_truncated=stderr_truncated,
+            stdout_truncated=(
+                bool(payload.get("stdout_truncated"))
+                or stdout_over_limit
+                or len(stdout) > policy.max_stdout_bytes
+            ),
+            stderr_truncated=(
+                bool(payload.get("stderr_truncated"))
+                or stderr_over_limit
+                or len(stderr) > policy.max_stderr_bytes
+            ),
             attestation=HostProcessAttestation(
                 authority=self.AUTHORITY,
                 boundary=boundary,
@@ -250,12 +328,127 @@ class HostBoundedProcessRunner:
             policy=policy,
         )
 
+    def run_local_to_file(
+        self,
+        *,
+        argv: Sequence[str],
+        cwd: Path,
+        stdin: str | bytes | None,
+        timeout_seconds: float,
+        environment: Mapping[str, str],
+        policy: ProcessExecutionPolicy,
+        stdout_path: Path,
+    ) -> BoundedProcessResult:
+        """Run locally while streaming bounded stdout to a new regular file."""
+        request = self._validate_request(
+            argv=argv,
+            cwd=cwd,
+            stdin=stdin,
+            timeout_seconds=timeout_seconds,
+            environment=environment,
+            policy=policy,
+        )
+        output_path = Path(stdout_path)
+        if (
+            not output_path.is_absolute()
+            or output_path.exists()
+            or output_path.is_symlink()
+            or output_path.parent.is_symlink()
+            or not output_path.parent.is_dir()
+        ):
+            raise PermissionError("process stdout path must be a new file in a real directory")
+        stderr_buffer = _CappedBytes(
+            policy.max_stderr_bytes + self._redaction_lookahead_bytes(policy)
+        )
+        timed_out = False
+        with output_path.open("xb") as output_handle:
+            stdout_file = _CappedFile(output_handle, policy.max_stdout_bytes)
+            popen_kwargs: dict[str, Any] = {
+                "args": request["argv"],
+                "cwd": request["cwd"],
+                "env": request["environment"],
+                "stdin": (
+                    subprocess.PIPE
+                    if request["stdin"] is not None
+                    else subprocess.DEVNULL
+                ),
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "close_fds": True,
+            }
+            if os.name == "posix":
+                popen_kwargs["start_new_session"] = True
+            elif os.name == "nt":
+                popen_kwargs["creationflags"] = getattr(
+                    subprocess,
+                    "CREATE_NEW_PROCESS_GROUP",
+                    0x00000200,
+                )
+            process = subprocess.Popen(**popen_kwargs)
+            io_threads = [
+                threading.Thread(
+                    target=self._drain,
+                    args=(process.stdout, stdout_file),
+                    daemon=True,
+                ),
+                threading.Thread(
+                    target=self._drain,
+                    args=(process.stderr, stderr_buffer),
+                    daemon=True,
+                ),
+            ]
+            if request["stdin"] is not None and process.stdin is not None:
+                io_threads.append(
+                    threading.Thread(
+                        target=self._write_stdin,
+                        args=(process.stdin, request["stdin"]),
+                        daemon=True,
+                    )
+                )
+            for io_thread in io_threads:
+                io_thread.start()
+            try:
+                process.wait(timeout=request["timeout_seconds"])
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                self._terminate_process_tree(process)
+            self._reap_process(process)
+            self._join_io_threads(io_threads)
+            output_handle.flush()
+            os.fsync(output_handle.fileno())
+            stdout_incomplete = io_threads[0].is_alive()
+            stderr_incomplete = io_threads[1].is_alive()
+        return self._result(
+            exit_code=process.returncode,
+            stdout=b"",
+            stderr=bytes(stderr_buffer.data),
+            timed_out=timed_out,
+            stdout_truncated=stdout_file.truncated or stdout_incomplete,
+            stderr_truncated=(
+                stderr_buffer.truncated
+                or len(stderr_buffer.data) > policy.max_stderr_bytes
+                or stderr_incomplete
+            ),
+            attestation=HostProcessAttestation(
+                authority=self.AUTHORITY,
+                boundary="bounded_host_process_file_sink",
+                sandboxed=False,
+                process_tree_kill=(
+                    "posix_process_group"
+                    if os.name == "posix"
+                    else "windows_process_tree"
+                ),
+            ),
+            transport_error=None,
+            policy=policy,
+        )
+
     @staticmethod
     def _validate_request(
         *,
         argv: Sequence[str],
         cwd: Path,
-        stdin: str | None,
+        stdin: str | bytes | None,
         timeout_seconds: float,
         environment: Mapping[str, str],
         policy: ProcessExecutionPolicy,
@@ -270,7 +463,7 @@ class HostBoundedProcessRunner:
                 isinstance(limit, bool)
                 or not isinstance(limit, int)
                 or limit <= 0
-                or limit > 64 * 1024 * 1024
+                or limit > _MAX_POLICY_STREAM_BYTES
                 for limit in limits
             )
             or isinstance(policy.max_timeout_seconds, bool)
@@ -279,14 +472,33 @@ class HostBoundedProcessRunner:
             or policy.max_timeout_seconds > 3600
         ):
             raise ValueError("process policy violates the bounded schema")
+        if (
+            not isinstance(policy.redact_values, tuple)
+            or len(policy.redact_values) > _MAX_REDACT_VALUES
+            or any(
+                not isinstance(value, str)
+                or "\x00" in value
+                or len(value.encode("utf-8")) > _MAX_REDACT_VALUE_BYTES
+                for value in policy.redact_values
+            )
+            or sum(
+                len(value.encode("utf-8"))
+                for value in policy.redact_values
+                if isinstance(value, str)
+            )
+            > _MAX_REDACT_TOTAL_BYTES
+        ):
+            raise ValueError("process redaction policy violates the bounded schema")
         if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
             raise ValueError("process argv must be a sequence of strings")
         normalized_argv = tuple(argv)
         if (
             not normalized_argv
+            or not isinstance(normalized_argv[0], str)
+            or not normalized_argv[0]
             or len(normalized_argv) > _MAX_ARGV_ITEMS
             or any(
-                not isinstance(item, str) or not item or "\x00" in item
+                not isinstance(item, str) or "\x00" in item
                 for item in normalized_argv
             )
             or sum(len(item.encode("utf-8")) for item in normalized_argv)
@@ -304,7 +516,9 @@ class HostBoundedProcessRunner:
             raise PermissionError("process arguments are not exactly allowlisted")
         raw_cwd = Path(cwd)
         if not raw_cwd.is_absolute() or raw_cwd.is_symlink():
-            raise PermissionError("process cwd must be an absolute non-symlink directory")
+            raise PermissionError(
+                "process cwd must be an absolute non-symlink directory"
+            )
         normalized_cwd = raw_cwd.resolve()
         allowed_cwds = tuple(Path(item).resolve() for item in policy.allowed_cwds)
         if normalized_cwd not in allowed_cwds or not normalized_cwd.is_dir():
@@ -316,9 +530,9 @@ class HostBoundedProcessRunner:
             or timeout_seconds > policy.max_timeout_seconds
         ):
             raise ValueError("process timeout violates the bounded schema")
-        if stdin is not None and not isinstance(stdin, str):
-            raise ValueError("process stdin must be text or null")
-        stdin_bytes = stdin.encode("utf-8") if stdin is not None else None
+        if stdin is not None and not isinstance(stdin, (str, bytes)):
+            raise ValueError("process stdin must be text, bytes, or null")
+        stdin_bytes = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
         if stdin_bytes is not None and len(stdin_bytes) > policy.max_stdin_bytes:
             raise ValueError("process stdin exceeds the policy limit")
         normalized_environment: dict[str, str] = {}
@@ -333,7 +547,9 @@ class HostBoundedProcessRunner:
             ):
                 raise ValueError("process environment violates the bounded schema")
             if key not in policy.allowed_environment:
-                raise PermissionError(f"process environment key is not allowlisted: {key}")
+                raise PermissionError(
+                    f"process environment key is not allowlisted: {key}"
+                )
             normalized_environment[key] = value
         return {
             "argv": normalized_argv,
@@ -347,27 +563,86 @@ class HostBoundedProcessRunner:
     def _validate_backend_result(payload: Mapping[str, Any]) -> None:
         if not isinstance(payload, Mapping):
             raise ValueError("process backend output must be an object")
-        if "exit_code" not in payload or "stdout" not in payload or "stderr" not in payload:
+        if (
+            "exit_code" not in payload
+            or "stdout" not in payload
+            or "stderr" not in payload
+        ):
             raise ValueError("process backend output is missing required fields")
+        unknown_keys = set(payload) - _BACKEND_RESULT_KEYS
+        if unknown_keys:
+            raise ValueError("process backend output has unknown fields")
         exit_code = payload["exit_code"]
         if exit_code is not None and (
             isinstance(exit_code, bool) or not isinstance(exit_code, int)
         ):
             raise ValueError("process backend exit_code must be an integer or null")
-        if not isinstance(payload["stdout"], str) or not isinstance(payload["stderr"], str):
+        if not isinstance(payload["stdout"], str) or not isinstance(
+            payload["stderr"], str
+        ):
             raise ValueError("process backend stdout and stderr must be strings")
-        if "timed_out" in payload and not isinstance(payload["timed_out"], bool):
+        timed_out = payload.get("timed_out", False)
+        if not isinstance(timed_out, bool):
             raise ValueError("process backend timed_out must be boolean")
+        for key in (
+            "stdout_truncated",
+            "stderr_truncated",
+            "success",
+            "ok",
+            "process_failed",
+        ):
+            if key in payload and not isinstance(payload[key], bool):
+                raise ValueError(f"process backend {key} must be boolean")
+        for key in ("error", "error_type"):
+            if key in payload and not isinstance(payload[key], str):
+                raise ValueError(f"process backend {key} must be a string")
+        if "returncode" in payload:
+            returncode = payload["returncode"]
+            if returncode is not None and (
+                isinstance(returncode, bool) or not isinstance(returncode, int)
+            ):
+                raise ValueError(
+                    "process backend returncode must be an integer or null"
+                )
+            if returncode != exit_code:
+                raise ValueError("process backend returncode conflicts with exit_code")
+        if exit_code is None and not (
+            timed_out or payload.get("error") or payload.get("error_type")
+        ):
+            raise ValueError(
+                "process backend null exit_code requires timeout or transport error"
+            )
+        if timed_out and exit_code == 0:
+            raise ValueError("process backend timeout conflicts with exit_code")
+        if "success" in payload and "ok" in payload:
+            if payload["success"] != payload["ok"]:
+                raise ValueError("process backend success conflicts with ok")
+        if payload.get("success") is True or payload.get("ok") is True:
+            if exit_code != 0 or timed_out:
+                raise ValueError(
+                    "process backend success conflicts with process outcome"
+                )
+        if "process_failed" in payload:
+            expected_process_failed = exit_code not in (0, None)
+            if payload["process_failed"] != expected_process_failed:
+                raise ValueError(
+                    "process backend process_failed conflicts with exit_code"
+                )
 
     @staticmethod
-    def _drain(stream: Any, output: _CappedBytes) -> None:
+    def _drain(stream: Any, output: _CappedBytes | _CappedFile) -> None:
         if stream is None:
             return
         try:
             for chunk in iter(lambda: stream.read(8192), b""):
                 output.append(chunk)
+        except (OSError, ValueError):
+            pass
         finally:
-            stream.close()
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
 
     @staticmethod
     def _write_stdin(stream: Any, value: bytes) -> None:
@@ -379,36 +654,82 @@ class HostBoundedProcessRunner:
         finally:
             stream.close()
 
-    @staticmethod
-    def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
+    @classmethod
+    def _terminate_process_tree(cls, process: subprocess.Popen[Any]) -> None:
         if os.name == "posix":
+            process_group = process.pid
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(process_group, signal.SIGTERM)
             except ProcessLookupError:
                 return
-            try:
-                process.wait(timeout=0.5)
-                return
-            except subprocess.TimeoutExpired:
+            deadline = time.monotonic() + _PROCESS_TERM_GRACE_SECONDS
+            while time.monotonic() < deadline:
+                process.poll()
+                if not cls._posix_process_group_exists(process_group):
+                    break
+                time.sleep(0.01)
+            if cls._posix_process_group_exists(process_group):
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process_group, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             return
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=5,
-        )
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=_PROCESS_TERM_GRACE_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
         if process.poll() is None:
             process.kill()
 
     @staticmethod
+    def _posix_process_group_exists(process_group: int) -> bool:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @staticmethod
+    def _reap_process(process: subprocess.Popen[Any]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            process.wait(timeout=_PROCESS_REAP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=_PROCESS_REAP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+
+    @staticmethod
+    def _join_io_threads(io_threads: Sequence[threading.Thread]) -> None:
+        deadline = time.monotonic() + _IO_JOIN_GRACE_SECONDS
+        for io_thread in io_threads:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            io_thread.join(timeout=remaining)
+
+    @staticmethod
     def _bounded_bytes(value: bytes, limit: int) -> tuple[bytes, bool]:
         return value[:limit], len(value) > limit
+
+    @staticmethod
+    def _redaction_lookahead_bytes(policy: ProcessExecutionPolicy) -> int:
+        return max(
+            (len(value.encode("utf-8")) - 1 for value in policy.redact_values if value),
+            default=0,
+        )
 
     @classmethod
     def _result(
@@ -466,4 +787,11 @@ class HostBoundedProcessRunner:
             reverse=True,
         ):
             redacted = redacted.replace(secret, "[REDACTED]")
-        return _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", redacted)
+
+        def redact_assignment(match: re.Match[str]) -> str:
+            assignment_value = match.group(2)
+            if assignment_value.casefold() in {"true", "false", "null"}:
+                return match.group(0)
+            return f"{match.group(1)}[REDACTED]"
+
+        return _SECRET_ASSIGNMENT.sub(redact_assignment, redacted)

@@ -18,6 +18,9 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.supervisor import (
     ManagedSandboxSupervisor,
+    _pack_data_migration_commit_script,
+    _safe_guest_name,
+    _validated_profile_context,
 )
 
 
@@ -29,6 +32,7 @@ def _hardened_payload() -> dict[str, object]:
         "config": {
             "vmType": "vz",
             "mounts": [],
+            "networks": [],
             "containerd": {"system": False, "user": False},
             "ssh": {
                 "forwardAgent": False,
@@ -76,16 +80,31 @@ def test_lima_attestation_rejects_missing_mount_measurement() -> None:
     assert "mounts" in str(validate_lima_instance_config(payload))
 
 
-def test_lima_payload_resolves_omitted_mounts_from_owned_instance_yaml(
+def test_lima_attestation_rejects_network_attachments_and_missing_measurement() -> None:
+    payload = _hardened_payload()
+    config = payload["config"]
+    assert isinstance(config, dict)
+    config["networks"] = [{"lima": "shared"}]
+    assert "network attachments" in str(validate_lima_instance_config(payload))
+
+    config.pop("networks")
+    assert "network attachments" in str(validate_lima_instance_config(payload))
+
+
+def test_lima_payload_resolves_omitted_isolation_fields_from_owned_instance_yaml(
     tmp_path: Path,
 ) -> None:
     instance_dir = tmp_path / "rumi-managed-runtime"
     instance_dir.mkdir()
-    (instance_dir / "lima.yaml").write_text("mounts: []\n", encoding="utf-8")
+    (instance_dir / "lima.yaml").write_text(
+        "mounts: []\nnetworks: []\n",
+        encoding="utf-8",
+    )
     payload = _hardened_payload()
     config = payload["config"]
     assert isinstance(config, dict)
     config.pop("mounts")
+    config.pop("networks")
     payload["dir"] = str(instance_dir)
 
     resolved = lima_instance_payload(
@@ -99,6 +118,7 @@ def test_lima_payload_resolves_omitted_mounts_from_owned_instance_yaml(
     )
 
     assert resolved["config"]["mounts"] == []
+    assert resolved["config"]["networks"] == []
 
 
 def test_guest_bwrap_masks_backing_workspaces_and_network() -> None:
@@ -141,6 +161,94 @@ def test_guest_bwrap_rejects_pack_data_path_traversal() -> None:
             env={},
             network_enabled=False,
         )
+
+
+def test_guest_pack_data_names_resist_normalization_and_prefix_collisions() -> None:
+    shared_prefix = "pack-" + ("x" * 140)
+    first = _safe_guest_name(shared_prefix + "/one")
+    second = _safe_guest_name(shared_prefix + "/two")
+
+    assert first != second
+    assert len(first) <= 128
+    assert len(second) <= 128
+    assert first.split("--", 1)[0] == second.split("--", 1)[0]
+
+
+def test_lima_profile_context_is_fail_closed() -> None:
+    assert _validated_profile_context("work-profile") == "work-profile"
+    with pytest.raises(ValueError, match="profile context"):
+        _validated_profile_context("../escape")
+
+
+def test_pack_data_migration_commit_is_idempotent(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    destination = data_dir / "packs" / "sample_pack"
+    destination.mkdir(parents=True)
+    (destination / "state.json").write_text("current", encoding="utf-8")
+    marker = data_dir / ".migration-complete"
+    marker.write_text("done", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "state.json").write_text("legacy", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            _pack_data_migration_commit_script(),
+            "migration-test",
+            str(data_dir),
+            str(destination),
+            str(staging),
+            str(tmp_path / "backup"),
+            str(marker),
+            str(data_dir / ".migration-lock"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (destination / "state.json").read_text(encoding="utf-8") == "current"
+    assert not staging.exists()
+
+
+def test_pack_data_migration_rolls_back_when_marker_commit_fails(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    destination = data_dir / "packs" / "sample_pack"
+    destination.mkdir(parents=True)
+    (destination / "state.json").write_text("current", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "state.json").write_text("legacy", encoding="utf-8")
+    invalid_marker_parent = tmp_path / "not-a-directory"
+    invalid_marker_parent.write_text("blocked", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            _pack_data_migration_commit_script(),
+            "migration-test",
+            str(data_dir),
+            str(destination),
+            str(staging),
+            str(tmp_path / "backup"),
+            str(invalid_marker_parent / "marker"),
+            str(data_dir / ".migration-lock"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert (destination / "state.json").read_text(encoding="utf-8") == "current"
+    assert not (tmp_path / "backup").exists()
+    assert not (data_dir / ".migration-lock").exists()
 
 
 @pytest.mark.skipif(

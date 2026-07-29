@@ -37,6 +37,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from .bounded_process_runner import (
+    HostBoundedProcessRunner,
+    ProcessExecutionPolicy,
+)
 from .execution_boundary import (
     ExecutionBoundary,
     SANDBOX_RUNTIME_UNAVAILABLE,
@@ -2651,6 +2655,13 @@ class CapabilityExecutor:
 
     def _response_from_completed_process(self, proc, start_time, failure_prefix):
         latency_ms = (time.time() - start_time) * 1000
+        if getattr(proc, "stdout_truncated", False) is True:
+            return CapabilityResponse(
+                success=False,
+                error="Response too large",
+                error_type="response_too_large",
+                latency_ms=latency_ms,
+            )
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
             stdout = (proc.stdout or "").strip()
@@ -2692,17 +2703,99 @@ class CapabilityExecutor:
                 latency_ms=latency_ms,
             )
 
+    @staticmethod
+    def _bounded_process_environment(environment=None):
+        source = environment if environment is not None else os.environ
+        return {
+            str(key): str(value)
+            for key, value in source.items()
+            if isinstance(key, str)
+            and isinstance(value, str)
+            and key
+            and "=" not in key
+            and "\x00" not in key
+            and "\x00" not in value
+        }
+
+    def _run_bounded_host_process(
+        self,
+        *,
+        argv,
+        cwd,
+        input_text,
+        timeout,
+        environment=None,
+    ):
+        """Run one exact Host command through the shared bounded boundary."""
+        if isinstance(argv, (str, bytes)) or not argv:
+            raise ValueError("bounded process argv must be a nonempty sequence")
+        requested_argv = tuple(str(item) for item in argv)
+        executable = requested_argv[0]
+        if not Path(executable).is_absolute():
+            executable = shutil.which(
+                executable,
+                path=(
+                    environment.get("PATH")
+                    if isinstance(environment, dict)
+                    else os.environ.get("PATH", os.defpath)
+                ),
+            )
+            if executable is None:
+                raise FileNotFoundError(requested_argv[0])
+        executable = str(Path(executable).resolve())
+        resolved_argv = (executable, *requested_argv[1:])
+        resolved_cwd = Path(cwd).resolve()
+        normalized_environment = self._bounded_process_environment(environment)
+        bounded_timeout = min(max(float(timeout), 1.0), MAX_TIMEOUT)
+        result = HostBoundedProcessRunner().run_local(
+            argv=resolved_argv,
+            cwd=resolved_cwd,
+            stdin=input_text,
+            timeout_seconds=bounded_timeout,
+            environment=normalized_environment,
+            policy=ProcessExecutionPolicy(
+                allowed_executables=frozenset({executable}),
+                allowed_argv=(resolved_argv,),
+                allowed_cwds=(resolved_cwd,),
+                allowed_environment=frozenset(normalized_environment),
+                max_stdin_bytes=8 * 1024 * 1024,
+                # Keep one extra byte so callers can distinguish exact-limit
+                # output from output that exceeded the public response cap.
+                max_stdout_bytes=MAX_RESPONSE_SIZE + 1,
+                max_stderr_bytes=64 * 1024,
+                max_timeout_seconds=bounded_timeout,
+            ),
+        )
+        completed = types.SimpleNamespace(
+            args=resolved_argv,
+            returncode=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            stdout_truncated=(
+                result.stdout_truncated
+                or len(result.stdout.encode("utf-8")) > MAX_RESPONSE_SIZE
+            ),
+            stderr_truncated=result.stderr_truncated,
+            attestation=result.attestation,
+        )
+        if result.timed_out:
+            raise subprocess.TimeoutExpired(
+                cmd=list(resolved_argv),
+                timeout=bounded_timeout,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        if result.exit_code is None:
+            raise RuntimeError(result.transport_error or "bounded process failed")
+        return completed
+
     def _run_runner_on_host(self, *, payload, cwd, timeout, start_time, failure_prefix):
-        proc = subprocess.run(
-            self._runner_command(),
-            input=payload,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
+        proc = self._run_bounded_host_process(
+            argv=self._runner_command(),
             cwd=cwd,
-            env=self._runner_env(),
+            input_text=payload,
+            timeout=timeout,
+            environment=self._runner_env(),
         )
         return self._response_from_completed_process(proc, start_time, failure_prefix)
 
@@ -2837,7 +2930,12 @@ class CapabilityExecutor:
             builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
             builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
-            proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
+            proc = self._run_bounded_host_process(
+                argv=builder.build(),
+                cwd=Path.cwd(),
+                input_text=None,
+                timeout=timeout,
+            )
             return self._response_from_completed_process(
                 proc,
                 start_time,
@@ -2845,7 +2943,12 @@ class CapabilityExecutor:
             )
         except subprocess.TimeoutExpired:
             try:
-                subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
+                self._run_bounded_host_process(
+                    argv=("docker", "kill", container_name),
+                    cwd=Path.cwd(),
+                    input_text=None,
+                    timeout=5,
+                )
             except Exception:
                 logger.debug("Failed to kill timed-out Docker function container '%s'", container_name, exc_info=True)
             return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
@@ -3033,7 +3136,12 @@ class CapabilityExecutor:
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         try:
-            proc = subprocess.run([str(binary_path)], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir))
+            proc = self._run_bounded_host_process(
+                argv=(str(binary_path),),
+                cwd=func_dir,
+                input_text=input_json,
+                timeout=timeout,
+            )
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
@@ -3088,7 +3196,12 @@ class CapabilityExecutor:
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
         try:
-            proc = subprocess.run(command, input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir) if func_dir else None)
+            proc = self._run_bounded_host_process(
+                argv=command,
+                cwd=func_dir or Path.cwd(),
+                input_text=input_json,
+                timeout=timeout,
+            )
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
