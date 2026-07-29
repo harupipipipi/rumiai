@@ -2936,6 +2936,46 @@ export type CodexConnectionActionResponse = Partial<CodexConnectionStatusRespons
   probe?: Record<string, unknown>;
 };
 
+async function nativeCodingApprovalOperator(
+  requestId: string,
+  decision: "approve" | "deny",
+): Promise<Record<string, unknown>> {
+  const listing = await request<{
+    requests?: CodingApprovalRequest[];
+    pending?: CodingApprovalRequest[];
+  }>(
+    withQuery("/api/coding/approvals", { include_expired: true, limit: 500 }),
+    { cache: "no-store" },
+  );
+  const approval = [...(listing.requests ?? []), ...(listing.pending ?? [])].find(
+    (candidate) => candidate.request_id === requestId,
+  );
+  const expectedDigest = String(approval?.args_hash ?? "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(expectedDigest)) {
+    throw new Error("The coding approval snapshot is unavailable.");
+  }
+  const tauri = (
+    globalThis as typeof globalThis & {
+      __TAURI__?: {
+        core?: {
+          invoke?: (
+            command: string,
+            args?: Record<string, unknown>,
+          ) => Promise<Record<string, unknown>>;
+        };
+      };
+    }
+  ).__TAURI__;
+  if (typeof tauri?.core?.invoke !== "function") {
+    throw new Error("Coding approval requires the focused Tobkiri Launcher window.");
+  }
+  return tauri.core.invoke("coding_approval_operator", {
+    requestId,
+    expectedDigest,
+    decision,
+  });
+}
+
 export const api = {
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
@@ -4767,17 +4807,19 @@ export const api = {
     );
   },
 
-  approveCodingApproval(requestId: string) {
+  async approveCodingApproval(requestId: string) {
+    const uiOperator = await nativeCodingApprovalOperator(requestId, "approve");
     return request<CodingApprovalDecision>("/api/coding/approvals/approve", {
       method: "POST",
-      body: JSON.stringify({ approval_request_id: requestId }),
+      body: JSON.stringify({ approval_request_id: requestId, ui_operator: uiOperator }),
     });
   },
 
-  denyCodingApproval(requestId: string, reason?: string) {
+  async denyCodingApproval(requestId: string, reason?: string) {
+    const uiOperator = await nativeCodingApprovalOperator(requestId, "deny");
     return request<Record<string, unknown>>("/api/coding/approvals/deny", {
       method: "POST",
-      body: JSON.stringify({ approval_request_id: requestId, reason }),
+      body: JSON.stringify({ approval_request_id: requestId, reason, ui_operator: uiOperator }),
     });
   },
 

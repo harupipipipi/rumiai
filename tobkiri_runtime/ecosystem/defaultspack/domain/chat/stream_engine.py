@@ -4014,12 +4014,13 @@ class ChatRunEngine:
         """Deterministically replay an approved coding tool when the user-side
         approval-followup metadata resolves to an approved pending tool.
 
-        Uses ``approval_token`` + ``tool_name`` + ``request_id`` from the
-        ``approval_followup`` metadata block to look up the stored approved
-        arguments, executes the pending tool once with those arguments and the
-        token, appends the synthetic assistant tool_use + tool_result pair to
-        the working chain, and clears ``provider_tools`` so the model can only
-        summarize the result.
+        Delegated debug flows use an opaque ``resume_id`` + ``tool_name`` +
+        ``request_id`` metadata block. The raw one-shot token is resolved only
+        inside this server-owned replay path. Legacy non-debug flows may still
+        provide ``approval_token``. The method executes the pending tool once
+        with the stored exact arguments, appends the synthetic assistant
+        tool_use + tool_result pair to the working chain, and clears
+        ``provider_tools`` so the model can only summarize the result.
 
         Falls through (no-op) for non-coding flows, missing tokens,
         mismatched args_hash, tool_name mismatch, or any internal error. A
@@ -4039,16 +4040,21 @@ class ChatRunEngine:
         followup = metadata.get("approval_followup") if isinstance(metadata.get("approval_followup"), dict) else None
         if not followup:
             return None
-        token = str(followup.get("approval_token") or followup.get("token") or "").strip()
-        original_token = token
         tool_name = _canonical_tool_name(followup.get("tool_name"))
         request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
-        if not (token and tool_name and request_id):
+        resume_id = str(followup.get("resume_id") or "").strip()
+        token = str(followup.get("approval_token") or followup.get("token") or "").strip()
+        if not ((resume_id or token) and tool_name and request_id):
             return None
 
         try:
             from domain.safety import approval as _approval_mod
         except Exception:
+            return None
+        if resume_id:
+            token = _approval_mod.resolve_debug_resume_handle(resume_id, request_id)
+        original_token = token
+        if not token:
             return None
 
         try:

@@ -24,10 +24,19 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/rumi_setup");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
+    println!("cargo:rerun-if-changed=capabilities");
 
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "debug_approval_status",
+            "arm_debug_approval",
+            "revoke_debug_approval",
+            "coding_approval_operator",
+        ]),
+    ))
+    .expect("failed to build Tauri application manifest")
 }
 
 fn warn_legacy_defaultspack_app_bundle() {

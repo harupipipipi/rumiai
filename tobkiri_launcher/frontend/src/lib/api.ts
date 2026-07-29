@@ -234,7 +234,7 @@ export async function armDebugApproval(): Promise<DebugApprovalStatus> {
   if (!invoke) {
     throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
   }
-  return invoke<DebugApprovalStatus>('arm_debug_approval', {confirmed: true});
+  return invoke<DebugApprovalStatus>('arm_debug_approval');
 }
 
 export async function revokeDebugApproval(): Promise<DebugApprovalStatus> {

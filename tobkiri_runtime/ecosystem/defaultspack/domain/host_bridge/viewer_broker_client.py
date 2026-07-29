@@ -92,11 +92,32 @@ class ViewerBrokerClient:
     def permissions(self) -> dict[str, Any]:
         return self._request("GET", "/api/host/permissions")
 
-    def verify_debug_cli_operator(self, operator: dict[str, Any]) -> dict[str, Any]:
+    def debug_approval_status(self) -> dict[str, Any]:
+        return self._request("GET", "/api/host/debug/status")
+
+    def verify_debug_cli_operator(
+        self, operator: dict[str, Any], *, expected_decision: str
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/api/host/debug/approval/verify",
-            {"debug_cli_operator": dict(operator)},
+            {
+                "debug_cli_operator": dict(operator),
+                "expected_decision": str(expected_decision),
+            },
+        )
+
+    def consume_debug_execution(
+        self, *, request_id: str, lease_epoch: int, execution_jti: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/host/debug/execution/consume",
+            {
+                "request_id": str(request_id),
+                "lease_epoch": int(lease_epoch),
+                "execution_jti": str(execution_jti),
+            },
         )
 
     def execute_intent(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:

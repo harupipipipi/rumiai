@@ -33,6 +33,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tauri::{AppHandle, Emitter, Manager, Url};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use config::AppConfig;
 use debug_approval::{DebugApprovalManager, DebugApprovalStatus};
@@ -226,6 +227,21 @@ struct AuthorityApprovalContext {
     ui_operator: AuthorityUiOperator,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CodingUiOperator {
+    version: u8,
+    kind: String,
+    origin: String,
+    window_label: String,
+    request_id: String,
+    expected_digest: String,
+    decision: String,
+    issued_at: u64,
+    expires_at: u64,
+    nonce: String,
+    signature: String,
+}
+
 /// Returns the current setup progress message.
 #[tauri::command]
 fn get_setup_progress(state: tauri::State<'_, SetupProgress>) -> String {
@@ -245,18 +261,74 @@ fn debug_approval_status(
     state.status()
 }
 
+fn validate_debug_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("debug approval can only be changed from the Launcher main window".into());
+    }
+    if !window
+        .is_focused()
+        .map_err(|error| format!("failed to inspect Launcher focus: {error}"))?
+    {
+        return Err("Launcher must be focused to change debug approval".into());
+    }
+    let url = window
+        .url()
+        .map_err(|error| format!("failed to inspect Launcher URL: {error}"))?;
+    let local_launcher = matches!(url.scheme(), "tauri" | "http" | "https")
+        && matches!(
+            url.host_str().unwrap_or(""),
+            "localhost" | "127.0.0.1" | "tauri.localhost"
+        );
+    if !local_launcher || url.path() == "/approval" {
+        return Err("debug approval is unavailable from this Launcher route".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
-fn arm_debug_approval(
-    confirmed: bool,
+async fn arm_debug_approval(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<DebugApprovalManager>>,
 ) -> Result<DebugApprovalStatus, String> {
-    state.arm(confirmed)
+    validate_debug_approval_window(&window)?;
+    let pending = state.status();
+    if pending.state != "pending" {
+        return Err("start a CLI debug session request before enabling".into());
+    }
+    let process_id = pending
+        .process_id
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let message = format!(
+        "この1つのCLIデバッグセッションだけに個別承認を委任します。\n\nWorkspace: {}\nPack / Profile: {} / {}\nRun: {}\nGuardian PID: {}\n\n承認後も各操作は個別のdigestに束縛されます。",
+        pending.workspace.as_deref().unwrap_or("unknown"),
+        pending.pack_id.as_deref().unwrap_or("unknown"),
+        pending.profile_id.as_deref().unwrap_or("unknown"),
+        pending.run_id.as_deref().unwrap_or("unknown"),
+        process_id,
+    );
+    let confirmed = window
+        .dialog()
+        .message(message)
+        .title("Developer Debug Approvalを有効にしますか？")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "このセッションだけ有効化".into(),
+            "キャンセル".into(),
+        ))
+        .blocking_show();
+    if !confirmed {
+        return Err("native confirmation was cancelled".into());
+    }
+    state.arm()
 }
 
 #[tauri::command]
 fn revoke_debug_approval(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<DebugApprovalManager>>,
-) -> DebugApprovalStatus {
+) -> Result<DebugApprovalStatus, String> {
+    validate_debug_approval_window(&window)?;
     state.revoke("user_revoked")
 }
 
@@ -769,6 +841,107 @@ fn authority_operator_message(operator: &AuthorityUiOperator) -> String {
         operator.nonce.clone(),
     ]
     .join("\n")
+}
+
+fn coding_operator_message(operator: &CodingUiOperator) -> String {
+    [
+        format!("v{}", operator.version),
+        operator.origin.clone(),
+        operator.window_label.clone(),
+        operator.request_id.clone(),
+        operator.expected_digest.clone(),
+        operator.decision.clone(),
+        operator.issued_at.to_string(),
+        operator.expires_at.to_string(),
+        operator.nonce.clone(),
+    ]
+    .join("\n")
+}
+
+#[tauri::command]
+async fn coding_approval_operator(
+    window: tauri::WebviewWindow,
+    config: tauri::State<'_, AppConfig>,
+    request_id: String,
+    expected_digest: String,
+    decision: String,
+) -> Result<CodingUiOperator, String> {
+    if window.label() != "defaultspack-main" {
+        return Err("coding approval is only available in the Defaultspack Launcher window".into());
+    }
+    if !window
+        .is_focused()
+        .map_err(|error| format!("failed to inspect Defaultspack focus: {error}"))?
+    {
+        return Err("Defaultspack approval window must be focused".into());
+    }
+    let url = window
+        .url()
+        .map_err(|error| format!("failed to inspect Defaultspack URL: {error}"))?;
+    if !matches!(url.host_str().unwrap_or(""), "127.0.0.1" | "localhost")
+        || url.port_or_known_default() != Some(DEFAULTSPACK_RESERVED_PORT)
+    {
+        return Err("coding approval is unavailable from this window origin".into());
+    }
+    if !valid_authority_request_id(&request_id)
+        || expected_digest.len() != 64
+        || !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !matches!(decision.as_str(), "approve" | "deny")
+    {
+        return Err("coding approval binding is invalid".into());
+    }
+    let confirmed = window
+        .dialog()
+        .message(format!(
+            "{} request {}\nDigest: {}\n\nこのexact requestだけに適用します。",
+            if decision == "approve" {
+                "Approve"
+            } else {
+                "Deny"
+            },
+            request_id,
+            expected_digest,
+        ))
+        .title("Tobkiri coding approval")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            if decision == "approve" {
+                "Approve once".into()
+            } else {
+                "Deny".into()
+            },
+            "Cancel".into(),
+        ))
+        .blocking_show();
+    if !confirmed {
+        return Err("native coding approval was cancelled".into());
+    }
+    let issued_at = unix_now_seconds();
+    let nonce: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    let mut operator = CodingUiOperator {
+        version: 3,
+        kind: "coding_ui_operator".into(),
+        origin: "tauri_webview_window".into(),
+        window_label: "defaultspack-main".into(),
+        request_id,
+        expected_digest,
+        decision,
+        issued_at,
+        expires_at: issued_at + 60,
+        nonce,
+        signature: String::new(),
+    };
+    let secret = load_or_create_panel_bootstrap_secret(&config)
+        .map_err(|error| format!("failed to load coding approval signing secret: {error}"))?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|error| format!("failed to prepare coding approval signature: {error}"))?;
+    mac.update(coding_operator_message(&operator).as_bytes());
+    operator.signature = hex::encode(mac.finalize().into_bytes());
+    Ok(operator)
 }
 
 fn sign_authority_ui_operator(
@@ -1991,6 +2164,7 @@ pub fn run() {
     let build_startup_stage = Arc::clone(&startup_stage);
 
     let app = builder
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(move |_webview, url| {
@@ -2229,6 +2403,7 @@ pub fn run() {
             open_defaults_console_window,
             open_host_permissions_window,
             authority_approval_context,
+            coding_approval_operator,
             send_to_background,
             show_app_window,
             get_background_control_status,

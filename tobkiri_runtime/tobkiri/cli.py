@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
 import stat
 import subprocess
 import sys
@@ -195,6 +196,30 @@ def _session() -> dict[str, Any]:
     return _safe_json_file(_session_path())
 
 
+def _debug_binding_query() -> dict[str, Any]:
+    session = _session()
+    status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
+    expected = {
+        "debug_session_id": str(session.get("session_id") or ""),
+        "lease_epoch": int(session.get("lease_epoch") or 0),
+        "debug_run_id": str(session.get("run_id") or ""),
+        "workspace_identity_digest": str(session.get("workspace_digest") or ""),
+        "pack_id": str(session.get("pack_id") or ""),
+        "profile_id": str(session.get("profile_id") or ""),
+    }
+    if (
+        status.get("state") != "active"
+        or str(status.get("session_id") or "") != expected["debug_session_id"]
+        or int(status.get("lease_epoch") or 0) != expected["lease_epoch"]
+        or str(status.get("run_id") or "") != expected["debug_run_id"]
+        or str(status.get("workspace_digest") or "") != expected["workspace_identity_digest"]
+        or str(status.get("pack_id") or "") != expected["pack_id"]
+        or str(status.get("profile_id") or "") != expected["profile_id"]
+    ):
+        raise CliError("Launcher debug session binding is no longer active")
+    return expected
+
+
 def _api_request(
     method: str,
     path: str,
@@ -297,41 +322,17 @@ def _resume_payload(
     *,
     source: str,
 ) -> tuple[str, dict[str, Any]] | None:
-    token = str(decision.get("token") or "").strip()
+    resume_id = str(decision.get("resume_id") or "").strip()
     conversation_id = str(request.get("conversation_id") or "").strip()
     details = request.get("details") if isinstance(request.get("details"), dict) else {}
     if not conversation_id:
         conversation_id = str(details.get("conversation_id") or "").strip()
-    if not token or not conversation_id:
+    if source == "authority":
+        return None
+    if not resume_id or not conversation_id:
         return None
     request_id = str(request.get("request_id") or "")
     idempotency_key = f"debug-resume-{request_id}-{uuid.uuid4().hex}"
-    if source == "authority":
-        permission_id = str(request.get("permission_id") or "")
-        metadata = {
-            "authority_followup": {
-                "approval_token": token,
-                "request_id": request_id,
-                "permission_id": permission_id,
-                "hidden": True,
-            },
-            "chat_display": {"hidden": True, "reason": "authority_followup"},
-            "runtime_content": (
-                "A Launcher-authorized delegated debug operator approved the exact "
-                f"pending Authority request {request_id}. Continue the interrupted "
-                "operation once using the attached one-shot authority approval."
-            ),
-        }
-        return conversation_id, {
-            "idempotency_key": idempotency_key,
-            "message": {
-                "role": "user",
-                "content": "Internal delegated debug authority resume.",
-                "metadata": metadata,
-            },
-            "params": {},
-        }
-
     tool = _request_field(request, ("function_id", "tool", "action"), "")
     action = _request_field(request, ("action", "function_id"), str(request.get("operation") or ""))
     approved_payload = details.get("payload")
@@ -339,12 +340,11 @@ def _resume_payload(
         approved_payload = details.get("arguments")
     if not isinstance(approved_payload, dict):
         approved_payload = {}
-    approved_arguments = {**approved_payload, "approval_token": token}
     metadata = {
         "approval_followup": {
             "action": action,
             "operation": str(request.get("operation") or action),
-            "approval_token": token,
+            "resume_id": resume_id,
             "payload": approved_payload,
             "request_id": request_id,
             "tool_call_id": str(details.get("tool_call_id") or ""),
@@ -358,7 +358,7 @@ def _resume_payload(
                 f"Operation: {request.get('operation') or action}",
                 f"Approval request id: {request_id}",
                 "Approved arguments JSON:",
-                json.dumps(approved_arguments, ensure_ascii=False, sort_keys=True),
+                json.dumps(approved_payload, ensure_ascii=False, sort_keys=True),
             ]
         ),
         "selected_tools": [tool] if tool else [],
@@ -381,15 +381,24 @@ def _resume_payload(
 
 
 def _request_by_id(request_id: str) -> dict[str, Any]:
+    debug_binding = _debug_binding_query()
     result = _api_request(
         "GET",
         "/api/coding/approvals",
-        query={"include_expired": "true", "limit": 500},
+        query={
+            "include_expired": "true",
+            "limit": 500,
+            **debug_binding,
+        },
     )
     for item in result.get("requests") or []:
         if isinstance(item, dict) and str(item.get("request_id") or "") == request_id:
             return {**item, "_approval_source": "runtime"}
-    authority = _api_request("GET", f"/api/authority/requests/{request_id}")
+    authority = _api_request(
+        "GET",
+        f"/api/authority/requests/{request_id}",
+        query=debug_binding,
+    )
     if authority:
         return {**authority, "_approval_source": "authority"}
     raise CliError("approval request not found")
@@ -402,6 +411,28 @@ def _request_field(request: dict[str, Any], keys: tuple[str, ...], fallback: str
         if value:
             return value
     return fallback
+
+
+def _safe_approval_view(request: dict[str, Any], *, expected_digest: str) -> dict[str, Any]:
+    details = request.get("details") if isinstance(request.get("details"), dict) else {}
+    return {
+        "request_id": str(request.get("request_id") or ""),
+        "approval_source": str(
+            request.get("approval_source") or request.get("_approval_source") or "runtime"
+        ),
+        "operation": str(request.get("operation") or request.get("permission_id") or ""),
+        "risk_level": str(request.get("risk_level") or ""),
+        "status": str(request.get("status") or ""),
+        "created_at": request.get("created_at"),
+        "expires_at": request.get("expires_at"),
+        "expected_digest": expected_digest,
+        "tool": _request_field(request, ("function_id", "tool", "action"), ""),
+        "conversation_id": str(
+            request.get("conversation_id") or details.get("conversation_id") or ""
+        ),
+        "pack_id": str(request.get("pack_id") or details.get("pack_id") or ""),
+        "profile_id": str(request.get("profile_id") or details.get("profile_id") or ""),
+    }
 
 
 def _authority_snapshot(request: dict[str, Any]) -> tuple[str, str]:
@@ -424,6 +455,13 @@ def _authority_snapshot(request: dict[str, Any]) -> tuple[str, str]:
             "profile_id",
             "node_id",
             "graph_id",
+            "debug_session_id",
+            "lease_epoch",
+            "debug_run_id",
+            "workspace_identity_digest",
+            "pack_id",
+            "debug_profile_id",
+            "operation_owner",
         )
     }
     digest = hashlib.sha256(
@@ -443,6 +481,9 @@ def _epoch(value: Any) -> int:
 
 
 def _signed_operator(request: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    decision = str(request.get("_debug_decision") or "")
+    if decision not in {"approve", "deny"}:
+        raise CliError("debug approval decision is invalid")
     session = _session()
     status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
     if status.get("state") != "active":
@@ -457,12 +498,13 @@ def _signed_operator(request: dict[str, Any]) -> tuple[dict[str, Any], str]:
             request.get("node_id") or (request.get("resource") or {}).get("kind") or "authority"
         )
         action = permission_id
-        owner = str(
+        conversation_id = str(
             request.get("conversation_id")
             or request.get("profile_id")
             or request.get("principal_id")
             or "local"
         )
+        operation_owner = str(request.get("principal_id") or session.get("pack_id") or "defaultspack")
         expires_at = _epoch(request.get("expires_at"))
     else:
         operation = str(request.get("operation") or "")
@@ -472,8 +514,11 @@ def _signed_operator(request: dict[str, Any]) -> tuple[dict[str, Any], str]:
         )
         tool = _request_field(request, ("function_id", "tool", "action"), operation)
         action = _request_field(request, ("action", "function_id"), operation)
-        owner = _request_field(
+        conversation_id = _request_field(
             request, ("conversation_owner", "conversation_id", "profile_id"), "local"
+        )
+        operation_owner = _request_field(
+            request, ("operation_owner", "owner_pack", "pack_id"), str(session.get("pack_id") or "")
         )
         digest = str(request.get("args_hash") or "")
         target_digest = str(details.get("target_digest") or details.get("snapshot_digest") or "")
@@ -482,14 +527,20 @@ def _signed_operator(request: dict[str, Any]) -> tuple[dict[str, Any], str]:
         "session_id": session["session_id"],
         "run_id": session["run_id"],
         "workspace_digest": status["workspace_digest"],
+        "pack_id": session["pack_id"],
+        "profile_id": session["profile_id"],
+        "lease_epoch": session["lease_epoch"],
+        "session_secret": session["session_secret"],
         "request_id": request_id,
         "permission_id": permission_id,
         "tool": tool,
         "action": action,
         "operation": operation,
+        "decision": decision,
         "canonical_arguments_digest": digest,
         "target_digest": target_digest or None,
-        "conversation_owner": owner,
+        "conversation_id": conversation_id,
+        "operation_owner": operation_owner,
         "request_expires_at": expires_at,
     }
     result = _broker_request("POST", "/api/host/debug/approval/operator", payload)
@@ -505,8 +556,8 @@ def _debug_status(_args: argparse.Namespace) -> dict[str, Any]:
 
 def _session_start(args: argparse.Namespace) -> dict[str, Any]:
     launcher_status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
-    if launcher_status.get("state") != "armed":
-        raise CliError("Launcher debug approval is not armed")
+    if launcher_status.get("state") not in {"disabled", "pending"}:
+        raise CliError("another Launcher debug approval request is already pending or active")
     workspace = Path(args.workspace).expanduser().resolve(strict=True)
     if not workspace.is_dir():
         raise CliError("workspace must be a directory")
@@ -519,22 +570,20 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
         raise CliError("debug launch manifest is incomplete")
     _write_session(None)
     session_id = "dbg-" + uuid.uuid4().hex
-    guard = None
-    process_id = args.process_id
-    if process_id is None:
-        guard = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "__debug-session-guard",
-                session_id,
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        process_id = guard.pid
+    guard = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "__debug-session-guard",
+            session_id,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    process_id = guard.pid
+    claim_secret = secrets.token_urlsafe(48)
     request = {
         "session_id": session_id,
         "run_id": args.run_id,
@@ -542,16 +591,34 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
         "pack_id": args.pack_id,
         "profile_id": args.profile_id,
         "process_id": process_id,
+        "claim_secret": claim_secret,
     }
     try:
+        _broker_request("POST", "/api/host/debug/session/request", request)
+        deadline = time.monotonic() + 5 * 60
+        while time.monotonic() < deadline:
+            status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
+            if status.get("state") == "armed" and status.get("session_id") == session_id:
+                break
+            if status.get("state") == "disabled":
+                raise CliError("Launcher rejected or revoked the pending debug session")
+            time.sleep(0.5)
+        else:
+            raise CliError("timed out waiting for native Launcher confirmation")
         result = _broker_request("POST", "/api/host/debug/session/start", request)
     except Exception:
-        if guard is not None:
-            guard.terminate()
+        guard.terminate()
         raise
+    status = result.get("status") if isinstance(result.get("status"), dict) else {}
+    session_secret = str(result.get("session_secret") or "")
+    if status.get("state") != "active" or not session_secret:
+        guard.terminate()
+        raise CliError("Launcher did not return an active session credential")
     _write_session(
         {
-            **request,
+            **{key: value for key, value in request.items() if key != "claim_secret"},
+            "session_secret": session_secret,
+            "lease_epoch": status.get("lease_epoch"),
             "workspace_digest": hashlib.sha256(str(workspace).encode()).hexdigest(),
             "defaultspack_url": f"http://127.0.0.1:{port}",
             "api_token_file": str(token_file.resolve()),
@@ -583,34 +650,46 @@ def _session_stop(_args: argparse.Namespace) -> dict[str, Any]:
     result = _broker_request(
         "POST",
         "/api/host/debug/session/stop",
-        {"session_id": session["session_id"], "run_id": session["run_id"]},
+        {
+            "session_id": session["session_id"],
+            "run_id": session["run_id"],
+            "session_secret": session["session_secret"],
+        },
     )
     _write_session(None)
     return result
 
 
 def _approvals_list(_args: argparse.Namespace) -> dict[str, Any]:
+    debug_binding = _debug_binding_query()
     runtime = _api_request(
         "GET",
         "/api/coding/approvals",
-        query={"status": "pending", "include_expired": "false", "limit": 100},
+        query={
+            "status": "pending",
+            "include_expired": "false",
+            "limit": 100,
+            **debug_binding,
+        },
     )
-    authority = _api_request("GET", "/api/authority/requests", query={"status": "pending"})
+    authority = _api_request(
+        "GET",
+        "/api/authority/requests",
+        query={"status": "pending", **debug_binding},
+    )
     runtime_pending = [
-        {
-            **item,
-            "approval_source": "runtime",
-            "expected_digest": str(item.get("args_hash") or ""),
-        }
+        _safe_approval_view(
+            {**item, "approval_source": "runtime"},
+            expected_digest=str(item.get("args_hash") or ""),
+        )
         for item in runtime.get("pending") or []
         if isinstance(item, dict)
     ]
     authority_pending = [
-        {
-            **item,
-            "approval_source": "authority",
-            "expected_digest": _authority_snapshot(item)[0],
-        }
+        _safe_approval_view(
+            {**item, "approval_source": "authority"},
+            expected_digest=_authority_snapshot(item)[0],
+        )
         for item in authority.get("requests") or authority.get("items") or []
         if isinstance(item, dict) and item.get("status") == "pending"
     ]
@@ -625,7 +704,10 @@ def _approval_show(args: argparse.Namespace) -> dict[str, Any]:
         if request.get("_approval_source") == "authority"
         else str(request.get("args_hash") or "")
     )
-    return {"request": request, "expected_digest": expected_digest}
+    return {
+        "request": _safe_approval_view(request, expected_digest=expected_digest),
+        "expected_digest": expected_digest,
+    }
 
 
 def _approval_decide(args: argparse.Namespace) -> dict[str, Any]:
@@ -638,7 +720,7 @@ def _approval_decide(args: argparse.Namespace) -> dict[str, Any]:
     )
     if args.decision == "approve" and args.expected_digest != digest:
         raise CliError("expected digest does not match the current approval snapshot")
-    operator, signed_digest = _signed_operator(request)
+    operator, signed_digest = _signed_operator({**request, "_debug_decision": args.decision})
     if signed_digest != digest:
         raise CliError("approval request changed while signing")
     payload = {
@@ -658,13 +740,27 @@ def _approval_decide(args: argparse.Namespace) -> dict[str, Any]:
         )
     else:
         decision = _api_request("POST", f"/api/coding/approvals/{args.decision}", payload)
+    _broker_request(
+        "POST",
+        "/api/host/debug/approval/settle",
+        {"debug_cli_operator": operator, "outcome": "settled"},
+    )
     if args.decision != "approve":
         return decision
     resume = _resume_payload(request, decision, source=source)
     if resume is None:
         return {**decision, "resumed": False, "resume_reason": "no_conversation"}
     conversation_id, resume_request = resume
-    return {**decision, **_api_resume(conversation_id, resume_request)}
+    try:
+        resumed = _api_resume(conversation_id, resume_request)
+    except Exception:
+        _broker_request(
+            "POST",
+            "/api/host/debug/approval/settle",
+            {"debug_cli_operator": operator, "outcome": "resume_failed"},
+        )
+        raise
+    return {**decision, **resumed}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -681,7 +777,6 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--run-id", required=True)
     start.add_argument("--pack-id", default="defaultspack")
     start.add_argument("--profile-id", default="debug-cli")
-    start.add_argument("--process-id", type=int)
     start.set_defaults(handler=_session_start)
     stop = session_commands.add_parser("stop")
     stop.set_defaults(handler=_session_stop)

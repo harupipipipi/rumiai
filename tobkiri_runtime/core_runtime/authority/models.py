@@ -107,6 +107,13 @@ class AuthorityRequest:
     profile_id: str | None = None
     node_id: str | None = None
     graph_id: str | None = None
+    debug_session_id: str = ""
+    lease_epoch: int = 0
+    debug_run_id: str = ""
+    workspace_identity_digest: str = ""
+    pack_id: str = ""
+    debug_profile_id: str = ""
+    operation_owner: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -127,4 +134,11 @@ class AuthorityRequest:
             profile_id=str(data.get("profile_id") or "") or None,
             node_id=str(data.get("node_id") or "") or None,
             graph_id=str(data.get("graph_id") or "") or None,
+            debug_session_id=str(data.get("debug_session_id") or ""),
+            lease_epoch=int(data.get("lease_epoch") or 0),
+            debug_run_id=str(data.get("debug_run_id") or ""),
+            workspace_identity_digest=str(data.get("workspace_identity_digest") or ""),
+            pack_id=str(data.get("pack_id") or ""),
+            debug_profile_id=str(data.get("debug_profile_id") or ""),
+            operation_owner=str(data.get("operation_owner") or ""),
         )

@@ -63,6 +63,8 @@ pub fn write_audit_log(path: &Path, entry: &HostAuditEntry) -> Result<()> {
     let line =
         serde_json::to_string(entry).context("failed to serialize host broker audit entry")?;
     writeln!(file, "{line}").context("failed to append host broker audit log")?;
+    file.sync_all()
+        .context("failed to fsync host broker audit log")?;
     Ok(())
 }
 
@@ -233,11 +235,36 @@ mod tests {
         }));
         assert_eq!(summary.pointer("/x"), Some(&json!(17)));
         assert_eq!(summary.pointer("/y"), Some(&json!(29)));
-        for key in ["app", "pid", "window_id", "x", "y", "width", "height", "title", "path", "token"] {
-            assert_eq!(summary.pointer(&format!("/window/{key}")), Some(&json!("[redacted]")));
+        for key in [
+            "app",
+            "pid",
+            "window_id",
+            "x",
+            "y",
+            "width",
+            "height",
+            "title",
+            "path",
+            "token",
+        ] {
+            assert_eq!(
+                summary.pointer(&format!("/window/{key}")),
+                Some(&json!("[redacted]"))
+            );
         }
         let serialized = serde_json::to_string(&summary).unwrap();
-        for secret in ["CANARY_PRIVATE_APP", "91234", "56789", "101", "202", "1303", "704", "CANARY_PRIVATE_TITLE", "/CANARY/private.png", "CANARY_PRIVATE_TOKEN"] {
+        for secret in [
+            "CANARY_PRIVATE_APP",
+            "91234",
+            "56789",
+            "101",
+            "202",
+            "1303",
+            "704",
+            "CANARY_PRIVATE_TITLE",
+            "/CANARY/private.png",
+            "CANARY_PRIVATE_TOKEN",
+        ] {
             assert!(!serialized.contains(secret), "leaked {secret}");
         }
     }

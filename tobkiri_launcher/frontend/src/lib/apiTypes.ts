@@ -229,6 +229,7 @@ export interface ApiUpdateSettings {
 
 export type DebugApprovalState =
   | 'disabled'
+  | 'pending'
   | 'armed'
   | 'active'
   | 'expired'
@@ -244,6 +245,8 @@ export interface DebugApprovalStatus {
   workspace_digest?: string | null;
   pack_id?: string | null;
   profile_id?: string | null;
+  process_id?: number | null;
+  lease_epoch?: number | null;
   expires_at?: number | null;
   instance_nonce: string;
 }

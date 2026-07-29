@@ -1217,10 +1217,24 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
+            debug_binding = None
+            if request_data.get("debug_session_id"):
+                debug_binding = {
+                    key: request_data.get(key)
+                    for key in (
+                        "debug_session_id",
+                        "lease_epoch",
+                        "debug_run_id",
+                        "workspace_identity_digest",
+                        "pack_id",
+                        "profile_id",
+                    )
+                }
             return ok(
                 get_authority_service().list_requests(
                     str(request_data.get("status") or "all"),
                     actor_principal=request_data.get("_authenticated_principal"),
+                    **({"debug_binding": debug_binding} if debug_binding else {}),
                 )
             )
         except Exception as exc:
@@ -1231,9 +1245,23 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
+            debug_binding = None
+            if request_data.get("debug_session_id"):
+                debug_binding = {
+                    key: request_data.get(key)
+                    for key in (
+                        "debug_session_id",
+                        "lease_epoch",
+                        "debug_run_id",
+                        "workspace_identity_digest",
+                        "pack_id",
+                        "profile_id",
+                    )
+                }
             result = get_authority_service().get_request(
                 request_id,
                 actor_principal=request_data.get("_authenticated_principal"),
+                **({"debug_binding": debug_binding} if debug_binding else {}),
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
@@ -1582,8 +1610,6 @@ _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_AUTH_CONTEXT_FLAG = "_defaultspack_local_ui_authenticated"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
-    "/api/coding/approvals/approve": {"POST"},
-    "/api/coding/approvals/deny": {"POST"},
     "/api/ai/provider-key": {"POST"},
     "/api/agent/subagent": {"POST"},
     "/api/connections/codex": {"POST"},
@@ -2023,19 +2049,6 @@ def _local_ui_approval_route_authorized(method, path, headers, request_data=None
         for pattern, pattern_methods in _LOCAL_UI_APPROVAL_METHOD_PATTERNS
     ):
         return False
-    if normalized_path in {
-        "/api/coding/approvals/approve",
-        "/api/coding/approvals/deny",
-    }:
-        origin = _strict_local_origin(_header_value(headers, "Origin"))
-        fetch_site = _header_value(headers, "Sec-Fetch-Site").strip().lower()
-        fetch_mode = _header_value(headers, "Sec-Fetch-Mode").strip().lower()
-        return bool(
-            origin
-            and fetch_site in {"same-origin", "same-site"}
-            and fetch_mode in {"cors", "same-origin"}
-            and _local_auth_token_authorized(headers)
-        )
     return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
 
 

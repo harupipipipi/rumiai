@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
+import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +15,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from core_runtime.authority.debug_cli_operator import authority_snapshot  # noqa: E402
 from core_runtime.authority.models import AuthorityRequest  # noqa: E402
+from domain.safety import approval as runtime_approval  # noqa: E402
 from domain.safety import debug_cli_operator as runtime_operator  # noqa: E402
 from tobkiri import cli  # noqa: E402
 
@@ -63,8 +68,13 @@ def test_runtime_operator_checks_digest_and_exact_provenance(monkeypatch):
         def available(self):
             return True
 
-        def verify_debug_cli_operator(self, _operator):
+        def verify_debug_cli_operator(self, _operator, *, expected_decision):
+            assert expected_decision == "approve"
             return {"ok": True, "verified": True}
+
+    class Store:
+        def bind_debug_context(self, _request_id, binding):
+            return all(binding.values())
 
     monkeypatch.setattr(runtime_operator, "get_approval_request", lambda _request_id: request)
     monkeypatch.setattr(
@@ -72,17 +82,27 @@ def test_runtime_operator_checks_digest_and_exact_provenance(monkeypatch):
         "from_environment",
         classmethod(lambda _cls: Broker()),
     )
+    monkeypatch.setattr(runtime_operator, "get_approval_store", lambda: Store())
     operator = {
         "kind": "debug_cli_operator",
         "origin": "launcher_debug_cli",
         "scope": "once",
+        "decision": "approve",
+        "version": 2,
+        "session_id": "session-1",
+        "run_id": "run-1",
+        "workspace_digest": "b" * 64,
+        "pack_id": "defaultspack",
+        "profile_id": "debug",
+        "lease_epoch": 1,
         "request_id": "apr-1",
         "canonical_arguments_digest": "a" * 64,
         "operation": "computer.click",
         "permission_id": "computer.control",
         "tool": "computer.click",
         "action": "computer.click",
-        "conversation_owner": "conversation-1",
+        "conversation_id": "conversation-1",
+        "operation_owner": "defaultspack",
         "expires_at": 1_900_000_000,
     }
 
@@ -166,8 +186,13 @@ def test_cli_approve_resumes_exact_conversation_without_returning_token_in_resum
         lambda *_args, **_kwargs: {
             "approved": True,
             "request_id": "apr-1",
-            "token": "one-shot-secret",
+            "resume_id": "resume-opaque",
         },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_broker_request",
+        lambda *_args, **_kwargs: {"ok": True, "settled": True},
     )
     captured = {}
 
@@ -188,10 +213,10 @@ def test_cli_approve_resumes_exact_conversation_without_returning_token_in_resum
     assert result["resumed"] is True
     assert captured["conversation_id"] == "conversation-1"
     assert (
-        captured["payload"]["message"]["metadata"]["approval_followup"]["approval_token"]
-        == "one-shot-secret"
+        captured["payload"]["message"]["metadata"]["approval_followup"]["resume_id"]
+        == "resume-opaque"
     )
-    assert cli._redact_output(result)["token"] == "[redacted]"
+    assert "approval_token" not in json.dumps(captured["payload"], sort_keys=True)
 
 
 def test_authority_accepts_launcher_verified_debug_operator_once(tmp_path, monkeypatch):
@@ -219,7 +244,7 @@ def test_authority_accepts_launcher_verified_debug_operator_once(tmp_path, monke
         lambda request, digest, operator: (
             request.request_id == decision.request_id
             and digest == "d" * 64
-            and operator == {"signed": True},
+            and operator.get("signed") is True,
             "",
             {
                 "decision_source": "delegated_debug_cli",
@@ -231,13 +256,13 @@ def test_authority_accepts_launcher_verified_debug_operator_once(tmp_path, monke
     approved = service.approve_request(
         decision.request_id,
         scope="once",
-        debug_cli_operator={"signed": True},
+        debug_cli_operator={"signed": True, "decision": "approve"},
         expected_digest="d" * 64,
     )
     replay = service.approve_request(
         decision.request_id,
         scope="once",
-        debug_cli_operator={"signed": True},
+        debug_cli_operator={"signed": True, "decision": "approve"},
         expected_digest="d" * 64,
     )
 
@@ -258,7 +283,7 @@ def test_coding_approval_rejects_token_and_request_id_without_operator(
     monkeypatch.setattr(
         approval_approve,
         "approve",
-        lambda request_id: {
+        lambda request_id, **_kwargs: {
             "request_id": request_id,
             "approved": True,
             "status": "approved",
@@ -269,8 +294,18 @@ def test_coding_approval_rejects_token_and_request_id_without_operator(
 
     ui_context = {"source": "defaultspack_local_ui"}
     mark_tool_server_approval_context(ui_context)
-    interactive = approval_approve.run(
+    forged_interactive = approval_approve.run(
         {"approval_request_id": "apr-1"},
+        ui_context,
+    )
+    monkeypatch.setattr(approval_approve, "get_approval_request", lambda _request_id: {"args_hash": "a" * 64})
+    monkeypatch.setattr(
+        approval_approve,
+        "verify_coding_ui_operator",
+        lambda *_args, **_kwargs: {"verified": True},
+    )
+    interactive = approval_approve.run(
+        {"approval_request_id": "apr-1", "ui_operator": {"signed": True}},
         ui_context,
     )
 
@@ -287,13 +322,14 @@ def test_coding_approval_rejects_token_and_request_id_without_operator(
         {
             "approval_request_id": "apr-2",
             "expected_digest": "a" * 64,
-            "debug_cli_operator": {"signed": True},
+            "debug_cli_operator": {"signed": True, "decision": "approve"},
         },
         {},
     )
 
     assert plain["status"] == "error"
     assert plain["error"]["code"] == "APPROVAL_OPERATOR_REQUIRED"
+    assert forged_interactive["status"] == "error"
     assert interactive["status"] == "ok"
     assert delegated["status"] == "ok"
 
@@ -322,5 +358,230 @@ def test_coding_interactive_ui_provenance_requires_browser_fetch_headers(
         _local_ui_approval_route_authorized(
             "POST", "/api/coding/approvals/approve", interactive
         )
-        is True
+        is False
     )
+
+
+def test_native_coding_operator_is_digest_decision_and_replay_bound(monkeypatch):
+    from domain.safety import coding_ui_operator
+
+    secret = "native-coding-operator-test-secret"
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", secret)
+    now = int(time.time())
+    operator = {
+        "version": 3,
+        "kind": "coding_ui_operator",
+        "origin": "tauri_webview_window",
+        "window_label": "defaultspack-main",
+        "request_id": "apr-native-1",
+        "expected_digest": "a" * 64,
+        "decision": "approve",
+        "issued_at": now,
+        "expires_at": now + 60,
+        "nonce": "native-once-nonce",
+    }
+    operator["signature"] = hmac.new(
+        secret.encode(),
+        coding_ui_operator._message(operator),
+        hashlib.sha256,
+    ).hexdigest()
+
+    verified = coding_ui_operator.verify_coding_ui_operator(
+        operator,
+        request_id="apr-native-1",
+        expected_digest="a" * 64,
+        decision="approve",
+    )
+    assert verified["window_label"] == "defaultspack-main"
+    with pytest.raises(coding_ui_operator.CodingUiOperatorError, match="already been used"):
+        coding_ui_operator.verify_coding_ui_operator(
+            operator,
+            request_id="apr-native-1",
+            expected_digest="a" * 64,
+            decision="approve",
+        )
+    tampered = {**operator, "nonce": "different-nonce", "decision": "deny"}
+    with pytest.raises(coding_ui_operator.CodingUiOperatorError, match="decision mismatch"):
+        coding_ui_operator.verify_coding_ui_operator(
+            tampered,
+            request_id="apr-native-1",
+            expected_digest="a" * 64,
+            decision="approve",
+        )
+
+
+def test_approval_store_debug_binding_is_immutable(tmp_path):
+    from domain.safety.approval_store import ApprovalStore
+
+    store = ApprovalStore(tmp_path / "approval.sqlite3")
+    store.save_request(
+        {
+            "request_id": "apr-bind-1",
+            "operation": "computer.click",
+            "risk_level": "high",
+            "args_hash": "a" * 64,
+            "details": {},
+            "created_at": int(time.time()),
+            "expires_at": int(time.time()) + 300,
+            "status": "pending",
+            "decision_at": None,
+        }
+    )
+    binding = {
+        "debug_session_id": "session-1",
+        "lease_epoch": 7,
+        "debug_run_id": "run-1",
+        "workspace_identity_digest": "b" * 64,
+        "pack_id": "defaultspack",
+        "profile_id": "debug",
+        "conversation_id": "conversation-1",
+        "operation_owner": "defaultspack",
+    }
+    assert store.bind_debug_context("apr-bind-1", binding) is True
+    assert store.bind_debug_context("apr-bind-1", binding) is True
+    assert store.bind_debug_context(
+        "apr-bind-1", {**binding, "lease_epoch": 8}
+    ) is False
+    stored = store.get_request("apr-bind-1")
+    assert stored["lease_epoch"] == 7
+    assert stored["debug_session_id"] == "session-1"
+
+
+def test_request_creation_persists_active_debug_binding(tmp_path, monkeypatch):
+    from domain.safety.approval_store import ApprovalStore
+
+    store = ApprovalStore(tmp_path / "approval.sqlite3")
+
+    class Broker:
+        def available(self):
+            return True
+
+        def debug_approval_status(self):
+            return {
+                "status": {
+                    "state": "active",
+                    "session_id": "session-create",
+                    "lease_epoch": 11,
+                    "run_id": "run-create",
+                    "workspace_digest": "c" * 64,
+                    "pack_id": "defaultspack",
+                    "profile_id": "debug",
+                }
+            }
+
+    monkeypatch.setattr(
+        runtime_approval.ViewerBrokerClient,
+        "from_environment",
+        classmethod(lambda _cls: Broker()),
+    )
+    monkeypatch.setattr(runtime_approval, "get_approval_store", lambda: store)
+    monkeypatch.setattr(runtime_approval, "_refresh_approval_state_mirrors_from_store", lambda: None)
+
+    created = runtime_approval.create_approval_request(
+        "computer.click",
+        "high",
+        {"x": 1, "y": 2},
+        details={
+            "pack_id": "defaultspack",
+            "profile_id": "debug",
+            "conversation_id": "conversation-create",
+            "operation_owner": "defaultspack",
+        },
+    )
+    stored = store.get_request(created["request_id"])
+
+    assert stored["debug_session_id"] == "session-create"
+    assert stored["lease_epoch"] == 11
+    assert stored["debug_run_id"] == "run-create"
+    assert stored["workspace_identity_digest"] == "c" * 64
+    assert stored["pack_id"] == "defaultspack"
+    assert stored["profile_id"] == "debug"
+    assert stored["conversation_id"] == "conversation-create"
+    assert stored["operation_owner"] == "defaultspack"
+
+
+def test_cli_approval_list_is_server_filtered_to_exact_active_binding(monkeypatch):
+    session = {
+        "session_id": "session-list",
+        "lease_epoch": 13,
+        "run_id": "run-list",
+        "workspace_digest": "d" * 64,
+        "pack_id": "defaultspack",
+        "profile_id": "debug",
+    }
+    monkeypatch.setattr(cli, "_session", lambda: session)
+    monkeypatch.setattr(
+        cli,
+        "_broker_request",
+        lambda *_args, **_kwargs: {
+            "status": {
+                "state": "active",
+                "session_id": "session-list",
+                "lease_epoch": 13,
+                "run_id": "run-list",
+                "workspace_digest": "d" * 64,
+                "pack_id": "defaultspack",
+                "profile_id": "debug",
+            }
+        },
+    )
+    queries = []
+
+    def api_request(_method, path, payload=None, query=None):
+        del payload
+        queries.append((path, query))
+        return {"pending": []} if path == "/api/coding/approvals" else {"requests": []}
+
+    monkeypatch.setattr(cli, "_api_request", api_request)
+
+    assert cli._approvals_list(argparse.Namespace()) == {"pending": [], "count": 0}
+    runtime_query = queries[0][1]
+    assert runtime_query["debug_session_id"] == "session-list"
+    assert runtime_query["lease_epoch"] == 13
+    assert runtime_query["debug_run_id"] == "run-list"
+    assert runtime_query["workspace_identity_digest"] == "d" * 64
+    assert runtime_query["pack_id"] == "defaultspack"
+    assert runtime_query["profile_id"] == "debug"
+    authority_query = queries[1][1]
+    assert authority_query["debug_session_id"] == "session-list"
+    assert authority_query["lease_epoch"] == 13
+
+
+def test_authority_request_debug_binding_is_part_of_snapshot_and_filter():
+    from core_runtime.authority.service import AuthorityService
+
+    request = _authority_request(
+        debug_session_id="session-authority",
+        lease_epoch=17,
+        debug_run_id="run-authority",
+        workspace_identity_digest="e" * 64,
+        pack_id="defaultspack",
+        debug_profile_id="debug",
+        operation_owner="profile:debug",
+    )
+    original = authority_snapshot(request)["digest"]
+    changed = authority_snapshot(
+        _authority_request(
+            debug_session_id="session-authority",
+            lease_epoch=18,
+            debug_run_id="run-authority",
+            workspace_identity_digest="e" * 64,
+            pack_id="defaultspack",
+            debug_profile_id="debug",
+            operation_owner="profile:debug",
+        )
+    )["digest"]
+    binding = {
+        "debug_session_id": "session-authority",
+        "lease_epoch": 17,
+        "debug_run_id": "run-authority",
+        "workspace_identity_digest": "e" * 64,
+        "pack_id": "defaultspack",
+        "profile_id": "debug",
+    }
+
+    assert original != changed
+    assert AuthorityService._matches_debug_binding(request, binding) is True
+    assert AuthorityService._matches_debug_binding(
+        request, {**binding, "lease_epoch": 18}
+    ) is False

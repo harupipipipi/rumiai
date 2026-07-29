@@ -192,8 +192,20 @@ class AuthorityRequestStore:
         graph_id: str | None = None,
         expires_in_seconds: int = 86400,
     ) -> AuthorityRequest:
+        from .debug_cli_operator import active_authority_debug_binding
+
+        debug_binding = active_authority_debug_binding(
+            profile_id=profile_id,
+            conversation_id=conversation_id,
+            principal_id=principal_id,
+        )
         with self._lock:
-            existing = self._find_pending_request(principal_id, permission_id, resource)
+            existing = self._find_pending_request(
+                principal_id,
+                permission_id,
+                resource,
+                debug_binding=debug_binding,
+            )
             if existing is not None:
                 return existing
             now = _now_utc()
@@ -211,6 +223,7 @@ class AuthorityRequestStore:
                 profile_id=profile_id,
                 node_id=node_id,
                 graph_id=graph_id,
+                **debug_binding,
             )
             self._write_json(self._request_path(request.request_id), request.to_dict())
             self.audit(
@@ -225,13 +238,27 @@ class AuthorityRequestStore:
             )
             return request
 
-    def _find_pending_request(self, principal_id: str, permission_id: str, resource: dict[str, Any]) -> AuthorityRequest | None:
+    def _find_pending_request(
+        self,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+        *,
+        debug_binding: dict[str, Any] | None = None,
+    ) -> AuthorityRequest | None:
         wanted_hash = self.resource_hash(resource)
+        expected_session = str((debug_binding or {}).get("debug_session_id") or "")
+        expected_epoch = int((debug_binding or {}).get("lease_epoch") or 0)
         for request in self.list_requests("pending"):
             if request.principal_id != principal_id or request.permission_id != permission_id:
                 continue
             if self.request_expired(request):
                 self.set_request_status(request.request_id, "expired")
+                continue
+            if (
+                request.debug_session_id != expected_session
+                or request.lease_epoch != expected_epoch
+            ):
                 continue
             if self.resource_hash(request.resource) == wanted_hash:
                 return request

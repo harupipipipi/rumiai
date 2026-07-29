@@ -72,7 +72,7 @@ let tauriSendToBackgroundCount = 0;
 let tauriShowAppWindowCount = 0;
 let tauriDesktopInfoCount = 0;
 let tauriDesktopLaunchCount = 0;
-let tauriDebugArmConfirmed: boolean | null = null;
+let tauriDebugArmArgs: Record<string, unknown> | undefined;
 let tauriDebugRevokeCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
@@ -152,7 +152,7 @@ function installBrowser(href: string): MemoryStorage {
             };
           }
           if (command === 'arm_debug_approval') {
-            tauriDebugArmConfirmed = args?.confirmed === true;
+            tauriDebugArmArgs = args;
             return {
               state: 'armed',
               armed_remaining_seconds: 300,
@@ -261,7 +261,7 @@ beforeEach(() => {
   tauriShowAppWindowCount = 0;
   tauriDesktopInfoCount = 0;
   tauriDesktopLaunchCount = 0;
-  tauriDebugArmConfirmed = null;
+  tauriDebugArmArgs = undefined;
   tauriDebugRevokeCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
@@ -587,7 +587,7 @@ test('debug approval helpers use Launcher-owned status, arm, and revoke commands
   assert.equal(disabled?.state, 'disabled');
   assert.equal(armed.state, 'armed');
   assert.equal(armed.armed_remaining_seconds, 300);
-  assert.equal(tauriDebugArmConfirmed, true);
+  assert.equal(tauriDebugArmArgs, undefined);
   assert.equal(revoked.reason, 'user_revoked');
   assert.equal(tauriDebugRevokeCount, 1);
 });

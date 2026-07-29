@@ -122,7 +122,7 @@ test('Settings exposes field names and visual selector state in English and Japa
   }
 });
 
-test('Developer Debug Approval uses an in-page explicit confirmation before arming', async () => {
+test('Developer Debug Approval delegates confirmation directly to the native command', async () => {
   const page = await mountSettings('en', true);
   try {
     const versionTab = page.container.querySelector<HTMLButtonElement>('#settings-version-tab');
@@ -136,23 +136,12 @@ test('Developer Debug Approval uses an in-page explicit confirmation before armi
       'button[aria-label="Developer Debug Approval"]',
     );
     assert.ok(toggle);
-    await act(async () => toggle.click());
-
-    const confirmation = page.container.querySelector('[role="alertdialog"]');
-    assert.ok(confirmation);
-    assert.equal(page.invocations.includes('arm_debug_approval'), false);
-
-    const enableButton = Array.from(confirmation.querySelectorAll<HTMLButtonElement>('button')).find(
-      button => button.textContent?.includes('Enable for one CLI session'),
-    );
-    assert.ok(enableButton);
     await act(async () => {
-      enableButton.click();
+      toggle.click();
       await Promise.resolve();
     });
 
     assert.equal(page.invocations.includes('arm_debug_approval'), true);
-    assert.equal(page.container.querySelector('[role="alertdialog"]'), null);
     assert.match(page.container.textContent ?? '', /ARMED/);
   } finally {
     await page.cleanup();

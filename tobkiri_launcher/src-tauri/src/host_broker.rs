@@ -18,8 +18,9 @@ use sha2::{Digest, Sha256};
 
 use crate::config::AppConfig;
 use crate::debug_approval::{
-    DebugApprovalManager, DebugOperatorRequest, DebugOperatorVerifyRequest,
-    DebugSessionStartRequest, DebugSessionStopRequest,
+    DebugApprovalManager, DebugExecutionConsumeRequest, DebugOperatorRequest,
+    DebugOperatorSettleRequest, DebugOperatorVerifyRequest, DebugSessionStartRequest,
+    DebugSessionStopRequest,
 };
 use crate::desktop_system_info;
 use crate::host_audit::{now_epoch_seconds, summarize_args, write_audit_log, HostAuditEntry};
@@ -42,10 +43,13 @@ const HOST_STREAM_START_PATH: &str = "/api/host/stream/start";
 const HOST_STREAM_STOP_PATH: &str = "/api/host/stream/stop";
 const HOST_STREAM_EVENTS_PREFIX: &str = "/api/host/stream/events/";
 const DEBUG_STATUS_PATH: &str = "/api/host/debug/status";
+const DEBUG_SESSION_REQUEST_PATH: &str = "/api/host/debug/session/request";
 const DEBUG_SESSION_START_PATH: &str = "/api/host/debug/session/start";
 const DEBUG_SESSION_STOP_PATH: &str = "/api/host/debug/session/stop";
 const DEBUG_OPERATOR_PATH: &str = "/api/host/debug/approval/operator";
 const DEBUG_OPERATOR_VERIFY_PATH: &str = "/api/host/debug/approval/verify";
+const DEBUG_OPERATOR_SETTLE_PATH: &str = "/api/host/debug/approval/settle";
+const DEBUG_EXECUTION_CONSUME_PATH: &str = "/api/host/debug/execution/consume";
 const PERMISSION_SUBJECT: &str = "Tobkiri Launcher";
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
@@ -465,11 +469,29 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                 json!({"ok": true, "status": shared.debug_approval.status()}),
             )
         }
+        ("POST", DEBUG_SESSION_REQUEST_PATH) => handle_authorized_json(
+            request,
+            shared,
+            |payload: DebugSessionStartRequest| match shared
+                .debug_approval
+                .register_session(payload)
+            {
+                Ok(status) => json!({"ok": true, "status": status}),
+                Err(error) => json!({
+                    "ok": false,
+                    "error": {"code": "DEBUG_SESSION_REJECTED", "message": error}
+                }),
+            },
+        ),
         ("POST", DEBUG_SESSION_START_PATH) => handle_authorized_json(
             request,
             shared,
             |payload: DebugSessionStartRequest| match shared.debug_approval.start_session(payload) {
-                Ok(status) => json!({"ok": true, "status": status}),
+                Ok(response) => json!({
+                    "ok": true,
+                    "status": response.status,
+                    "session_secret": response.session_secret,
+                }),
                 Err(error) => json!({
                     "ok": false,
                     "error": {"code": "DEBUG_SESSION_REJECTED", "message": error}
@@ -511,6 +533,34 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                         "ok": false,
                         "verified": false,
                         "error": {"code": "DEBUG_OPERATOR_INVALID", "message": error}
+                    }),
+                }
+            })
+        }
+        ("POST", DEBUG_OPERATOR_SETTLE_PATH) => {
+            handle_authorized_json(request, shared, |payload: DebugOperatorSettleRequest| {
+                match shared.debug_approval.settle_operator(payload) {
+                    Ok(operator) => json!({
+                        "ok": true,
+                        "settled": true,
+                        "debug_cli_operator": operator,
+                    }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "settled": false,
+                        "error": {"code": "DEBUG_OPERATOR_SETTLEMENT_INVALID", "message": error}
+                    }),
+                }
+            })
+        }
+        ("POST", DEBUG_EXECUTION_CONSUME_PATH) => {
+            handle_authorized_json(request, shared, |payload: DebugExecutionConsumeRequest| {
+                match shared.debug_approval.consume_execution(payload) {
+                    Ok(()) => json!({"ok": true, "consumed": true}),
+                    Err(error) => json!({
+                        "ok": false,
+                        "consumed": false,
+                        "error": {"code": "DEBUG_EXECUTION_INVALID", "message": error}
                     }),
                 }
             })
@@ -865,6 +915,28 @@ fn execute_approved_host_intent(
     let approval_token_present = intent.approval_token.is_some();
     if !approval_token_present {
         return host_intent_missing_approval_response(shared, &intent, audit_id);
+    }
+    if write_audit_log(
+        &shared.config.host_broker_audit_log_path(),
+        &host_intent_audit_entry(
+            audit_id.clone(),
+            &intent,
+            false,
+            false,
+            Some("execution_attempt".to_string()),
+        ),
+    )
+    .is_err()
+    {
+        return json!({
+            "ok": false,
+            "operation": intent.operation,
+            "error": {
+                "code": "AUDIT_UNAVAILABLE",
+                "message": "Host action blocked because the durable audit log is unavailable."
+            },
+            "audit_id": audit_id,
+        });
     }
     if let Err(error) = validate_host_intent_approval_token(shared, &intent) {
         return host_intent_approval_error_response(shared, &intent, audit_id, error);
@@ -1449,6 +1521,36 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 audit_id,
             },
         );
+    }
+
+    if high_risk_function(&function_id)
+        && write_audit_log(
+            &shared.config.host_broker_audit_log_path(),
+            &HostAuditEntry {
+                audit_id: audit_id.clone(),
+                ts: now_epoch_seconds(),
+                function_id: function_id.clone(),
+                profile_id: request.profile_id.clone(),
+                pack_id: request.pack_id.clone(),
+                conversation_id: request.conversation_id.clone(),
+                allowed: false,
+                result_ok: false,
+                approval_token_present: Some(approval_token_present),
+                approval_result: Some("execution_attempt".to_string()),
+                args_summary: summarize_args(&helper_args),
+            },
+        )
+        .is_err()
+    {
+        return json!({
+            "ok": false,
+            "function_id": function_id,
+            "error": {
+                "code": "AUDIT_UNAVAILABLE",
+                "message": "Computer action blocked because the durable audit log is unavailable."
+            },
+            "audit_id": audit_id,
+        });
     }
 
     let mut viewer_host_approved = false;
