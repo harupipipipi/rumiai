@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from core_runtime.pack_artifact_integrity import write_host_install_record
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -146,6 +148,23 @@ def test_isolated_asset_is_bound_to_persisted_plan_and_artifact_evidence(
     }
     ecosystem_path = pack / "ecosystem.json"
     ecosystem_path.write_text(json.dumps(ecosystem_manifest), encoding="utf-8")
+    trust_store = tmp_path / "host-policy" / "publisher-trust.json"
+    write_host_install_record(
+        trust_store,
+        pack_id="feature-pack",
+        record={
+            "signature_required": False,
+            "developer_mode": True,
+            "publisher_id": "",
+            "key_id": "",
+            "installed_version": "unknown",
+            "signed_manifest_path": "",
+            "contract_versions": {},
+            "requested_capabilities": [],
+        },
+    )
+    monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store))
+    monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "1")
     plan = SimpleNamespace(
         effective_pack_set=("feature-pack",),
         packs=(

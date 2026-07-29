@@ -8,11 +8,37 @@ import pytest
 
 import core_runtime.frontend_host as frontend_host_module
 from core_runtime.frontend_host import FrontendHostRegistry
+from core_runtime.pack_artifact_integrity import write_host_install_record
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 
 
 def _sha256(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _authorize_developer_packs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *pack_ids: str,
+) -> None:
+    trust_store = tmp_path / "host-policy" / "publisher-trust.json"
+    for pack_id in pack_ids:
+        write_host_install_record(
+            trust_store,
+            pack_id=pack_id,
+            record={
+                "signature_required": False,
+                "developer_mode": True,
+                "publisher_id": "",
+                "key_id": "",
+                "installed_version": "1.0.0",
+                "signed_manifest_path": "",
+                "contract_versions": {},
+                "requested_capabilities": [],
+            },
+        )
+    monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store))
+    monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "1")
 
 
 def _write_ui_pack(
@@ -94,8 +120,10 @@ def _plan(
 
 def test_declarative_catalog_is_profile_scoped_and_provenance_bound(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a", "pack-b")
     _write_ui_pack(ecosystem, "pack-a", [_route("pack-a.home", "/home")])
     _write_ui_pack(ecosystem, "pack-b", [_route("pack-b.hidden", "/hidden")])
     plan = _plan(ecosystem, "pack-a")
@@ -115,8 +143,10 @@ def test_declarative_catalog_is_profile_scoped_and_provenance_bound(
 
 def test_self_declared_system_same_origin_module_is_quarantined(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a")
     module_raw = b"export const Screen = () => null;\n"
     descriptor = {
         **_route("pack-a.executable", "/executable"),
@@ -149,8 +179,10 @@ def test_self_declared_system_same_origin_module_is_quarantined(
 
 def test_host_verified_system_same_origin_module_is_accepted(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a")
     module_raw = b"export const Screen = () => null;\n"
     descriptor = {
         **_route("pack-a.executable", "/executable"),
@@ -181,8 +213,16 @@ def test_host_verified_system_same_origin_module_is_accepted(
 
 def test_priority_tie_rejects_both_routes_without_crashing_host(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(
+        monkeypatch,
+        tmp_path,
+        "pack-a",
+        "pack-b",
+        "pack-c",
+    )
     _write_ui_pack(ecosystem, "pack-a", [_route("pack-a.route", "/same")])
     _write_ui_pack(ecosystem, "pack-b", [_route("pack-b.route", "/same")])
     _write_ui_pack(ecosystem, "pack-c", [_route("pack-c.route", "/safe")])
@@ -196,8 +236,12 @@ def test_priority_tie_rejects_both_routes_without_crashing_host(
     assert any(item.code == "frontend_priority_tie" for item in catalog.diagnostics)
 
 
-def test_removing_pack_removes_route_without_host_rebuild(tmp_path: Path) -> None:
+def test_removing_pack_removes_route_without_host_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a")
     _write_ui_pack(ecosystem, "pack-a", [_route("pack-a.route", "/feature")])
 
     with_pack = FrontendHostRegistry(
@@ -216,6 +260,7 @@ def test_missing_jsonschema_quarantines_frontend_without_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a")
     _write_ui_pack(ecosystem, "pack-a", [_route("pack-a.route", "/feature")])
     monkeypatch.setattr(frontend_host_module, "Draft202012Validator", None)
 
@@ -233,8 +278,10 @@ def test_missing_jsonschema_quarantines_frontend_without_crashing(
 
 def test_modified_pack_artifact_quarantines_the_entire_frontend_pack(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ecosystem = tmp_path / "ecosystem"
+    _authorize_developer_packs(monkeypatch, tmp_path, "pack-a")
     pack = _write_ui_pack(
         ecosystem,
         "pack-a",
