@@ -18,6 +18,10 @@ def _settings_path(user_data_root: Path) -> Path:
 
 
 def active_profile_id(user_data_root: Path | None = None) -> str | None:
+    if user_data_root is None:
+        explicit = str(os.environ.get("RUMI_ACTIVE_PROFILE_ID") or "").strip()
+        if explicit:
+            return validate_profile_id(explicit)
     root = Path(user_data_root) if user_data_root is not None else _default_user_data_root()
     active_path = root / "profiles" / "active_profile.json"
     for path in (active_path, _settings_path(root)):

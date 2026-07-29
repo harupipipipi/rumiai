@@ -8,6 +8,11 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from core_runtime.capability_plan import (
+    CAPABILITY_PLAN_SCHEMA_VERSION,
+    canonical_capability_plan_digest,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CapabilityTarget:
@@ -54,6 +59,7 @@ class CapabilityPlan:
     loaded_skills: list[str] = field(default_factory=list)
     tool_schema_hashes: dict[str, str] = field(default_factory=dict)
     tool_capability_grants: dict[str, list[str]] = field(default_factory=dict)
+    provider_selections: dict[str, list[str]] = field(default_factory=dict)
     skill_instruction_hashes: dict[str, str] = field(default_factory=dict)
     approval_effects: list[dict[str, str]] = field(default_factory=list)
     tool_schema_tokens: int = 0
@@ -83,7 +89,7 @@ class CapabilityPlan:
         """Return the versioned JSON contract."""
 
         result = {
-            "schema_version": "tobkiri.capability-plan/v1",
+            "schema_version": CAPABILITY_PLAN_SCHEMA_VERSION,
             "plan_id": self.plan_id,
             "registry_revision": self.registry_revision,
             "policy_revision": self.policy_revision,
@@ -116,6 +122,20 @@ class CapabilityPlan:
                 "instruction_hashes": dict(self.skill_instruction_hashes),
             },
             "approval": {"effects": list(self.approval_effects)},
+            "effective_capabilities": sorted(
+                {
+                    capability
+                    for tool_id in self.attached_tools
+                    for capability in self.tool_capability_grants.get(
+                        tool_id,
+                        [],
+                    )
+                }
+            ),
+            "provider_selections": {
+                key: sorted(set(value))
+                for key, value in sorted(self.provider_selections.items())
+            },
             "budget": {
                 "tool_schema_tokens": self.tool_schema_tokens,
                 "skill_instruction_tokens": self.skill_instruction_tokens,
@@ -124,13 +144,7 @@ class CapabilityPlan:
             "diagnostics": list(self.diagnostics),
             "trace_id": self.trace_id,
         }
-        result["digest"] = stable_revision(
-            {
-                key: value
-                for key, value in result.items()
-                if key not in {"plan_id", "trace_id"}
-            }
-        )
+        result["digest"] = canonical_capability_plan_digest(result)
         return result
 
 

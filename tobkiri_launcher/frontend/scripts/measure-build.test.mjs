@@ -25,7 +25,12 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
     assert.equal(report.initial_javascript.files.some((item) => item.file === 'assets/main.js'), true);
     assert.deepEqual(report.initial_css.files.map((item) => item.file), ['assets/main.css']);
     assert.equal(report.routes['src/pages/Flows.tsx'].present, true);
-    assert.equal(JSON.parse(await readFile(outputPath, 'utf8')).entry, 'src/main.tsx');
+    const firstReport = await readFile(outputPath, 'utf8');
+    assert.equal(JSON.parse(firstReport).entry, 'src/main.tsx');
+    assert.equal('generated_at' in report, false);
+
+    await measureBuild({distDir: root});
+    assert.equal(await readFile(outputPath, 'utf8'), firstReport);
   } finally {
     await rm(root, {recursive: true, force: true});
   }

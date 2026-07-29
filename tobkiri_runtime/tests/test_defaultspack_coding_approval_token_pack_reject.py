@@ -44,6 +44,10 @@ def _coding_git_commit_tool_def():
 
 def _pack_not_approved_executor():
     capability_executor = MagicMock()
+    capability_executor._approval_manager.is_pack_approved_and_verified.return_value = (
+        False,
+        "Pack not approved: defaultspack",
+    )
     capability_executor.execute.return_value = SimpleNamespace(
         success=False,
         output=None,
@@ -55,6 +59,10 @@ def _pack_not_approved_executor():
 
 def _success_executor():
     capability_executor = MagicMock()
+    capability_executor._approval_manager.is_pack_approved_and_verified.return_value = (
+        True,
+        None,
+    )
     capability_executor.execute.return_value = SimpleNamespace(
         success=True,
         output={"status": "ok", "data": {"commit_hash": "abc1234"}},

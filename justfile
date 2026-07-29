@@ -47,3 +47,7 @@ pack-architecture:
 command-protocol:
     cd tobkiri_runtime && python scripts/quality/scan_command_protocol.py --inventory generated/pack_sdk/command_inventory.json --check-inventory
     cd tobkiri_runtime && python scripts/tobkiri_pack.py generate generated/pack_sdk --check
+
+# Verify compatibility views are generated only from their canonical v3 source.
+manifest-projections:
+    cd tobkiri_runtime && python scripts/tobkiri_pack.py project-legacy examples/pack_v3/minimal_service.json examples/pack_v3/minimal_service.ecosystem.json --check

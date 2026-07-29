@@ -82,7 +82,6 @@ export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = 
   }
 
   const report = {
-    generated_at: new Date().toISOString(),
     entry: entryKey,
     initial_javascript: sumMetrics(initialJavaScript),
     initial_css: sumMetrics(initialCss),

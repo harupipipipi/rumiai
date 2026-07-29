@@ -615,6 +615,11 @@ class StartupProfileManager:
         tmp_path = path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp_path.replace(path)
+        from .resolved_profile_scope import (
+            invalidate_persisted_resolved_profile,
+        )
+
+        invalidate_persisted_resolved_profile()
 
     def _profile_with_workspace_payload(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         enriched = copy.deepcopy(profile)

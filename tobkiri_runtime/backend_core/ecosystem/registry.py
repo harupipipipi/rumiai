@@ -14,10 +14,11 @@ import logging
 import os
 import re
 import sys
-from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
+
+from core_runtime.dependency_resolver import resolve_load_order as _resolve_dependencies
 
 from .uuid_utils import generate_pack_uuid, generate_component_uuid
 from .json_patch import apply_patch, JsonPatchError
@@ -1044,97 +1045,29 @@ _global_registry: Optional[Registry] = None
 
 
 
+def _dependency_manifests(packs: Dict[str, "PackInfo"]) -> Dict[str, Dict[str, Any]]:
+    """Adapt registry ``PackInfo`` records to canonical resolver manifests."""
+    manifests: Dict[str, Dict[str, Any]] = {}
+    for pack_id, pack_info in packs.items():
+        manifest = dict(pack_info.ecosystem)
+        manifest["version"] = pack_info.version
+        manifest["components"] = {
+            component_id: component.manifest
+            for component_id, component in pack_info.components.items()
+        }
+        manifests[pack_id] = manifest
+    return manifests
+
+
 def resolve_load_order(packs: Dict[str, "PackInfo"]) -> List[str]:
+    """Resolve PackInfo load order through the canonical dependency resolver.
+
+    Missing dependencies and dependency cycles are intentionally fail-closed.
+    This registry only adapts its in-memory PackInfo representation; dependency
+    extraction, version parsing, and topological ordering remain centralized
+    in :mod:`core_runtime.dependency_resolver`.
     """
-    Pack間の依存関係からload_orderを自動解決する（Kahnのアルゴリズム）。
-
-    依存関係ソース:
-    - ecosystem.dependencies (リストまたは辞書)
-    - ecosystem.connectivity.requires (pack-level)
-    - 各componentの connectivity.requires → 該当typeを提供するpackを探索
-
-    循環依存を検出した場合はエラーログを出して循環部分をスキップ。
-
-    Args:
-        packs: pack_id -> PackInfo のマップ
-
-    Returns:
-        トポロジカルソート済みのpack_idリスト
-    """
-    all_pack_ids = set(packs.keys())
-    if not all_pack_ids:
-        return []
-
-    in_degree: Dict[str, int] = {pid: 0 for pid in all_pack_ids}
-    dependents: Dict[str, List[str]] = {pid: [] for pid in all_pack_ids}
-
-    # type -> pack_id のマップを構築（provides 解決用）
-    type_to_packs: Dict[str, set] = {}
-    for pack_id, pack_info in packs.items():
-        for comp in pack_info.components.values():
-            comp_provides = comp.manifest.get("connectivity", {}).get("provides", [])
-            if isinstance(comp_provides, list):
-                for ptype in comp_provides:
-                    if ptype not in type_to_packs:
-                        type_to_packs[ptype] = set()
-                    type_to_packs[ptype].add(pack_id)
-
-    for pack_id, pack_info in packs.items():
-        eco = pack_info.ecosystem
-        deps: set = set()
-
-        # 1. ecosystem.dependencies
-        raw_deps = eco.get("dependencies", [])
-        if isinstance(raw_deps, list):
-            deps.update(raw_deps)
-        elif isinstance(raw_deps, dict):
-            deps.update(raw_deps.keys())
-
-        # 2. ecosystem.connectivity.requires
-        eco_conn = eco.get("connectivity", {})
-        if isinstance(eco_conn, dict):
-            eco_requires = eco_conn.get("requires", [])
-            if isinstance(eco_requires, list):
-                deps.update(eco_requires)
-
-        # 3. component connectivity.requires → type提供packを探す
-        for comp in pack_info.components.values():
-            comp_requires = comp.manifest.get("connectivity", {}).get("requires", [])
-            if isinstance(comp_requires, list):
-                for req_type in comp_requires:
-                    provider_packs = type_to_packs.get(req_type, set())
-                    for provider_id in provider_packs:
-                        if provider_id != pack_id:
-                            deps.add(provider_id)
-
-        # エッジ追加（存在するpackのみ、自己参照除外）
-        for dep_id in deps:
-            if dep_id in all_pack_ids and dep_id != pack_id:
-                dependents[dep_id].append(pack_id)
-                in_degree[pack_id] += 1
-
-    # Kahnのアルゴリズム
-    queue = deque(pid for pid in sorted(all_pack_ids) if in_degree[pid] == 0)
-    result: List[str] = []
-
-    while queue:
-        node = queue.popleft()
-        result.append(node)
-        for neighbor in sorted(dependents[node]):
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
-
-    # 循環依存チェック
-    if len(result) < len(all_pack_ids):
-        cyclic = sorted(pid for pid in all_pack_ids if pid not in set(result))
-        print(
-            f"[Registry] ERROR: Circular dependency detected among packs: {cyclic}\n"
-            f"[Registry] Loading cyclic packs in alphabetical order at end of load_order."
-        )
-        result.extend(cyclic)  # L2: append cyclic packs so they still get loaded
-
-    return result
+    return _resolve_dependencies(_dependency_manifests(packs), strict=True)
 
 
 def get_registry() -> Registry:

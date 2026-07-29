@@ -339,9 +339,10 @@ def test_high_risk_command_requires_one_shot_approval_resume(
         check=True,
     )
     protocol = CommandProtocolRegistry(DEFAULTSPACK_ROOT)
+    durable_secret = "durable-raw-execution-secret-62e6099b"
     payload = {
         "command_ref": "defaultspack:terminal",
-        "args": {"cmd": "python -c \"print('approved')\""},
+        "args": {"cmd": f"python -c \"print('{durable_secret}')\""},
         "conversation_id": "conversation-1",
         "invocation_id": "terminal-approval-1",
         "mode": "coding",
@@ -374,13 +375,36 @@ def test_high_risk_command_requires_one_shot_approval_resume(
     assert resumed["status"] == "succeeded"
     assert resumed["legacy_result"]["action"] == "request_terminal_approval"
     assert resumed["legacy_result"]["executed"] is True
-    assert "approved" in resumed["legacy_result"]["stdout"]
+    receipt = resumed["legacy_result"]["execution_receipt"]
+    assert receipt["exit_code"] == 0
+    assert receipt["stdout_bytes"] > 0
+    assert receipt["stdout_sha256"].startswith("sha256:")
+    assert "argv" not in resumed["legacy_result"]
+    assert "cwd" not in resumed["legacy_result"]
+    assert "stdout" not in resumed["legacy_result"]
+    assert "stderr" not in resumed["legacy_result"]
+    assert "args" not in pending["approval"]["details"]
+    assert "operation_plan" not in pending["approval"]["details"]
+    assert set(pending["approval"]["details"]["operation_binding"]) == {
+        "version",
+        "action",
+        "plan_sha256",
+    }
     assert replay["status"] == "failed"
     assert replay["error"]["code"] in {
         "APPROVAL_ARGUMENTS_CHANGED",
         "APPROVAL_TOKEN_ARGUMENTS_MISMATCH",
         "APPROVAL_TOKEN_USED",
     }
+    durable_sqlite = b"".join(
+        path.read_bytes()
+        for path in tmp_path.glob("*.sqlite3*")
+        if path.is_file()
+    )
+    assert durable_secret.encode() not in durable_sqlite
+    assert str(workspace).encode() not in durable_sqlite
+    for raw_field in (b'"argv"', b'"cwd"', b'"stdout"', b'"stderr"'):
+        assert raw_field not in durable_sqlite
 
 
 def test_high_risk_executor_policy_calls_runtime_authority(
@@ -430,6 +454,8 @@ def test_high_risk_executor_policy_calls_runtime_authority(
     assert result is not None
     assert result["status"] == "approval_required"
     assert result["approval"]["kind"] == "authority"
+    assert "operation_plan" not in result["approval"]["details"]
+    assert "cwd" not in captured["resource"]["metadata"]
     assert captured["permission_id"] == "host.process.exec_guarded"
     assert captured["principal_id"] == "alice"
 
@@ -476,6 +502,107 @@ def test_high_risk_operation_plan_binds_workspace_and_git_state(
     assert approved["cwd"] == str(workspace.resolve())
     assert approved["argv"] == ["true"]
     assert approved["plan_sha256"] != changed["plan_sha256"]
+
+    patch_text = (
+        "diff --git a/new.txt b/new.txt\n"
+        "new file mode 100644\n"
+        "index 0000000..3e75765\n"
+        "--- /dev/null\n"
+        "+++ b/new.txt\n"
+        "@@ -0,0 +1 @@\n"
+        "+new\n"
+    )
+    patch = protocol.operations.prepare_high_risk_plan(
+        "request_patch_approval",
+        {"patch": patch_text},
+        context,
+    )
+    restore = protocol.operations.prepare_high_risk_plan(
+        "request_restore_approval",
+        {"paths": "tracked.txt"},
+        context,
+    )
+    assert patch["argv"][:2] == ["git", "apply"]
+    assert restore["argv"][:3] == ["git", "restore", "--worktree"]
+    applied = protocol.operations._execute_high_risk_host_operation(
+        {"id": "patch"},
+        "request_patch_approval",
+        {"patch": patch_text},
+        {**context, "_approved_operation_plan": patch},
+    )
+    assert applied["status"] == "ok"
+    assert (workspace / "new.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_high_risk_host_policy_requires_authoritative_roots_and_executable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.name", "Test"],
+        check=True,
+    )
+    (workspace / "tracked.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-qm", "seed"],
+        check=True,
+    )
+    operations = CommandProtocolRegistry(DEFAULTSPACK_ROOT).operations
+
+    with pytest.raises(ValueError, match="authorized_workspace_roots"):
+        operations.prepare_high_risk_plan(
+            "request_terminal_approval",
+            {"cmd": "true"},
+            {"workspace_path": str(workspace)},
+        )
+
+    with pytest.raises(ValueError, match="not allowlisted"):
+        operations.prepare_high_risk_plan(
+            "request_terminal_approval",
+            {"cmd": "/bin/rm tracked.txt"},
+            {
+                "workspace_path": str(workspace),
+                "authorized_workspace_roots": [str(workspace)],
+            },
+        )
+
+    host_only_secret = "host-environment-secret-43de6ab0"
+    monkeypatch.setenv("UNTRUSTED_COMMAND_SECRET", host_only_secret)
+    environment_probe = operations._run_host_process(
+        argv=(
+            "python",
+            "-c",
+            (
+                "import os; "
+                "print(os.environ.get('UNTRUSTED_COMMAND_SECRET', 'absent'))"
+            ),
+        ),
+        cwd=workspace,
+        stdin=None,
+        timeout_seconds=10,
+        command_class="terminal",
+        allowed_cwds=(workspace,),
+    )
+    assert environment_probe.exit_code == 0
+    assert environment_probe.stdout.strip() == "absent"
+    assert host_only_secret not in environment_probe.stdout
+    with pytest.raises(ValueError, match="not allowlisted"):
+        operations.prepare_high_risk_plan(
+            "request_terminal_approval",
+            {"cmd": "/tmp/git status"},
+            {
+                "workspace_path": str(workspace),
+                "authorized_workspace_roots": [str(workspace)],
+            },
+        )
 
 
 def test_command_protocol_routes_are_registered() -> None:

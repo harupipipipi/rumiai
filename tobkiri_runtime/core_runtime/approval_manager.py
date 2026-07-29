@@ -234,6 +234,14 @@ class ApprovalManager:
             pack_dir = self._resolve_pack_dir(pack_id)
             if pack_dir:
                 self._hash_cache.pop(str(pack_dir.resolve()), None)
+        try:
+            from .resolved_profile_scope import (
+                invalidate_persisted_resolved_profile,
+            )
+
+            invalidate_persisted_resolved_profile()
+        except ImportError:
+            pass
     
     def initialize(self) -> None:
         """初期化: grants.jsonを読み込み"""

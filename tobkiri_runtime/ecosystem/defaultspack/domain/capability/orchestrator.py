@@ -334,6 +334,7 @@ class CapabilityOrchestrator:
             for tool in selected_tools
             if _tool_id(tool)
         }
+        plan.provider_selections = _provider_selections(context)
 
         expansion = self._activities.expand(activity_ids, eligible_tools)
         safety_skills = _unique(
@@ -575,6 +576,47 @@ def _tool_capability_grants(tool: dict[str, Any]) -> list[str]:
             }
         )
     return sorted(normalized)
+
+
+def _provider_selections(
+    context: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Project Host-selected provider identities into the canonical plan."""
+
+    explicit = context.get("capability_provider_selections")
+    if isinstance(explicit, dict):
+        return {
+            str(contract_id): sorted(
+                {
+                    str(provider_id).strip()
+                    for provider_id in provider_ids
+                    if str(provider_id).strip()
+                }
+            )
+            for contract_id, provider_ids in explicit.items()
+            if str(contract_id).strip() and isinstance(provider_ids, list)
+        }
+    try:
+        from core_runtime.resolved_profile_scope import (
+            persisted_resolved_profile,
+        )
+
+        resolved = persisted_resolved_profile()
+        providers = getattr(resolved, "providers", ()) if resolved else ()
+        result: dict[str, list[str]] = {}
+        for provider in providers:
+            contract_id = str(getattr(provider, "contract_id", "")).strip()
+            provider_id = str(
+                getattr(provider, "provider_instance_id", "")
+            ).strip()
+            if contract_id and provider_id:
+                result.setdefault(contract_id, []).append(provider_id)
+        return {
+            key: sorted(set(value))
+            for key, value in sorted(result.items())
+        }
+    except Exception:
+        return {}
 
 
 def _unique(values: Iterable[str]) -> list[str]:

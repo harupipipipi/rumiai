@@ -510,6 +510,8 @@ def test_prepared_actions_redact_secret_and_lease_roundtrip(tmp_path, monkeypatc
 def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
+
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
 
@@ -522,6 +524,7 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     workspace = tmp_path / "repo"
     workspace.mkdir()
     WorkspaceStore().create(workspace, workspace_id="ws1", trusted=True)
+    bind_verified_coding_contracts(monkeypatch, workspace, workspace_id="ws1")
 
     lease = dispatch(
         "lease_acquire",
@@ -544,12 +547,14 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     assert blocked["status"] == "error"
     assert blocked["error"]["code"] == "ADAPTIVE_LEASE_HELD"
     assert not (workspace / "src" / "App.tsx").exists()
+    (workspace / "src").mkdir()
+    (workspace / "src" / "App.tsx").write_text("", encoding="utf-8")
 
     allowed = file_write_run(
         {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "ok"},
         _approved_tool_context(profile_id="coding", principal_id="agent-a"),
     )
-    assert allowed["status"] == "ok"
+    assert allowed["status"] == "ok", allowed
     assert (workspace / "src" / "App.tsx").read_text(encoding="utf-8") == "ok"
 
     blocked_commit = git_commit_run(
@@ -588,6 +593,31 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     assert blocked_by_worktree["status"] == "error"
     assert blocked_by_worktree["error"]["code"] == "ADAPTIVE_LEASE_HELD"
     assert not (workspace / "docs" / "notes.txt").exists()
+
+
+def test_coding_mutation_requests_approval_before_resolving_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from blocks.coding.file_write import run as file_write_run
+
+    def unexpected_resolution(*_args, **_kwargs):
+        raise AssertionError("workspace resolution must follow approval")
+
+    monkeypatch.setattr(
+        "blocks.coding.file_write.canonical_mutation_guard",
+        unexpected_resolution,
+    )
+    result = file_write_run(
+        {
+            "workspace_id": "not-yet-resolved",
+            "path": "src/App.tsx",
+            "content": "pending approval",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_required"] is True
 
 
 def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(

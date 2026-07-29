@@ -23,10 +23,23 @@ from core_runtime.resolved_profile_scope import (
     _persisted_startup_pack_ids,
     activate_resolved_profile,
     effective_pack_ids,
+    invalidate_persisted_resolved_profile,
     persisted_resolved_profile,
     require_effective_pack,
     restore_resolved_profile,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_profile_resolution_from_pack_install_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """These resolver fixtures model already Host-verified installed Packs."""
+
+    monkeypatch.setattr(
+        "core_runtime.resolved_profile.verify_declared_artifacts",
+        lambda *_args, **_kwargs: (True, ()),
+    )
 
 
 def test_persisted_scope_reads_the_configured_user_data_root(
@@ -123,6 +136,68 @@ def test_persisted_profile_restores_verified_system_trust(
     )
     assert defaultspack.authorized is True
     assert defaultspack.trust_class == "system"
+
+
+def test_persisted_profile_cache_tracks_host_authority_and_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import core_runtime.approval_manager as approval_module
+    import core_runtime.resolved_profile_scope as scope
+
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    (settings_dir / "startup_profiles.json").write_text(
+        json.dumps(
+            {
+                "active_profile_id": "fixture",
+                "profiles": [
+                    {
+                        "profile_id": "fixture",
+                        "base_pack": "defaultspack",
+                        "packs": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    trust = {"enabled": True}
+
+    class FakeApprovalManager:
+        def get_verified_pack_trust(
+            self, pack_ids: tuple[str, ...]
+        ) -> dict[str, str]:
+            if not trust["enabled"]:
+                return {}
+            return {pack_id: "system" for pack_id in pack_ids}
+
+    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(scope, "_PERSISTED_PROFILE_CACHE", None)
+    monkeypatch.setattr(
+        scope,
+        "_PERSISTED_PROFILE_INVALIDATION_REVISION",
+        0,
+    )
+    monkeypatch.setattr(
+        approval_module,
+        "get_approval_manager",
+        lambda: FakeApprovalManager(),
+    )
+
+    first = persisted_resolved_profile()
+    cached = persisted_resolved_profile()
+    assert first is cached
+
+    trust["enabled"] = False
+    authority_changed = persisted_resolved_profile()
+    assert authority_changed is not None
+    assert authority_changed is not first
+    assert not authority_changed.authorized_pack_ids
+
+    invalidate_persisted_resolved_profile()
+    invalidated = persisted_resolved_profile()
+    assert invalidated is not authority_changed
 
 
 def _write_pack(

@@ -2,15 +2,48 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
-import subprocess
+import shutil
 import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core_runtime.bounded_process_runner import (
+    BoundedProcessResult,
+    HostBoundedProcessRunner,
+    ProcessExecutionPolicy,
+)
 from domain.frontend.command_registry import SlashCommandRegistry, error, ok
+
+
+_HOST_COMMAND_ALLOWLIST = {
+    "git_read": frozenset({"git"}),
+    "git_write": frozenset({"git"}),
+    "terminal": frozenset(
+        {
+            "cargo",
+            "git",
+            "just",
+            "mypy",
+            "node",
+            "npm",
+            "npx",
+            "python",
+            "python3",
+            "pytest",
+            "ruff",
+            "rustc",
+            "swift",
+            "true",
+            "uv",
+            "xcodebuild",
+        }
+    ),
+}
+_HOST_PROCESS_ENVIRONMENT = {"PATH": os.defpath}
 
 
 class CommandOperationRegistry:
@@ -191,22 +224,28 @@ class CommandOperationRegistry:
         input_text = (
             str(args["patch"]) if action == "request_patch_approval" else None
         )
-        completed = subprocess.run(
-            argv,
+        completed = self._run_host_process(
+            argv=tuple(argv),
             cwd=workspace,
-            input=input_text,
-            text=True,
-            capture_output=True,
-            timeout=300,
-            check=False,
+            stdin=input_text,
+            timeout_seconds=300,
+            command_class=(
+                "terminal"
+                if action == "request_terminal_approval"
+                else "git_write"
+            ),
+            allowed_cwds=(workspace,),
         )
-        if completed.returncode != 0:
+        if completed.exit_code != 0:
             return error(
                 "approved host operation failed",
                 "HOST_OPERATION_FAILED",
                 details={
-                    "returncode": completed.returncode,
-                    "stderr": completed.stderr[-4000:],
+                    "exit_code": completed.exit_code,
+                    "timed_out": completed.timed_out,
+                    "stderr_sha256": self._text_digest(completed.stderr),
+                    "stderr_bytes": len(completed.stderr.encode("utf-8")),
+                    "stderr_truncated": completed.stderr_truncated,
                 },
             )
         return ok(
@@ -214,9 +253,15 @@ class CommandOperationRegistry:
                 "command": self.source_registry.public_command_contract(command),
                 "executed": True,
                 "action": action,
-                "argv": argv,
-                "cwd": str(workspace),
-                "stdout": completed.stdout[-4000:],
+                # Raw argv/cwd/stdout/stderr stay in short-lived process memory.
+                "execution_receipt": {
+                    "executable": Path(argv[0]).name,
+                    "exit_code": completed.exit_code,
+                    "stdout_sha256": self._text_digest(completed.stdout),
+                    "stdout_bytes": len(completed.stdout.encode("utf-8")),
+                    "stdout_truncated": completed.stdout_truncated,
+                    "boundary": completed.attestation.boundary,
+                },
             }
         )
 
@@ -269,15 +314,15 @@ class CommandOperationRegistry:
                 raise ValueError("push remote is invalid")
             if branch.startswith("-") or ":" in branch or branch.startswith("+"):
                 raise ValueError("push branch/refspec is invalid")
-            checked = subprocess.run(
-                ["git", "check-ref-format", "--branch", branch],
+            checked = self._run_host_process(
+                argv=("git", "check-ref-format", "--branch", branch),
                 cwd=workspace,
-                text=True,
-                capture_output=True,
-                timeout=10,
-                check=False,
+                stdin=None,
+                timeout_seconds=10,
+                command_class="git_read",
+                allowed_cwds=(workspace,),
             )
-            if checked.returncode != 0:
+            if checked.exit_code != 0:
                 raise ValueError("push branch is invalid")
             remote_url = self._git_output(
                 workspace,
@@ -296,6 +341,7 @@ class CommandOperationRegistry:
             argv = shlex.split(str(args.get("cmd") or ""))
             if not argv or any("\x00" in item for item in argv):
                 raise ValueError("terminal argv is empty or invalid")
+            self._validate_host_command("terminal", tuple(argv))
         elif action == "request_patch_approval":
             patch = str(args.get("patch") or "")
             if not patch:
@@ -334,55 +380,126 @@ class CommandOperationRegistry:
         if not explicit:
             raise ValueError("trusted workspace_path is required")
         candidate = Path(explicit).resolve()
-        allowed_roots = context.get("authorized_workspace_roots")
-        if isinstance(allowed_roots, (list, tuple, set)) and allowed_roots:
-            roots = [Path(str(item)).resolve() for item in allowed_roots]
-            if not any(candidate == root or candidate.is_relative_to(root) for root in roots):
-                raise ValueError("workspace_path is outside authorized workspace roots")
-        completed = subprocess.run(
-            ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=False,
+        roots = self._authorized_workspace_roots(context)
+        if not any(candidate == root or candidate.is_relative_to(root) for root in roots):
+            raise ValueError("workspace_path is outside authorized workspace roots")
+        completed = self._run_host_process(
+            argv=("git", "-C", str(candidate), "rev-parse", "--show-toplevel"),
+            cwd=candidate,
+            stdin=None,
+            timeout_seconds=10,
+            command_class="git_read",
+            allowed_cwds=(candidate,),
         )
-        if completed.returncode != 0:
+        if completed.exit_code != 0:
             raise ValueError("workspace is not inside a Git repository")
         workspace = Path(completed.stdout.strip()).resolve()
-        if isinstance(allowed_roots, (list, tuple, set)) and allowed_roots:
-            roots = [Path(str(item)).resolve() for item in allowed_roots]
-            if not any(workspace == root or workspace.is_relative_to(root) for root in roots):
-                raise ValueError("Git workspace is outside authorized workspace roots")
+        if not any(workspace == root or workspace.is_relative_to(root) for root in roots):
+            raise ValueError("Git workspace is outside authorized workspace roots")
         return workspace
 
-    @staticmethod
-    def _git_output(workspace: Path, *args: str) -> str:
-        completed = subprocess.run(
-            ["git", *args],
+    def _git_output(self, workspace: Path, *args: str) -> str:
+        completed = self._run_host_process(
+            argv=("git", *args),
             cwd=workspace,
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=False,
+            stdin=None,
+            timeout_seconds=10,
+            command_class="git_read",
+            allowed_cwds=(workspace,),
         )
-        if completed.returncode != 0:
-            raise ValueError(f"Git operation failed: {' '.join(args)}")
+        if completed.exit_code != 0:
+            raise ValueError("Git state inspection failed")
         return completed.stdout.strip()
 
-    @staticmethod
-    def _current_branch(workspace: Path) -> str:
-        completed = subprocess.run(
-            ["git", "branch", "--show-current"],
+    def _current_branch(self, workspace: Path) -> str:
+        completed = self._run_host_process(
+            argv=("git", "branch", "--show-current"),
             cwd=workspace,
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=True,
+            stdin=None,
+            timeout_seconds=10,
+            command_class="git_read",
+            allowed_cwds=(workspace,),
         )
+        if completed.exit_code != 0:
+            raise ValueError("Git branch lookup failed")
         branch = completed.stdout.strip()
         if not branch:
             raise ValueError("cannot push from a detached HEAD")
         return branch
+
+    @staticmethod
+    def _authorized_workspace_roots(
+        context: dict[str, Any],
+    ) -> tuple[Path, ...]:
+        raw_roots = context.get("authorized_workspace_roots")
+        if (
+            not isinstance(raw_roots, (list, tuple, set))
+            or not raw_roots
+        ):
+            raise ValueError("trusted authorized_workspace_roots are required")
+        unresolved_roots = tuple(Path(str(item)) for item in raw_roots)
+        if any(not root.is_absolute() for root in unresolved_roots):
+            raise ValueError("authorized workspace root is invalid")
+        roots = tuple(root.resolve() for root in unresolved_roots)
+        if any(not root.is_dir() for root in roots):
+            raise ValueError("authorized workspace root is invalid")
+        return roots
+
+    @staticmethod
+    def _validate_host_command(
+        command_class: str,
+        argv: tuple[str, ...],
+    ) -> str:
+        allowed_names = _HOST_COMMAND_ALLOWLIST.get(command_class)
+        requested_name = Path(argv[0]).name
+        if (
+            allowed_names is None
+            or requested_name not in allowed_names
+            or argv[0] != requested_name
+        ):
+            raise ValueError("Host executable is not allowlisted")
+        executable = shutil.which(argv[0], path=os.environ.get("PATH", os.defpath))
+        if executable is None:
+            raise ValueError("Host executable is unavailable")
+        return str(Path(executable).resolve())
+
+    @staticmethod
+    def _run_host_process(
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        stdin: str | None,
+        timeout_seconds: float,
+        command_class: str,
+        allowed_cwds: tuple[Path, ...],
+    ) -> BoundedProcessResult:
+        executable = CommandOperationRegistry._validate_host_command(
+            command_class,
+            argv,
+        )
+        resolved_argv = (executable, *argv[1:])
+        environment = dict(_HOST_PROCESS_ENVIRONMENT)
+        return HostBoundedProcessRunner().run_local(
+            argv=resolved_argv,
+            cwd=cwd.resolve(),
+            stdin=stdin,
+            timeout_seconds=timeout_seconds,
+            environment=environment,
+            policy=ProcessExecutionPolicy(
+                allowed_executables=frozenset({resolved_argv[0]}),
+                allowed_argv=(resolved_argv,),
+                allowed_cwds=tuple(root.resolve() for root in allowed_cwds),
+                allowed_environment=frozenset(environment),
+                max_stdin_bytes=8 * 1024 * 1024,
+                max_stdout_bytes=256 * 1024,
+                max_stderr_bytes=64 * 1024,
+                max_timeout_seconds=timeout_seconds,
+            ),
+        )
+
+    @staticmethod
+    def _text_digest(value: str) -> str:
+        return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def _state_mutation(
         self,
@@ -391,10 +508,9 @@ class CommandOperationRegistry:
         args: dict[str, Any],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        legacy_execution = (
-            command.get("execution")
-            if isinstance(command.get("execution"), dict)
-            else {}
+        raw_execution = command.get("execution")
+        legacy_execution: dict[str, Any] = (
+            dict(raw_execution) if isinstance(raw_execution, dict) else {}
         )
         source_type = str(legacy_execution.get("type") or "")
         if source_type == "model_command":
@@ -432,10 +548,9 @@ class CommandOperationRegistry:
         payload: dict[str, Any],
         context: dict[str, Any],
     ) -> dict[str, Any]:
-        legacy_execution = (
-            command.get("execution")
-            if isinstance(command.get("execution"), dict)
-            else {}
+        raw_execution = command.get("execution")
+        legacy_execution: dict[str, Any] = (
+            dict(raw_execution) if isinstance(raw_execution, dict) else {}
         )
         source_type = str(legacy_execution.get("type") or "")
         if source_type == "rumi_function":

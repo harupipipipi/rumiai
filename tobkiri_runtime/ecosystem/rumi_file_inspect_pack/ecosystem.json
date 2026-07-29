@@ -1,1 +1,43 @@
-{"pack_id":"rumi_file_inspect_pack","pack_identity":"rumi:ecosystem/rumi_file_inspect_pack","display_name":"Rumi File Inspect Pack","version":"1.0.0","description":"Read-only workspace-jailed file inspection.","dependencies":{"rumi_workspace_mount_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.workspace.v1"],"provides":["rumi.service.file.inspect.v1"]},"required_secrets":[],"required_capabilities":["file.inspect","workspace.metadata.read"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":true,"resources":[],"provenance":{"content_hash":"sha256:03d6ed673dc338170fd9cd44c263996f087d145d7ef76fe5eed140b4c6798ed0","build_identity":"rumi-file-inspect-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authority":"inspect","mutation":false,"tool_or_ui_registry_imports":false}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.file.inspect.v1"
+    ],
+    "requires": [
+      "rumi.resource.workspace.v1"
+    ]
+  },
+  "dependencies": {},
+  "description": "Read-only workspace-jailed file inspection.",
+  "display_name": "Rumi File Inspect",
+  "host_execution": false,
+  "metadata": {
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v1",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:5f8622c8e8ade8ff6b8c208943cc367c49fc86f2c69538b2200b12145c5b9999"
+    },
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_file_inspect_pack",
+  "pack_identity": "rumi:ecosystem/rumi_file_inspect_pack",
+  "provenance": {
+    "build_identity": "rumi-file-inspect-pack:1.0.0",
+    "content_hash": "sha256:d055c25ba8c455a431cb2976e21f26a99bf27fcc27ee0c87b1a369aceb15d3c8",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "file.inspect",
+    "workspace.metadata.read"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0"
+}

@@ -133,8 +133,13 @@ def scaffold_component(
     normalized_description = _single_line(description, "description")
     slug = normalized_id.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
     root = Path(pack_root)
-    if not (root / "pack.json").is_file():
-        raise PackTemplateError(f"pack.json is required in Pack root: {root}")
+    if not (
+        (root / "rumi.pack.v3.json").is_file()
+        or (root / "pack.json").is_file()
+    ):
+        raise PackTemplateError(
+            f"rumi.pack.v3.json is required in Pack root: {root}"
+        )
     if normalized_kind == "activity":
         files = {
             root / "extensions" / "activities" / slug / "manifest.json":

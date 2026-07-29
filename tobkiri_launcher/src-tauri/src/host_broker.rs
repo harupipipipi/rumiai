@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -285,72 +285,123 @@ fn generate_broker_token() -> String {
 }
 
 fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
+    let parent = path
+        .parent()
+        .context("host broker connection path has no parent directory")?;
+    let temporary = parent.join(format!(".connection-{}.tmp", generate_broker_token()));
+    write_connection_file_with_temporary(path, connection, &temporary)
+}
+
+fn write_connection_file_with_temporary(
+    path: &Path,
+    connection: &HostBrokerConnectionInfo,
+    temporary: &Path,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("host broker connection path has no parent directory")?;
+    if temporary.parent() != Some(parent) {
+        bail!("host broker temporary file must share the connection file directory");
+    }
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create host broker connection parent directory at {}",
+            parent.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).with_context(|| {
             format!(
-                "failed to create host broker connection parent directory at {}",
+                "failed to secure host broker connection directory at {}",
                 parent.display()
             )
         })?;
     }
     let body = serde_json::to_vec_pretty(connection)
         .context("failed to serialize host broker connection")?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("connection.json");
-    let temp_path = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
-    let _ = fs::remove_file(&temp_path);
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // The connection payload contains the broker bearer token.  Set the
-        // restrictive mode at creation time; chmod after writing would leave
-        // a disclosure window when the process umask is permissive.
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temp_path).with_context(|| {
-        format!(
-            "failed to create temporary broker connection file at {}",
-            temp_path.display()
-        )
-    })?;
-    file.write_all(&body).with_context(|| {
-        format!(
-            "failed to write temporary host broker connection file at {}",
-            temp_path.display()
-        )
-    })?;
-    file.sync_all()
-        .context("failed to sync broker connection file")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(&temp_path, permissions).with_context(|| {
+    let mut owns_temporary = false;
+    let write_result = (|| -> Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut handle = options.open(&temporary).with_context(|| {
             format!(
-                "failed to set temporary host broker connection file permissions at {}",
-                temp_path.display()
+                "failed to create secure host broker temporary file at {}",
+                temporary.display()
             )
         })?;
-    }
-    #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path).with_context(|| {
+        owns_temporary = true;
+        handle.write_all(&body).with_context(|| {
             format!(
-                "failed to replace host broker connection file at {}",
+                "failed to write host broker temporary file at {}",
+                temporary.display()
+            )
+        })?;
+        handle
+            .sync_all()
+            .context("failed to sync host broker temporary file")?;
+        atomic_replace_file(&temporary, path).with_context(|| {
+            format!(
+                "failed to atomically replace host broker connection file at {}",
                 path.display()
             )
         })?;
+        #[cfg(unix)]
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .context("failed to sync host broker connection directory")?;
+        Ok(())
+    })();
+    if owns_temporary && write_result.is_err() {
+        let _ = fs::remove_file(temporary);
     }
-    fs::rename(&temp_path, path).with_context(|| {
-        format!(
-            "failed to atomically publish host broker connection file at {}",
-            path.display()
+    write_result
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    unsafe extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+    let source_wide: Vec<u16> = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let replaced = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
         )
-    })?;
+    };
+    if replaced == 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
 }
 
@@ -2453,11 +2504,90 @@ mod tests {
             instance_nonce: Some("instance-test".to_string()),
         };
         write_connection_file(&path, &info).expect("connection file should be written");
+        let replacement = HostBrokerConnectionInfo {
+            token: "replacement-secret".to_string(),
+            created_at: 456,
+            ..info
+        };
+        write_connection_file(&path, &replacement)
+            .expect("existing connection file should be atomically replaced");
         let stored: HostBrokerConnectionInfo =
             serde_json::from_slice(&fs::read(&path).expect("connection file should be readable"))
                 .expect("connection file JSON should parse");
         assert_eq!(stored.permission_subject, PERMISSION_SUBJECT);
         assert_eq!(stored.port, DEFAULT_PORT);
+        assert_eq!(stored.token, "replacement-secret");
+        assert_eq!(stored.created_at, 456);
+        assert!(
+            fs::read_dir(&temp_dir)
+                .expect("temporary directory should be readable")
+                .all(|entry| {
+                    !entry
+                        .expect("directory entry should be readable")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".connection-")
+                }),
+            "atomic writer must not leave temporary connection files"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path)
+                    .expect("connection metadata should be readable")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(&temp_dir)
+                    .expect("connection directory metadata should be readable")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn write_connection_file_does_not_delete_unowned_temporary_collision() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("rumi-host-broker-test-{}", generate_broker_token()));
+        fs::create_dir_all(&temp_dir).expect("temporary directory should be created");
+        let path = temp_dir.join("connection.json");
+        let temporary = temp_dir.join(".connection-collision.tmp");
+        let sentinel = b"existing unowned temporary file";
+        fs::write(&temporary, sentinel).expect("collision file should be created");
+        let info = HostBrokerConnectionInfo {
+            version: 1,
+            host: DEFAULT_HOST.to_string(),
+            port: DEFAULT_PORT,
+            url: format!("http://{DEFAULT_HOST}:{DEFAULT_PORT}"),
+            token: "secret".to_string(),
+            permission_subject: PERMISSION_SUBJECT.to_string(),
+            pid: 42,
+            created_at: 123,
+            instance_nonce: Some("instance-test".to_string()),
+        };
+
+        let error = write_connection_file_with_temporary(&path, &info, &temporary)
+            .expect_err("create_new collision should fail");
+
+        assert!(error
+            .to_string()
+            .contains("failed to create secure host broker temporary file"));
+        assert_eq!(
+            fs::read(&temporary).expect("unowned collision file must remain"),
+            sentinel
+        );
+        assert!(
+            !path.exists(),
+            "failed write must not publish a connection file"
+        );
         let _ = fs::remove_dir_all(temp_dir);
     }
 

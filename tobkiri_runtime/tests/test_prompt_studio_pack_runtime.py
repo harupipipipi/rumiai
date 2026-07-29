@@ -241,7 +241,9 @@ def test_v3_process_providers_register_without_importing_pack_runtime(
         strategy="all",
     )
     assert len(providers) == 1
-    assert providers[0]["isolation"] == "process"
+    assert providers[0]["isolation"] == "host_measured_at_invocation"
+    assert providers[0]["declared_isolation"] == "process"
+    assert providers[0]["trust_class"] == "untrusted"
 
 
 def test_resolved_profile_selects_manifest_only_prompt_providers() -> None:
@@ -280,4 +282,3 @@ def test_resolved_profile_selects_manifest_only_prompt_providers() -> None:
         "rumi.action.prompt.test.v1",
         "rumi.action.prompt.migrate.v1",
     }
-

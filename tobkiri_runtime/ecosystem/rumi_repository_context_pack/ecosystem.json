@@ -47,7 +47,7 @@
     "extensions/skills/repository_context_preparation/SKILL.md"
   ],
   "provenance": {
-    "content_hash": "sha256:1b9244348c541a88e2169e47cf7c4f04f85c9803963c91c7bf1ba36f79596dc6",
+    "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
     "build_identity": "rumi-repository-context-pack:1.0.0",
     "trust_class": "local",
     "signature": null

@@ -12,6 +12,7 @@ from core_runtime.pack_sdk import (
     scaffold_pack,
     validate_pack_manifest,
 )
+from core_runtime.manifest_projection import generate_legacy_ecosystem_projection
 from core_runtime.pack_templates import (
     PackTemplateError,
     resolve_profile,
@@ -66,6 +67,7 @@ def test_scaffold_is_strictly_valid_and_untrusted(tmp_path: Path) -> None:
 
     manifest = validate_pack_manifest(manifest_path, schema_path=PACK_SCHEMA)
 
+    assert manifest_path.name == "rumi.pack.v3.json"
     assert manifest["pack"]["id"] == "example.echo"
     assert manifest["provenance"]["trust_class"] == "untrusted"
     assert manifest["permissions"] == []
@@ -78,6 +80,13 @@ def test_scaffold_is_strictly_valid_and_untrusted(tmp_path: Path) -> None:
     assert contract["selection"]["owner"] == "ai"
     assert contract["selection"]["schema_policy"] == "progressive"
     assert contract["security"]["default_authority"] == "none"
+    projection_path = manifest_path.parent / "ecosystem.json"
+    assert projection_path.is_file()
+    assert generate_legacy_ecosystem_projection(
+        manifest_path,
+        projection_path,
+        check=True,
+    ).startswith("sha256:")
     validate_template_components(
         manifest_path.parent,
         ROOT / "ecosystem" / "defaultspack" / "schemas",
@@ -189,7 +198,7 @@ def test_add_component_is_strict_and_never_overwrites(tmp_path: Path) -> None:
 def test_add_component_requires_pack_root_and_preflights_every_file(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(PackTemplateError, match="pack.json"):
+    with pytest.raises(PackTemplateError, match="rumi.pack.v3.json"):
         scaffold_component(
             tmp_path / "not-a-pack",
             kind="activity",

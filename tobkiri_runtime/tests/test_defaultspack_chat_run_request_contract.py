@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -29,7 +30,14 @@ class _Manager:
 
 
 def _setup_store(tmp_path, monkeypatch):
+    import core_runtime.resolved_profile_scope as profile_scope
+    from domain.chat import store as facade
+    from domain.chat import run_request
     from domain.chat.store import ChatStore
+    from domain.tool.registry import ToolRegistry
+    from ecosystem.rumi_conversation_store_pack.runtime.store import (
+        ConversationStore,
+    )
 
     configured_user_data = os.environ.get("RUMI_USER_DATA")
     configured_path = Path(configured_user_data) if configured_user_data else None
@@ -37,8 +45,101 @@ def _setup_store(tmp_path, monkeypatch):
         monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "user_data" / "shared" / "chat" / "conversations.json"))
     ChatStore._instance = None
+    ToolRegistry._instance = None
+    verified_plan = SimpleNamespace(
+        effective_pack_set=(
+            "defaultspack",
+            "rumi_default_tools_pack",
+            "rumi_operations_company_pack",
+        )
+    )
+    monkeypatch.setattr(
+        profile_scope,
+        "persisted_resolved_profile",
+        lambda: verified_plan,
+    )
+    run_request._profile_snapshot.cache_clear()
+    resolve_runtime_profile_context = run_request.resolve_runtime_profile_context
+
+    def resolve_verified_developer_context(
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved = resolve_runtime_profile_context(context)
+        resolved.setdefault("principal_capabilities", ["developer"])
+        return resolved
+
+    monkeypatch.setattr(
+        run_request,
+        "resolve_runtime_profile_context",
+        resolve_verified_developer_context,
+    )
+    owner = ConversationStore("default", user_data_root=tmp_path / "user_data")
+
+    def invoke(contract_id: str, operation: str, payload: dict[str, Any]) -> Any:
+        if contract_id == facade.CONVERSATION:
+            if operation == "list":
+                return owner.snapshot()
+            if operation == "get":
+                return owner.get(str(payload.get("conversation_id") or ""))
+        if contract_id == facade.MESSAGE and operation == "get":
+            conversation = owner.get(str(payload.get("conversation_id") or ""))
+            return next(
+                (
+                    message
+                    for message in (conversation or {}).get("messages", [])
+                    if message.get("id") == payload.get("message_id")
+                ),
+                None,
+            )
+        if contract_id == facade.CONVERSATION_MANAGE:
+            if operation == "create":
+                return owner.create(
+                    payload["conversation"],
+                    expected_revision=int(payload["expected_revision"]),
+                )
+            if operation == "update":
+                return owner.update(
+                    str(payload["conversation_id"]),
+                    payload["patch"],
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+            if operation == "delete":
+                return owner.delete(
+                    str(payload["conversation_id"]),
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+        if contract_id == facade.MESSAGE_MANAGE:
+            if operation == "append":
+                return owner.append_message(
+                    str(payload["conversation_id"]),
+                    payload["message"],
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+            if operation in {"update", "delete"}:
+                return owner.mutate_message(
+                    str(payload["conversation_id"]),
+                    str(payload["message_id"]),
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                    patch=payload.get("patch"),
+                    delete=operation == "delete",
+                )
+        raise AssertionError(f"unexpected contract call: {contract_id}/{operation}")
+
+    monkeypatch.setattr(facade, "_invoke", invoke)
     store = ChatStore()
     monkeypatch.setattr("domain.chat.run_request.get_manager", lambda: _Manager())
+    monkeypatch.setattr(
+        "domain.chat.run_request.get_model_capabilities",
+        lambda _model: {"supports_tool_calling": True},
+    )
     monkeypatch.setattr(
         "domain.chat.run_request.enrich_messages",
         lambda messages, system_prompt, conversation_id, user_text, manager: {
@@ -210,7 +311,7 @@ def test_approval_followup_tool_is_explicit_only_after_signed_server_verificatio
     assert _verified_approval_followup_tool_ids(request) == []
 
 
-def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkeypatch):
+def test_top_level_tools_raw_definition_does_not_bypass_verified_catalog(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -234,7 +335,7 @@ def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkey
         {},
     )
 
-    assert "attacker_tool" in _external_provider_tool_names(prepared)
+    assert "attacker_tool" not in _external_provider_tool_names(prepared)
     assert prepared.tool_context["tool_selection"]["provider_compat_tool_ids"] == ["attacker_tool"]
     assert "attacker_tool" not in prepared.connected_tool_names
     ChatStore._instance = None
@@ -1002,7 +1103,9 @@ def test_prepare_chat_run_keeps_inferred_pr_tools_with_auto_tool_selection(tmp_p
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_authority_off_allows_inferred_pr_write_tools(tmp_path, monkeypatch):
+def test_prepare_chat_run_authority_off_does_not_bypass_write_approval(
+    tmp_path, monkeypatch
+):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
     from domain.tool.schema_adapter import max_tool_calls
@@ -1040,9 +1143,9 @@ def test_prepare_chat_run_authority_off_allows_inferred_pr_write_tools(tmp_path,
         entry["tool_name"]: entry["status"]
         for entry in prepared.tool_context.get("tool_filter_result", [])
     }
-    assert filter_status["coding_file_write"] == "allowed"
-    assert filter_status["coding_git_commit"] == "allowed"
-    assert filter_status["coding_git_push"] == "allowed"
+    assert filter_status["coding_file_write"] == "approval_required"
+    assert filter_status["coding_git_commit"] == "approval_required"
+    assert filter_status["coding_git_push"] == "approval_required"
     assert max_tool_calls(prepared.tool_context) is None
     assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
     assert prepared.request_context.get("user_requested_shell_tool") is True
@@ -1056,7 +1159,6 @@ def test_prepare_chat_run_adds_requested_tool_to_existing_agent_profile(tmp_path
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(
         model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
-        metadata={"profile_id": "defaultspack.mimo_coding_company"},
     )
     runtime_profile = {
         "defaultspack": {

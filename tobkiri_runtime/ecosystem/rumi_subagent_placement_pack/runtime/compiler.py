@@ -7,6 +7,11 @@ import json
 import re
 from typing import Any, Callable, Iterable, Mapping
 
+from core_runtime.capability_plan import (
+    CapabilityPlanValidationError,
+    validate_capability_plan,
+)
+
 
 CATALOG = "rumi.resource.subagent.catalog.v1"
 PLACEMENT = "rumi.resource.subagent.placement.v1"
@@ -73,9 +78,22 @@ class SubagentPlacementCompiler:
         _redeem_authority(self.client, payload)
         placement, placement_source = self._resolve_placement(payload)
         definition, definition_source = self._resolve_definition(placement)
-        capability_plan = _object(payload.get("capability_plan"), "capability_plan")
-        _require_capability_plan(capability_plan)
-        feature_warnings = self._validate_features(placement)
+        raw_capability_plan = _object(
+            payload.get("capability_plan"),
+            "capability_plan",
+        )
+        try:
+            capability_plan = validate_capability_plan(raw_capability_plan)
+        except CapabilityPlanValidationError as exc:
+            raise PlacementCompileError(str(exc)) from exc
+        selected_stage_ids = _selected_provider_ids(
+            capability_plan,
+            STAGE,
+        )
+        feature_warnings = self._validate_features(
+            placement,
+            selected_stage_ids,
+        )
         bindings = _bindings(placement)
         _validate_binding_policies(definition, bindings)
         protocols = self._validate_protocols(placement, definition)
@@ -149,7 +167,7 @@ class SubagentPlacementCompiler:
             "warnings": feature_warnings,
             "revisions": revisions,
         }
-        staged = self._apply_stages(base)
+        staged = self._apply_stages(base, selected_stage_ids)
         staged["plan_hash"] = _sha(
             {key: value for key, value in staged.items() if key != "plan_hash"}
         )
@@ -217,8 +235,13 @@ class SubagentPlacementCompiler:
     def _validate_features(
         self,
         placement: Mapping[str, Any],
+        selected_stage_ids: set[str],
     ) -> list[str]:
-        stages = _providers(self.client, STAGE)
+        stages = _providers(
+            self.client,
+            STAGE,
+            selected_provider_ids=selected_stage_ids,
+        )
         available = {
             str(item.get("feature_id") or "")
             for item in stages
@@ -281,9 +304,17 @@ class SubagentPlacementCompiler:
             result.append(dict(item))
         return result
 
-    def _apply_stages(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _apply_stages(
+        self,
+        plan: dict[str, Any],
+        selected_stage_ids: set[str],
+    ) -> dict[str, Any]:
         current = _copy(plan)
-        for provider in _providers(self.client, STAGE):
+        for provider in _providers(
+            self.client,
+            STAGE,
+            selected_provider_ids=selected_stage_ids,
+        ):
             if provider.get("feature_id") and not any(
                 item.get("feature_id") == provider["feature_id"]
                 for item in current.get("features") or []
@@ -418,7 +449,12 @@ def create_core_stage(
     return operation
 
 
-def _providers(client: Any, contract_id: str) -> list[dict[str, str]]:
+def _providers(
+    client: Any,
+    contract_id: str,
+    *,
+    selected_provider_ids: set[str] | None = None,
+) -> list[dict[str, str]]:
     values = client.providers(contract_id)
     providers: list[dict[str, str]] = []
     for value in values:
@@ -426,6 +462,11 @@ def _providers(client: Any, contract_id: str) -> list[dict[str, str]]:
             continue
         provider_id = str(value.get("provider_instance_id") or "").strip()
         if not provider_id:
+            continue
+        if (
+            selected_provider_ids is not None
+            and provider_id not in selected_provider_ids
+        ):
             continue
         providers.append(
             {
@@ -560,9 +601,7 @@ def _compile_authority(
         "subagent.requirements",
     )
     implementation = set(_strings(requirements.get("required_capabilities")))
-    implementation.update(
-        _strings(requirements.get("optional_capabilities"))
-    )
+    implementation.update(_strings(requirements.get("optional_capabilities")))
     layers = [implementation]
     for source_name, source in (
         ("placement governance", placement.get("governance")),
@@ -574,9 +613,10 @@ def _compile_authority(
         if source is None:
             continue
         layer = _object(source, source_name)
-        allowed = set(_strings(layer.get("allowed_capabilities")))
-        if allowed:
-            layers.append(allowed)
+        if "allowed_capabilities" in layer:
+            layers.append(
+                set(_strings(layer.get("allowed_capabilities")))
+            )
     granted = _capability_grants(capability_plan)
     layers.append(granted)
     effective = set.intersection(*layers) if layers else set()
@@ -751,52 +791,25 @@ def _skill_bindings(placement: Mapping[str, Any]) -> list[str]:
 
 
 def _capability_grants(plan: Mapping[str, Any]) -> set[str]:
-    values: set[str] = set()
-    for key in (
-        "effective_permissions",
-        "granted_capabilities",
-        "capabilities",
-    ):
-        raw = plan.get(key)
-        if isinstance(raw, list):
-            values.update(_strings(raw))
-        elif isinstance(raw, Mapping):
-            values.update(str(item) for item, enabled in raw.items() if enabled)
-    tools = plan.get("tools")
-    for tool in tools if isinstance(tools, list) else []:
-        if isinstance(tool, Mapping):
-            values.update(_strings(tool.get("capability_grants")))
-    if isinstance(tools, Mapping):
-        attached = {
-            str(item).strip()
-            for item in tools.get("attached") or []
-            if str(item or "").strip()
-        }
-        grants = tools.get("capability_grants")
-        if isinstance(grants, Mapping):
-            for tool_id in attached:
-                values.update(_strings(grants.get(tool_id)))
-    return values
-
-
-def _require_capability_plan(plan: Mapping[str, Any]) -> None:
-    if not _capability_ref(plan):
-        raise PlacementCompileError("CapabilityPlan requires plan_id or digest")
-    if not _capability_revision(plan):
-        raise PlacementCompileError("CapabilityPlan revision is required")
+    return set(_strings(plan.get("effective_capabilities")))
 
 
 def _capability_ref(plan: Mapping[str, Any]) -> str:
-    return str(plan.get("plan_id") or plan.get("digest") or "").strip()
+    return str(plan.get("plan_id") or "").strip()
 
 
 def _capability_revision(plan: Mapping[str, Any]) -> str:
-    return str(
-        plan.get("registry_revision")
-        or plan.get("revision")
-        or plan.get("digest")
-        or ""
-    ).strip()
+    return str(plan.get("digest") or "").strip()
+
+
+def _selected_provider_ids(
+    plan: Mapping[str, Any],
+    contract_id: str,
+) -> set[str]:
+    selections = plan.get("provider_selections")
+    if not isinstance(selections, Mapping):
+        return set()
+    return set(_strings(selections.get(contract_id)))
 
 
 def _merge_stage_fragment(
@@ -863,6 +876,28 @@ def _assert_no_authority_widening(
         99,
     ):
         raise PlacementCompileError("Placement stage weakened approval")
+    if after.get("enforcement") != before.get("enforcement"):
+        raise PlacementCompileError(
+            "Placement stage changed Host enforcement"
+        )
+    before_protocols = {
+        _sha(value)
+        for value in before.get("protocol_bindings") or []
+        if isinstance(value, Mapping)
+    }
+    after_protocols = {
+        _sha(value)
+        for value in after.get("protocol_bindings") or []
+        if isinstance(value, Mapping)
+    }
+    if not after_protocols.issubset(before_protocols):
+        raise PlacementCompileError(
+            "Placement stage widened protocol bindings"
+        )
+    if after.get("behavior") != before.get("behavior"):
+        raise PlacementCompileError(
+            "Placement stage changed sealed behavior"
+        )
 
 
 def _object(value: Any, field: str) -> dict[str, Any]:

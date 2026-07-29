@@ -122,7 +122,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_compile_operation",
-      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
+      "artifact_hash": "sha256:e9eb41aacc4a25834a846926bc35ac423dcb77a811a32215c3232951d0a74bc9"
     },
     {
       "id": "subagent-placement-core-stage",
@@ -130,7 +130,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_core_stage",
-      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
+      "artifact_hash": "sha256:e9eb41aacc4a25834a846926bc35ac423dcb77a811a32215c3232951d0a74bc9"
     },
     {
       "id": "subagent-placement-protocols",
@@ -138,7 +138,7 @@
       "loader": "python",
       "module": "ecosystem.rumi_subagent_placement_pack.runtime.compiler",
       "symbol": "create_protocol_catalog",
-      "artifact_hash": "sha256:79f4eb07e8b775e73acddef0ceed1b015deb07816f79be09aaeecf6e129142df"
+      "artifact_hash": "sha256:e9eb41aacc4a25834a846926bc35ac423dcb77a811a32215c3232951d0a74bc9"
     },
     {
       "id": "subagent-placement-topology",
@@ -177,7 +177,7 @@
     {"capability": "host.authority.consume", "access": "control", "approval_required": false}
   ],
   "provenance": {
-    "content_hash": "sha256:1e7aaecba46b5c381970d1835fa2c65bb08ea452ab177bf4be4559f0a9fed612",
+    "content_hash": "sha256:fab5267ad37180ce140fa4b486785f551902b055476f6d0adde3ecdc7d9119e0",
     "build_identity": "rumi-subagent-placement-pack:1.0.0",
     "trust_class": "local",
     "signature": null

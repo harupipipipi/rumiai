@@ -6,14 +6,20 @@ import importlib
 import hashlib
 import json
 import os
+import platform
 import re
-import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .interface_registry import InterfaceRegistry
+from .bounded_process_runner import (
+    BoundedProcessResult,
+    HostBoundedProcessRunner,
+    ProcessExecutionPolicy,
+)
 from .global_contracts.manifest import load_manifest
 from .global_contract_dispatch import (
     GlobalContractClient,
@@ -25,6 +31,7 @@ from .paths import (
     CORE_PACK_ID_PREFIX,
     ECOSYSTEM_DIR,
     PackLocation,
+    USER_DATA_DIR,
     discover_pack_locations,
     resolve_pack_locations,
 )
@@ -197,21 +204,6 @@ def _register_v3_contract_bindings(
         result,
         pack_id,
     )
-    host_allowed, host_reason = _host_registration_allowed(
-        pack_id,
-        pack_location,
-        ecosystem_manifest,
-    )
-    if not host_allowed:
-        result.diagnostics.append(
-            _diagnostic(
-                "warning",
-                "v3_process_host_execution_required",
-                f"Pack process activation skipped: {host_reason}",
-                pack_id=pack_id,
-            )
-        )
-        return True, False
     integrity_ok, integrity_diagnostics = verify_declared_artifacts(
         pack_location.pack_subdir,
         ecosystem_manifest,
@@ -238,16 +230,25 @@ def _register_v3_contract_bindings(
         if isinstance(item, dict) and item.get("id")
     )
     providers = manifest.get("contracts", {}).get("provides", [])
-    registered = 0
-    expected = 0
+    pending: list[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
+    expected = len(providers) if isinstance(providers, list) else 0
     for provider in providers if isinstance(providers, list) else []:
         if not isinstance(provider, dict):
             continue
         contract_id = str(provider.get("id") or "")
         entrypoint = entrypoints.get(contract_id)
         if entrypoint is None:
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_provider_entrypoint_missing",
+                    "Provided contract has no supported entrypoint",
+                    pack_id=pack_id,
+                    contract_id=contract_id,
+                )
+            )
             continue
-        expected += 1
         module = str(entrypoint.get("module") or "").strip()
         if not module or not _module_owned_by_pack(module, pack_id):
             result.ok = False
@@ -286,6 +287,22 @@ def _register_v3_contract_bindings(
                 pack_location=pack_location,
             )
         else:
+            host_allowed, host_reason = _host_registration_allowed(
+                pack_id,
+                pack_location,
+                ecosystem_manifest,
+            )
+            if not host_allowed:
+                result.diagnostics.append(
+                    _diagnostic(
+                        "warning",
+                        "v3_python_host_execution_required",
+                        f"Python Pack activation skipped: {host_reason}",
+                        pack_id=pack_id,
+                        contract_id=contract_id,
+                    )
+                )
+                continue
             try:
                 operation = _load_python_contract_operation(
                     module=module,
@@ -309,7 +326,7 @@ def _register_v3_contract_bindings(
                     )
                 )
                 continue
-        descriptor = {
+        descriptor: Dict[str, Any] = {
             "contract_id": contract_id,
             "version": str(provider.get("version") or ""),
             "provider_instance_id": str(
@@ -319,8 +336,17 @@ def _register_v3_contract_bindings(
             "source_pack_version": str(manifest.get("pack", {}).get("version") or ""),
             "content_hash": str(manifest.get("provenance", {}).get("content_hash") or ""),
             "build_identity": str(manifest.get("provenance", {}).get("build_identity") or ""),
-            "trust_class": str(manifest.get("provenance", {}).get("trust_class") or "untrusted"),
-            "isolation": str(provider.get("isolation") or loader),
+            # Pack declarations are evidence, never Host authority.
+            "trust_class": "untrusted",
+            "declared_trust_class": str(
+                manifest.get("provenance", {}).get("trust_class") or "untrusted"
+            ),
+            "isolation": (
+                "host_measured_at_invocation"
+                if loader == "process"
+                else "host_in_process"
+            ),
+            "declared_isolation": str(provider.get("isolation") or loader),
             "required_capabilities": list(provider.get("required_capabilities") or []),
             "routing_keys": sorted(
                 {
@@ -331,17 +357,50 @@ def _register_v3_contract_bindings(
             ),
             "operation": operation,
         }
-        interface_registry.register(
-            f"global_contract.provider.{contract_id}",
-            descriptor,
-            meta={
-                "_source_pack_id": pack_id,
-                "_source_pack_version": descriptor["source_pack_version"],
-                "authority_grant": False,
-                "isolation": descriptor["isolation"],
-            },
+        if isinstance(operation, _ProcessContractOperation):
+            descriptor["host_attestation"] = operation.last_host_attestation
+        pending.append(
+            (
+                f"global_contract.provider.{contract_id}",
+                descriptor,
+                {
+                    "_source_pack_id": pack_id,
+                    "_source_pack_version": descriptor["source_pack_version"],
+                    "authority_grant": False,
+                    "isolation": descriptor["isolation"],
+                },
+            )
         )
-        registered += 1
+
+    if len(pending) != expected:
+        _deactivate_pending_python_operations(pending, result, pack_id)
+        result.diagnostics.append(
+            _diagnostic(
+                "warning",
+                "v3_contract_bindings_registered",
+                "Registered 0 contract providers",
+                pack_id=pack_id,
+                registered=0,
+            )
+        )
+        return True, False
+
+    try:
+        interface_registry.register_batch_atomic(pending)
+    except Exception as exc:
+        _deactivate_pending_python_operations(pending, result, pack_id)
+        result.ok = False
+        result.diagnostics.append(
+            _diagnostic(
+                "error",
+                "v3_contract_activation_rolled_back",
+                f"Contract activation failed and was rolled back: {exc}",
+                pack_id=pack_id,
+            )
+        )
+        return True, False
+
+    registered = len(pending)
     result.diagnostics.append(
         _diagnostic(
             "info" if registered else "warning",
@@ -352,63 +411,290 @@ def _register_v3_contract_bindings(
         )
     )
     complete = registered > 0 and registered == expected
-    if not complete and registered:
-        for contract_id in entrypoints:
-            interface_registry.unregister(
-                f"global_contract.provider.{contract_id}",
-                predicate=lambda entry, owner=pack_id: (
-                    entry.get("meta", {}).get("_source_pack_id") == owner
-                ),
-            )
     return True, complete
 
 
+def _deactivate_pending_python_operations(
+    pending: Iterable[tuple[str, Dict[str, Any], Dict[str, Any]]],
+    result: CapabilityBindingRegistrationResult,
+    pack_id: str,
+) -> None:
+    """Release explicitly reversible in-process activation in reverse order.
+
+    Existing callable providers remain source-compatible: teardown is opt-in via
+    ``__rumi_deactivate__``. Factories without that hook must remain
+    construction-side-effect-free; they have not been published to observers.
+    """
+    for _key, descriptor, _meta in reversed(tuple(pending)):
+        if descriptor.get("isolation") != "host_in_process":
+            continue
+        operation = descriptor.get("operation")
+        deactivate = getattr(operation, "__rumi_deactivate__", None)
+        if not callable(deactivate):
+            continue
+        try:
+            deactivate()
+        except Exception as exc:
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_python_deactivation_failed",
+                    f"Python provider teardown failed: {exc}",
+                    pack_id=pack_id,
+                    contract_id=str(descriptor.get("contract_id") or ""),
+                )
+            )
+
+
 class _ProcessContractOperation:
-    """Invoke a declared pack process with a minimal non-secret environment."""
+    """Invoke a declared Pack through the Host-owned bounded process runner."""
 
     def __init__(self, *, module: str, pack_location: PackLocation) -> None:
         self.module = module
         self.pack_location = pack_location
+        self._attestation_lock = threading.RLock()
+        self._last_host_attestation: Dict[str, Any] | None = None
+
+    def last_host_attestation(self) -> Dict[str, Any] | None:
+        """Return the latest Host-authored execution measurement."""
+        with self._attestation_lock:
+            if self._last_host_attestation is None:
+                return None
+            return dict(self._last_host_attestation)
 
     def __call__(self, operation: str, payload: Dict[str, Any]) -> Any:
-        runtime_root = self.pack_location.pack_dir.parent.parent
-        environment = {
-            "PATH": os.environ.get("PATH", ""),
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        }
-        user_data_root = str(os.environ.get("RUMI_USER_DATA") or "").strip()
-        if user_data_root:
-            environment["RUMI_USER_DATA"] = user_data_root
-        completed = subprocess.run(
-            # ``-E`` intentionally ignores PYTHON* environment variables for
-            # process isolation, including PYTHONDONTWRITEBYTECODE.  ``-B`` is
-            # therefore required as an interpreter flag so a process-backed
-            # pack can never add bytecode files to a signed application bundle.
-            [sys.executable, "-B", "-s", "-E", "-m", self.module],
-            input=json.dumps(
-                {"operation": operation, "payload": dict(payload)},
-                ensure_ascii=False,
-            ),
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=False,
-            cwd=str(runtime_root),
-            env=environment,
+        if (
+            not isinstance(operation, str)
+            or not operation
+            or len(operation) > 128
+            or "\x00" in operation
+            or not isinstance(payload, dict)
+        ):
+            raise ValueError("pack process request violates the operation schema")
+        timeout_seconds = 30.0
+        stdin = json.dumps(
+            {"operation": operation, "payload": dict(payload)},
+            ensure_ascii=False,
         )
-        try:
-            response = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("pack process returned invalid JSON") from exc
-        if not isinstance(response, dict) or response.get("status") != "ok":
-            diagnostics = response.get("diagnostics") if isinstance(response, dict) else []
+        runner = HostBoundedProcessRunner()
+        pack_dir = Path(self.pack_location.pack_dir).resolve()
+        runtime_root = pack_dir.parent.parent.resolve()
+        from .profile_paths import active_profile_id
+
+        resolved_profile_id = active_profile_id(Path(USER_DATA_DIR))
+        if platform.system().lower() == "darwin":
+            argv = ("python3", "-B", "-s", "-E", "-m", self.module)
+            environment = {"RUMI_USER_DATA": "/data"}
+            if resolved_profile_id:
+                environment["RUMI_ACTIVE_PROFILE_ID"] = resolved_profile_id
+            policy = self._policy(
+                argv=argv,
+                cwd=runtime_root,
+                environment=environment,
+                timeout_seconds=timeout_seconds,
+            )
+            supervisor = _managed_sandbox_supervisor()
+            result = runner.run_attested_backend(
+                argv=argv,
+                cwd=runtime_root,
+                stdin=stdin,
+                timeout_seconds=timeout_seconds,
+                environment=environment,
+                policy=policy,
+                backend=lambda: supervisor.execute_pack_process(
+                    {
+                        "pack_id": self.pack_location.pack_id,
+                        "pack_dir": str(pack_dir),
+                        "module": self.module,
+                        "stdin": stdin,
+                        "timeout_seconds": timeout_seconds,
+                        "host_user_data_dir": str(Path(USER_DATA_DIR).resolve()),
+                        "active_profile_id": resolved_profile_id or "",
+                    }
+                ),
+                boundary="lima_bubblewrap",
+                sandboxed=True,
+                process_tree_kill="bubblewrap_pid_namespace",
+            )
+        else:
+            user_data = self._local_pack_data_dir()
+            environment = {
+                "PATH": os.defpath,
+                "RUMI_USER_DATA": str(user_data),
+            }
+            if resolved_profile_id:
+                environment["RUMI_ACTIVE_PROFILE_ID"] = resolved_profile_id
+            argv = (sys.executable, "-B", "-s", "-E", "-m", self.module)
+            result = runner.run_local(
+                argv=argv,
+                cwd=runtime_root,
+                stdin=stdin,
+                timeout_seconds=timeout_seconds,
+                environment=environment,
+                policy=self._policy(
+                    argv=argv,
+                    cwd=runtime_root,
+                    environment=environment,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+
+        self._record_host_attestation(
+            result=result,
+            operation=operation,
+        )
+        if result.stdout_truncated:
+            raise GlobalContractInvocationError(
+                "response_too_large",
+                "Pack process response exceeded the output limit",
+            )
+        response: Any = None
+        if result.stdout.strip():
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                response = None
+        if response is not None:
+            self._validate_response_envelope(response)
+        if isinstance(response, dict) and response.get("status") != "ok":
+            diagnostics = response.get("diagnostics")
+            if not isinstance(diagnostics, list):
+                diagnostics = [diagnostics] if diagnostics else []
             code = str(response.get("error_code") or "provider_unavailable")
             raise GlobalContractInvocationError(
                 code,
                 "; ".join(str(item) for item in diagnostics),
             )
+        if result.transport_error is not None or result.exit_code is None:
+            raise GlobalContractInvocationError(
+                str(result.transport_error or "provider_unavailable"),
+                result.stderr or "Pack process transport failed",
+            )
+        if result.exit_code != 0:
+            raise GlobalContractInvocationError(
+                "provider_unavailable",
+                result.stderr or f"Pack process exited {result.exit_code}",
+            )
+        if not isinstance(response, dict) or response.get("status") != "ok":
+            raise RuntimeError("pack process returned invalid JSON")
         return response.get("value")
+
+    def _record_host_attestation(
+        self,
+        *,
+        result: BoundedProcessResult,
+        operation: str,
+    ) -> None:
+        """Persist Host measurement separately from untrusted Pack output."""
+        host_attestation = result.attestation
+        record = {
+            "source": "host_runtime",
+            "authority": str(host_attestation.authority),
+            "boundary": str(host_attestation.boundary),
+            "sandboxed": bool(host_attestation.sandboxed),
+            "process_tree_kill": str(host_attestation.process_tree_kill),
+            "pack_id": str(self.pack_location.pack_id),
+            "module": self.module,
+            "operation": operation,
+            "exit_code": result.exit_code,
+            "timed_out": bool(result.timed_out),
+            "transport_error": result.transport_error,
+        }
+        with self._attestation_lock:
+            self._last_host_attestation = record
+        try:
+            from .audit_logger import get_audit_logger
+
+            get_audit_logger().log_security_event(
+                event_type="pack_process_host_attestation",
+                severity="info",
+                description="Host measured a Pack process execution boundary",
+                pack_id=str(self.pack_location.pack_id),
+                details=record,
+            )
+        except Exception:
+            # Audit persistence is best-effort; the in-memory Host measurement
+            # remains authoritative for this provider instance.
+            pass
+
+    @staticmethod
+    def _validate_response_envelope(response: Any) -> None:
+        if not isinstance(response, dict):
+            raise RuntimeError("pack process response must be an object")
+        allowed_keys = {"status", "value", "error_code", "diagnostics"}
+        if set(response) - allowed_keys:
+            raise RuntimeError("pack process response has unknown fields")
+        status = response.get("status")
+        if status == "ok":
+            if "value" not in response or "error_code" in response:
+                raise RuntimeError("pack process success response violates schema")
+            return
+        if status not in {"denied", "unavailable"}:
+            raise RuntimeError("pack process response status violates schema")
+        error_code = response.get("error_code")
+        diagnostics = response.get("diagnostics")
+        if (
+            not isinstance(error_code, str)
+            or not error_code
+            or len(error_code) > 128
+            or not isinstance(diagnostics, list)
+            or len(diagnostics) > 32
+            or any(
+                not isinstance(item, str) or len(item) > 1000
+                for item in diagnostics
+            )
+        ):
+            raise RuntimeError("pack process error response violates schema")
+
+    @staticmethod
+    def _policy(
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        environment: Dict[str, str],
+        timeout_seconds: float,
+    ) -> ProcessExecutionPolicy:
+        return ProcessExecutionPolicy(
+            allowed_executables=frozenset({argv[0]}),
+            allowed_argv=(argv,),
+            allowed_cwds=(cwd,),
+            allowed_environment=frozenset(environment),
+            max_stdin_bytes=1024 * 1024,
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=256 * 1024,
+            max_timeout_seconds=timeout_seconds,
+            allow_path_search=not Path(argv[0]).is_absolute(),
+        )
+
+    def _local_pack_data_dir(self) -> Path:
+        pack_id = str(self.pack_location.pack_id)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", pack_id):
+            raise GlobalContractInvocationError(
+                "provider_unavailable",
+                "Pack identifier is invalid for Host-owned storage",
+            )
+        path = (USER_DATA_DIR / "packs" / "process" / pack_id).resolve()
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            path.chmod(0o700)
+        except OSError:
+            pass
+        return path
+
+
+def _managed_sandbox_supervisor() -> Any:
+    from .di_container import get_container
+
+    supervisor = get_container().get_or_none("managed_sandbox_supervisor")
+    if supervisor is None or not callable(
+        getattr(supervisor, "execute_pack_process", None)
+    ):
+        raise GlobalContractInvocationError(
+            "provider_unavailable",
+            "Managed sandbox supervisor is unavailable",
+        )
+    return supervisor
 
 
 def _load_python_contract_operation(

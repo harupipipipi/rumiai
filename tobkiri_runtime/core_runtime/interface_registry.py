@@ -26,6 +26,7 @@ if _this_module is not None:
 
 
 GetStrategy = Literal["first", "last", "all"]
+Registration = Tuple[str, Any, Optional[Dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,81 @@ class InterfaceRegistry:
         # W17-C: emit warning outside lock
         if _should_warn:
             _emit_protected_key_warning(key, meta_dict)
+
+    def register_batch_atomic(self, registrations: Iterable[Registration]) -> None:
+        """Commit registrations as one observer-visible transaction.
+
+        All protected-key checks and entry construction happen before the store
+        is changed. Store mutation is performed while holding the registry
+        lock; if any append fails, the exact pre-transaction store is restored.
+        Observers are notified only after the complete batch is committed, so a
+        callback can never observe a partially activated batch.
+        """
+        prepared: List[Tuple[str, Any, Dict[str, Any], bool, Dict[str, Any]]] = []
+        for registration in registrations:
+            if not isinstance(registration, tuple) or len(registration) != 3:
+                raise ValueError("batch registration must contain (key, value, meta) tuples")
+            key, value, meta = registration
+            if not isinstance(key, str) or not key:
+                raise ValueError("batch registration key must be a non-empty string")
+            if meta is None:
+                meta_dict: Dict[str, Any] = {}
+            elif isinstance(meta, dict):
+                meta_dict = dict(meta)
+            else:
+                meta_dict = {"_raw_meta": meta}
+            should_warn = _check_protected_key(key, meta_dict)
+            prepared.append(
+                (
+                    key,
+                    value,
+                    meta_dict,
+                    should_warn,
+                    {
+                        "key": key,
+                        "value": value,
+                        "meta": meta_dict,
+                        "ts": self._now_ts(),
+                    },
+                )
+            )
+
+        notifications: List[Tuple[str, Any, Any]] = []
+        original_store: Dict[str, List[Dict[str, Any]]] = {}
+        with self._lock:
+            affected_keys = {key for key, *_rest in prepared}
+            original_store = {
+                key: list(self._store[key])
+                for key in affected_keys
+                if key in self._store
+            }
+            try:
+                for key, value, _meta, _warn, entry in prepared:
+                    items = self._store.get(key, [])
+                    old_value = items[-1].get("value") if items else None
+                    self._append_registration_locked(key, entry)
+                    notifications.append((key, old_value, value))
+            except Exception:
+                for key in affected_keys:
+                    if key in original_store:
+                        self._store[key] = original_store[key]
+                    else:
+                        self._store.pop(key, None)
+                raise
+
+        for key, old_value, value in notifications:
+            self._notify_observers(key, old_value, value)
+        for key, _value, meta, should_warn, _entry in prepared:
+            if should_warn:
+                _emit_protected_key_warning(key, meta)
+
+    def _append_registration_locked(
+        self,
+        key: str,
+        entry: Dict[str, Any],
+    ) -> None:
+        """Append one prepared entry while ``_lock`` is held."""
+        self._store.setdefault(key, []).append(entry)
 
     def register_if_absent(
         self, 

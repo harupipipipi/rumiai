@@ -24,6 +24,10 @@ const DEFAULTSPACK_RESTART_INITIAL_BACKOFF: Duration = Duration::from_millis(250
 const DEFAULTSPACK_RESTART_MAX_BACKOFF: Duration = Duration::from_secs(5);
 const DEFAULTSPACK_STABLE_RUN_WINDOW: Duration = Duration::from_secs(30);
 const DEFAULTSPACK_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const SYSTEM_KILL: &str = "/bin/kill";
+#[cfg(all(test, unix))]
+const SYSTEM_SHELL: &str = "/bin/sh";
 
 /// Tracks the Defaultspack child started by this Launcher instance.
 pub(crate) struct DefaultspackManager {
@@ -505,8 +509,10 @@ fn stop_non_unix_child(child: &mut Child) -> Result<()> {
 #[cfg(unix)]
 fn send_process_group_signal(pid: u32, signal: &str) -> bool {
     let process_group = format!("-{pid}");
-    let sent = match process_utils::command("kill")
-        .args([signal, &process_group])
+    let sent = match process_utils::command(SYSTEM_KILL)
+        // `--` is required by GNU kill so a negative process-group id is not
+        // parsed as another option or signal number.
+        .args([signal, "--", &process_group])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -530,13 +536,99 @@ fn send_process_group_signal(pid: u32, signal: &str) -> bool {
 
 #[cfg(unix)]
 fn process_group_exists(process_group: u32) -> bool {
-    send_process_group_signal(process_group, "-0")
+    if !send_process_group_signal(process_group, "-0") {
+        return false;
+    }
+
+    // GitHub's Linux runner acts as a child subreaper. A terminated orphan can
+    // therefore remain as a zombie briefly, and `kill -0 -- -PGID` still
+    // reports that process group as present even though no code can execute.
+    // Do not spend the full shutdown timeout waiting for zombie-only groups.
+    #[cfg(target_os = "linux")]
+    {
+        return linux_process_group_has_live_members(process_group).unwrap_or(true);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    true
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_group_has_live_members(process_group: u32) -> std::io::Result<bool> {
+    let mut observation_error = None;
+    for entry in fs::read_dir("/proc")? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                observation_error.get_or_insert(error);
+                continue;
+            }
+        };
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        let stat = match fs::read_to_string(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                observation_error.get_or_insert(error);
+                continue;
+            }
+        };
+        let Some((state, member_group)) = linux_process_state_and_group(&stat) else {
+            observation_error.get_or_insert_with(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid Linux process stat record",
+                )
+            });
+            continue;
+        };
+        if member_group == process_group && !matches!(state, 'Z' | 'X') {
+            return Ok(true);
+        }
+    }
+    match observation_error {
+        Some(error) => Err(error),
+        None => Ok(false),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_state_and_group(stat: &str) -> Option<(char, u32)> {
+    // `/proc/<pid>/stat` wraps the executable name in parentheses; the name
+    // may itself contain spaces or parentheses, so split after the last `)`.
+    let (_, fields) = stat.rsplit_once(") ")?;
+    let mut fields = fields.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    let _parent_pid = fields.next()?;
+    let process_group = fields.next()?.parse().ok()?;
+    Some((state, process_group))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[cfg(unix)]
+    fn process_id_is_live(process_id: u32) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            return fs::read_to_string(format!("/proc/{process_id}/stat"))
+                .ok()
+                .and_then(|stat| linux_process_state_and_group(&stat))
+                .is_some_and(|(state, _)| !matches!(state, 'Z' | 'X'));
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        process_utils::command(SYSTEM_KILL)
+            .args(["-0", &process_id.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
 
     fn test_config() -> AppConfig {
         AppConfig {
@@ -550,6 +642,15 @@ mod tests {
             kernel_port: 8765,
             dev_workspace_root: None,
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_process_stat_parser_handles_parentheses_in_command_name() {
+        assert_eq!(
+            linux_process_state_and_group("123 (worker ) helper) Z 1 77 77 0"),
+            Some(('Z', 77))
+        );
     }
 
     #[test]
@@ -613,7 +714,7 @@ mod tests {
             "sleep 30 & child=$!; printf '%s' \"$child\" > {}; exit 0",
             pid_file.display()
         );
-        let mut command = process_utils::command("sh");
+        let mut command = process_utils::command(SYSTEM_SHELL);
         command.args(["-c", &script]);
         crate::dock_registration::configure_defaultspack_process_group(&mut command);
         let child = command.spawn().unwrap();
@@ -662,13 +763,7 @@ mod tests {
         assert!(state.owned_process_groups.is_empty());
         assert!(state.launch_metadata.is_none());
         drop(state);
-        let descendant_alive = process_utils::command("kill")
-            .args(["-0", &descendant_pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap()
-            .success();
+        let descendant_alive = process_id_is_live(descendant_pid);
         fs::remove_file(pid_file).ok();
         assert!(
             !descendant_alive,
@@ -692,7 +787,7 @@ mod tests {
             "sleep 30 & child=$!; printf '%s' \"$child\" > {}; exit 0",
             pid_file.display()
         );
-        let mut command = process_utils::command("sh");
+        let mut command = process_utils::command(SYSTEM_SHELL);
         command.args(["-c", &script]);
         crate::dock_registration::configure_defaultspack_process_group(&mut command);
         let mut child = command.spawn().unwrap();
@@ -717,13 +812,7 @@ mod tests {
 
         manager.stop().unwrap();
 
-        let descendant_alive = process_utils::command("kill")
-            .args(["-0", &descendant_pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap()
-            .success();
+        let descendant_alive = process_id_is_live(descendant_pid);
         fs::remove_file(pid_file).ok();
         assert!(
             !descendant_alive,

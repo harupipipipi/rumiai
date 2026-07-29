@@ -175,6 +175,38 @@ def test_manifest_semantic_validation_rejects_unprovided_entrypoint(
     assert "not provided" in result.diagnostics[0]
 
 
+def test_manifest_semantic_validation_rejects_missing_entrypoint(
+    tmp_path: Path,
+) -> None:
+    """Every provided contract must have exactly one executable entrypoint."""
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["entrypoints"] = []
+    path = tmp_path / "ecosystem.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = load_manifest(path)
+
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert any("missing entrypoint" in item for item in result.diagnostics)
+
+
+def test_manifest_semantic_validation_rejects_duplicate_entrypoint(
+    tmp_path: Path,
+) -> None:
+    """Two differently configured entrypoints must not target one provider."""
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    duplicate = dict(manifest["entrypoints"][0])
+    duplicate["symbol"] = "create_duplicate_provider"
+    manifest["entrypoints"].append(duplicate)
+    path = tmp_path / "ecosystem.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = load_manifest(path)
+
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert any("duplicate entrypoint" in item for item in result.diagnostics)
+
+
 def test_manifest_semantic_validation_rejects_major_version_mismatch(
     tmp_path: Path,
 ) -> None:

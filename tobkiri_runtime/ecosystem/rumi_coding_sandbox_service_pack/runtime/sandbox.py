@@ -22,7 +22,15 @@ WORKSPACE = "rumi.resource.workspace.v1"
 SERVICE_PACK_ID = "rumi_coding_sandbox_service_pack"
 _IMAGE = re.compile(r"^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$")
 _SKIP_DIRS = {".git", ".rumi_snapshots", "node_modules", ".venv", "target", "dist", "build"}
-_SECRET_NAMES = {".env", ".env.local", ".npmrc", ".pypirc", "credentials.json", "id_rsa", "id_ed25519"}
+_SECRET_NAMES = {
+    ".env",
+    ".env.local",
+    ".npmrc",
+    ".pypirc",
+    "credentials.json",
+    "id_rsa",
+    "id_ed25519",
+}
 _SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
 _SECRET_PARTS = {".ssh", ".aws", ".gnupg", ".kube"}
 _MAX_FILES = 4_000
@@ -38,12 +46,7 @@ class CodingSandboxRuntime:
         self.client = client
         self.profile_id = profile_id
         self.root = (
-            Path(USER_DATA_DIR)
-            / "packs"
-            / SERVICE_PACK_ID
-            / "profiles"
-            / profile_id
-            / "sandboxes"
+            Path(USER_DATA_DIR) / "packs" / SERVICE_PACK_ID / "profiles" / profile_id / "sandboxes"
         )
         self.lock = threading.RLock()
         self.records: dict[str, dict[str, Any]] = {}
@@ -72,6 +75,7 @@ class CodingSandboxRuntime:
 
     def control(self, name: str, payload: Mapping[str, Any]) -> Any:
         """Apply one receipt-gated sandbox mutation or execution."""
+        arguments: dict[str, Any]
         if name == "prepare":
             arguments = {
                 "workspace_id": str(payload.get("workspace_id") or ""),
@@ -115,9 +119,7 @@ class CodingSandboxRuntime:
             return self._execute(sandbox, arguments)
         return self._discard(sandbox)
 
-    def _prepare(
-        self, payload: Mapping[str, Any], arguments: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def _prepare(self, payload: Mapping[str, Any], arguments: Mapping[str, Any]) -> dict[str, Any]:
         mount = self.client.invoke(
             WORKSPACE,
             "get",
@@ -153,20 +155,21 @@ class CodingSandboxRuntime:
             self.records[sandbox_id] = record
         return self._public(record)
 
-    def _write(
-        self, sandbox: dict[str, Any], arguments: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def _write(self, sandbox: dict[str, Any], arguments: Mapping[str, Any]) -> dict[str, Any]:
         data = str(arguments["content"]).encode("utf-8")
         if len(data) > _MAX_FILE:
             raise ValueError("sandbox file exceeds size limit")
         path = _jailed(sandbox["work"], arguments["path"], must_exist=False)
         _atomic(path, data)
         sandbox["updated_at"] = time.time()
-        return {"sandbox_id": sandbox["id"], "path": arguments["path"], "size": len(data), "host_modified": False}
+        return {
+            "sandbox_id": sandbox["id"],
+            "path": arguments["path"],
+            "size": len(data),
+            "host_modified": False,
+        }
 
-    def _patch(
-        self, sandbox: dict[str, Any], arguments: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def _patch(self, sandbox: dict[str, Any], arguments: Mapping[str, Any]) -> dict[str, Any]:
         path = _jailed(sandbox["work"], arguments["path"], must_exist=True)
         before = path.read_text(encoding="utf-8")
         old = str(arguments["old"])
@@ -175,11 +178,14 @@ class CodingSandboxRuntime:
         after = before.replace(old, str(arguments["new"]), 1)
         _atomic(path, after.encode("utf-8"))
         sandbox["updated_at"] = time.time()
-        return {"sandbox_id": sandbox["id"], "path": arguments["path"], "patched": True, "host_modified": False}
+        return {
+            "sandbox_id": sandbox["id"],
+            "path": arguments["path"],
+            "patched": True,
+            "host_modified": False,
+        }
 
-    def _execute(
-        self, sandbox: dict[str, Any], arguments: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def _execute(self, sandbox: dict[str, Any], arguments: Mapping[str, Any]) -> dict[str, Any]:
         image = str(arguments["image"])
         if not _IMAGE.fullmatch(image):
             raise ValueError("sandbox image must be digest pinned")
@@ -194,12 +200,32 @@ class CodingSandboxRuntime:
             raise RuntimeError("pinned sandbox image is not available locally")
         container_name = "rumi-coding-" + sandbox["id"].replace("-", "")[:20]
         command = [
-            "docker", "run", "--rm", "--name", container_name,
-            "--network", "none", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--pids-limit", "256",
-            "--memory", "1g", "--cpus", "2", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--mount", f"type=bind,src={sandbox['work']},dst=/workspace,rw",
-            "--workdir", "/workspace", image, *arguments["command"],
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            container_name,
+            "--network",
+            "none",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "256",
+            "--memory",
+            "1g",
+            "--cpus",
+            "2",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=64m",
+            "--mount",
+            f"type=bind,src={sandbox['work']},dst=/workspace,rw",
+            "--workdir",
+            "/workspace",
+            image,
+            *arguments["command"],
         ]
         try:
             completed = subprocess.run(
@@ -274,10 +300,14 @@ class CodingSandboxRuntime:
     @staticmethod
     def _public(value: Mapping[str, Any]) -> dict[str, Any]:
         return {
-            "id": value["id"], "workspace_id": value["workspace_id"],
-            "status": value["status"], "stage_audit": value["stage_audit"],
-            "created_at": value["created_at"], "updated_at": value["updated_at"],
-            "isolation": "docker_no_network", "host_downgrade": False,
+            "id": value["id"],
+            "workspace_id": value["workspace_id"],
+            "status": value["status"],
+            "stage_audit": value["stage_audit"],
+            "created_at": value["created_at"],
+            "updated_at": value["updated_at"],
+            "isolation": "docker_no_network",
+            "host_downgrade": False,
             "host_modified": False,
         }
 
@@ -288,15 +318,19 @@ _LOCK = threading.Lock()
 
 def create_sandbox_observe(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
     """Create sandbox observe operations."""
+
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         return _runtime(client, payload).observe(name, payload)
+
     return operation
 
 
 def create_sandbox_control(client: Any) -> Callable[[str, Mapping[str, Any]], Any]:
     """Create receipt-gated sandbox control operations."""
+
     def operation(name: str, payload: Mapping[str, Any]) -> Any:
         return _runtime(client, payload).control(name, payload)
+
     return operation
 
 
@@ -328,7 +362,11 @@ def _stage(source: Path, target: Path, include_paths: list[str]) -> dict[str, An
             if _secret(relative):
                 skipped += 1
                 continue
-            if info.st_size > _MAX_FILE or files + 1 > _MAX_FILES or total + info.st_size > _MAX_BYTES:
+            if (
+                info.st_size > _MAX_FILE
+                or files + 1 > _MAX_FILES
+                or total + info.st_size > _MAX_BYTES
+            ):
                 raise ValueError("sandbox staging limit exceeded")
             destination = target / relative
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -354,7 +392,11 @@ def _jailed(root: Path, value: Any, *, must_exist: bool) -> Path:
     if not str(raw) or raw.is_absolute() or ".." in raw.parts or _secret(raw):
         raise PermissionError("sandbox path is restricted")
     candidate = root / raw
-    resolved = candidate.resolve(strict=True) if must_exist else candidate.parent.resolve(strict=True) / candidate.name
+    resolved = (
+        candidate.resolve(strict=True)
+        if must_exist
+        else candidate.parent.resolve(strict=True) / candidate.name
+    )
     try:
         resolved.relative_to(root)
     except ValueError as exc:
@@ -376,8 +418,20 @@ def _atomic(path: Path, data: bytes) -> None:
 
 
 def _changes(base: Path, work: Path) -> list[dict[str, Any]]:
-    paths = {path.relative_to(base).as_posix() for path in base.rglob("*") if path.is_file()}
-    paths.update(path.relative_to(work).as_posix() for path in work.rglob("*") if path.is_file())
+    paths: set[str] = set()
+    for root in (base, work):
+        files = total = 0
+        for path in root.rglob("*"):
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                raise ValueError("sandbox diff contains an unsupported symlink")
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            files += 1
+            total += info.st_size
+            if info.st_size > _MAX_FILE or files > _MAX_FILES or total > _MAX_BYTES:
+                raise ValueError("sandbox diff limit exceeded")
+            paths.add(path.relative_to(root).as_posix())
     result = []
     for relative in sorted(paths):
         before = base / relative
@@ -394,7 +448,9 @@ def _hash(path: Path) -> str:
 
 
 def _output(value: bytes) -> str:
-    return value[:_MAX_OUTPUT].decode("utf-8", errors="replace") + ("\n[truncated]\n" if len(value) > _MAX_OUTPUT else "")
+    return value[:_MAX_OUTPUT].decode("utf-8", errors="replace") + (
+        "\n[truncated]\n" if len(value) > _MAX_OUTPUT else ""
+    )
 
 
 def _string_list(value: Any) -> list[str]:
@@ -403,4 +459,3 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         raise ValueError("sandbox include_paths must be a list")
     return [str(item) for item in value]
-

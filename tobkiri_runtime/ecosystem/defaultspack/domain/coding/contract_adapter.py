@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
@@ -28,6 +28,11 @@ GIT_READ = "rumi.service.git.read.v1"
 GIT_WRITE = "rumi.service.git.write.v1"
 GIT_PUBLISH = "rumi.service.git.publish.v1"
 HOST_AUTHORITY = "rumi.service.host.authorize.v1"
+
+MutationGuard = Callable[
+    [str, Mapping[str, Any], Mapping[str, Any] | None, str],
+    Mapping[str, Any] | None,
+]
 
 
 def invoke_coding_contract(
@@ -71,23 +76,49 @@ def authorize_legacy_coding_operation(
     input_data: Mapping[str, Any],
     context: Mapping[str, Any] | None,
     selected_workspace_id: str,
+    mutation_guard: MutationGuard,
     allow_without_approval: bool = False,
 ) -> dict[str, Any]:
-    """Consume one legacy approval and mint one exact service receipt."""
+    """Validate authority, gate the mutation, then mint one service receipt."""
 
     request = dict(input_data)
     internal = tool_server_approval_context_is_internal(
         dict(context) if isinstance(context, Mapping) else None
     )
     verification = None
+    token = ""
+    arguments_hash = ""
     if not internal and not allow_without_approval:
         token = _approval_token(request)
         if not token:
             return {"authorized": False, "reason": "approval_required"}
+        arguments_hash = approval.hash_arguments(request)
         verification = approval.verify_execution_token(
             token,
             legacy_operation,
-            approval.hash_arguments(request),
+            arguments_hash,
+            consume=False,
+        )
+        if not verification.valid:
+            return {
+                "authorized": False,
+                "reason": "approval_invalid",
+                "code": verification.code or "APPROVAL_INVALID",
+                "message": verification.message or "approval token is invalid",
+            }
+    guard_denial = mutation_guard(
+        selected_workspace_id,
+        request,
+        context,
+        legacy_operation,
+    )
+    if guard_denial is not None:
+        return {"authorized": False, **dict(guard_denial)}
+    if token:
+        verification = approval.verify_execution_token(
+            token,
+            legacy_operation,
+            arguments_hash,
             consume=True,
         )
         if not verification.valid:

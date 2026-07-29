@@ -100,7 +100,10 @@ export function hasPendingPanelBootstrapCode(href = window.location.href): boole
   return new URL(href).searchParams.has('code');
 }
 
-async function exchangePanelBootstrapCode(code: string): Promise<void> {
+async function exchangePanelBootstrapCode(
+  code: string,
+  currentRequestSignal?: AbortSignal,
+): Promise<void> {
   const url = new URL(window.location.href);
   if (!code) {
     return;
@@ -134,9 +137,9 @@ async function exchangePanelBootstrapCode(code: string): Promise<void> {
   }
 
   setStoredPanelCsrfToken(envelope.data.csrf_token);
-  // The exchange can happen inside an already coordinated foreground GET.
-  // Clear cached/prefetched data without making that recovered request retry a third time.
-  getRequestCoordinator.invalidate({preserveForeground: true});
+  // The current request will refetch only after this exchange completes. Keep
+  // that exact request while invalidating all other stale foreground reads.
+  getRequestCoordinator.invalidate({preserveSignal: currentRequestSignal});
   url.searchParams.delete('code');
   window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
 }
@@ -271,14 +274,14 @@ function isRecoverablePanelAuthError(status: number, errorMessage: string): bool
   return status === 401 || /Unauthorized|Invalid or expired code/i.test(errorMessage);
 }
 
-async function recoverExpiredPanelSession(): Promise<boolean> {
+async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): Promise<boolean> {
   if (panelSessionRecoveryPromise) {
     return panelSessionRecoveryPromise;
   }
 
   panelSessionRecoveryPromise = (async () => {
     if (hasPendingPanelBootstrapCode()) {
-      await bootstrapPanelSession();
+      await bootstrapPanelSession(currentRequestSignal);
       return true;
     }
 
@@ -287,7 +290,7 @@ async function recoverExpiredPanelSession(): Promise<boolean> {
       return false;
     }
 
-    await exchangePanelBootstrapCode(code);
+    await exchangePanelBootstrapCode(code, currentRequestSignal);
     return true;
   })();
 
@@ -298,7 +301,7 @@ async function recoverExpiredPanelSession(): Promise<boolean> {
   }
 }
 
-export async function bootstrapPanelSession(): Promise<void> {
+export async function bootstrapPanelSession(currentRequestSignal?: AbortSignal): Promise<void> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
   if (!code) {
@@ -310,7 +313,7 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 
   panelBootstrapCodeInFlight = code;
-  panelBootstrapPromise = exchangePanelBootstrapCode(code);
+  panelBootstrapPromise = exchangePanelBootstrapCode(code, currentRequestSignal);
 
   try {
     await panelBootstrapPromise;
@@ -320,7 +323,11 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 }
 
-async function ensurePanelSessionForRequest(path: string, method: string): Promise<void> {
+async function ensurePanelSessionForRequest(
+  path: string,
+  method: string,
+  currentRequestSignal?: AbortSignal,
+): Promise<void> {
   if (!isPanelSessionApiPath(path)) {
     return;
   }
@@ -330,7 +337,7 @@ async function ensurePanelSessionForRequest(path: string, method: string): Promi
   }
 
   if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
-    await bootstrapPanelSession();
+    await bootstrapPanelSession(currentRequestSignal);
   }
 }
 
@@ -359,7 +366,7 @@ export async function apiFetch<T>(
     allowPanelRecovery = true,
     signal?: AbortSignal,
   ): Promise<T> => {
-    await ensurePanelSessionForRequest(path, method);
+    await ensurePanelSessionForRequest(path, method, signal);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -399,7 +406,7 @@ export async function apiFetch<T>(
         allowPanelRecovery &&
         isPanelSessionApiPath(path) &&
         isRecoverablePanelAuthError(response.status, errorMessage) &&
-        await recoverExpiredPanelSession()
+        await recoverExpiredPanelSession(signal)
       ) {
         return fetchRequest(false, signal);
       }
@@ -415,7 +422,7 @@ export async function apiFetch<T>(
         allowPanelRecovery &&
         isPanelSessionApiPath(path) &&
         isRecoverablePanelAuthError(response.status, errorMessage) &&
-        await recoverExpiredPanelSession()
+        await recoverExpiredPanelSession(signal)
       ) {
         return fetchRequest(false, signal);
       }
