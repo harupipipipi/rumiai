@@ -24,6 +24,10 @@ const DEFAULTSPACK_RESTART_INITIAL_BACKOFF: Duration = Duration::from_millis(250
 const DEFAULTSPACK_RESTART_MAX_BACKOFF: Duration = Duration::from_secs(5);
 const DEFAULTSPACK_STABLE_RUN_WINDOW: Duration = Duration::from_secs(30);
 const DEFAULTSPACK_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const SYSTEM_KILL: &str = "/bin/kill";
+#[cfg(all(test, unix))]
+const SYSTEM_SHELL: &str = "/bin/sh";
 
 /// Tracks the Defaultspack child started by this Launcher instance.
 pub(crate) struct DefaultspackManager {
@@ -505,8 +509,10 @@ fn stop_non_unix_child(child: &mut Child) -> Result<()> {
 #[cfg(unix)]
 fn send_process_group_signal(pid: u32, signal: &str) -> bool {
     let process_group = format!("-{pid}");
-    let sent = match process_utils::command("kill")
-        .args([signal, &process_group])
+    let sent = match process_utils::command(SYSTEM_KILL)
+        // `--` is required by GNU kill so a negative process-group id is not
+        // parsed as another option or signal number.
+        .args([signal, "--", &process_group])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -616,7 +622,7 @@ mod tests {
         }
 
         #[cfg(not(target_os = "linux"))]
-        process_utils::command("kill")
+        process_utils::command(SYSTEM_KILL)
             .args(["-0", &process_id.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -708,7 +714,7 @@ mod tests {
             "sleep 30 & child=$!; printf '%s' \"$child\" > {}; exit 0",
             pid_file.display()
         );
-        let mut command = process_utils::command("sh");
+        let mut command = process_utils::command(SYSTEM_SHELL);
         command.args(["-c", &script]);
         crate::dock_registration::configure_defaultspack_process_group(&mut command);
         let child = command.spawn().unwrap();
@@ -781,7 +787,7 @@ mod tests {
             "sleep 30 & child=$!; printf '%s' \"$child\" > {}; exit 0",
             pid_file.display()
         );
-        let mut command = process_utils::command("sh");
+        let mut command = process_utils::command(SYSTEM_SHELL);
         command.args(["-c", &script]);
         crate::dock_registration::configure_defaultspack_process_group(&mut command);
         let mut child = command.spawn().unwrap();
