@@ -595,7 +595,7 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
     }
     try:
         _broker_request("POST", "/api/host/debug/session/request", request)
-        deadline = time.monotonic() + 5 * 60
+        deadline = time.monotonic() + 10 * 60
         while time.monotonic() < deadline:
             status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
             if status.get("state") == "armed" and status.get("session_id") == session_id:

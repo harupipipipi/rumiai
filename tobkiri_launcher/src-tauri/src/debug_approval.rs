@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-const REQUEST_TTL: Duration = Duration::from_secs(5 * 60);
+const REQUEST_TTL: Duration = Duration::from_secs(10 * 60);
 const ACTIVE_TTL: Duration = Duration::from_secs(30 * 60);
 const OPERATOR_TTL_SECONDS: u64 = 120;
 

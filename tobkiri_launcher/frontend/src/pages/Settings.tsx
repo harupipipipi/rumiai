@@ -136,7 +136,11 @@ export function Settings() {
         setDebugApproval(await armDebugApproval());
         addToast('Developer Debug Approval is armed for the exact requested CLI session.', 'success');
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to update Developer Debug Approval';
+        const message = error instanceof Error
+          ? error.message
+          : typeof error === 'string' && error.trim()
+            ? error
+            : 'Failed to update Developer Debug Approval';
         addToast(message, 'error');
       } finally {
         setDebugApprovalBusy(false);
@@ -149,7 +153,11 @@ export function Settings() {
       setDebugApproval(await revokeDebugApproval());
       addToast('Developer Debug Approval was revoked.', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update Developer Debug Approval';
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === 'string' && error.trim()
+          ? error
+          : 'Failed to update Developer Debug Approval';
       addToast(message, 'error');
     } finally {
       setDebugApprovalBusy(false);
