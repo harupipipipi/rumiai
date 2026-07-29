@@ -172,6 +172,45 @@ def test_generated_tauri_runtime_is_not_scanned(tmp_path: Path) -> None:
     assert scanner.scan_repository(tmp_path) == []
 
 
+def test_dependency_trees_are_excluded_without_hiding_real_sources(
+    tmp_path: Path,
+) -> None:
+    scanner = _scanner()
+    pack_a = _pack(tmp_path, "pack_a")
+    _pack(tmp_path, "pack_b")
+    dependency_source = (
+        tmp_path
+        / "tobkiri_runtime"
+        / ".venv"
+        / "lib"
+        / "python3.13"
+        / "site-packages"
+        / "mypy"
+        / "consumer.py"
+    )
+    dependency_source.parent.mkdir(parents=True)
+    dependency_source.write_text(
+        "from ecosystem.pack_b.private import value\n",
+        encoding="utf-8",
+    )
+    real_source = pack_a / "node_modules_helper" / "consumer.py"
+    real_source.parent.mkdir()
+    real_source.write_text(
+        "from ecosystem.pack_b.private import value\n",
+        encoding="utf-8",
+    )
+
+    cross_pack_edges = [
+        item
+        for item in scanner.scan_repository(tmp_path)
+        if item.rule == "cross_pack_import"
+    ]
+
+    assert [item.path for item in cross_pack_edges] == [
+        "tobkiri_runtime/ecosystem/pack_a/node_modules_helper/consumer.py"
+    ]
+
+
 def _baseline_exception(
     *,
     line: int,

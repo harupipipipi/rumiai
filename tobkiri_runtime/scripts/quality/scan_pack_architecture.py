@@ -15,6 +15,29 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".dart"}
+IGNORED_SOURCE_DIRECTORY_NAMES = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".next",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "assets",
+        "build",
+        "dist",
+        "node_modules",
+        "site-packages",
+        "target",
+        "venv",
+    }
+)
+IGNORED_SOURCE_DIRECTORY_PATHS = (
+    Path("tobkiri_launcher") / "src-tauri" / "gen",
+)
 IMPORT_RE = re.compile(
     r"(?:import|export)\s+(?:[^'\"]+?\s+from\s+)?['\"]([^'\"]+)['\"]|"
     r"import\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"
@@ -255,26 +278,29 @@ def scan_repository(root: Path) -> list[Violation]:
 
 
 def _source_files(root: Path) -> Iterable[Path]:
-    ignored = {
-        ".git",
-        "node_modules",
-        "target",
-        "dist",
-        "build",
-        "assets",
-        "__pycache__",
-    }
-    generated_runtime = root / "tobkiri_launcher" / "src-tauri" / "gen"
     for path in root.rglob("*"):
-        if path.suffix not in SOURCE_SUFFIXES or any(
-            part in ignored for part in path.parts
-        ):
+        if path.suffix not in SOURCE_SUFFIXES:
             continue
-        if path.is_relative_to(generated_runtime):
+        if _is_ignored_source_path(root, path):
             continue
         if "/tests/" in path.as_posix() or "/fixtures/" in path.as_posix():
             continue
         yield path
+
+
+def _is_ignored_source_path(root: Path, path: Path) -> bool:
+    """Return whether a source belongs to an explicit dependency/generated tree."""
+    relative = path.relative_to(root)
+    directory_parts = relative.parts[:-1]
+    if any(
+        part in IGNORED_SOURCE_DIRECTORY_NAMES
+        for part in directory_parts
+    ):
+        return True
+    return any(
+        relative.is_relative_to(ignored_path)
+        for ignored_path in IGNORED_SOURCE_DIRECTORY_PATHS
+    )
 
 
 def _scan_manifest_graph(
