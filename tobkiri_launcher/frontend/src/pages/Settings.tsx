@@ -75,6 +75,7 @@ export function Settings() {
   const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
   const [debugApproval, setDebugApproval] = useState<DebugApprovalStatus | null>(null);
   const [debugApprovalBusy, setDebugApprovalBusy] = useState(false);
+  const [debugApprovalConfirmationOpen, setDebugApprovalConfirmationOpen] = useState(false);
   const profileTabRef = useRef<HTMLButtonElement>(null);
   const versionTabRef = useRef<HTMLButtonElement>(null);
   const desktopShellAvailable = isDesktopShellAvailable();
@@ -130,19 +131,30 @@ export function Settings() {
   };
 
   const handleDebugApprovalToggle = async (enabled: boolean) => {
+    if (enabled) {
+      setDebugApprovalConfirmationOpen(true);
+      return;
+    }
+
     setDebugApprovalBusy(true);
     try {
-      if (enabled) {
-        const confirmed = window.confirm(
-          'Developer Debug Approvalを有効にすると、最初の1つのCLI debug session中に、ターミナル上のAIがpending操作を個別にapprove/denyできます。自動一括承認ではなく、各操作はexact digestに束縛されます。有効にしますか？',
-        );
-        if (!confirmed) return;
-        setDebugApproval(await armDebugApproval());
-        addToast('Developer Debug Approval is armed for one CLI session.', 'success');
-      } else {
-        setDebugApproval(await revokeDebugApproval());
-        addToast('Developer Debug Approval was revoked.', 'success');
-      }
+      setDebugApproval(await revokeDebugApproval());
+      setDebugApprovalConfirmationOpen(false);
+      addToast('Developer Debug Approval was revoked.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update Developer Debug Approval';
+      addToast(message, 'error');
+    } finally {
+      setDebugApprovalBusy(false);
+    }
+  };
+
+  const confirmDebugApproval = async () => {
+    setDebugApprovalBusy(true);
+    try {
+      setDebugApproval(await armDebugApproval());
+      setDebugApprovalConfirmationOpen(false);
+      addToast('Developer Debug Approval is armed for one CLI session.', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update Developer Debug Approval';
       addToast(message, 'error');
@@ -696,6 +708,37 @@ export function Settings() {
                   <div className="rounded-lg border border-border bg-bg-main/50 p-4 text-xs leading-5 text-text-muted">
                     Launcher restart, Revoke now, session stop, expiry, or any workspace/run mismatch immediately disables delegated approval. The AI must still approve or deny every pending request separately.
                   </div>
+                  {debugApprovalConfirmationOpen && (
+                    <div
+                      role="alertdialog"
+                      aria-labelledby="debug-approval-confirmation-title"
+                      aria-describedby="debug-approval-confirmation-description"
+                      className="space-y-3 rounded-lg border border-warning/40 bg-warning/10 p-4"
+                    >
+                      <p id="debug-approval-confirmation-title" className="text-sm font-medium text-text-main">
+                        Enable Developer Debug Approval?
+                      </p>
+                      <p id="debug-approval-confirmation-description" className="text-xs leading-5 text-text-muted">
+                        最初の1つのCLI debug session中に、ターミナル上のAIがpending操作を個別にapprove/denyできます。自動一括承認ではなく、各操作はexact digestに束縛されます。
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => void confirmDebugApproval()}
+                          disabled={debugApprovalBusy}
+                          loading={debugApprovalBusy}
+                        >
+                          Enable for one CLI session
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setDebugApprovalConfirmationOpen(false)}
+                          disabled={debugApprovalBusy}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {debugApproval?.state === 'armed' && (
                     <p className="text-sm text-text-main">
                       Waiting for the first CLI session · {debugApproval.armed_remaining_seconds ?? 0}s remaining

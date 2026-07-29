@@ -789,7 +789,7 @@ def test_load_connection_rejects_mismatched_or_unauthenticated_broker(tmp_path, 
                 "port": 8770,
                 "url": "http://127.0.0.1:8770",
                 "token": "secret",
-                "permission_subject": "Rumi Viewer",
+                "permission_subject": "Tobkiri Launcher",
                 "pid": 12,
                 "created_at": 1,
             }
@@ -812,6 +812,18 @@ def test_load_connection_rejects_mismatched_or_unauthenticated_broker(tmp_path, 
     _, unauthenticated = debug.load_connection(path, expected_port=8770)
     assert unauthenticated["ok"] is False
     assert calls[1][1] == "secret"
+
+
+def test_defaultspack_python_prefers_launcher_managed_venv(tmp_path, monkeypatch):
+    app_data = tmp_path / "dev.tobkiri.launcher"
+    connection_path = app_data / "user_data" / "host_broker" / "connection.json"
+    launcher_python = app_data / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python3")
+    launcher_python.parent.mkdir(parents=True)
+    launcher_python.write_text("", encoding="utf-8")
+    launcher_python.chmod(0o700)
+    monkeypatch.setattr(debug, "default_connection_path", lambda: connection_path)
+
+    assert debug.defaultspack_python_executable() == launcher_python.absolute()
 
 
 def test_viewer_smoke_composes_existing_launch_and_smoke_and_stops_only_owned_processes(

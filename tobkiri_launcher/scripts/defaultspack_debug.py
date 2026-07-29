@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch and inspect Defaultspack with the Rumi Viewer host broker wired in.
+"""Launch and inspect Defaultspack with the Tobkiri Launcher host broker wired in.
 
 This is intentionally a local debugging harness for agents and developers. It
 prints redacted status only; reusable local tokens stay in process env/files.
@@ -143,6 +143,7 @@ DEFAULT_MAX_TRANSIENT_RESUMES = 2
 DEFAULT_VIEWER_BROKER_PORT = 8770
 DEFAULT_DEFAULTSPACK_HTTP_PORT = 8766
 DEFAULT_KERNEL_PORT = 8765
+HOST_BROKER_PERMISSION_SUBJECTS = frozenset({"Tobkiri Launcher", "Rumi Viewer"})
 VIEWER_DEV_COMMAND = ("cargo", "tauri", "dev")
 DEFAULT_VIEWER_MIN_FREE_MB = 4096
 WRY_DETACHED_PANIC = "wkwebview/mod.rs:1349"
@@ -151,6 +152,7 @@ VIEWER_DEBUG_USER_DATA_ROOT_ENV = "RUMI_VIEWER_DEBUG_USER_DATA_ROOT"
 VIEWER_TRUSTED_CHAT_STORE_ENV = "RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH"
 VIEWER_BROKER_CONNECTION_ENV = "RUMI_VIEWER_HOST_BROKER_CONNECTION"
 VIEWER_BROKER_INSTANCE_NONCE_ENV = "RUMI_VIEWER_BROKER_INSTANCE_NONCE"
+DEBUG_PYTHON_ENV = "TOBKIRI_DEBUG_PYTHON"
 DEFAULTSPACK_DEBUG_ISOLATION_ENV = "RUMI_DEFAULTSPACK_DEBUG_ISOLATION"
 DEFAULTSPACK_DEBUG_RUN_ID_ENV = "RUMI_DEFAULTSPACK_RUN_ID"
 DEFAULTSPACK_DEBUG_LAUNCH_NONCE_ENV = "RUMI_DEFAULTSPACK_LAUNCH_NONCE"
@@ -1548,6 +1550,27 @@ def default_connection_path() -> Path:
     )
 
 
+def defaultspack_python_executable() -> Path:
+    configured = process_environment().get(DEBUG_PYTHON_ENV, "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.absolute()
+        raise SmokeRunnerError(f"{DEBUG_PYTHON_ENV} is not an executable file")
+
+    app_data_dir = default_connection_path().parent.parent.parent
+    launcher_python = (
+        app_data_dir / "venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else app_data_dir / "venv" / "bin" / "python3"
+    )
+    if launcher_python.is_file() and os.access(launcher_python, os.X_OK):
+        # Keep the venv entrypoint path intact. Resolving its symlink to the
+        # base interpreter discards pyvenv.cfg discovery and its site-packages.
+        return launcher_python.absolute()
+    return Path(sys.executable).absolute()
+
+
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -1811,7 +1834,8 @@ def load_connection(
         or not 1 <= port <= 65535
         or url != expected_url
         or (expected_port is not None and port != expected_port)
-        or str(connection.get("permission_subject") or "") != "Rumi Viewer"
+        or str(connection.get("permission_subject") or "")
+        not in HOST_BROKER_PERMISSION_SUBJECTS
         or pid is None
         or pid <= 0
         or created_at is None
@@ -6851,7 +6875,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     command = str(desktop_app.get("command") or "python defaultspack/desktop_app.py")
     argv = shlex.split(command)
     if argv and argv[0] == "python":
-        argv[0] = sys.executable
+        argv[0] = str(defaultspack_python_executable())
 
     process = subprocess.Popen(
         argv,
