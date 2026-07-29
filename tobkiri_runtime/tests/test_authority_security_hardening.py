@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.pack_artifact_integrity import verify_declared_artifacts
+from core_runtime.pack_artifact_integrity import (
+    verify_declared_artifacts,
+    write_host_install_record,
+)
 from core_runtime.resolved_profile import _manifest_contract_metadata
 from ecosystem.rumi_agent_runtime_service_pack.runtime import runtime
 from ecosystem.rumi_agent_state_store_pack.runtime.store import (
@@ -39,24 +42,19 @@ def test_unsigned_nonbuiltin_requires_explicit_host_developer_record(
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
     trust_store = tmp_path / "trust.json"
-    trust_store.write_text(
-        json.dumps(
-            {
-                "install_records": {
-                    "third_party": {
-                        "signature_required": False,
-                        "developer_mode": True,
-                        "publisher_id": "",
-                        "key_id": "",
-                        "installed_version": "1.0.0",
-                        "signed_manifest_path": "",
-                        "contract_versions": {},
-                        "requested_capabilities": [],
-                    }
-                },
-                "publishers": {},
-            }
-        )
+    write_host_install_record(
+        trust_store,
+        pack_id="third_party",
+        record={
+            "signature_required": False,
+            "developer_mode": True,
+            "publisher_id": "",
+            "key_id": "",
+            "installed_version": "1.0.0",
+            "signed_manifest_path": "",
+            "contract_versions": {},
+            "requested_capabilities": [],
+        },
     )
     monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store))
     monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "1")

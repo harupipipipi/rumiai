@@ -321,16 +321,22 @@ def write_host_install_record(
     developer_exception = record.get("developer_mode") is True
     if record.get("signature_required") is not True and not developer_exception:
         raise ValueError("installed publisher Pack signatures must be required")
-    if any(
-        not str(record.get(field) or "").strip()
-        for field in (
+    identity_fields = (
+        ("installed_version",)
+        if developer_exception
+        else (
             "publisher_id",
             "key_id",
             "installed_version",
             "signed_manifest_path",
         )
-    ):
+    )
+    if any(not str(record.get(field) or "").strip() for field in identity_fields):
         raise ValueError("Host install record identity fields are required")
+    if developer_exception and str(record.get("signed_manifest_path") or "").strip():
+        raise ValueError(
+            "developer-mode unsigned install record must not declare a signed manifest"
+        )
     unresolved_target = trust_store_path.expanduser()
     if unresolved_target.is_symlink():
         raise ValueError("publisher trust store must not be a symbolic link")
