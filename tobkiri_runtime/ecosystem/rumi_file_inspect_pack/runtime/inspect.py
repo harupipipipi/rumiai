@@ -15,6 +15,34 @@ from typing import Any, Callable, Mapping
 WORKSPACE = "rumi.resource.workspace.v1"
 _MAX_READ_BYTES = 4 * 1024 * 1024
 _MAX_RESULTS = 10_000
+_PROTECTED_PARTS = frozenset({".git", ".rumi_snapshots"})
+_SECRET_PARTS = frozenset({
+    ".aws",
+    ".azure",
+    ".docker",
+    ".gnupg",
+    ".kube",
+    ".ssh",
+    "secrets",
+})
+_SECRET_NAMES = frozenset({
+    ".dockercfg",
+    ".git-credentials",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "credentials",
+    "credentials.json",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+    "kubeconfig",
+    "token",
+    "tokens.json",
+})
+_SECRET_SUFFIXES = (".key", ".pem", ".p12", ".pfx", ".crt")
+_SAFE_ENV_SUFFIXES = (".example", ".sample", ".template")
 
 
 class FileInspectService:
@@ -239,13 +267,18 @@ class FileInspectService:
                 continue
             if not _within(root, resolved):
                 continue
+            relative = resolved.relative_to(root)
+            try:
+                _deny_restricted_path(relative)
+            except PermissionError:
+                continue
             try:
                 stat = resolved.stat()
             except OSError:
                 continue
             items.append(
                 {
-                    "path": resolved.relative_to(root).as_posix(),
+                    "path": relative.as_posix(),
                     "name": resolved.name,
                     "is_file": resolved.is_file(),
                     "is_dir": resolved.is_dir(),
@@ -268,6 +301,10 @@ class FileInspectService:
             if not _within(root, resolved):
                 continue
             relative = resolved.relative_to(root).as_posix()
+            try:
+                _deny_restricted_path(Path(relative))
+            except PermissionError:
+                continue
             if fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(resolved.name, pattern):
                 matches.append(relative)
             if len(matches) >= _MAX_RESULTS:
@@ -291,6 +328,7 @@ def _jailed(root: Path, value: Any, *, must_exist: bool) -> Path:
     raw = Path(str(value or "").strip() or ".")
     if raw.is_absolute():
         raise PermissionError("absolute paths are not accepted")
+    _deny_restricted_path(raw)
     candidate = root / raw
     if must_exist:
         resolved = candidate.resolve(strict=True)
@@ -300,6 +338,31 @@ def _jailed(root: Path, value: Any, *, must_exist: bool) -> Path:
     if not _within(root, resolved):
         raise PermissionError("path escapes the workspace mount")
     return resolved
+
+
+def _deny_restricted_path(path: Path) -> None:
+    parts = tuple(
+        part.casefold()
+        for part in path.parts
+        if part not in {"", "."}
+    )
+    if any(part in _PROTECTED_PARTS for part in parts):
+        raise PermissionError("protected workspace paths are not readable")
+    if any(part in _SECRET_PARTS for part in parts):
+        raise PermissionError("secret workspace directories are not readable")
+    if not parts:
+        return
+    name = parts[-1]
+    is_env = name == ".env" or (
+        name.startswith(".env.")
+        and not name.endswith(_SAFE_ENV_SUFFIXES)
+    )
+    if (
+        is_env
+        or name in _SECRET_NAMES
+        or name.endswith(_SECRET_SUFFIXES)
+    ):
+        raise PermissionError("secret workspace files are not readable")
 
 
 def _within(root: Path, candidate: Path) -> bool:

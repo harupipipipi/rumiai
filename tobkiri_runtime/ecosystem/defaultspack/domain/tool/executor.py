@@ -1640,9 +1640,11 @@ class ToolExecutor:
 
             path = arguments.get("path", "")
             call_context = context if isinstance(context, dict) else {}
+            workspace_id = str(call_context.get("workspace_id") or "").strip()
             result = file_read_run(
                 {
                     "path": path,
+                    "workspace_id": workspace_id,
                     "start_line": arguments.get("start_line"),
                     "end_line": arguments.get("end_line"),
                     "max_chars": arguments.get("max_chars") or arguments.get("max_output_chars"),
