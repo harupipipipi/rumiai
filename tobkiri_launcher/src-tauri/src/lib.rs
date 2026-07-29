@@ -287,20 +287,33 @@ fn validate_debug_approval_window(window: &tauri::WebviewWindow) -> Result<(), S
 
 #[tauri::command]
 async fn arm_debug_approval(
+    duration: String,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Arc<DebugApprovalManager>>,
 ) -> Result<DebugApprovalStatus, String> {
     validate_debug_approval_window(&window)?;
     let pending = state.status();
+    if matches!(pending.state.as_str(), "armed" | "active") {
+        return state.arm(&duration);
+    }
     if pending.state != "pending" {
         return Err("start a CLI debug session request before enabling".into());
     }
+    let duration_label = match duration.as_str() {
+        "1h" => "1時間",
+        "1d" => "1日",
+        "1w" => "1週間",
+        "1mo" => "1か月",
+        "permanent" => "無期限（手動OFF・Launcher終了・guardian終了まで）",
+        _ => return Err("invalid debug approval duration".into()),
+    };
     let process_id = pending
         .process_id
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown".into());
     let message = format!(
-        "この1つのCLIデバッグセッションだけに個別承認を委任します。\n\nWorkspace: {}\nPack / Profile: {} / {}\nRun: {}\nGuardian PID: {}\n\n承認後も各操作は個別のdigestに束縛されます。",
+        "この1つのCLIデバッグセッションだけに個別承認を委任します。\n\n利用期間: {}\nWorkspace: {}\nPack / Profile: {} / {}\nRun: {}\nGuardian PID: {}\n\n承認後も各操作は個別のdigestに束縛されます。",
+        duration_label,
         pending.workspace.as_deref().unwrap_or("unknown"),
         pending.pack_id.as_deref().unwrap_or("unknown"),
         pending.profile_id.as_deref().unwrap_or("unknown"),
@@ -313,14 +326,14 @@ async fn arm_debug_approval(
         .title("Developer Debug Approvalを有効にしますか？")
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "このセッションだけ有効化".into(),
+            format!("{duration_label}だけ有効化"),
             "キャンセル".into(),
         ))
         .blocking_show();
     if !confirmed {
         return Err("native confirmation was cancelled".into());
     }
-    state.arm()
+    state.arm(&duration)
 }
 
 #[tauri::command]

@@ -8,7 +8,6 @@ import json
 import os
 import secrets
 import stat
-import subprocess
 import sys
 import time
 import urllib.error
@@ -568,21 +567,15 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
     port = int(manifest.get("port") or 0)
     if not token_file.is_file() or not (1 <= port <= 65535):
         raise CliError("debug launch manifest is incomplete")
+    process_id = int(manifest.get("pid") or 0)
+    if process_id <= 0:
+        raise CliError("debug launch manifest has no owned guardian process")
+    try:
+        os.kill(process_id, 0)
+    except (OSError, ValueError) as exc:
+        raise CliError("owned Defaultspack guardian process is not running") from exc
     _write_session(None)
     session_id = "dbg-" + uuid.uuid4().hex
-    guard = subprocess.Popen(
-        [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "__debug-session-guard",
-            session_id,
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    process_id = guard.pid
     claim_secret = secrets.token_urlsafe(48)
     request = {
         "session_id": session_id,
@@ -593,26 +586,21 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
         "process_id": process_id,
         "claim_secret": claim_secret,
     }
-    try:
-        _broker_request("POST", "/api/host/debug/session/request", request)
-        deadline = time.monotonic() + 10 * 60
-        while time.monotonic() < deadline:
-            status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
-            if status.get("state") == "armed" and status.get("session_id") == session_id:
-                break
-            if status.get("state") == "disabled":
-                raise CliError("Launcher rejected or revoked the pending debug session")
-            time.sleep(0.5)
-        else:
-            raise CliError("timed out waiting for native Launcher confirmation")
-        result = _broker_request("POST", "/api/host/debug/session/start", request)
-    except Exception:
-        guard.terminate()
-        raise
+    _broker_request("POST", "/api/host/debug/session/request", request)
+    deadline = time.monotonic() + 60 * 60
+    while time.monotonic() < deadline:
+        status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
+        if status.get("state") == "armed" and status.get("session_id") == session_id:
+            break
+        if status.get("state") == "disabled":
+            raise CliError("Launcher rejected or revoked the pending debug session")
+        time.sleep(0.5)
+    else:
+        raise CliError("timed out waiting for native Launcher confirmation")
+    result = _broker_request("POST", "/api/host/debug/session/start", request)
     status = result.get("status") if isinstance(result.get("status"), dict) else {}
     session_secret = str(result.get("session_secret") or "")
     if status.get("state") != "active" or not session_secret:
-        guard.terminate()
         raise CliError("Launcher did not return an active session credential")
     _write_session(
         {
@@ -623,26 +611,11 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
             "defaultspack_url": f"http://127.0.0.1:{port}",
             "api_token_file": str(token_file.resolve()),
             "started_at": int(time.time()),
+            "expires_at": status.get("expires_at"),
+            "duration": status.get("duration"),
         }
     )
     return result
-
-
-def _session_guard(session_id: str) -> int:
-    deadline = time.monotonic() + 31 * 60
-    initial_grace = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        try:
-            session = _safe_json_file(_session_path())
-        except CliError:
-            if time.monotonic() >= initial_grace:
-                return 0
-            time.sleep(0.25)
-            continue
-        if str(session.get("session_id") or "") != session_id:
-            return 0
-        time.sleep(1)
-    return 0
 
 
 def _session_stop(_args: argparse.Namespace) -> dict[str, Any]:
@@ -800,8 +773,6 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if len(raw_argv) == 2 and raw_argv[0] == "__debug-session-guard":
-        return _session_guard(raw_argv[1])
     try:
         args = _parser().parse_args(raw_argv)
         result = args.handler(args)

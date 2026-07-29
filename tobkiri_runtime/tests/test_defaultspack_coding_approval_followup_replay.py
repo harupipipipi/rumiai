@@ -117,6 +117,26 @@ def test_approval_required_strips_token_and_transport_keys_from_stored_args():
     assert request["details"]["arguments"] == {"message": "fix typo"}
 
 
+def test_coding_approval_infers_replay_tool_and_conversation():
+    from blocks.coding._approval import approval_required
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    payload = approval_required(
+        "file.write",
+        "high",
+        args={
+            "path": "debug-e2e.txt",
+            "content": "approved",
+            "conversation_id": "debug-e2e-conversation",
+        },
+    )
+    request = approval.get_approval_request(payload["approval_request_id"])
+    assert request["details"]["tool_name"] == "coding_file_write"
+    assert request["details"]["function_id"] == "coding_file_write"
+    assert request["details"]["conversation_id"] == "debug-e2e-conversation"
+
+
 def test_executor_approval_required_tool_response_embeds_replayable_args():
     """Generic executor approval requests must also persist replayable args.
 

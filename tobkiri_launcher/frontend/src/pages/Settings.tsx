@@ -12,6 +12,7 @@ import {
 } from '@/src/lib/api';
 import type {
   BackgroundControlStatus,
+  DebugApprovalDuration,
   DebugApprovalStatus,
   DesktopPermissionStatus,
   DesktopSystemInfo,
@@ -39,6 +40,18 @@ function permissionStatusLabel(permission: DesktopPermissionStatus): string {
   if (permission.status === 'not_checked') return 'Manual check';
   if (permission.status === 'unsupported') return 'Unsupported';
   return permission.status || 'Unknown';
+}
+
+const DEBUG_APPROVAL_DURATIONS: Array<{value: DebugApprovalDuration; label: string}> = [
+  {value: '1h', label: '1 hour'},
+  {value: '1d', label: '1 day'},
+  {value: '1w', label: '1 week'},
+  {value: '1mo', label: '1 month'},
+  {value: 'permanent', label: 'Until manually revoked'},
+];
+
+function debugApprovalDurationLabel(duration?: DebugApprovalDuration | null): string {
+  return DEBUG_APPROVAL_DURATIONS.find(option => option.value === duration)?.label ?? 'Unknown';
 }
 
 export function Settings() {
@@ -74,7 +87,9 @@ export function Settings() {
   const [desktopInfoError, setDesktopInfoError] = useState<string | null>(null);
   const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
   const [debugApproval, setDebugApproval] = useState<DebugApprovalStatus | null>(null);
+  const [debugApprovalDuration, setDebugApprovalDuration] = useState<DebugApprovalDuration>('1h');
   const [debugApprovalBusy, setDebugApprovalBusy] = useState(false);
+  const debugApprovalMutationRef = useRef(false);
   const profileTabRef = useRef<HTMLButtonElement>(null);
   const versionTabRef = useRef<HTMLButtonElement>(null);
   const desktopShellAvailable = isDesktopShellAvailable();
@@ -130,10 +145,13 @@ export function Settings() {
   };
 
   const handleDebugApprovalToggle = async (enabled: boolean) => {
+    if (debugApprovalMutationRef.current) return;
+    if (enabled && (debugApproval?.state === 'armed' || debugApproval?.state === 'active')) return;
+    debugApprovalMutationRef.current = true;
     if (enabled) {
       setDebugApprovalBusy(true);
       try {
-        setDebugApproval(await armDebugApproval());
+        setDebugApproval(await armDebugApproval(debugApprovalDuration));
         addToast('Developer Debug Approval is armed for the exact requested CLI session.', 'success');
       } catch (error) {
         const message = error instanceof Error
@@ -144,6 +162,7 @@ export function Settings() {
         addToast(message, 'error');
       } finally {
         setDebugApprovalBusy(false);
+        debugApprovalMutationRef.current = false;
       }
       return;
     }
@@ -161,6 +180,7 @@ export function Settings() {
       addToast(message, 'error');
     } finally {
       setDebugApprovalBusy(false);
+      debugApprovalMutationRef.current = false;
     }
   };
 
@@ -184,13 +204,12 @@ export function Settings() {
 
   useEffect(() => {
     if (activeTab === 'version') {
-      loadUpdates();
       loadUpdateSettings();
       void loadBackgroundStatus();
       void loadDesktopInfo();
       void loadDebugApproval();
     }
-  }, [activeTab, loadUpdates, loadUpdateSettings]);
+  }, [activeTab, loadUpdateSettings]);
 
   useEffect(() => {
     if (activeTab !== 'version' || !desktopShellAvailable) return;
@@ -706,6 +725,25 @@ export function Settings() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label htmlFor="debug-approval-duration" className="text-sm font-medium text-text-main">
+                      Available for
+                    </label>
+                    <select
+                      id="debug-approval-duration"
+                      value={debugApproval?.duration ?? debugApprovalDuration}
+                      onChange={(event) => setDebugApprovalDuration(event.target.value as DebugApprovalDuration)}
+                      disabled={debugApprovalBusy || debugApproval?.state === 'armed' || debugApproval?.state === 'active'}
+                      className="rounded-lg border border-border bg-bg-main px-3 py-2 text-sm text-text-main disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {DEBUG_APPROVAL_DURATIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    {debugApprovalDuration === 'permanent' && debugApproval?.state !== 'armed' && debugApproval?.state !== 'active' && (
+                      <span className="text-xs text-warning">Remains active until OFF, Launcher exit, or guardian exit.</span>
+                    )}
+                  </div>
                   <div className="rounded-lg border border-border bg-bg-main/50 p-4 text-xs leading-5 text-text-muted">
                     Launcher restart, Revoke now, session stop, expiry, or any workspace/run mismatch immediately disables delegated approval. The AI must still approve or deny every pending request separately.
                   </div>
@@ -737,9 +775,11 @@ export function Settings() {
                         <p className="mt-1 break-all text-sm text-text-main">{debugApproval.run_id}</p>
                       </div>
                       <div className="rounded-lg border border-border p-3">
-                        <p className="text-xs text-text-muted">Expires</p>
+                        <p className="text-xs text-text-muted">Duration / Expires</p>
                         <p className="mt-1 text-sm text-text-main">
-                          {debugApproval.expires_at ? new Date(debugApproval.expires_at * 1000).toLocaleString() : 'Unknown'}
+                          {debugApprovalDurationLabel(debugApproval.duration)}
+                          {' · '}
+                          {debugApproval.expires_at ? new Date(debugApproval.expires_at * 1000).toLocaleString() : 'Until manually revoked'}
                         </p>
                       </div>
                     </div>

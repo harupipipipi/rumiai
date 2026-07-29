@@ -235,6 +235,8 @@ export type DebugApprovalState =
   | 'expired'
   | 'revoked';
 
+export type DebugApprovalDuration = '1h' | '1d' | '1w' | '1mo' | 'permanent';
+
 export interface DebugApprovalStatus {
   state: DebugApprovalState;
   reason?: string | null;
@@ -248,6 +250,7 @@ export interface DebugApprovalStatus {
   process_id?: number | null;
   lease_epoch?: number | null;
   expires_at?: number | null;
+  duration?: DebugApprovalDuration | null;
   instance_nonce: string;
 }
 

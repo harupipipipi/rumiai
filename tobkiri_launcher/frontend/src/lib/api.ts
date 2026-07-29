@@ -31,6 +31,7 @@ import type {
   HealthResponseData,
   BackgroundControlStatus,
   DesktopSystemInfo,
+  DebugApprovalDuration,
   DebugApprovalStatus,
   CapabilityGraphsResponseData,
   CapabilityGraphResponseData,
@@ -229,12 +230,12 @@ export async function fetchDebugApprovalStatus(): Promise<DebugApprovalStatus | 
   return invoke<DebugApprovalStatus>('debug_approval_status');
 }
 
-export async function armDebugApproval(): Promise<DebugApprovalStatus> {
+export async function armDebugApproval(duration: DebugApprovalDuration): Promise<DebugApprovalStatus> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {
     throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
   }
-  return invoke<DebugApprovalStatus>('arm_debug_approval');
+  return invoke<DebugApprovalStatus>('arm_debug_approval', {duration});
 }
 
 export async function revokeDebugApproval(): Promise<DebugApprovalStatus> {

@@ -6819,6 +6819,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     env["RUMI_COMPUTER_USE_HAZE"] = "1"
     env["RUMI_COMPUTER_USE_DEBUG_FOREGROUND"] = env.get("RUMI_COMPUTER_USE_DEBUG_FOREGROUND") or "1"
     env["RUMI_DEFAULTSPACK_PROVIDER_TRACE"] = env.get("RUMI_DEFAULTSPACK_PROVIDER_TRACE") or "full"
+    env["RUMI_AUTHORITY_TEST_ENDPOINT"] = "1"
     env["PYTHONFAULTHANDLER"] = env.get("PYTHONFAULTHANDLER") or "1"
     env["RUMI_HOME"] = env.get("RUMI_HOME") or str(RUMI_AI_ROOT)
     env["RUMI_APP_DIR"] = env.get("RUMI_APP_DIR") or str(RUMI_AI_ROOT)
@@ -6924,6 +6925,7 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
             "RUMI_COMPUTER_USE_HAZE": env["RUMI_COMPUTER_USE_HAZE"],
             "RUMI_COMPUTER_USE_DEBUG_FOREGROUND": env["RUMI_COMPUTER_USE_DEBUG_FOREGROUND"],
             "RUMI_DEFAULTSPACK_PROVIDER_TRACE": env["RUMI_DEFAULTSPACK_PROVIDER_TRACE"],
+            "RUMI_AUTHORITY_TEST_ENDPOINT": env["RUMI_AUTHORITY_TEST_ENDPOINT"],
             "RUMI_EDGE_HAZE_DISABLED": env.get("RUMI_EDGE_HAZE_DISABLED"),
             "PYTHONFAULTHANDLER": env.get("PYTHONFAULTHANDLER"),
             "RUMI_API_TOKEN_present": bool(env.get("RUMI_API_TOKEN")),

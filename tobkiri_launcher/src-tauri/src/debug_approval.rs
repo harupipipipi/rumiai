@@ -13,9 +13,50 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-const REQUEST_TTL: Duration = Duration::from_secs(10 * 60);
-const ACTIVE_TTL: Duration = Duration::from_secs(30 * 60);
+const REQUEST_TTL: Duration = Duration::from_secs(60 * 60);
 const OPERATOR_TTL_SECONDS: u64 = 120;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DebugApprovalDuration {
+    OneHour,
+    OneDay,
+    OneWeek,
+    OneMonth,
+    Permanent,
+}
+
+impl DebugApprovalDuration {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "1h" => Ok(Self::OneHour),
+            "1d" => Ok(Self::OneDay),
+            "1w" => Ok(Self::OneWeek),
+            "1mo" => Ok(Self::OneMonth),
+            "permanent" => Ok(Self::Permanent),
+            _ => Err("invalid debug approval duration".into()),
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::OneHour => "1h",
+            Self::OneDay => "1d",
+            Self::OneWeek => "1w",
+            Self::OneMonth => "1mo",
+            Self::Permanent => "permanent",
+        }
+    }
+
+    fn seconds(self) -> Option<u64> {
+        match self {
+            Self::OneHour => Some(60 * 60),
+            Self::OneDay => Some(24 * 60 * 60),
+            Self::OneWeek => Some(7 * 24 * 60 * 60),
+            Self::OneMonth => Some(30 * 24 * 60 * 60),
+            Self::Permanent => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 enum LeaseState {
@@ -36,6 +77,7 @@ struct PendingSession {
     process_id: u32,
     process_fingerprint: String,
     claim_secret_hash: String,
+    approved_duration: Option<DebugApprovalDuration>,
     expires_at: u64,
     deadline: Instant,
 }
@@ -53,7 +95,8 @@ struct ActiveLease {
     session_secret_hash: String,
     lease_epoch: u64,
     expires_at: u64,
-    deadline: Instant,
+    deadline: Option<Instant>,
+    duration: DebugApprovalDuration,
     lease_hash: String,
 }
 
@@ -103,6 +146,7 @@ pub struct DebugApprovalStatus {
     pub process_id: Option<u32>,
     pub lease_epoch: Option<u64>,
     pub expires_at: Option<u64>,
+    pub duration: Option<String>,
     pub instance_nonce: String,
 }
 
@@ -274,7 +318,8 @@ impl DebugApprovalManager {
 
     /// Called only after the Tauri command has validated the dedicated Launcher
     /// window and completed a native operating-system confirmation dialog.
-    pub fn arm(&self) -> Result<DebugApprovalStatus, String> {
+    pub fn arm(&self, duration: &str) -> Result<DebugApprovalStatus, String> {
+        let duration = DebugApprovalDuration::parse(duration)?;
         let now_epoch = now_epoch_seconds();
         let now = Instant::now();
         let mut state = self
@@ -282,13 +327,37 @@ impl DebugApprovalManager {
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
         expire_if_needed(&mut state, now);
-        let pending = match &state.lease {
+        let mut pending = match &state.lease {
             LeaseState::Pending(pending) => pending.clone(),
-            _ => return Err("a CLI debug session must be requested before enabling".into()),
+            LeaseState::Armed(existing) if existing.approved_duration == Some(duration) => {
+                return Ok(status_from_state(
+                    &state.lease,
+                    &self.instance_nonce,
+                    now_epoch,
+                    now,
+                ));
+            }
+            LeaseState::Active(active) if active.duration == duration => {
+                return Ok(status_from_state(
+                    &state.lease,
+                    &self.instance_nonce,
+                    now_epoch,
+                    now,
+                ));
+            }
+            LeaseState::Armed(_) | LeaseState::Active(_) => {
+                return Err(
+                    "revoke the current debug approval before changing its duration".into(),
+                );
+            }
+            LeaseState::Disabled { .. } => {
+                return Err("a CLI debug session must be requested before enabling".into());
+            }
         };
+        pending.approved_duration = Some(duration);
         self.audit(
             "enable",
-            "armed_exact_session",
+            &format!("armed_exact_session:{}", duration.key()),
             None,
             Some(&pending.run_id),
             None,
@@ -361,11 +430,14 @@ impl DebugApprovalManager {
         if current_fingerprint != approved.process_fingerprint {
             return Err("debug guardian process identity changed before claim".into());
         }
+        let duration = approved
+            .approved_duration
+            .ok_or_else(|| "debug approval duration was not confirmed".to_string())?;
         let session_secret = random_identifier("debug-session-secret");
         let lease_epoch = state.next_lease_epoch;
         state.next_lease_epoch = state.next_lease_epoch.saturating_add(1);
         let lease_material = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.instance_nonce,
             candidate.session_id,
             candidate.run_id,
@@ -373,7 +445,9 @@ impl DebugApprovalManager {
             candidate.pack_id,
             candidate.profile_id,
             lease_epoch,
+            duration.key(),
         );
+        let duration_seconds = duration.seconds();
         let lease = ActiveLease {
             session_id: candidate.session_id,
             run_id: candidate.run_id,
@@ -385,8 +459,11 @@ impl DebugApprovalManager {
             process_fingerprint: current_fingerprint,
             session_secret_hash: sha256_text(&session_secret),
             lease_epoch,
-            expires_at: now_epoch + ACTIVE_TTL.as_secs(),
-            deadline: now + ACTIVE_TTL,
+            expires_at: duration_seconds
+                .map(|seconds| now_epoch.saturating_add(seconds))
+                .unwrap_or(u64::MAX),
+            deadline: duration_seconds.map(|seconds| now + Duration::from_secs(seconds)),
+            duration,
             lease_hash: sha256_text(lease_material),
         };
         self.audit(
@@ -763,6 +840,7 @@ fn pending_from_request(request: &DebugSessionStartRequest) -> Result<PendingSes
         process_id: request.process_id,
         process_fingerprint,
         claim_secret_hash: sha256_text(&request.claim_secret),
+        approved_duration: None,
         expires_at: now_epoch_seconds() + REQUEST_TTL.as_secs(),
         deadline: now + REQUEST_TTL,
     })
@@ -863,6 +941,7 @@ fn status_from_state(
         process_id: None,
         lease_epoch: None,
         expires_at: None,
+        duration: None,
         instance_nonce: instance_nonce.to_string(),
     };
     match state {
@@ -886,6 +965,9 @@ fn status_from_state(
             status.profile_id = Some(pending.profile_id.clone());
             status.process_id = Some(pending.process_id);
             status.expires_at = Some(pending.expires_at.max(now_epoch));
+            status.duration = pending
+                .approved_duration
+                .map(|duration| duration.key().to_string());
             status
         }
         LeaseState::Active(active) => {
@@ -898,7 +980,8 @@ fn status_from_state(
             status.profile_id = Some(active.profile_id.clone());
             status.process_id = Some(active.process_id);
             status.lease_epoch = Some(active.lease_epoch);
-            status.expires_at = Some(active.expires_at);
+            status.expires_at = active.duration.seconds().map(|_| active.expires_at);
+            status.duration = Some(active.duration.key().to_string());
             status
         }
     }
@@ -908,7 +991,7 @@ fn expire_if_needed(state: &mut DebugApprovalState, now: Instant) {
     let expired = match &state.lease {
         LeaseState::Pending(pending) | LeaseState::Armed(pending) => pending.deadline <= now,
         LeaseState::Active(active) => {
-            active.deadline <= now
+            active.deadline.is_some_and(|deadline| deadline <= now)
                 || process_fingerprint(active.process_id)
                     .map(|fingerprint| fingerprint != active.process_fingerprint)
                     .unwrap_or(true)
@@ -1000,17 +1083,10 @@ fn process_fingerprint(process_id: u32) -> Result<String, String> {
     }
     #[cfg(unix)]
     {
+        // PID + owner + process birth time identifies the guardian without
+        // depending on `comm`, which a process may legitimately rename.
         let output = std::process::Command::new("/bin/ps")
-            .args([
-                "-p",
-                &process_id.to_string(),
-                "-o",
-                "uid=",
-                "-o",
-                "lstart=",
-                "-o",
-                "comm=",
-            ])
+            .args(["-p", &process_id.to_string(), "-o", "uid=", "-o", "lstart="])
             .output()
             .map_err(|_| "failed to inspect debug guardian process")?;
         if !output.status.success() {
@@ -1121,7 +1197,7 @@ mod tests {
     fn active(manager: &DebugApprovalManager) -> (DebugApprovalStatus, String) {
         let request = request(&std::env::temp_dir());
         manager.register_session(request.clone()).unwrap();
-        manager.arm().unwrap();
+        manager.arm("1h").unwrap();
         let result = manager.start_session(request).unwrap();
         (result.status, result.session_secret)
     }
@@ -1157,9 +1233,43 @@ mod tests {
     fn requires_registered_exact_session_before_native_arm() {
         let manager = manager();
         assert_eq!(manager.status().state, "disabled");
-        assert!(manager.arm().is_err());
+        assert!(manager.arm("1h").is_err());
         let request = request(&std::env::temp_dir());
         assert_eq!(manager.register_session(request).unwrap().state, "pending");
+    }
+
+    #[test]
+    fn selected_duration_is_bound_to_the_active_lease() {
+        for (key, seconds) in [
+            ("1h", 60 * 60),
+            ("1d", 24 * 60 * 60),
+            ("1w", 7 * 24 * 60 * 60),
+            ("1mo", 30 * 24 * 60 * 60),
+        ] {
+            let manager = manager();
+            let request = request(&std::env::temp_dir());
+            manager.register_session(request.clone()).unwrap();
+            let armed = manager.arm(key).unwrap();
+            assert_eq!(armed.duration.as_deref(), Some(key));
+            let before = now_epoch_seconds();
+            let active = manager.start_session(request).unwrap().status;
+            assert_eq!(active.duration.as_deref(), Some(key));
+            assert!(active.expires_at.unwrap() >= before + seconds);
+            assert_eq!(manager.arm(key).unwrap().state, "active");
+            assert!(manager.arm("1h").is_err() || key == "1h");
+        }
+    }
+
+    #[test]
+    fn permanent_duration_has_no_wall_clock_expiry() {
+        let manager = manager();
+        let request = request(&std::env::temp_dir());
+        manager.register_session(request.clone()).unwrap();
+        manager.arm("permanent").unwrap();
+        let active = manager.start_session(request).unwrap().status;
+        assert_eq!(active.state, "active");
+        assert_eq!(active.duration.as_deref(), Some("permanent"));
+        assert_eq!(active.expires_at, None);
     }
 
     #[test]
@@ -1167,7 +1277,7 @@ mod tests {
         let manager = manager();
         let mut request = request(&std::env::temp_dir());
         manager.register_session(request.clone()).unwrap();
-        manager.arm().unwrap();
+        manager.arm("1h").unwrap();
         request.claim_secret = "wrong-claim-secret-that-is-at-least-thirty-two".into();
         assert!(manager.start_session(request).is_err());
         let second_manager = DebugApprovalManager::new(std::env::temp_dir().join(format!(

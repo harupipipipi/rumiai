@@ -581,13 +581,13 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
 
 test('debug approval helpers use Launcher-owned status, arm, and revoke commands', async () => {
   const disabled = await fetchDebugApprovalStatus();
-  const armed = await armDebugApproval();
+  const armed = await armDebugApproval('1w');
   const revoked = await revokeDebugApproval();
 
   assert.equal(disabled?.state, 'disabled');
   assert.equal(armed.state, 'armed');
   assert.equal(armed.armed_remaining_seconds, 300);
-  assert.equal(tauriDebugArmArgs, undefined);
+  assert.deepEqual(tauriDebugArmArgs, {duration: '1w'});
   assert.equal(revoked.reason, 'user_revoked');
   assert.equal(tauriDebugRevokeCount, 1);
 });

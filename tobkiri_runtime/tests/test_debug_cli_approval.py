@@ -134,6 +134,68 @@ def test_cli_has_only_individual_approval_commands():
         parser.parse_args(["debug", "approvals", "approve-all"])
 
 
+def test_cli_session_uses_owned_defaultspack_process_as_guardian(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    token_file = tmp_path / ".desktop_api_token"
+    token_file.write_text("test-token", encoding="utf-8")
+    manifest = {
+        "run_id": "launch-owned",
+        "pid": 4242,
+        "port": 8766,
+        "token_file": str(token_file),
+    }
+    monkeypatch.setattr(cli, "_latest_manifest", lambda: manifest)
+    observed_kills = []
+    monkeypatch.setattr(cli.os, "kill", lambda pid, signal: observed_kills.append((pid, signal)))
+    stored = []
+    monkeypatch.setattr(cli, "_write_session", lambda value: stored.append(value))
+    requests = []
+
+    def broker(method, path, payload=None):
+        requests.append((method, path, payload))
+        if method == "GET":
+            if len([item for item in requests if item[:2] == ("GET", path)]) == 1:
+                return {"status": {"state": "disabled"}}
+            return {"status": {"state": "armed", "session_id": payload_session_id()}}
+        if path.endswith("/request"):
+            return {"status": {"state": "pending"}}
+        if path.endswith("/start"):
+            return {
+                "session_secret": "session-secret-" + ("x" * 40),
+                "status": {
+                    "state": "active",
+                    "session_id": payload["session_id"],
+                    "lease_epoch": 7,
+                    "workspace_digest": "a" * 64,
+                    "duration": "permanent",
+                    "expires_at": None,
+                },
+            }
+        raise AssertionError(path)
+
+    def payload_session_id():
+        request_call = next(item for item in requests if item[1].endswith("/request"))
+        return request_call[2]["session_id"]
+
+    monkeypatch.setattr(cli, "_broker_request", broker)
+    result = cli._session_start(
+        argparse.Namespace(
+            workspace=str(workspace),
+            run_id="launch-owned",
+            pack_id="defaultspack",
+            profile_id="debug",
+        )
+    )
+
+    assert result["status"]["state"] == "active"
+    assert observed_kills == [(4242, 0)]
+    request_payload = next(item[2] for item in requests if item[1].endswith("/request"))
+    assert request_payload["process_id"] == 4242
+    assert stored[-1]["process_id"] == 4242
+    assert stored[-1]["duration"] == "permanent"
+
+
 def test_cli_refuses_changed_digest_before_requesting_operator(monkeypatch):
     monkeypatch.setattr(
         cli,

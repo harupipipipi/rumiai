@@ -135,7 +135,13 @@ test('Developer Debug Approval delegates confirmation directly to the native com
     const toggle = page.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Developer Debug Approval"]',
     );
+    const duration = page.container.querySelector<HTMLSelectElement>('#debug-approval-duration');
     assert.ok(toggle);
+    assert.ok(duration);
+    assert.deepEqual(
+      Array.from(duration.options).map(option => option.value),
+      ['1h', '1d', '1w', '1mo', 'permanent'],
+    );
     await act(async () => {
       toggle.click();
       await Promise.resolve();
