@@ -434,19 +434,26 @@ fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&s
         );
     }
 
-    let hash_start = if tokens.get(1) == Some(&";") {
-        let marker = tokens.get(1..5).unwrap_or_default();
-        if !is_supported_python_version_marker(marker) {
+    let hash_start = tokens
+        .iter()
+        .position(|token| token.starts_with("--hash=sha256:"))
+        .unwrap_or(tokens.len());
+    if tokens.get(1) == Some(&";") {
+        let marker = tokens.get(1..hash_start).unwrap_or_default();
+        if !is_supported_environment_marker(marker) {
             bail!(
-                "{}:{} contains an unsupported environment marker; automatic installation only permits a simple python_version comparison",
+                "{}:{} contains an unsupported environment marker; automatic installation only permits comparisons against Python version or implementation markers",
                 req_path.display(),
                 line_number
             );
         }
-        5
-    } else {
-        1
-    };
+    } else if hash_start != 1 {
+        bail!(
+            "{}:{} contains unsupported requirement tokens before the package hashes",
+            req_path.display(),
+            line_number
+        );
+    }
 
     let mut hash_count = 0usize;
     for token in &tokens[hash_start..] {
@@ -479,30 +486,53 @@ fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&s
     Ok(())
 }
 
-fn is_supported_python_version_marker(tokens: &[&str]) -> bool {
-    if tokens.len() != 4 || tokens[0] != ";" || tokens[1] != "python_version" {
-        return false;
-    }
-    if !matches!(tokens[2], "<" | "<=" | "==" | "!=" | ">=" | ">") {
+fn is_supported_environment_marker(tokens: &[&str]) -> bool {
+    if tokens.first() != Some(&";") {
         return false;
     }
 
-    let quoted_version = tokens[3];
-    if quoted_version.len() < 5 {
+    let expressions = &tokens[1..];
+    if expressions.len() < 3 || !(expressions.len() + 1).is_multiple_of(4) {
         return false;
     }
-    let quote = quoted_version.as_bytes()[0];
-    if !matches!(quote, b'\'' | b'"') || quoted_version.as_bytes().last() != Some(&quote) {
+
+    for (index, expression) in expressions.chunks(4).enumerate() {
+        let comparison = if index + 1 == expressions.len().div_ceil(4) {
+            expression
+        } else {
+            if !matches!(expression.get(3), Some(&"and") | Some(&"or")) {
+                return false;
+            }
+            &expression[..3]
+        };
+        if comparison.len() != 3
+            || !matches!(
+                comparison[0],
+                "python_version"
+                    | "python_full_version"
+                    | "implementation_name"
+                    | "platform_python_implementation"
+            )
+            || !matches!(comparison[1], "<" | "<=" | "==" | "!=" | ">=" | ">")
+            || !is_safe_marker_value(comparison[2])
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_safe_marker_value(value: &str) -> bool {
+    if value.len() < 3 {
         return false;
     }
-    let version = &quoted_version[1..quoted_version.len() - 1];
-    version.contains('.')
-        && version
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
-        && !version.starts_with('.')
-        && !version.ends_with('.')
-        && !version.contains("..")
+    let quote = value.as_bytes()[0];
+    if !matches!(quote, b'\'' | b'"') || value.as_bytes().last() != Some(&quote) {
+        return false;
+    }
+    value[1..value.len() - 1]
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn is_exact_package_pin(token: &str) -> bool {
@@ -718,6 +748,41 @@ mod tests {
 
         validate_hashed_requirements(&req_path).unwrap();
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn validate_hashed_requirements_accepts_uv_implementation_markers() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_uv_marker_requirements_{unique}"));
+        let req_path = root.join("requirements.txt");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &req_path,
+            concat!(
+                "cffi==2.1.0 ; platform_python_implementation != 'PyPy' ",
+                "--hash=sha256:02cb7ff33ded4f1532476731f89ede53e2e488a8e6205515a82144246ffa7dcc\n",
+                "pycparser==3.0 ; implementation_name != 'PyPy' and ",
+                "platform_python_implementation != 'PyPy' ",
+                "--hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29\n",
+                "rpds-py==2026.6.3 ; python_full_version >= '3.11' ",
+                "--hash=sha256:0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5\n",
+            ),
+        )
+        .unwrap();
+
+        validate_hashed_requirements(&req_path).unwrap();
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn bundled_runtime_requirements_pass_launcher_validation() {
+        let req_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tobkiri_runtime/requirements.txt");
+
+        validate_hashed_requirements(&req_path).unwrap();
     }
 
     #[test]
