@@ -282,6 +282,12 @@ FORBIDDEN_DIRS = {
     "webapp",
 }
 FORBIDDEN_EXTENSIONS = {".py", ".sh", ".js", ".ts", ".tsx", ".ipynb", ".sql"}
+PACK_METADATA_FILES = {
+    "ecosystem.json",
+    "rumi.pack.v3.json",
+    "artifact-manifest.json",
+    "frontend/contributions/office-authoring.json",
+}
 
 
 def read_json(path: Path) -> dict:
@@ -317,7 +323,8 @@ def test_required_assets_and_ecosystem_contract() -> None:
     actual = {
         path.relative_to(PACK_DIR).as_posix()
         for path in PACK_DIR.rglob("*")
-        if path.is_file() and path.name != "ecosystem.json"
+        if path.is_file()
+        and path.relative_to(PACK_DIR).as_posix() not in PACK_METADATA_FILES
     }
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)

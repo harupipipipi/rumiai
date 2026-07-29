@@ -349,7 +349,11 @@ def test_pack_docs_no_secrets_and_explain_boundaries() -> None:
     ]:
         assert expected in docs
     pattern = re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{12,}")
-    checked = [p for p in PACK_DIR.rglob("*") if p.is_file()] + [SETUP_PACK_JSON]
+    checked = [
+        p
+        for p in PACK_DIR.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+    ] + [SETUP_PACK_JSON]
     assert [str(p.relative_to(ROOT)) for p in checked if pattern.search(p.read_text(encoding="utf-8"))] == []
     combined = "\n".join(p.read_text(encoding="utf-8") for p in checked)
     for phrase in ["sample user request", "reviewer_ready_plan", "Complementary owner surface"]:
