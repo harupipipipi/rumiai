@@ -604,7 +604,7 @@ def test_coding_mutation_requests_approval_before_resolving_workspace(
         raise AssertionError("workspace resolution must follow approval")
 
     monkeypatch.setattr(
-        "domain.coding.contract_adapter._enforce_canonical_adaptive_lease",
+        "blocks.coding.file_write.canonical_mutation_guard",
         unexpected_resolution,
     )
     result = file_write_run(
