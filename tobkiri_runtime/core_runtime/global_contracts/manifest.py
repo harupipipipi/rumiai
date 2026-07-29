@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -95,7 +96,22 @@ def _semantic_diagnostics(
                 )
             )
 
+    entrypoint_contract_ids = [
+        entrypoint["contract_id"] for entrypoint in manifest["entrypoints"]
+    ]
+    entrypoint_counts = Counter(entrypoint_contract_ids)
+    for contract_id in sorted(
+        value for value, count in entrypoint_counts.items() if count > 1
+    ):
+        diagnostics.append(
+            ManifestDiagnostic(
+                path="$['entrypoints']",
+                message=f"duplicate entrypoint contract ID: {contract_id}",
+            )
+        )
+
     provided_set = set(contract_ids)
+    entrypoint_set = set(entrypoint_contract_ids)
     for index, entrypoint in enumerate(manifest["entrypoints"]):
         if entrypoint["contract_id"] not in provided_set:
             diagnostics.append(
@@ -104,6 +120,13 @@ def _semantic_diagnostics(
                     message="entrypoint references a contract not provided by this pack",
                 )
             )
+    for contract_id in sorted(provided_set - entrypoint_set):
+        diagnostics.append(
+            ManifestDiagnostic(
+                path="$['entrypoints']",
+                message=f"missing entrypoint for provided contract: {contract_id}",
+            )
+        )
     return tuple(diagnostics)
 
 

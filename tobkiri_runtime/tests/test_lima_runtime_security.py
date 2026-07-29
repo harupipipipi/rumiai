@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,8 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     LIMA_GUEST_WORKSPACE_ROOT,
     LIMA_GUEST_PACK_DATA_ROOT,
     build_guest_bwrap_argv,
+    lima_instance_payload,
+    resolve_attested_lima_runtime,
     validate_lima_instance_config,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.supervisor import (
@@ -63,6 +67,40 @@ def test_lima_attestation_rejects_host_bridges() -> None:
     assert "port forwarding" in str(validate_lima_instance_config(payload))
 
 
+def test_lima_attestation_rejects_missing_mount_measurement() -> None:
+    payload = _hardened_payload()
+    config = payload["config"]
+    assert isinstance(config, dict)
+    config.pop("mounts")
+
+    assert "mounts" in str(validate_lima_instance_config(payload))
+
+
+def test_lima_payload_resolves_omitted_mounts_from_owned_instance_yaml(
+    tmp_path: Path,
+) -> None:
+    instance_dir = tmp_path / "rumi-managed-runtime"
+    instance_dir.mkdir()
+    (instance_dir / "lima.yaml").write_text("mounts: []\n", encoding="utf-8")
+    payload = _hardened_payload()
+    config = payload["config"]
+    assert isinstance(config, dict)
+    config.pop("mounts")
+    payload["dir"] = str(instance_dir)
+
+    resolved = lima_instance_payload(
+        "limactl",
+        "rumi-managed-runtime",
+        runner=lambda *_args: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(payload),
+            stderr="",
+        ),
+    )
+
+    assert resolved["config"]["mounts"] == []
+
+
 def test_guest_bwrap_masks_backing_workspaces_and_network() -> None:
     source = f"{LIMA_GUEST_WORKSPACE_ROOT}/.rumi-sbx"
     argv = build_guest_bwrap_argv(
@@ -80,6 +118,9 @@ def test_guest_bwrap_masks_backing_workspaces_and_network() -> None:
     mask_index = argv.index(LIMA_GUEST_WORKSPACE_ROOT, bind_index + 1)
     assert bind_index < mask_index
     assert argv[argv.index("--bind") + 2] == "/workspace"
+    assert LIMA_GUEST_PACK_DATA_ROOT in argv
+    pack_mask = argv.index(LIMA_GUEST_PACK_DATA_ROOT)
+    assert argv[pack_mask - 1] == "--tmpfs"
 
 
 def test_guest_bwrap_rejects_pack_data_path_traversal() -> None:
@@ -108,7 +149,31 @@ def test_guest_bwrap_rejects_pack_data_path_traversal() -> None:
 )
 def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
     tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
+    limactl, instance = resolve_attested_lima_runtime()
+    sibling_secret_dir = f"{LIMA_GUEST_PACK_DATA_ROOT}/other_pack"
+    sibling_secret = f"{sibling_secret_dir}/secret.txt"
+    subprocess.run(
+        [
+            limactl,
+            "shell",
+            instance,
+            "--",
+            "sh",
+            "-c",
+            f"mkdir -p {sibling_secret_dir} && printf cross-pack-secret > {sibling_secret}",
+        ],
+        check=True,
+        timeout=10,
+    )
+    request.addfinalizer(
+        lambda: subprocess.run(
+            [limactl, "shell", instance, "--", "rm", "-rf", sibling_secret_dir],
+            check=False,
+            timeout=10,
+        )
+    )
     function_dir = tmp_path / "function"
     function_dir.mkdir()
     main_py = function_dir / "main.py"
@@ -125,6 +190,7 @@ def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
         "    return {\n"
         "        'host_visible': os.path.exists('/Users'),\n"
         f"        'sibling_workspaces': os.listdir('{LIMA_GUEST_WORKSPACE_ROOT}'),\n"
+        f"        'sibling_pack_secret': os.path.exists('{sibling_secret}'),\n"
         "        'network': network,\n"
         "    }\n",
         encoding="utf-8",
@@ -148,6 +214,7 @@ def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
     assert result["output"] == {
         "host_visible": False,
         "sibling_workspaces": [],
+        "sibling_pack_secret": False,
         "network": False,
     }
 
@@ -161,12 +228,16 @@ def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
                 "-c",
                 "import json,pathlib;"
                 "pathlib.Path('proof.json').write_text("
-                "json.dumps({'host':pathlib.Path('/Users').exists()}))",
+                "json.dumps({"
+                "'host':pathlib.Path('/Users').exists(),"
+                f"'sibling_pack_secret':pathlib.Path('{sibling_secret}').exists()"
+                "}))",
             ],
             "timeout_seconds": 10,
         }
     )
     assert coding["success"] is True
     assert json.loads((coding_workspace / "proof.json").read_text(encoding="utf-8")) == {
-        "host": False
+        "host": False,
+        "sibling_pack_secret": False,
     }

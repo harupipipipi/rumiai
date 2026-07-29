@@ -580,6 +580,11 @@ class ManagedSandboxSupervisor:
             "error": message,
             "error_type": error_type,
             "execution_boundary": "managed_sandbox",
+            "exit_code": None,
+            "returncode": None,
+            "stdout": "",
+            "stderr": message,
+            "timed_out": error_type == "timeout",
             "request": {
                 "profile_runtime": request.get("profile_runtime"),
                 "pack_id": request.get("pack_id"),

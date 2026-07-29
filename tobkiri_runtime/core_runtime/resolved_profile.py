@@ -279,7 +279,11 @@ def resolve_profile(
     )
     projections = _project_resources(effective, manifests)
     manifest_providers, manifest_requirements, manifest_diagnostics = (
-        _manifest_contract_metadata(effective, manifests, verified_pack_trust)
+        _manifest_contract_metadata(
+            effective,
+            manifests,
+            verified_pack_trust=verified_pack_trust,
+        )
     )
     diagnostics.extend(manifest_diagnostics)
     requirement_map = {
@@ -834,6 +838,7 @@ def _project_resources(
         manifest = manifests[pack_id]
         content_hash = str(manifest["_content_hash"])
         components = manifest.get("components")
+        entries: Iterable[tuple[Any, Any]]
         if isinstance(components, Mapping):
             entries = components.items()
         elif isinstance(components, list):
@@ -858,6 +863,7 @@ def _project_resources(
                 )
         for kind in PROJECTION_TYPES:
             values = manifest.get(kind)
+            resource_ids: Iterable[Any]
             if isinstance(values, Mapping):
                 resource_ids = values.keys()
             elif isinstance(values, list):
@@ -884,6 +890,7 @@ def _project_resources(
 def _manifest_contract_metadata(
     effective: tuple[str, ...],
     manifests: Mapping[str, Mapping[str, Any]],
+    *,
     verified_pack_trust: Mapping[str, str],
 ) -> tuple[
     tuple[ProviderDescriptor, ...],
@@ -939,7 +946,8 @@ def _manifest_contract_metadata(
                     # Provider authority is Host-attested. Pack provenance is
                     # descriptive input and cannot elevate dispatch trust.
                     trust_class=verified_pack_trust.get(pack_id, "untrusted"),
-                    isolation=str(item.get("isolation") or "process"),
+                    # Placement/Pack declarations are not runtime attestation.
+                    isolation="host_unattested",
                     required_capabilities=tuple(
                         str(value)
                         for value in item.get("required_capabilities", [])

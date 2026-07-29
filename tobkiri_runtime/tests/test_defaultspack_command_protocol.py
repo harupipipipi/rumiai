@@ -374,7 +374,14 @@ def test_high_risk_command_requires_one_shot_approval_resume(
     assert resumed["status"] == "succeeded"
     assert resumed["legacy_result"]["action"] == "request_terminal_approval"
     assert resumed["legacy_result"]["executed"] is True
-    assert "approved" in resumed["legacy_result"]["stdout"]
+    receipt = resumed["legacy_result"]["execution_receipt"]
+    assert receipt["exit_code"] == 0
+    assert receipt["stdout_bytes"] > 0
+    assert receipt["stdout_sha256"].startswith("sha256:")
+    assert "argv" not in resumed["legacy_result"]
+    assert "cwd" not in resumed["legacy_result"]
+    assert "stdout" not in resumed["legacy_result"]
+    assert "stderr" not in resumed["legacy_result"]
     assert replay["status"] == "failed"
     assert replay["error"]["code"] in {
         "APPROVAL_ARGUMENTS_CHANGED",

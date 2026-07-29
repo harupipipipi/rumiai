@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::{Read, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
@@ -246,32 +246,106 @@ fn generate_broker_token() -> String {
 }
 
 fn write_connection_file(path: &Path, connection: &HostBrokerConnectionInfo) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
+    let parent = path
+        .parent()
+        .context("host broker connection path has no parent directory")?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create host broker connection parent directory at {}",
+            parent.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).with_context(|| {
             format!(
-                "failed to create host broker connection parent directory at {}",
+                "failed to secure host broker connection directory at {}",
                 parent.display()
             )
         })?;
     }
     let body = serde_json::to_vec_pretty(connection)
         .context("failed to serialize host broker connection")?;
-    fs::write(path, body).with_context(|| {
-        format!(
-            "failed to write host broker connection file at {}",
-            path.display()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions).with_context(|| {
+    let temporary = parent.join(format!(".connection-{}.tmp", generate_broker_token()));
+    let write_result = (|| -> Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut handle = options.open(&temporary).with_context(|| {
             format!(
-                "failed to set host broker connection file permissions at {}",
+                "failed to create secure host broker temporary file at {}",
+                temporary.display()
+            )
+        })?;
+        handle.write_all(&body).with_context(|| {
+            format!(
+                "failed to write host broker temporary file at {}",
+                temporary.display()
+            )
+        })?;
+        handle
+            .sync_all()
+            .context("failed to sync host broker temporary file")?;
+        atomic_replace_file(&temporary, path).with_context(|| {
+            format!(
+                "failed to atomically replace host broker connection file at {}",
                 path.display()
             )
         })?;
+        #[cfg(unix)]
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .context("failed to sync host broker connection directory")?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    unsafe extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+    let source_wide: Vec<u16> = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let replaced = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
@@ -2214,11 +2288,52 @@ mod tests {
             created_at: 123,
         };
         write_connection_file(&path, &info).expect("connection file should be written");
+        let replacement = HostBrokerConnectionInfo {
+            token: "replacement-secret".to_string(),
+            created_at: 456,
+            ..info
+        };
+        write_connection_file(&path, &replacement)
+            .expect("existing connection file should be atomically replaced");
         let stored: HostBrokerConnectionInfo =
             serde_json::from_slice(&fs::read(&path).expect("connection file should be readable"))
                 .expect("connection file JSON should parse");
         assert_eq!(stored.permission_subject, PERMISSION_SUBJECT);
         assert_eq!(stored.port, DEFAULT_PORT);
+        assert_eq!(stored.token, "replacement-secret");
+        assert_eq!(stored.created_at, 456);
+        assert!(
+            fs::read_dir(&temp_dir)
+                .expect("temporary directory should be readable")
+                .all(|entry| {
+                    !entry
+                        .expect("directory entry should be readable")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".connection-")
+                }),
+            "atomic writer must not leave temporary connection files"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path)
+                    .expect("connection metadata should be readable")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(&temp_dir)
+                    .expect("connection directory metadata should be readable")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
         let _ = fs::remove_dir_all(temp_dir);
     }
 

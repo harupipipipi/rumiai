@@ -4,10 +4,13 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
+
+import yaml  # type: ignore[import-untyped]
 
 
 LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
@@ -15,7 +18,7 @@ LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
 
 DEFAULT_LIMA_INSTANCE = "rumi-managed-runtime"
 LIMA_STATE_VERSION = 1
-LIMA_CONFIG_POLICY_VERSION = 2
+LIMA_CONFIG_POLICY_VERSION = 3
 LIMA_STATE_ENV = "RUMI_SANDBOX_LIMA_STATE"
 MAX_LIMA_STATE_BYTES = 64 * 1024
 LIMA_GUEST_WORKSPACE_ROOT = "/var/lib/rumi/workspaces"
@@ -158,7 +161,7 @@ def lima_instance_payload(
         item = payload
     if not isinstance(item, dict) or str(item.get("name") or "").strip() != instance:
         raise ValueError("Lima sandbox instance was not found")
-    return item
+    return _with_resolved_mounts(item, instance)
 
 
 def validate_lima_instance_config(payload: Mapping[str, Any]) -> str | None:
@@ -168,7 +171,7 @@ def validate_lima_instance_config(payload: Mapping[str, Any]) -> str | None:
     if str(config.get("vmType") or payload.get("vmType") or "").casefold() != "vz":
         return "Lima sandbox must use the macOS Virtualization.framework driver"
     mounts = config.get("mounts")
-    if mounts not in (None, []):
+    if mounts != []:
         return "Lima sandbox host mounts must be disabled"
     ssh = config.get("ssh")
     if not isinstance(ssh, Mapping) or ssh.get("forwardAgent") is not False:
@@ -275,14 +278,53 @@ def build_guest_bwrap_argv(
     if data_dir is not None:
         command.extend(("--bind", data_dir, "/data"))
     command.extend(("--tmpfs", LIMA_GUEST_WORKSPACE_ROOT))
-    if data_dir is not None:
-        command.extend(("--tmpfs", LIMA_GUEST_PACK_DATA_ROOT))
+    command.extend(("--tmpfs", LIMA_GUEST_PACK_DATA_ROOT))
     command.append("--clearenv")
     for key, value in sorted(env.items()):
         command.extend(("--setenv", str(key), str(value)))
     command.extend(("--chdir", cwd, "--"))
     command.extend(str(item) for item in argv)
     return tuple(command)
+
+
+def _with_resolved_mounts(
+    payload: Mapping[str, Any],
+    instance: str,
+) -> dict[str, Any]:
+    """Fill Lima's omitted mounts field from its Host-owned instance YAML."""
+    config = payload.get("config")
+    if isinstance(config, Mapping) and "mounts" in config:
+        return dict(payload)
+    instance_dir = Path(str(payload.get("dir") or ""))
+    if (
+        not instance_dir.is_absolute()
+        or instance_dir.name != instance
+        or instance_dir.is_symlink()
+    ):
+        raise ValueError("Lima sandbox mount attestation source is unavailable")
+    config_path = instance_dir / "lima.yaml"
+    try:
+        metadata = config_path.lstat()
+    except OSError as exc:
+        raise ValueError("Lima sandbox mount attestation source is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_size > MAX_LIMA_STATE_BYTES
+        or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+    ):
+        raise ValueError("Lima sandbox mount attestation source is unsafe")
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError("Lima sandbox mount attestation source is invalid") from exc
+    if not isinstance(raw_config, Mapping) or "mounts" not in raw_config:
+        raise ValueError("Lima sandbox mount attestation is incomplete")
+    resolved = dict(payload)
+    resolved_config = dict(config) if isinstance(config, Mapping) else {}
+    resolved_config["mounts"] = raw_config["mounts"]
+    resolved["config"] = resolved_config
+    return resolved
 
 
 def _all_guest_ports_ignored(value: Any) -> bool:
