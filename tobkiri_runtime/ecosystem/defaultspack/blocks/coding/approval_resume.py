@@ -9,6 +9,7 @@ from domain.function_runtime.dispatcher import run_defaultspack_function
 from domain.safety import approval
 
 _CODING_OPERATION_PREFIXES = ("file.", "git.", "shell.", "terminal.", "workspace.")
+_EXACT_REPLAY_TOOLS = {"pack.approve": "coding_pack_approve"}
 
 
 def run(input_data: dict[str, Any], context: dict[str, Any] | None = None):
@@ -25,9 +26,15 @@ def run(input_data: dict[str, Any], context: dict[str, Any] | None = None):
     operation = str(request.get("operation") or "").strip()
     tool_name = str(details.get("function_id") or details.get("tool_name") or "").strip()
     arguments = details.get("arguments")
+    expected_tool = _EXACT_REPLAY_TOOLS.get(
+        operation,
+        "coding_" + operation.replace(".", "_")
+        if operation.startswith(_CODING_OPERATION_PREFIXES)
+        else "",
+    )
     if (
-        not operation.startswith(_CODING_OPERATION_PREFIXES)
-        or tool_name != "coding_" + operation.replace(".", "_")
+        not expected_tool
+        or tool_name != expected_tool
         or str(details.get("conversation_id") or "").strip() != conversation_id
         or not isinstance(arguments, dict)
         or approval.hash_arguments(arguments) != str(request.get("args_hash") or "")
@@ -47,15 +54,18 @@ def run(input_data: dict[str, Any], context: dict[str, Any] | None = None):
             code=verification.code or "DEBUG_RESUME_INVALID",
         )
 
-    result = run_defaultspack_function(
-        tool_name,
-        {**arguments, "approval_token": token},
-        {
-            **dict(context or {}),
-            "conversation_id": conversation_id,
-            "approval_replay": True,
-        },
-    )
+    replay_input = {**arguments, "approval_token": token}
+    replay_context = {
+        **dict(context or {}),
+        "conversation_id": conversation_id,
+        "approval_replay": True,
+    }
+    if operation == "pack.approve":
+        from blocks.coding.pack_approve import run as approve_pack
+
+        result = approve_pack(replay_input, replay_context)
+    else:
+        result = run_defaultspack_function(tool_name, replay_input, replay_context)
     if result.get("status") != "ok":
         return result
     settled = approval.get_approval_request(request_id)

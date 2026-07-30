@@ -23,6 +23,7 @@ Wave 17-B 変更:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import json
 import os
@@ -730,6 +731,67 @@ class ApprovalManager:
             self._invalidate_hash_cache(pack_id)
             
             return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.APPROVED)
+
+    @staticmethod
+    def _pack_snapshot_digest(pack_id: str, file_hashes: Mapping[str, str]) -> str:
+        """Return a path-free digest for one exact Pack content snapshot."""
+        payload = {
+            "pack_id": str(pack_id),
+            "file_hashes": {
+                str(path): str(digest)
+                for path, digest in sorted(file_hashes.items())
+            },
+        }
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def get_pack_approval_snapshot(self, pack_id: str) -> dict[str, Any]:
+        """Describe the exact Pack content a delegated approval would authorize."""
+        with self._lock:
+            if pack_id not in self._approvals:
+                return {"success": False, "error": "Pack not found"}
+            if pack_id == LOCAL_PACK_ID:
+                file_hashes = self._compute_local_pack_hashes()
+            else:
+                pack_dir = self._resolve_pack_dir(pack_id)
+                if pack_dir is None or not pack_dir.exists():
+                    return {"success": False, "error": "Pack directory not found"}
+                file_hashes = self._compute_pack_hashes_nocache(pack_dir)
+            status = self.get_status(pack_id)
+            return {
+                "success": True,
+                "pack_id": pack_id,
+                "status": status.value if status else "unknown",
+                "snapshot_digest": self._pack_snapshot_digest(pack_id, file_hashes),
+                "file_count": len(file_hashes),
+            }
+
+    def approve_if_snapshot(self, pack_id: str, expected_digest: str) -> ApprovalResult:
+        """Approve only if Pack contents still match the reviewed snapshot."""
+        with self._lock:
+            snapshot = self.get_pack_approval_snapshot(pack_id)
+            if not snapshot.get("success"):
+                return ApprovalResult(
+                    success=False,
+                    pack_id=pack_id,
+                    error=str(snapshot.get("error") or "Pack snapshot unavailable"),
+                )
+            if not hmac.compare_digest(
+                str(snapshot.get("snapshot_digest") or ""),
+                str(expected_digest or ""),
+            ):
+                return ApprovalResult(
+                    success=False,
+                    pack_id=pack_id,
+                    error="Pack contents changed after approval was requested",
+                )
+            self._invalidate_hash_cache(pack_id)
+            return self.approve(pack_id)
     
     def approve_rule(self, pack_id: str) -> ApprovalResult:
         """rule Pack に対するルール拡張承認を実行する。

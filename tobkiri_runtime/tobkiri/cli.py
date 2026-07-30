@@ -601,6 +601,24 @@ def _debug_status(_args: argparse.Namespace) -> dict[str, Any]:
     return _broker_request("GET", "/api/host/debug/status")
 
 
+def _pack_approval_request(args: argparse.Namespace) -> dict[str, Any]:
+    _debug_binding_query()
+    return _api_request(
+        "POST",
+        "/api/coding/packs/approval/request",
+        {"pack_id": args.pack_id},
+    )
+
+
+def _pack_status(args: argparse.Namespace) -> dict[str, Any]:
+    _debug_binding_query()
+    return _api_request(
+        "GET",
+        "/api/coding/packs/status",
+        query={"pack_id": args.pack_id},
+    )
+
+
 def _session_start(args: argparse.Namespace) -> dict[str, Any]:
     launcher_status = _broker_request("GET", "/api/host/debug/status").get("status") or {}
     if launcher_status.get("state") not in {"disabled", "pending"}:
@@ -822,6 +840,14 @@ def _parser() -> argparse.ArgumentParser:
     deny.add_argument("request_id")
     deny.add_argument("--reason", default="denied by delegated debug CLI")
     deny.set_defaults(handler=_approval_decide, decision="deny")
+    packs = commands.add_parser("packs")
+    pack_commands = packs.add_subparsers(dest="pack_command", required=True)
+    pack_request = pack_commands.add_parser("request")
+    pack_request.add_argument("pack_id")
+    pack_request.set_defaults(handler=_pack_approval_request)
+    pack_status = pack_commands.add_parser("status")
+    pack_status.add_argument("pack_id")
+    pack_status.set_defaults(handler=_pack_status)
     return parser
 
 

@@ -1880,6 +1880,16 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec(
         "POST", "/api/coding/approvals/resume", block_module="blocks.coding.approval_resume"
     ),
+    HttpRouteSpec(
+        "POST",
+        "/api/coding/packs/approval/request",
+        block_module="blocks.coding.pack_approval_request",
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/coding/packs/status",
+        block_module="blocks.coding.pack_status",
+    ),
     HttpRouteSpec("GET", "/api/authority/requests", handler_name="_handle_authority_requests"),
     HttpRouteSpec(
         "GET", "/api/authority/requests/{request_id}", handler_name="_handle_authority_request"

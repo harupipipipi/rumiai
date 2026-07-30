@@ -2389,6 +2389,20 @@ legacy_routes:
   reason: server-owned deterministic replay for delegated CLI coding approvals
   remove_after: v2.4
 - method: POST
+  pattern: /api/coding/packs/approval/request
+  legacy_block_module: blocks.coding.pack_approval_request
+  replacement_function_id: coding_pack_approval_request
+  owner: coding
+  reason: Launcher-bound exact Pack snapshot approval request
+  remove_after: v2.4
+- method: GET
+  pattern: /api/coding/packs/status
+  legacy_block_module: blocks.coding.pack_status
+  replacement_function_id: coding_pack_status
+  owner: coding
+  reason: path-free delegated CLI Pack approval verification
+  remove_after: v2.4
+- method: POST
   pattern: /api/coding/github/pr
   legacy_block_module: blocks.coding.github_pr_read
   replacement_function_id: coding_github_pr_read

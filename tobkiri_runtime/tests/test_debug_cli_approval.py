@@ -281,6 +281,146 @@ def test_server_owned_coding_resume_uses_stored_arguments_and_consumes_once(
     assert "one-shot-token" not in json.dumps(result)
 
 
+def test_server_owned_resume_accepts_exact_pack_approval_tool(monkeypatch):
+    from blocks.coding import approval_resume
+    from blocks.coding import pack_approve
+
+    arguments = {
+        "target_pack_id": "test-pack",
+        "snapshot_digest": "a" * 64,
+    }
+    request = {
+        "request_id": "apr-pack",
+        "status": "approved",
+        "operation": "pack.approve",
+        "args_hash": runtime_approval.hash_arguments(arguments),
+        "details": {
+            "function_id": "coding_pack_approve",
+            "conversation_id": "debug-pack-approval",
+            "arguments": arguments,
+        },
+    }
+    monkeypatch.setattr(approval_resume.approval, "get_approval_request", lambda _id: request)
+    monkeypatch.setattr(
+        approval_resume.approval,
+        "resolve_debug_resume_handle",
+        lambda _resume_id, _request_id: "one-shot-token",
+    )
+    monkeypatch.setattr(
+        approval_resume.approval,
+        "verify_execution_token",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            valid=True, request_id="apr-pack", message=None, code=None
+        ),
+    )
+
+    def execute(payload, context):
+        assert payload == {**arguments, "approval_token": "one-shot-token"}
+        request["status"] = "consumed"
+        return {"status": "ok", "data": {"approved": True, "verified": True}}
+
+    monkeypatch.setattr(pack_approve, "run", execute)
+
+    result = approval_resume.run(
+        {
+            "request_id": "apr-pack",
+            "resume_id": "resume-pack",
+            "conversation_id": "debug-pack-approval",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["resumed"] is True
+
+
+def test_cli_pack_request_requires_active_debug_and_calls_server(monkeypatch):
+    monkeypatch.setattr(cli, "_debug_binding_query", lambda: {"debug_session_id": "dbg"})
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "_api_request",
+        lambda method, path, payload=None, **_kwargs: calls.append((method, path, payload))
+        or {"approval_required": True},
+    )
+
+    result = cli._pack_approval_request(argparse.Namespace(pack_id="test-pack"))
+
+    assert result["approval_required"] is True
+    assert calls == [
+        (
+            "POST",
+            "/api/coding/packs/approval/request",
+            {"pack_id": "test-pack"},
+        )
+    ]
+
+
+def test_cli_pack_status_uses_path_free_status_route(monkeypatch):
+    monkeypatch.setattr(cli, "_debug_binding_query", lambda: {"debug_session_id": "dbg"})
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "_api_request",
+        lambda method, path, **kwargs: calls.append((method, path, kwargs))
+        or {"status": "approved", "approved_and_verified": True},
+    )
+
+    result = cli._pack_status(argparse.Namespace(pack_id="test-pack"))
+
+    assert result["approved_and_verified"] is True
+    assert calls == [
+        (
+            "GET",
+            "/api/coding/packs/status",
+            {"query": {"pack_id": "test-pack"}},
+        )
+    ]
+
+
+def test_pack_approve_consumes_token_and_verifies_exact_snapshot(monkeypatch):
+    from blocks.coding import pack_approve
+    from core_runtime import approval_manager
+
+    observed = {}
+
+    def verify(token, operation, args_hash, *, consume):
+        observed.update(
+            token=token,
+            operation=operation,
+            args_hash=args_hash,
+            consume=consume,
+        )
+        return SimpleNamespace(valid=True, request_id="apr-pack", message=None, code=None)
+
+    manager = SimpleNamespace(
+        scan_packs=lambda: ["test-pack"],
+        approve_if_snapshot=lambda pack_id, digest: SimpleNamespace(
+            success=pack_id == "test-pack" and digest == "a" * 64,
+            error=None,
+        ),
+        is_pack_approved_and_verified=lambda pack_id, **_kwargs: (pack_id == "test-pack", None),
+    )
+    monkeypatch.setattr(pack_approve.approval, "verify_execution_token", verify)
+    monkeypatch.setattr(approval_manager, "get_approval_manager", lambda: manager)
+    payload = {
+        "target_pack_id": "test-pack",
+        "snapshot_digest": "a" * 64,
+        "approval_token": "one-shot-token",
+    }
+
+    result = pack_approve.run(payload, {})
+
+    assert result["status"] == "ok"
+    assert result["data"] == {"approved": True, "verified": True}
+    assert observed == {
+        "token": "one-shot-token",
+        "operation": "pack.approve",
+        "args_hash": runtime_approval.hash_arguments(payload),
+        "consume": True,
+    }
+
+
 def test_cli_session_uses_owned_defaultspack_process_as_guardian(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
