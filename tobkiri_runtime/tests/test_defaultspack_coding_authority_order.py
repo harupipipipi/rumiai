@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,6 +15,54 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 pytestmark = pytest.mark.contract
+
+
+def test_coding_contract_recovers_persisted_profile_for_request_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from domain.coding import contract_adapter
+
+    registry = object()
+    monkeypatch.setattr(
+        contract_adapter,
+        "persisted_resolved_profile",
+        lambda: SimpleNamespace(profile_id="profile-1"),
+    )
+    monkeypatch.setattr(
+        contract_adapter,
+        "get_container",
+        lambda: SimpleNamespace(get_or_none=lambda key: registry),
+    )
+    captured: dict[str, Any] = {}
+
+    def invoke(interface_registry, contract_id, operation, payload):
+        captured.update(
+            registry=interface_registry,
+            contract_id=contract_id,
+            operation=operation,
+            payload=payload,
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(contract_adapter, "invoke_global_contract", invoke)
+
+    result = contract_adapter.invoke_coding_contract(
+        contract_adapter.WORKSPACE_RESOURCE,
+        "list",
+        {"cursor": None},
+    )
+
+    assert result == {"ok": True}
+    assert captured == {
+        "registry": registry,
+        "contract_id": contract_adapter.WORKSPACE_RESOURCE,
+        "operation": "list",
+        "payload": {
+            "profile_id": "profile-1",
+            "cursor": None,
+            "_contract_consumer_pack_id": "defaultspack",
+        },
+    }
 
 
 def _authorize(monkeypatch: pytest.MonkeyPatch, events: list[str], mutation_guard):

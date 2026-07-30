@@ -48,6 +48,7 @@ def run(context):
         ("GET", "/api/coding/approvals", _lazy("blocks.coding.approval_list"), {}),
         ("POST", "/api/coding/approvals/approve", _lazy("blocks.coding.approval_approve"), {}),
         ("POST", "/api/coding/approvals/deny", _lazy("blocks.coding.approval_deny"), {}),
+        ("POST", "/api/coding/approvals/resume", _lazy("blocks.coding.approval_resume"), {}),
         ("POST", "/api/coding/github/pr", _lazy("blocks.coding.github_pr_read"), {}),
         ("POST", "/api/coding/github/issue", _lazy("blocks.coding.github_issue_read"), {}),
         ("POST", "/api/coding/github/ci", _lazy("blocks.coding.github_ci_status"), {}),

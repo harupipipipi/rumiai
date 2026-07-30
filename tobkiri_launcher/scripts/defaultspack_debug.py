@@ -6778,16 +6778,18 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
         except SmokeRunnerError as error:
             return {"ok": False, "error": str(error)}
     if configured_debug_state_root is not None:
-        state_root = Path(configured_debug_state_root).expanduser()
+        state_root = Path(configured_debug_state_root).expanduser().resolve()
         user_data = state_root / "user_data"
     else:
         user_data = (
-            Path(args.user_data).expanduser() if args.user_data else run_dir / "user_data"
+            Path(args.user_data).expanduser().resolve()
+            if args.user_data
+            else (run_dir / "user_data").resolve()
         )
     chat_store = (
-        Path(configured_debug_state_root).expanduser() / "chat" / "conversations.json"
+        state_root / "chat" / "conversations.json"
         if configured_debug_state_root is not None
-        else run_dir / "chat" / "conversations.json"
+        else (run_dir / "chat" / "conversations.json").resolve()
     )
     direct_workspace = chat_store.parent / "conversations" / "direct-http" / "workspace"
     direct_artifact_root = direct_workspace / "tools" / "computer"
@@ -6823,6 +6825,11 @@ def launch(args: argparse.Namespace, *, include_process: bool = False) -> dict[s
     env["PYTHONFAULTHANDLER"] = env.get("PYTHONFAULTHANDLER") or "1"
     env["RUMI_HOME"] = env.get("RUMI_HOME") or str(RUMI_AI_ROOT)
     env["RUMI_APP_DIR"] = env.get("RUMI_APP_DIR") or str(RUMI_AI_ROOT)
+    # Keep both sides of the migrated environment contract pinned to the same
+    # harness-owned root.  A packaged Launcher may already export the new name;
+    # leaving it inherited would make read_migrated_env() silently bypass the
+    # isolated RUMI_USER_DATA tree (including its approval grants).
+    env["TOBKIRI_USER_DATA"] = str(user_data)
     env["RUMI_USER_DATA"] = str(user_data)
     env["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"] = str(chat_store)
     env["RUMI_DEFAULTSPACK_DIRECT_CONVERSATION_WORKSPACE"] = str(direct_workspace)

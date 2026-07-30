@@ -160,6 +160,7 @@ def test_workspace_action_receipt_binds_revision_and_metadata() -> None:
 def test_wave8_artifact_hashes_match_static_source() -> None:
     root = Path(__file__).parents[1] / "ecosystem"
     pack_ids = (
+        "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
         "rumi_file_inspect_pack",
         "rumi_file_mutation_pack",
@@ -189,4 +190,3 @@ def test_wave8_artifact_hashes_match_static_source() -> None:
         for artifact in manifest["artifacts"]:
             content = (pack_root / artifact["path"]).read_bytes()
             assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
-

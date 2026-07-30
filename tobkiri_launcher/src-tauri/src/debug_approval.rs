@@ -631,6 +631,11 @@ impl DebugApprovalManager {
         }
         match (record.state, next) {
             (OperatorState::Settling, _) => {}
+            // The CLI settles an approved operator before executing the
+            // one-shot token because consume_execution() accepts only that
+            // state. If deterministic replay then fails before consumption,
+            // preserve the failure outcome without reopening execution.
+            (OperatorState::Settled, OperatorState::ResumeFailed) => {}
             (OperatorState::Settled, OperatorState::Settled)
             | (OperatorState::ResumeFailed, OperatorState::ResumeFailed) => {
                 return Ok(record.operator.clone());
@@ -1381,6 +1386,40 @@ mod tests {
                 request_id: operator.request_id,
                 lease_epoch: operator.lease_epoch,
                 execution_jti: "tok-second-execution".into(),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn settled_operator_can_record_resume_failure_before_execution() {
+        let manager = manager();
+        let (status, secret) = active(&manager);
+        let operator = manager
+            .sign_operator(operator_request(&status, &secret, "approve"))
+            .unwrap();
+        manager
+            .verify_operator(DebugOperatorVerifyRequest {
+                debug_cli_operator: operator.clone(),
+                expected_decision: "approve".into(),
+            })
+            .unwrap();
+        manager
+            .settle_operator(DebugOperatorSettleRequest {
+                debug_cli_operator: operator.clone(),
+                outcome: "settled".into(),
+            })
+            .unwrap();
+        manager
+            .settle_operator(DebugOperatorSettleRequest {
+                debug_cli_operator: operator.clone(),
+                outcome: "resume_failed".into(),
+            })
+            .unwrap();
+        assert!(manager
+            .consume_execution(DebugExecutionConsumeRequest {
+                request_id: operator.request_id,
+                lease_epoch: operator.lease_epoch,
+                execution_jti: "tok-after-failed-resume".into(),
             })
             .is_err());
     }

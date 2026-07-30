@@ -161,7 +161,23 @@ def _open_json(request: urllib.request.Request, label: str) -> dict[str, Any]:
         with urllib.request.urlopen(request, timeout=15) as response:
             decoded = json.loads(response.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
-        raise CliError(f"{label} returned HTTP {exc.code}") from exc
+        message = ""
+        try:
+            failure = json.loads(exc.read().decode("utf-8") or "{}")
+            if isinstance(failure, dict):
+                candidate = failure.get("error")
+                if isinstance(candidate, dict):
+                    message = str(candidate.get("message") or candidate.get("code") or "")
+                elif candidate is not None:
+                    message = str(candidate)
+                if not message:
+                    data = failure.get("data")
+                    if isinstance(data, dict):
+                        message = str(data.get("message") or data.get("error") or "")
+        except Exception:
+            pass
+        suffix = f": {message}" if message else ""
+        raise CliError(f"{label} returned HTTP {exc.code}{suffix}") from exc
     except Exception as exc:
         raise CliError(f"{label} is unavailable") from exc
     if not isinstance(decoded, dict):
@@ -257,6 +273,28 @@ def _api_resume(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """Resume an approved conversation without exposing its one-shot token."""
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    followup = (
+        metadata.get("approval_followup")
+        if isinstance(metadata.get("approval_followup"), dict)
+        else {}
+    )
+    tool_name = str(followup.get("tool_name") or "").strip()
+    if tool_name.startswith("coding_"):
+        resumed = _api_request(
+            "POST",
+            "/api/coding/approvals/resume",
+            {
+                "conversation_id": conversation_id,
+                "request_id": str(followup.get("request_id") or ""),
+                "resume_id": str(followup.get("resume_id") or ""),
+            },
+        )
+        if resumed.get("resumed") is not True:
+            raise CliError("Defaultspack rejected delegated coding replay")
+        return resumed
+
     session = _session()
     token = _safe_secret_text(Path(str(session.get("api_token_file") or "")))
     if not token:
@@ -302,6 +340,16 @@ def _api_resume(
                     error = event.get("error")
                     message = error.get("message") if isinstance(error, dict) else error
                     raise CliError(str(message or "delegated debug resume failed"))
+                if event_type == "tool_call_completed" and event.get("approval_replay") is True:
+                    if event.get("is_error") is True:
+                        raise CliError(
+                            str(event.get("message") or "delegated debug replay failed")
+                        )
+                    return {
+                        "resumed": True,
+                        "terminal_event": "tool_call_completed",
+                        "approval_requested": approval_requested,
+                    }
     except CliError:
         raise
     except urllib.error.HTTPError as exc:
@@ -727,11 +775,17 @@ def _approval_decide(args: argparse.Namespace) -> dict[str, Any]:
     try:
         resumed = _api_resume(conversation_id, resume_request)
     except Exception:
-        _broker_request(
-            "POST",
-            "/api/host/debug/approval/settle",
-            {"debug_cli_operator": operator, "outcome": "resume_failed"},
-        )
+        # Preserve the actual resume failure.  The best-effort settlement may
+        # itself fail (for example after the operator was already consumed),
+        # but that secondary failure must never mask the actionable cause.
+        try:
+            _broker_request(
+                "POST",
+                "/api/host/debug/approval/settle",
+                {"debug_cli_operator": operator, "outcome": "resume_failed"},
+            )
+        except CliError:
+            pass
         raise
     return {**decision, **resumed}
 

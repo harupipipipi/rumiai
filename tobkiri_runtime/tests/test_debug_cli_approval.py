@@ -3,10 +3,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import io
 import json
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +22,45 @@ from core_runtime.authority.models import AuthorityRequest  # noqa: E402
 from domain.safety import approval as runtime_approval  # noqa: E402
 from domain.safety import debug_cli_operator as runtime_operator  # noqa: E402
 from tobkiri import cli  # noqa: E402
+
+
+class _SseResponse:
+    headers = {"Content-Type": "text/event-stream"}
+
+    def __init__(self, events):
+        self._lines = io.BytesIO(
+            b"".join(
+                b"data: " + json.dumps(event).encode() + b"\n\n"
+                for event in events
+            )
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+def test_open_json_preserves_structured_http_error_message(monkeypatch):
+    failure = urllib.error.HTTPError(
+        "http://127.0.0.1:8767/api/test",
+        400,
+        "Bad Request",
+        {},
+        io.BytesIO(json.dumps({"error": {"message": "contract unavailable"}}).encode()),
+    )
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(cli.CliError, match=r"HTTP 400: contract unavailable"):
+        cli._open_json(urllib.request.Request("http://127.0.0.1:8767/api/test"), "Defaultspack")
 
 
 def _authority_request(**overrides):
@@ -132,6 +175,110 @@ def test_cli_has_only_individual_approval_commands():
     parser.parse_args(["debug", "approvals", "deny", "apr-1"])
     with pytest.raises(SystemExit):
         parser.parse_args(["debug", "approvals", "approve-all"])
+
+
+def test_cli_resume_returns_after_exact_replayed_tool_completes(
+    tmp_path, monkeypatch
+):
+    token_file = tmp_path / "token"
+    token_file.write_text("secret", encoding="utf-8")
+    token_file.chmod(0o600)
+    monkeypatch.setattr(
+        cli,
+        "_session",
+        lambda: {
+            "api_token_file": str(token_file),
+            "defaultspack_url": "http://127.0.0.1:8767",
+        },
+    )
+    response = _SseResponse(
+        [
+            {"type": "tool_call_started", "approval_replay": True},
+            {
+                "type": "tool_call_completed",
+                "approval_replay": True,
+                "is_error": False,
+            },
+            {"type": "message_delta", "text": "must not be awaited"},
+        ]
+    )
+    monkeypatch.setattr(cli.urllib.request, "urlopen", lambda *_args, **_kwargs: response)
+
+    result = cli._api_resume("conversation-1", {"message": {}})
+
+    assert result == {
+        "resumed": True,
+        "terminal_event": "tool_call_completed",
+        "approval_requested": False,
+    }
+
+
+def test_server_owned_coding_resume_uses_stored_arguments_and_consumes_once(
+    monkeypatch,
+):
+    from blocks.coding import approval_resume
+
+    arguments = {
+        "workspace_id": "workspace-1",
+        "conversation_id": "conversation-1",
+        "path": "proof.txt",
+        "content": "proof",
+    }
+    request = {
+        "request_id": "apr-1",
+        "status": "approved",
+        "operation": "file.write",
+        "args_hash": runtime_approval.hash_arguments(arguments),
+        "details": {
+            "function_id": "coding_file_write",
+            "tool_name": "coding_file_write",
+            "conversation_id": "conversation-1",
+            "arguments": arguments,
+        },
+    }
+    monkeypatch.setattr(
+        approval_resume.approval,
+        "get_approval_request",
+        lambda _request_id: request,
+    )
+    monkeypatch.setattr(
+        approval_resume.approval,
+        "resolve_debug_resume_handle",
+        lambda _resume_id, _request_id: "one-shot-token",
+    )
+    monkeypatch.setattr(
+        approval_resume.approval,
+        "verify_execution_token",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            valid=True,
+            request_id="apr-1",
+            message=None,
+            code=None,
+        ),
+    )
+    captured = {}
+
+    def execute(function_id, payload, context):
+        captured.update(function_id=function_id, payload=payload, context=context)
+        request["status"] = "consumed"
+        return {"status": "ok", "data": {"written": True}}
+
+    monkeypatch.setattr(approval_resume, "run_defaultspack_function", execute)
+
+    result = approval_resume.run(
+        {
+            "request_id": "apr-1",
+            "resume_id": "resume-1",
+            "conversation_id": "conversation-1",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["resumed"] is True
+    assert captured["function_id"] == "coding_file_write"
+    assert captured["payload"] == {**arguments, "approval_token": "one-shot-token"}
+    assert "one-shot-token" not in json.dumps(result)
 
 
 def test_cli_session_uses_owned_defaultspack_process_as_guardian(tmp_path, monkeypatch):
@@ -251,14 +398,17 @@ def test_cli_approve_resumes_exact_conversation_without_returning_token_in_resum
             "resume_id": "resume-opaque",
         },
     )
-    monkeypatch.setattr(
-        cli,
-        "_broker_request",
-        lambda *_args, **_kwargs: {"ok": True, "settled": True},
-    )
+    events = []
+
+    def broker(_method, _path, payload=None):
+        events.append(("settle", payload["outcome"]))
+        return {"ok": True, "settled": True}
+
+    monkeypatch.setattr(cli, "_broker_request", broker)
     captured = {}
 
     def resume(conversation_id, payload):
+        events.append(("resume", conversation_id))
         captured["conversation_id"] = conversation_id
         captured["payload"] = payload
         return {"resumed": True, "terminal_event": "done"}
@@ -279,6 +429,110 @@ def test_cli_approve_resumes_exact_conversation_without_returning_token_in_resum
         == "resume-opaque"
     )
     assert "approval_token" not in json.dumps(captured["payload"], sort_keys=True)
+    assert events == [("settle", "settled"), ("resume", "conversation-1")]
+
+
+def test_cli_marks_resume_failed_without_settling_first(monkeypatch):
+    request = {
+        "_approval_source": "runtime",
+        "request_id": "apr-1",
+        "operation": "file.write",
+        "args_hash": "a" * 64,
+        "details": {
+            "conversation_id": "conversation-1",
+            "function_id": "coding_file_write",
+            "action": "file.write",
+            "arguments": {"path": "proof.txt", "content": "proof"},
+        },
+    }
+    monkeypatch.setattr(cli, "_request_by_id", lambda _request_id: request)
+    monkeypatch.setattr(cli, "_signed_operator", lambda _request: ({"signed": True}, "a" * 64))
+    monkeypatch.setattr(
+        cli,
+        "_api_request",
+        lambda *_args, **_kwargs: {
+            "approved": True,
+            "request_id": "apr-1",
+            "resume_id": "resume-opaque",
+        },
+    )
+    settlements = []
+    monkeypatch.setattr(
+        cli,
+        "_broker_request",
+        lambda _method, _path, payload=None: settlements.append(payload["outcome"])
+        or {"ok": True},
+    )
+    monkeypatch.setattr(
+        cli,
+        "_api_resume",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(cli.CliError("resume unavailable")),
+    )
+
+    with pytest.raises(cli.CliError, match="resume unavailable"):
+        cli._approval_decide(
+            argparse.Namespace(
+                request_id="apr-1",
+                expected_digest="a" * 64,
+                decision="approve",
+            )
+        )
+
+    assert settlements == ["settled", "resume_failed"]
+
+
+def test_cli_preserves_resume_error_when_failure_settlement_is_rejected(monkeypatch):
+    request = {
+        "_approval_source": "runtime",
+        "request_id": "apr-1",
+        "operation": "file.write",
+        "args_hash": "a" * 64,
+        "details": {
+            "conversation_id": "conversation-1",
+            "function_id": "coding_file_write",
+            "action": "file.write",
+            "arguments": {"path": "proof.txt", "content": "proof"},
+        },
+    }
+    monkeypatch.setattr(cli, "_request_by_id", lambda _request_id: request)
+    monkeypatch.setattr(cli, "_signed_operator", lambda _request: ({"signed": True}, "a" * 64))
+    monkeypatch.setattr(
+        cli,
+        "_api_request",
+        lambda *_args, **_kwargs: {
+            "approved": True,
+            "request_id": "apr-1",
+            "resume_id": "resume-opaque",
+        },
+    )
+    settlements = []
+
+    def broker(_method, _path, payload=None):
+        outcome = payload["outcome"]
+        settlements.append(outcome)
+        if outcome == "resume_failed":
+            raise cli.CliError("debug operator execution was already consumed")
+        return {"ok": True}
+
+    monkeypatch.setattr(cli, "_broker_request", broker)
+    monkeypatch.setattr(
+        cli,
+        "_api_resume",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            cli.CliError("host authority contract unavailable")
+        ),
+    )
+
+    with pytest.raises(cli.CliError, match="host authority contract unavailable"):
+        cli._approval_decide(
+            argparse.Namespace(
+                request_id="apr-1",
+                expected_digest="a" * 64,
+                decision="approve",
+            )
+        )
+
+    assert settlements == ["settled", "resume_failed"]
 
 
 def test_authority_accepts_launcher_verified_debug_operator_once(tmp_path, monkeypatch):

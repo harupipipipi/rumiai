@@ -777,6 +777,17 @@ def _strip_approval_tokens(value: Any) -> Any:
     return value
 
 
+def _approval_replay_operation_allowed(operation: str, tool_name: str) -> bool:
+    """Allow only a signed operation's exact executable tool identity."""
+    if operation.startswith("tool."):
+        return True
+    if operation.startswith(("browser.", "computer.")):
+        return tool_name in {"browser_computer", "browser_use", "computer_use"}
+    if operation.startswith(("file.", "git.", "shell.", "terminal.", "workspace.")):
+        return tool_name == "coding_" + operation.replace(".", "_")
+    return False
+
+
 def _canonical_approval_replay_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     canonical = _strip_approval_tokens(arguments or {})
     payload = canonical.pop("payload", None)
@@ -4125,12 +4136,8 @@ class ChatRunEngine:
             return None
         if not operation:
             return None
-        if not operation.startswith("tool."):
-            if not (
-                operation.startswith(("browser.", "computer."))
-                and tool_name in {"browser_computer", "browser_use", "computer_use"}
-            ):
-                return None
+        if not _approval_replay_operation_allowed(operation, tool_name):
+            return None
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["_approval_followup_block_legacy"] = True
 

@@ -1987,3 +1987,14 @@ def test_approval_followup_replay_keeps_attached_tools_metadata_truthful(tmp_pat
                 assert token not in tool_content, msg
     assert saw_synthetic_tool_call, summary_messages
     ChatStore._instance = None
+
+
+def test_debug_replay_accepts_only_exact_coding_operation_tool_identity():
+    # Importing stream_engine initializes its compatibility facades, so keep
+    # this pure helper assertion after the stateful replay fixtures above.
+    from domain.chat.stream_engine import _approval_replay_operation_allowed
+
+    assert _approval_replay_operation_allowed("file.write", "coding_file_write")
+    assert _approval_replay_operation_allowed("git.commit", "coding_git_commit")
+    assert not _approval_replay_operation_allowed("file.write", "coding_file_delete")
+    assert not _approval_replay_operation_allowed("model.invoke", "coding_model_invoke")

@@ -2382,6 +2382,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/coding/approvals/resume
+  legacy_block_module: blocks.coding.approval_resume
+  replacement_function_id: coding_approval_resume
+  owner: coding
+  reason: server-owned deterministic replay for delegated CLI coding approvals
+  remove_after: v2.4
+- method: POST
   pattern: /api/coding/github/pr
   legacy_block_module: blocks.coding.github_pr_read
   replacement_function_id: coding_github_pr_read

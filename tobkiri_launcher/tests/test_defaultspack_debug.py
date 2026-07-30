@@ -947,6 +947,7 @@ def test_viewer_smoke_composes_existing_launch_and_smoke_and_stops_only_owned_pr
 
 
 def test_launch_propagates_validated_connection_port_to_child_env(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     connection_path = tmp_path / "connection.json"
     connection = {
         "version": 1,
@@ -989,7 +990,7 @@ def test_launch_propagates_validated_connection_port_to_child_env(tmp_path, monk
                 "port": 8766,
                 "connection": str(connection_path),
                 "viewer_broker_port": 8771,
-                "user_data": str(tmp_path / "user_data"),
+                "user_data": "relative-user-data",
                 "wait_seconds": 1.0,
                 "allow_no_broker": False,
             },
@@ -999,6 +1000,12 @@ def test_launch_propagates_validated_connection_port_to_child_env(tmp_path, monk
     assert result["ok"] is True
     assert captured["env"]["RUMI_VIEWER_BROKER_PORT"] == "8771"
     assert captured["env"]["RUMI_VIEWER_HOST_BROKER_CONNECTION"] == str(connection_path)
+    assert captured["env"]["TOBKIRI_USER_DATA"] == str(
+        (tmp_path / "relative-user-data").resolve()
+    )
+    assert captured["env"]["RUMI_USER_DATA"] == str(
+        (tmp_path / "relative-user-data").resolve()
+    )
     direct_workspace = Path(captured["env"]["RUMI_DEFAULTSPACK_DIRECT_CONVERSATION_WORKSPACE"])
     assert direct_workspace == Path(captured["env"]["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"]).parent / "conversations" / "direct-http" / "workspace"
     assert (direct_workspace / "tools" / "computer").is_dir()
@@ -1064,6 +1071,8 @@ def test_launch_applies_debug_isolation_after_desktop_metadata(tmp_path, monkeyp
     assert env["DEFAULTS_HTTP_PORT"] == "18771"
     assert env["RUMI_DEFAULTSPACK_PORT"] == "18771"
     assert env["RUMI_PORT"] == "18772"
+    assert env["TOBKIRI_USER_DATA"] == str(state_root / "user_data")
+    assert env["RUMI_USER_DATA"] == str(state_root / "user_data")
     assert env[debug.DEFAULTSPACK_DEBUG_ISOLATION_ENV] == "1"
     assert env[debug.DEFAULTSPACK_REQUIRE_OWN_BIND_ENV] == "1"
     assert env["RUMI_DEFAULTSPACK_APPROVAL_DB_PATH"].startswith(str(state_root))
@@ -1480,6 +1489,7 @@ def test_mimo_provider_launch_uses_complete_owned_debug_isolation(
     assert env[debug.DEFAULTSPACK_REQUIRE_OWN_BIND_ENV] == "1"
     assert env[debug.DEFAULTSPACK_DEBUG_HTTP_PORT_ENV] == "18770"
     assert env[debug.DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV] == "18771"
+    assert env["TOBKIRI_USER_DATA"] == str(state_root / "user_data")
     assert env["RUMI_USER_DATA"] == str(state_root / "user_data")
     assert env["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"] == str(
         state_root / "chat" / "conversations.json"
