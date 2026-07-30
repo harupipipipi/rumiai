@@ -38,9 +38,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use config::AppConfig;
 use debug_approval::{DebugApprovalManager, DebugApprovalStatus};
 use defaultspack_manager::DefaultspackManager;
-use host_broker::HostBrokerRuntime;
 #[cfg(any(debug_assertions, test))]
 use host_broker::DEFAULT_PORT as DEFAULT_HOST_BROKER_PORT;
+use host_broker::{BrokerAttestationIdentity, HostBrokerRuntime};
 use kernel_manager::KernelManager;
 
 mod dock_registration;
@@ -232,6 +232,7 @@ struct CodingUiOperator {
     version: u8,
     kind: String,
     origin: String,
+    instance_nonce: String,
     window_label: String,
     request_id: String,
     expected_digest: String,
@@ -264,12 +265,6 @@ fn debug_approval_status(
 fn validate_debug_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() != "main" {
         return Err("debug approval can only be changed from the Launcher main window".into());
-    }
-    if !window
-        .is_focused()
-        .map_err(|error| format!("failed to inspect Launcher focus: {error}"))?
-    {
-        return Err("Launcher must be focused to change debug approval".into());
     }
     let url = window
         .url()
@@ -307,18 +302,13 @@ async fn arm_debug_approval(
         "permanent" => "無期限（手動OFF・Launcher終了・guardian終了まで）",
         _ => return Err("invalid debug approval duration".into()),
     };
-    let process_id = pending
-        .process_id
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "unknown".into());
     let message = format!(
-        "この1つのCLIデバッグセッションだけに個別承認を委任します。\n\n利用期間: {}\nWorkspace: {}\nPack / Profile: {} / {}\nRun: {}\nGuardian PID: {}\n\n承認後も各操作は個別のdigestに束縛されます。",
+        "この1つのCLIデバッグセッションだけに個別承認を委任します。\n\n利用期間: {}\nWorkspace: {}\nPack / Profile: {} / {}\nRun: {}\nGuardian: Launcher-owned Defaultspack child（検証済み）\n\n承認後も各操作は個別のdigestに束縛されます。",
         duration_label,
         pending.workspace.as_deref().unwrap_or("unknown"),
         pending.pack_id.as_deref().unwrap_or("unknown"),
         pending.profile_id.as_deref().unwrap_or("unknown"),
         pending.run_id.as_deref().unwrap_or("unknown"),
-        process_id,
     );
     let confirmed = window
         .dialog()
@@ -860,6 +850,7 @@ fn coding_operator_message(operator: &CodingUiOperator) -> String {
     [
         format!("v{}", operator.version),
         operator.origin.clone(),
+        operator.instance_nonce.clone(),
         operator.window_label.clone(),
         operator.request_id.clone(),
         operator.expected_digest.clone(),
@@ -874,7 +865,7 @@ fn coding_operator_message(operator: &CodingUiOperator) -> String {
 #[tauri::command]
 async fn coding_approval_operator(
     window: tauri::WebviewWindow,
-    config: tauri::State<'_, AppConfig>,
+    attestation: tauri::State<'_, BrokerAttestationIdentity>,
     request_id: String,
     expected_digest: String,
     decision: String,
@@ -936,9 +927,10 @@ async fn coding_approval_operator(
         .map(char::from)
         .collect();
     let mut operator = CodingUiOperator {
-        version: 3,
+        version: 4,
         kind: "coding_ui_operator".into(),
         origin: "tauri_webview_window".into(),
+        instance_nonce: attestation.instance_nonce().into(),
         window_label: "defaultspack-main".into(),
         request_id,
         expected_digest,
@@ -948,12 +940,8 @@ async fn coding_approval_operator(
         nonce,
         signature: String::new(),
     };
-    let secret = load_or_create_panel_bootstrap_secret(&config)
-        .map_err(|error| format!("failed to load coding approval signing secret: {error}"))?;
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|error| format!("failed to prepare coding approval signature: {error}"))?;
-    mac.update(coding_operator_message(&operator).as_bytes());
-    operator.signature = hex::encode(mac.finalize().into_bytes());
+    operator.signature =
+        attestation.sign_message_base64(coding_operator_message(&operator).as_bytes());
     Ok(operator)
 }
 
@@ -1763,6 +1751,14 @@ enum StartupRecoveryStage {
     Bootstrap,
 }
 
+fn prepare_defaultspack_guardian_in_background(app: AppHandle, config: AppConfig) {
+    thread::spawn(move || {
+        if let Err(error) = dock_registration::prepare_defaultspack_guardian_impl(&app, &config) {
+            error!("Failed to prepare Launcher-owned Defaultspack guardian: {error:#}");
+        }
+    });
+}
+
 fn run_startup_sequence<StartKernel, WaitForHealthy, AuthorizePanel, RecoverConflict>(
     app_handle: Option<&AppHandle>,
     progress: &Arc<Mutex<String>>,
@@ -2244,9 +2240,11 @@ pub fn run() {
             let host_broker =
                 HostBrokerRuntime::start(&config, Arc::clone(&debug_approval))
                 .context("failed to start Viewer host broker")?;
+            let broker_attestation = host_broker.attestation_identity();
             record_startup_stage(&setup_startup_stage, "host_broker_running");
             app.manage(host_broker.clone());
-            app.manage(debug_approval);
+            app.manage(broker_attestation.clone());
+            app.manage(Arc::clone(&debug_approval));
             #[cfg(debug_assertions)]
             if let Some(policy) = debug_parallel_instance.as_ref() {
                 // A complete debug policy binds every run to an exact reserved
@@ -2286,6 +2284,8 @@ pub fn run() {
             let defaultspack_manager = Arc::new(DefaultspackManager::new(
                 config.clone(),
                 Arc::clone(&shutdown_flag),
+                broker_attestation,
+                Arc::clone(&debug_approval),
             ));
             let defaultspack_manager_for_monitor = Arc::clone(&defaultspack_manager);
             app.manage(defaultspack_manager);
@@ -2333,6 +2333,10 @@ pub fn run() {
                                     error!("Failed to navigate to panel: {e}");
                                 }
                             }
+                            prepare_defaultspack_guardian_in_background(
+                                handle.clone(),
+                                config.clone(),
+                            );
                             // Delayed background update check.
                             run_delayed_update_check();
                             return;
@@ -2375,6 +2379,8 @@ pub fn run() {
                         error!("Failed to navigate to panel: {e}");
                     }
                 }
+
+                prepare_defaultspack_guardian_in_background(handle.clone(), config.clone());
 
                 // Delayed background update check.
                 run_delayed_update_check();

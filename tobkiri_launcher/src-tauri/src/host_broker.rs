@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use ed25519_dalek::{Signer, SigningKey};
 use log::{error, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -43,6 +44,7 @@ const HOST_STREAM_START_PATH: &str = "/api/host/stream/start";
 const HOST_STREAM_STOP_PATH: &str = "/api/host/stream/stop";
 const HOST_STREAM_EVENTS_PREFIX: &str = "/api/host/stream/events/";
 const DEBUG_STATUS_PATH: &str = "/api/host/debug/status";
+const DEBUG_GUARDIAN_PATH: &str = "/api/host/debug/guardian";
 const DEBUG_SESSION_REQUEST_PATH: &str = "/api/host/debug/session/request";
 const DEBUG_SESSION_START_PATH: &str = "/api/host/debug/session/start";
 const DEBUG_SESSION_STOP_PATH: &str = "/api/host/debug/session/stop";
@@ -50,6 +52,7 @@ const DEBUG_OPERATOR_PATH: &str = "/api/host/debug/approval/operator";
 const DEBUG_OPERATOR_VERIFY_PATH: &str = "/api/host/debug/approval/verify";
 const DEBUG_OPERATOR_SETTLE_PATH: &str = "/api/host/debug/approval/settle";
 const DEBUG_EXECUTION_CONSUME_PATH: &str = "/api/host/debug/execution/consume";
+const RESPONSE_NONCE_HEADER: &str = "x-rumi-launcher-response-nonce";
 const PERMISSION_SUBJECT: &str = "Tobkiri Launcher";
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
@@ -88,6 +91,36 @@ struct HostBrokerShared {
     active_requests: Mutex<usize>,
     active_host_streams: Mutex<HashMap<String, HostStreamSession>>,
     used_approval_tokens: Mutex<HashMap<String, u64>>,
+    attestation: BrokerAttestationIdentity,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BrokerAttestationIdentity {
+    instance_nonce: String,
+    signing_key: Arc<SigningKey>,
+}
+
+impl BrokerAttestationIdentity {
+    pub(crate) fn generate() -> Self {
+        let mut key_bytes = [0_u8; 32];
+        rand::thread_rng().fill(&mut key_bytes);
+        Self {
+            instance_nonce: generate_broker_token(),
+            signing_key: Arc::new(SigningKey::from_bytes(&key_bytes)),
+        }
+    }
+
+    pub(crate) fn public_key_base64(&self) -> String {
+        URL_SAFE_NO_PAD.encode(self.signing_key.verifying_key().as_bytes())
+    }
+
+    pub(crate) fn instance_nonce(&self) -> &str {
+        &self.instance_nonce
+    }
+
+    pub(crate) fn sign_message_base64(&self, message: &[u8]) -> String {
+        URL_SAFE_NO_PAD.encode(self.signing_key.sign(message).to_bytes())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +168,7 @@ impl Drop for RequestSlot {
 
 impl HostBrokerRuntime {
     pub fn start(config: &AppConfig, debug_approval: Arc<DebugApprovalManager>) -> Result<Self> {
+        let attestation = BrokerAttestationIdentity::generate();
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             return Ok(Self {
@@ -146,6 +180,7 @@ impl HostBrokerRuntime {
                     active_requests: Mutex::new(0),
                     active_host_streams: Mutex::new(HashMap::new()),
                     used_approval_tokens: Mutex::new(HashMap::new()),
+                    attestation,
                 }),
             });
         }
@@ -179,6 +214,8 @@ impl HostBrokerRuntime {
                 instance_nonce: std::env::var("RUMI_VIEWER_BROKER_INSTANCE_NONCE")
                     .ok()
                     .filter(|value| !value.is_empty()),
+                attestation_public_key: Some(attestation.public_key_base64()),
+                attestation_instance_nonce: Some(attestation.instance_nonce.clone()),
             };
             write_connection_file(&config.host_broker_connection_path(), &connection)?;
 
@@ -203,6 +240,7 @@ impl HostBrokerRuntime {
                     active_requests: Mutex::new(0),
                     active_host_streams: Mutex::new(HashMap::new()),
                     used_approval_tokens: Mutex::new(HashMap::new()),
+                    attestation,
                 }),
             };
 
@@ -252,6 +290,10 @@ impl HostBrokerRuntime {
                 connection_path: None,
                 recovery: Some("Viewer host broker status is unavailable.".to_string()),
             })
+    }
+
+    pub(crate) fn attestation_identity(&self) -> BrokerAttestationIdentity {
+        self.inner.attestation.clone()
     }
 }
 
@@ -424,8 +466,57 @@ fn handle_stream(mut stream: TcpStream, shared: &Arc<HostBrokerShared>) -> Resul
             return Ok(());
         }
     };
-    let (status_code, body) = route_request(&request, shared);
+    let (status_code, mut body) = route_request(&request, shared);
+    attest_response(&request, status_code, &mut body, &shared.attestation)?;
     write_json_response(&mut stream, status_code, &body)
+}
+
+fn attest_response(
+    request: &ParsedRequest,
+    status_code: u16,
+    body: &mut Value,
+    identity: &BrokerAttestationIdentity,
+) -> Result<()> {
+    let Some(request_nonce) = request
+        .headers
+        .get(RESPONSE_NONCE_HEADER)
+        .map(|value| value.trim())
+        .filter(|value| (32..=256).contains(&value.len()))
+    else {
+        return Ok(());
+    };
+    let payload =
+        serde_json::to_vec(body).context("failed to encode broker attestation payload")?;
+    let payload_hash = hex::encode(Sha256::digest(&payload));
+    let signed = format!(
+        "tobkiri-launcher-response-v1\n{}\n{}\n{}\n{}\n{}\n{}",
+        identity.instance_nonce,
+        request_nonce,
+        request.method,
+        request.path,
+        status_code,
+        payload_hash,
+    );
+    let signature = identity.signing_key.sign(signed.as_bytes());
+    let Some(object) = body.as_object_mut() else {
+        bail!("broker response body must be a JSON object");
+    };
+    object.insert(
+        "_launcher_attestation".to_string(),
+        json!({
+            "version": 1,
+            "algorithm": "Ed25519",
+            "instance_nonce": identity.instance_nonce,
+            "request_nonce": request_nonce,
+            "method": request.method,
+            "path": request.path,
+            "status": status_code,
+            "payload_sha256": payload_hash,
+            "payload": URL_SAFE_NO_PAD.encode(payload),
+            "signature": URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+        }),
+    );
+    Ok(())
 }
 
 fn read_error_response(error: &anyhow::Error) -> (u16, Value) {
@@ -468,6 +559,21 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                 200,
                 json!({"ok": true, "status": shared.debug_approval.status()}),
             )
+        }
+        ("GET", DEBUG_GUARDIAN_PATH) => {
+            if let Err(error) = authorize_request(request, shared) {
+                return unauthorized_response(error);
+            }
+            match shared.debug_approval.current_guardian() {
+                Ok(guardian) => (200, json!({"ok": true, "guardian": guardian})),
+                Err(error) => (
+                    409,
+                    json!({
+                        "ok": false,
+                        "error": {"code": "DEBUG_GUARDIAN_UNAVAILABLE", "message": error}
+                    }),
+                ),
+            }
         }
         ("POST", DEBUG_SESSION_REQUEST_PATH) => handle_authorized_json(
             request,
@@ -2604,6 +2710,8 @@ mod tests {
             pid: 42,
             created_at: 123,
             instance_nonce: Some("instance-test".to_string()),
+            attestation_public_key: Some("public-key-test".to_string()),
+            attestation_instance_nonce: Some("attestation-instance-test".to_string()),
         };
         write_connection_file(&path, &info).expect("connection file should be written");
         let replacement = HostBrokerConnectionInfo {
@@ -2674,6 +2782,8 @@ mod tests {
             pid: 42,
             created_at: 123,
             instance_nonce: Some("instance-test".to_string()),
+            attestation_public_key: Some("public-key-test".to_string()),
+            attestation_instance_nonce: Some("attestation-instance-test".to_string()),
         };
 
         let error = write_connection_file_with_temporary(&path, &info, &temporary)
@@ -3356,6 +3466,7 @@ mod tests {
             active_requests: Mutex::new(0),
             active_host_streams: Mutex::new(HashMap::new()),
             used_approval_tokens: Mutex::new(HashMap::new()),
+            attestation: BrokerAttestationIdentity::generate(),
         }
     }
 }

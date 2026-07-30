@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import hmac
+import base64
 import io
 import json
 import sys
@@ -421,26 +420,28 @@ def test_pack_approve_consumes_token_and_verifies_exact_snapshot(monkeypatch):
     }
 
 
-def test_cli_session_uses_owned_defaultspack_process_as_guardian(tmp_path, monkeypatch):
+def test_cli_session_uses_launcher_owned_run_as_guardian(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     token_file = tmp_path / ".desktop_api_token"
     token_file.write_text("test-token", encoding="utf-8")
-    manifest = {
-        "run_id": "launch-owned",
-        "pid": 4242,
-        "port": 8766,
-        "token_file": str(token_file),
-    }
-    monkeypatch.setattr(cli, "_latest_manifest", lambda: manifest)
-    observed_kills = []
-    monkeypatch.setattr(cli.os, "kill", lambda pid, signal: observed_kills.append((pid, signal)))
     stored = []
     monkeypatch.setattr(cli, "_write_session", lambda value: stored.append(value))
     requests = []
 
     def broker(method, path, payload=None):
         requests.append((method, path, payload))
+        if path.endswith("/guardian"):
+            return {
+                "guardian": {
+                    "run_id": "launch-owned",
+                    "workspace": str(workspace.resolve()),
+                    "pack_id": "defaultspack",
+                    "guardian_owned": True,
+                    "http_port": 8766,
+                    "api_token_file": str(token_file),
+                }
+            }
         if method == "GET":
             if len([item for item in requests if item[:2] == ("GET", path)]) == 1:
                 return {"status": {"state": "disabled"}}
@@ -476,10 +477,9 @@ def test_cli_session_uses_owned_defaultspack_process_as_guardian(tmp_path, monke
     )
 
     assert result["status"]["state"] == "active"
-    assert observed_kills == [(4242, 0)]
     request_payload = next(item[2] for item in requests if item[1].endswith("/request"))
-    assert request_payload["process_id"] == 4242
-    assert stored[-1]["process_id"] == 4242
+    assert "process_id" not in request_payload
+    assert "process_id" not in stored[-1]
     assert stored[-1]["duration"] == "permanent"
 
 
@@ -820,14 +820,33 @@ def test_coding_interactive_ui_provenance_requires_browser_fetch_headers(
 
 def test_native_coding_operator_is_digest_decision_and_replay_bound(monkeypatch):
     from domain.safety import coding_ui_operator
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    secret = "native-coding-operator-test-secret"
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", secret)
+    signing_key = Ed25519PrivateKey.generate()
+    public_key = base64.urlsafe_b64encode(
+        signing_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode().rstrip("=")
+    instance_nonce = "launcher-native-coding-test"
+    monkeypatch.setattr(
+        coding_ui_operator.ViewerBrokerClient,
+        "from_environment",
+        classmethod(
+            lambda cls: cls(
+                attestation_public_key=public_key,
+                instance_nonce=instance_nonce,
+            )
+        ),
+    )
     now = int(time.time())
     operator = {
-        "version": 3,
+        "version": 4,
         "kind": "coding_ui_operator",
         "origin": "tauri_webview_window",
+        "instance_nonce": instance_nonce,
         "window_label": "defaultspack-main",
         "request_id": "apr-native-1",
         "expected_digest": "a" * 64,
@@ -836,11 +855,9 @@ def test_native_coding_operator_is_digest_decision_and_replay_bound(monkeypatch)
         "expires_at": now + 60,
         "nonce": "native-once-nonce",
     }
-    operator["signature"] = hmac.new(
-        secret.encode(),
-        coding_ui_operator._message(operator),
-        hashlib.sha256,
-    ).hexdigest()
+    operator["signature"] = base64.urlsafe_b64encode(
+        signing_key.sign(coding_ui_operator._message(operator))
+    ).decode().rstrip("=")
 
     verified = coding_ui_operator.verify_coding_ui_operator(
         operator,

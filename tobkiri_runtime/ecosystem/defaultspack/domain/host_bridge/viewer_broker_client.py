@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import base64
+import hashlib
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
 import time
 from pathlib import Path
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from core_runtime.host_broker.computer_delivery import (
     SAFE_TYPE_PREDISPATCH_ERROR_CODES,
@@ -32,10 +38,20 @@ VIEWER_BROKER_REQUEST_TIMEOUT_SECONDS = VIEWER_BROKER_HELPER_TIMEOUT_SECONDS + 1
 
 
 class ViewerBrokerClient:
-    def __init__(self, *, url: str = "", token: str = "", connection_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        url: str = "",
+        token: str = "",
+        connection_path: Path | None = None,
+        attestation_public_key: str = "",
+        instance_nonce: str = "",
+    ) -> None:
         self.url = str(url or "").rstrip("/")
         self.token = str(token or "")
         self.connection_path = connection_path
+        self.attestation_public_key = str(attestation_public_key or "").strip()
+        self.instance_nonce = str(instance_nonce or "").strip()
 
     @classmethod
     def from_environment(cls) -> "ViewerBrokerClient":
@@ -43,30 +59,59 @@ class ViewerBrokerClient:
             configured_port = _configured_broker_port()
         except ValueError:
             return cls()
+        pinned_public_key = str(
+            os.environ.get("RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY") or ""
+        ).strip()
+        pinned_instance_nonce = str(
+            os.environ.get("RUMI_VIEWER_BROKER_INSTANCE_NONCE") or ""
+        ).strip()
+        if bool(pinned_public_key) != bool(pinned_instance_nonce):
+            return cls()
         env_url = str(os.environ.get("RUMI_VIEWER_HOST_BROKER_URL") or "").strip()
         env_token = str(os.environ.get("RUMI_VIEWER_HOST_BROKER_TOKEN") or "").strip()
         if bool(env_url) != bool(env_token):
             return cls()
         if env_url and env_token:
             validated_url = _validated_loopback_url(env_url, configured_port=configured_port)
-            return cls(url=validated_url, token=env_token) if validated_url else cls()
+            return (
+                cls(
+                    url=validated_url,
+                    token=env_token,
+                    attestation_public_key=pinned_public_key,
+                    instance_nonce=pinned_instance_nonce,
+                )
+                if validated_url
+                else cls()
+            )
 
         connection_env = str(os.environ.get("RUMI_VIEWER_HOST_BROKER_CONNECTION") or "").strip()
         if connection_env:
-            return cls._from_connection_file(Path(connection_env), configured_port=configured_port)
+            return cls._from_connection_file(
+                Path(connection_env),
+                configured_port=configured_port,
+                attestation_public_key=pinned_public_key,
+                instance_nonce=pinned_instance_nonce,
+            )
 
         user_data = str(os.environ.get("RUMI_USER_DATA") or "").strip()
         if user_data:
             return cls._from_connection_file(
                 Path(user_data) / "host_broker" / "connection.json",
                 configured_port=configured_port,
+                attestation_public_key=pinned_public_key,
+                instance_nonce=pinned_instance_nonce,
             )
 
         return cls()
 
     @classmethod
     def _from_connection_file(
-        cls, path: Path, *, configured_port: int | None = None
+        cls,
+        path: Path,
+        *,
+        configured_port: int | None = None,
+        attestation_public_key: str = "",
+        instance_nonce: str = "",
     ) -> "ViewerBrokerClient":
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
@@ -84,6 +129,8 @@ class ViewerBrokerClient:
             url=url,
             token=str(raw.get("token") or ""),
             connection_path=path,
+            attestation_public_key=attestation_public_key,
+            instance_nonce=instance_nonce,
         )
 
     def available(self) -> bool:
@@ -263,10 +310,12 @@ class ViewerBrokerClient:
         if not self.available():
             raise RuntimeError("Rumi Viewer host broker is unavailable.")
         body = None
+        request_nonce = secrets.token_urlsafe(32)
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.token}",
             "X-Rumi-Viewer-Broker-Token": self.token,
+            "X-Rumi-Launcher-Response-Nonce": request_nonce,
         }
         if payload is not None:
             body = json.dumps(payload).encode("utf-8")
@@ -274,6 +323,7 @@ class ViewerBrokerClient:
         request = urllib.request.Request(f"{self.url}{path}", data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=VIEWER_BROKER_REQUEST_TIMEOUT_SECONDS) as response:
+                status_code = int(getattr(response, "status", 200))
                 data = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             message = exc.read().decode("utf-8", errors="replace")
@@ -281,7 +331,71 @@ class ViewerBrokerClient:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Viewer broker request failed: {exc.reason}") from exc
         decoded = json.loads(data or "{}")
-        return decoded if isinstance(decoded, dict) else {}
+        if not isinstance(decoded, dict):
+            return {}
+        if path.startswith("/api/host/debug/") or self.attestation_public_key:
+            return self._verify_launcher_attestation(
+                method=method,
+                path=path,
+                status_code=status_code,
+                request_nonce=request_nonce,
+                response=decoded,
+            )
+        return decoded
+
+    def _verify_launcher_attestation(
+        self,
+        *,
+        method: str,
+        path: str,
+        status_code: int,
+        request_nonce: str,
+        response: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.attestation_public_key or not self.instance_nonce:
+            raise RuntimeError("Launcher response attestation is unavailable.")
+        attestation = response.get("_launcher_attestation")
+        if not isinstance(attestation, dict):
+            raise RuntimeError("Launcher response attestation is missing.")
+        if (
+            attestation.get("version") != 1
+            or attestation.get("algorithm") != "Ed25519"
+            or str(attestation.get("instance_nonce") or "") != self.instance_nonce
+            or str(attestation.get("request_nonce") or "") != request_nonce
+            or str(attestation.get("method") or "") != method
+            or str(attestation.get("path") or "") != path
+            or int(attestation.get("status") or 0) != status_code
+        ):
+            raise RuntimeError("Launcher response attestation binding is invalid.")
+        try:
+            payload = _urlsafe_b64decode(str(attestation.get("payload") or ""))
+            signature = _urlsafe_b64decode(str(attestation.get("signature") or ""))
+            public_key = Ed25519PublicKey.from_public_bytes(
+                _urlsafe_b64decode(self.attestation_public_key)
+            )
+        except Exception as exc:
+            raise RuntimeError("Launcher response attestation is malformed.") from exc
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        if not secrets.compare_digest(
+            payload_hash, str(attestation.get("payload_sha256") or "")
+        ):
+            raise RuntimeError("Launcher response attestation payload changed.")
+        signed = (
+            "tobkiri-launcher-response-v1\n"
+            f"{self.instance_nonce}\n{request_nonce}\n{method}\n{path}\n"
+            f"{status_code}\n{payload_hash}"
+        ).encode()
+        try:
+            public_key.verify(signature, signed)
+        except InvalidSignature as exc:
+            raise RuntimeError("Launcher response signature is invalid.") from exc
+        try:
+            verified = json.loads(payload.decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError("Launcher signed payload is invalid.") from exc
+        if not isinstance(verified, dict):
+            raise RuntimeError("Launcher signed payload is invalid.")
+        return verified
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:
@@ -300,6 +414,11 @@ def _strict_port(value: Any) -> int | None:
         return None
     port = int(text)
     return port if 1 <= port <= 65535 else None
+
+
+def _urlsafe_b64decode(value: str) -> bytes:
+    raw = str(value or "").encode("ascii")
+    return base64.urlsafe_b64decode(raw + (b"=" * (-len(raw) % 4)))
 
 
 def _configured_broker_port() -> int | None:

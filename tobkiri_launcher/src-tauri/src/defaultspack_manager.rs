@@ -14,9 +14,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use log::{error, info, warn};
+use rand::{distributions::Alphanumeric, Rng};
 
 use crate::config::AppConfig;
+use crate::debug_approval::DebugApprovalManager;
 use crate::dock_registration::{spawn_defaultspack_local_server, DefaultspackDesktopMetadata};
+use crate::host_broker::BrokerAttestationIdentity;
 use crate::process_utils;
 
 const DEFAULTSPACK_MONITOR_INTERVAL: Duration = Duration::from_millis(250);
@@ -33,6 +36,8 @@ const SYSTEM_SHELL: &str = "/bin/sh";
 pub(crate) struct DefaultspackManager {
     config: AppConfig,
     shutdown_requested: Arc<AtomicBool>,
+    broker_attestation: BrokerAttestationIdentity,
+    debug_approval: Arc<DebugApprovalManager>,
     state: Mutex<DefaultspackState>,
 }
 
@@ -48,6 +53,8 @@ struct DefaultspackState {
     consecutive_failures: u32,
     next_restart_at: Option<Instant>,
     started_at: Option<Instant>,
+    active_run_id: Option<String>,
+    active_guardian_pid: Option<u32>,
 }
 
 impl Default for DefaultspackState {
@@ -61,15 +68,24 @@ impl Default for DefaultspackState {
             consecutive_failures: 0,
             next_restart_at: None,
             started_at: None,
+            active_run_id: None,
+            active_guardian_pid: None,
         }
     }
 }
 
 impl DefaultspackManager {
-    pub(crate) fn new(config: AppConfig, shutdown_requested: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(
+        config: AppConfig,
+        shutdown_requested: Arc<AtomicBool>,
+        broker_attestation: BrokerAttestationIdentity,
+        debug_approval: Arc<DebugApprovalManager>,
+    ) -> Self {
         Self {
             config,
             shutdown_requested,
+            broker_attestation,
+            debug_approval,
             state: Mutex::new(DefaultspackState::default()),
         }
     }
@@ -102,6 +118,10 @@ impl DefaultspackManager {
                             "Managed Defaultspack exited before reuse (status {status}); starting a replacement"
                         );
                         state.child = None;
+                        if let Some(run_id) = state.active_run_id.take() {
+                            self.debug_approval.unregister_guardian(&run_id);
+                        }
+                        state.active_guardian_pid = None;
                         state.record_unexpected_exit(status);
                     }
                 }
@@ -144,6 +164,10 @@ impl DefaultspackManager {
                 Some(status) => {
                     warn!("Managed Defaultspack exited with {status}; scheduling a restart");
                     state.child = None;
+                    if let Some(run_id) = state.active_run_id.take() {
+                        self.debug_approval.unregister_guardian(&run_id);
+                    }
+                    state.active_guardian_pid = None;
                     state.record_unexpected_exit(status);
                 }
             }
@@ -152,9 +176,14 @@ impl DefaultspackManager {
         Ok(!state.stop_requested && (state.restart_in_progress || state.launch_metadata.is_some()))
     }
 
+    pub(crate) fn managed_child_pid(&self) -> Result<Option<u32>> {
+        let state = self.lock_state()?;
+        Ok(state.child.as_ref().map(Child::id))
+    }
+
     /// Stop the managed child and disable all automatic restart paths.
     pub(crate) fn stop(&self) -> Result<()> {
-        let (child, owned_process_groups) = {
+        let (child, owned_process_groups, active_run_id) = {
             let mut state = self.lock_state()?;
             state.stop_requested = true;
             state.launch_metadata = None;
@@ -162,11 +191,16 @@ impl DefaultspackManager {
             state.restart_in_progress = false;
             state.consecutive_failures = 0;
             state.started_at = None;
+            state.active_guardian_pid = None;
             (
                 state.child.take(),
                 std::mem::take(&mut state.owned_process_groups),
+                state.active_run_id.take(),
             )
         };
+        if let Some(run_id) = active_run_id.as_deref() {
+            self.debug_approval.unregister_guardian(run_id);
+        }
 
         let mut stopped_child_group = None;
         if let Some(mut child) = child {
@@ -221,6 +255,9 @@ impl DefaultspackManager {
                             "Managed Defaultspack exited unexpectedly with {status}; it will be restarted"
                         );
                         state.child = None;
+                        if let Some(run_id) = state.active_run_id.take() {
+                            self.debug_approval.unregister_guardian(&run_id);
+                        }
                         let delay = state.record_unexpected_exit(status);
                         info!(
                             "Defaultspack restart scheduled after {} ms",
@@ -254,7 +291,13 @@ impl DefaultspackManager {
     }
 
     fn spawn_and_track(&self, metadata: DefaultspackDesktopMetadata, reason: &str) -> Result<()> {
-        let mut child = match spawn_defaultspack_local_server(&self.config, &metadata) {
+        let run_id = managed_defaultspack_run_id();
+        let mut child = match spawn_defaultspack_local_server(
+            &self.config,
+            &metadata,
+            &self.broker_attestation,
+            &run_id,
+        ) {
             Ok(child) => child,
             Err(error) => {
                 let delay = self.record_spawn_failure()?;
@@ -268,6 +311,7 @@ impl DefaultspackManager {
         };
         let pid = child.id();
         self.drain_child_output(&mut child, pid);
+        let mut registration_error = None;
 
         let should_stop_child = {
             let mut state = self.lock_state()?;
@@ -282,19 +326,91 @@ impl DefaultspackManager {
                 if !state.owned_process_groups.contains(&pid) {
                     state.owned_process_groups.push(pid);
                 }
-                state.child = Some(child);
-                state.launch_metadata = Some(metadata);
-                state.next_restart_at = None;
-                state.started_at = Some(Instant::now());
-                info!("Defaultspack {reason} started (pid {pid})");
-                return Ok(());
+                if let Err(error) = self.debug_approval.register_guardian(
+                    run_id.clone(),
+                    pid,
+                    self.config.venv_python().to_string_lossy().into_owned(),
+                    self.config
+                        .dev_workspace_root
+                        .clone()
+                        .unwrap_or_else(|| metadata.working_dir().to_path_buf()),
+                    metadata.port(),
+                    self.config.desktop_api_token_path(),
+                ) {
+                    registration_error = Some(error);
+                    true
+                } else {
+                    state.child = Some(child);
+                    state.launch_metadata = Some(metadata);
+                    state.next_restart_at = None;
+                    state.started_at = Some(Instant::now());
+                    state.active_run_id = Some(run_id.clone());
+                    state.active_guardian_pid = Some(pid);
+                    info!("Defaultspack {reason} started (pid {pid})");
+                    return Ok(());
+                }
             }
         };
 
         if should_stop_child {
+            // This rejected child never became the registered guardian.
+            // Unregistering by run id here could revoke a different listener
+            // that won the startup race.
             info!("Discarding duplicate Defaultspack process (pid {pid})");
             stop_child(&mut child)?;
         }
+        if let Some(error) = registration_error {
+            return Err(anyhow!(
+                "failed to register Launcher-owned Defaultspack child: {error}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Register the actual authenticated HTTP listener as the guardian after
+    /// the caller proves it descends from this Launcher. `pack-shell` is only
+    /// a supervision wrapper and is never used as the lease guardian.
+    pub(crate) fn register_launcher_owned_listener(
+        &self,
+        metadata: &DefaultspackDesktopMetadata,
+        process_id: u32,
+        executable_identity: String,
+    ) -> Result<()> {
+        let (run_id, old_run_id) = {
+            let mut state = self.lock_state()?;
+            if state.active_guardian_pid == Some(process_id) {
+                return Ok(());
+            }
+            let old_run_id = state.active_run_id.take();
+            let run_id = old_run_id
+                .clone()
+                .unwrap_or_else(managed_defaultspack_run_id);
+            state.active_guardian_pid = None;
+            (run_id, old_run_id)
+        };
+        if let Some(old_run_id) = old_run_id.as_deref() {
+            self.debug_approval.unregister_guardian(old_run_id);
+        }
+        self.debug_approval
+            .register_guardian(
+                run_id.clone(),
+                process_id,
+                executable_identity,
+                self.config
+                    .dev_workspace_root
+                    .clone()
+                    .unwrap_or_else(|| metadata.working_dir().to_path_buf()),
+                metadata.port(),
+                self.config.desktop_api_token_path(),
+            )
+            .map_err(|error| {
+                anyhow!("failed to register authenticated Defaultspack listener: {error}")
+            })?;
+        let mut state = self.lock_state()?;
+        state.active_run_id = Some(run_id);
+        state.active_guardian_pid = Some(process_id);
+        state.launch_metadata = Some(metadata.clone());
+        state.stop_requested = false;
         Ok(())
     }
 
@@ -319,6 +435,20 @@ impl DefaultspackManager {
             .lock()
             .map_err(|error| anyhow!("Defaultspack manager lock poisoned: {error}"))
     }
+}
+
+fn managed_defaultspack_run_id() -> String {
+    std::env::var("RUMI_DEFAULTSPACK_DEBUG_RUN_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            let suffix: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(32)
+                .map(char::from)
+                .collect();
+            format!("defaultspack-{suffix}")
+        })
 }
 
 impl DefaultspackState {
@@ -644,6 +774,19 @@ mod tests {
         }
     }
 
+    fn test_manager() -> DefaultspackManager {
+        let config = test_config();
+        let debug_approval = Arc::new(DebugApprovalManager::new(
+            config.log_dir.join("debug-approval-test.jsonl"),
+        ));
+        DefaultspackManager::new(
+            config,
+            Arc::new(AtomicBool::new(false)),
+            BrokerAttestationIdentity::generate(),
+            debug_approval,
+        )
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_process_stat_parser_handles_parentheses_in_command_name() {
@@ -701,7 +844,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn explicit_stop_terminates_the_defaultspack_process_group() {
-        let manager = DefaultspackManager::new(test_config(), Arc::new(AtomicBool::new(false)));
+        let manager = test_manager();
         let pid_file = std::env::temp_dir().join(format!(
             "defaultspack-manager-child-{}-{}.pid",
             std::process::id(),
@@ -774,7 +917,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn explicit_stop_terminates_an_orphaned_owned_process_group() {
-        let manager = DefaultspackManager::new(test_config(), Arc::new(AtomicBool::new(false)));
+        let manager = test_manager();
         let pid_file = std::env::temp_dir().join(format!(
             "defaultspack-manager-orphan-{}-{}.pid",
             std::process::id(),

@@ -56,6 +56,16 @@ pub(crate) struct DefaultspackDesktopMetadata {
     port: u16,
 }
 
+impl DefaultspackDesktopMetadata {
+    pub(crate) fn working_dir(&self) -> &Path {
+        &self.app_working_dir
+    }
+
+    pub(crate) fn port(&self) -> u16 {
+        self.port
+    }
+}
+
 /// Read the HMAC key from the plaintext `hmac_keys.json` file.
 ///
 /// Returns the first active key's `key` field. If the file uses Fernet
@@ -728,6 +738,18 @@ pub(crate) fn launch_defaultspack_desktop_window_impl(
     })
 }
 
+/// Ensure the real Defaultspack listener is Launcher-owned and registered as
+/// the debug guardian without opening or focusing its desktop window.
+pub(crate) fn prepare_defaultspack_guardian_impl(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<()> {
+    with_defaultspack_launch_coordination(|| {
+        ensure_defaultspack_desktop_ready(app, config)?;
+        Ok(())
+    })
+}
+
 pub(crate) fn open_defaultspack_desktop_window_path_impl(
     app: &AppHandle,
     config: &AppConfig,
@@ -902,6 +924,21 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
     if server_ready && recover_authenticated_stale_defaultspack_listener(&metadata)? {
         server_ready = false;
     }
+    if server_ready {
+        let listener = detect_port_listener(metadata.port)?.ok_or_else(|| {
+            anyhow!("authenticated Defaultspack listener identity is unavailable")
+        })?;
+        if !identify_defaultspack_listener(&listener, &metadata)
+            || !process_is_descendant_of(listener.pid, std::process::id())?
+        {
+            warn!(
+                "Stopping authenticated Defaultspack listener that is not descended from this Launcher: pid {}",
+                listener.pid
+            );
+            terminate_external_listener(listener.pid, metadata.port)?;
+            server_ready = false;
+        }
+    }
 
     if server_ready {
         info!(
@@ -936,7 +973,95 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         }
     }
 
+    let mut listener = detect_port_listener(metadata.port)?
+        .ok_or_else(|| anyhow!("authenticated Defaultspack listener identity is unavailable"))?;
+    if !identify_defaultspack_listener(&listener, &metadata)
+        || !process_is_descendant_of(listener.pid, std::process::id())?
+    {
+        // The Kernel can finish restoring an old startup profile while the
+        // supervised pack-shell is starting. Resolve that race once: stop the
+        // authenticated but unowned winner, then launch a fresh owned child.
+        warn!(
+            "Replacing authenticated Defaultspack listener that won the startup race without Launcher ownership: pid {}",
+            listener.pid
+        );
+        terminate_external_listener(listener.pid, metadata.port)?;
+        manager.stop()?;
+        manager.start_or_reuse(metadata.clone())?;
+        wait_for_defaultspack_http_ready(metadata.port, &api_token, manager.inner())?;
+        listener = detect_port_listener(metadata.port)?
+            .ok_or_else(|| anyhow!("replacement Defaultspack listener identity is unavailable"))?;
+    }
+    if !identify_defaultspack_listener(&listener, &metadata)
+        || !process_is_descendant_of(listener.pid, std::process::id())?
+    {
+        bail!("replacement Defaultspack listener is not owned by this Launcher");
+    }
+    if let Some(wrapper_pid) = manager.managed_child_pid()? {
+        if !process_is_descendant_of(listener.pid, wrapper_pid)? {
+            // A Kernel-restored server won the bind race. It is still a
+            // Launcher child, but the losing pack-shell monitor must not own
+            // (and later unregister) its guardian record.
+            manager.stop()?;
+        }
+    }
+    manager.register_launcher_owned_listener(&metadata, listener.pid, listener.command)?;
+
     defaultspack_window_url_with_local_auth(metadata.port, &api_token)
+}
+
+#[cfg(unix)]
+fn process_is_descendant_of(mut process_id: u32, ancestor_id: u32) -> AnyResult<bool> {
+    for _ in 0..64 {
+        if process_id == ancestor_id {
+            return Ok(true);
+        }
+        let output = process_utils::command("/bin/ps")
+            .args(["-p", &process_id.to_string(), "-o", "ppid="])
+            .output()
+            .context("failed to inspect Defaultspack process ancestry")?;
+        if !output.status.success() {
+            return Ok(false);
+        }
+        let parent = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(0);
+        if parent == 0 || parent == process_id {
+            return Ok(false);
+        }
+        process_id = parent;
+    }
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn process_is_descendant_of(mut process_id: u32, ancestor_id: u32) -> AnyResult<bool> {
+    for _ in 0..64 {
+        if process_id == ancestor_id {
+            return Ok(true);
+        }
+        let script = format!(
+            "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = {process_id}\\\";\
+             if($null -eq $p){{exit 3}};[Console]::Write($p.ParentProcessId)"
+        );
+        let output = process_utils::command("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .context("failed to inspect Defaultspack process ancestry")?;
+        if !output.status.success() {
+            return Ok(false);
+        }
+        let parent = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(0);
+        if parent == 0 || parent == process_id {
+            return Ok(false);
+        }
+        process_id = parent;
+    }
+    Ok(false)
 }
 
 fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
@@ -1154,38 +1279,43 @@ pub(crate) fn configure_defaultspack_process_group(command: &mut std::process::C
 pub(crate) fn spawn_defaultspack_local_server(
     config: &AppConfig,
     metadata: &DefaultspackDesktopMetadata,
+    broker_attestation: &crate::host_broker::BrokerAttestationIdentity,
+    guardian_run_id: &str,
 ) -> AnyResult<Child> {
-    let pack_shell = config
-        .ensure_pack_shell_path()
-        .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
     let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
-    let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
     let python_path = python_path_with_runtime(&config.app_dir, std::env::var_os("PYTHONPATH"))?;
+    let command_parts =
+        shell_words::split(&metadata.command).context("defaultspack desktop command is invalid")?;
+    let (program, arguments) = command_parts
+        .split_first()
+        .context("defaultspack desktop command is empty")?;
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(program_name.as_str(), "python" | "python3" | "python.exe") {
+        bail!("defaultspack desktop command must use the managed Python runtime");
+    }
+    if arguments.is_empty() {
+        bail!("defaultspack desktop command is missing its entrypoint");
+    }
 
     info!(
-        "spawn_defaultspack_local_server: pack_shell={}, port={}, kernel_cmd={}, working_dir={}",
-        pack_shell.display(),
-        config.kernel_port,
-        kernel_command,
+        "spawn_defaultspack_local_server: python={}, port={}, working_dir={}",
+        config.venv_python().display(),
+        metadata.port,
         metadata.app_working_dir.display(),
     );
 
-    let mut command = process_utils::command(&pack_shell);
+    // Spawn the actual long-lived server as the Launcher child. pack-shell's
+    // `run` command delegates to Kernel and exits, which leaves the real
+    // listener orphaned and cannot provide a process-lifetime guardian.
+    let mut command = process_utils::command(config.venv_python());
     command
-        .arg("run")
-        .arg("defaultspack")
-        .arg("--command")
-        .arg(&metadata.command)
-        .arg("--port")
-        .arg(config.kernel_port.to_string())
-        .arg("--kernel-cmd")
-        .arg(&kernel_command)
-        .arg("--working-dir")
-        .arg(&metadata.app_working_dir)
-        .arg("--timeout")
-        .arg("120")
+        .args(arguments)
         .env("PATH", path)
         .env("PYTHONPATH", python_path)
         .env("RUMI_HOME", &config.rumi_home)
@@ -1209,6 +1339,15 @@ pub(crate) fn spawn_defaultspack_local_server(
             viewer_host_broker_connection_env_key(),
             viewer_host_broker_connection_env_value(config),
         )
+        .env(
+            "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
+            broker_attestation.public_key_base64(),
+        )
+        .env(
+            "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
+            broker_attestation.instance_nonce(),
+        )
+        .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
         .env("RUMI_API_TOKEN", &api_token)
         .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
@@ -1224,6 +1363,19 @@ pub(crate) fn spawn_defaultspack_local_server(
     // asserted for the child so a desktop_app env entry cannot redirect a
     // debug run to production/default ports or an unrelated listener.
     command
+        .env(
+            viewer_host_broker_connection_env_key(),
+            viewer_host_broker_connection_env_value(config),
+        )
+        .env(
+            "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
+            broker_attestation.public_key_base64(),
+        )
+        .env(
+            "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
+            broker_attestation.instance_nonce(),
+        )
+        .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
         .env("DEFAULTS_HTTP_HOST", "127.0.0.1")
         .env("DEFAULTS_HTTP_PORT", metadata.port.to_string())
         .env("RUMI_DEFAULTSPACK_PORT", metadata.port.to_string())
@@ -1240,9 +1392,12 @@ pub(crate) fn spawn_defaultspack_local_server(
     #[cfg(unix)]
     configure_defaultspack_process_group(&mut command);
 
-    command
-        .spawn()
-        .with_context(|| format!("failed to spawn {}", pack_shell.display()))
+    command.spawn().with_context(|| {
+        format!(
+            "failed to spawn managed Defaultspack with {}",
+            config.venv_python().display()
+        )
+    })
 }
 
 fn viewer_host_broker_connection_env_key() -> &'static str {

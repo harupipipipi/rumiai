@@ -626,30 +626,26 @@ def _session_start(args: argparse.Namespace) -> dict[str, Any]:
     workspace = Path(args.workspace).expanduser().resolve(strict=True)
     if not workspace.is_dir():
         raise CliError("workspace must be a directory")
-    manifest = _latest_manifest()
-    if str(manifest.get("run_id") or "") != args.run_id:
-        raise CliError("--run-id does not match the owned Defaultspack launch")
-    token_file = Path(str(manifest.get("token_file") or ""))
-    port = int(manifest.get("port") or 0)
+    guardian = _broker_request("GET", "/api/host/debug/guardian").get("guardian") or {}
+    run_id = str(guardian.get("run_id") or "")
+    if not run_id or guardian.get("guardian_owned") is not True:
+        raise CliError("Launcher-owned Defaultspack guardian is unavailable")
+    guardian_workspace = Path(str(guardian.get("workspace") or "")).resolve()
+    if guardian_workspace != workspace:
+        raise CliError("--workspace does not match the Launcher-owned Defaultspack launch")
+    token_file = Path(str(guardian.get("api_token_file") or ""))
+    port = int(guardian.get("http_port") or 0)
     if not token_file.is_file() or not (1 <= port <= 65535):
-        raise CliError("debug launch manifest is incomplete")
-    process_id = int(manifest.get("pid") or 0)
-    if process_id <= 0:
-        raise CliError("debug launch manifest has no owned guardian process")
-    try:
-        os.kill(process_id, 0)
-    except (OSError, ValueError) as exc:
-        raise CliError("owned Defaultspack guardian process is not running") from exc
+        raise CliError("Launcher-owned Defaultspack connection is incomplete")
     _write_session(None)
     session_id = "dbg-" + uuid.uuid4().hex
     claim_secret = secrets.token_urlsafe(48)
     request = {
         "session_id": session_id,
-        "run_id": args.run_id,
+        "run_id": run_id,
         "workspace": str(workspace),
         "pack_id": args.pack_id,
         "profile_id": args.profile_id,
-        "process_id": process_id,
         "claim_secret": claim_secret,
     }
     _broker_request("POST", "/api/host/debug/session/request", request)

@@ -247,7 +247,7 @@ export interface DebugApprovalStatus {
   workspace_digest?: string | null;
   pack_id?: string | null;
   profile_id?: string | null;
-  process_id?: number | null;
+  guardian_owned?: boolean;
   lease_epoch?: number | null;
   expires_at?: number | null;
   duration?: DebugApprovalDuration | null;

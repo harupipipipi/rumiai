@@ -671,8 +671,6 @@ class ApprovalManager:
             if pack_id not in self._approvals:
                 return ApprovalResult(success=False, pack_id=pack_id, error="Pack not found")
             
-            approval = self._approvals[pack_id]
-            
             # local_pack特殊処理
             if pack_id == LOCAL_PACK_ID:
                 file_hashes = self._compute_local_pack_hashes()
@@ -683,54 +681,60 @@ class ApprovalManager:
                 
                 file_hashes = self._compute_pack_hashes(pack_dir)
             
-            previous_hashes = dict(approval.file_hashes)
+            return self._persist_approved_snapshot(pack_id, file_hashes)
 
-            approval.status = PackStatus.APPROVED
-            approval.approved_at = self._now_ts()
-            approval.file_hashes = file_hashes
-            approval.rejection_reason = None
-            if approval.rule_approved and previous_hashes != file_hashes:
-                self._clear_rule_approval(approval)
+    def _persist_approved_snapshot(
+        self, pack_id: str, file_hashes: Mapping[str, str]
+    ) -> ApprovalResult:
+        """Persist exactly the hashes already inspected by the caller.
 
-            # G-3: バージョン履歴を記録
-            approval.version_history.append({
-                "version": len(approval.version_history) + 1,
-                "timestamp": approval.approved_at,
-                "action": "approve",
-                "file_hashes": dict(file_hashes),
-            })
-            
-            self._save_grant(approval)
-
-            # #62: 宣言的Store作成
-            self._create_declared_stores(pack_id)
-
-            # W18-B: host_execution 警告ログ (W26-HOTFIX: try/except保護)
-            try:
-                eco_data = self._read_ecosystem_data(pack_id)
-                if eco_data.get("host_execution", False) is True:
-                    logger.warning(
-                        "SECURITY: Pack '%s' declares host_execution=true. "
-                        "This pack will run directly on the host without Docker isolation.",
-                        pack_id,
+        This method intentionally never scans the Pack.  In particular,
+        delegated approval must not compare snapshot A and then accidentally
+        approve a second scan B.
+        """
+        approval = self._approvals[pack_id]
+        exact_hashes = {
+            str(path): str(digest) for path, digest in sorted(file_hashes.items())
+        }
+        previous_hashes = dict(approval.file_hashes)
+        approval.status = PackStatus.APPROVED
+        approval.approved_at = self._now_ts()
+        approval.file_hashes = exact_hashes
+        approval.rejection_reason = None
+        if approval.rule_approved and previous_hashes != exact_hashes:
+            self._clear_rule_approval(approval)
+        approval.version_history.append({
+            "version": len(approval.version_history) + 1,
+            "timestamp": approval.approved_at,
+            "action": "approve",
+            "file_hashes": dict(exact_hashes),
+        })
+        self._save_grant(approval)
+        self._create_declared_stores(pack_id)
+        try:
+            eco_data = self._read_ecosystem_data(pack_id)
+            if eco_data.get("host_execution", False) is True:
+                logger.warning(
+                    "SECURITY: Pack '%s' declares host_execution=true. "
+                    "This pack will run directly on the host without Docker isolation.",
+                    pack_id,
+                )
+                try:
+                    from .audit_logger import get_audit_logger
+                    get_audit_logger().log_security_event(
+                        event_type="approve_host_execution_warning",
+                        severity="warning",
+                        description=f"Pack '{pack_id}' runs on host without Docker isolation",
+                        pack_id=pack_id,
                     )
-                    try:
-                        from .audit_logger import get_audit_logger
-                        get_audit_logger().log_security_event(
-                            event_type="approve_host_execution_warning",
-                            severity="warning",
-                            description=f"Pack '{pack_id}' runs on host without Docker isolation",
-                            pack_id=pack_id,
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass  # host_execution check failure must not block approval
-
-            # キャッシュ無効化
-            self._invalidate_hash_cache(pack_id)
-            
-            return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.APPROVED)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._invalidate_hash_cache(pack_id)
+        return ApprovalResult(
+            success=True, pack_id=pack_id, status=PackStatus.APPROVED
+        )
 
     @staticmethod
     def _pack_snapshot_digest(pack_id: str, file_hashes: Mapping[str, str]) -> str:
@@ -753,15 +757,9 @@ class ApprovalManager:
     def get_pack_approval_snapshot(self, pack_id: str) -> dict[str, Any]:
         """Describe the exact Pack content a delegated approval would authorize."""
         with self._lock:
-            if pack_id not in self._approvals:
-                return {"success": False, "error": "Pack not found"}
-            if pack_id == LOCAL_PACK_ID:
-                file_hashes = self._compute_local_pack_hashes()
-            else:
-                pack_dir = self._resolve_pack_dir(pack_id)
-                if pack_dir is None or not pack_dir.exists():
-                    return {"success": False, "error": "Pack directory not found"}
-                file_hashes = self._compute_pack_hashes_nocache(pack_dir)
+            file_hashes, error = self._exact_pack_hashes(pack_id)
+            if error:
+                return {"success": False, "error": error}
             status = self.get_status(pack_id)
             return {
                 "success": True,
@@ -771,18 +769,31 @@ class ApprovalManager:
                 "file_count": len(file_hashes),
             }
 
+    def _exact_pack_hashes(
+        self, pack_id: str
+    ) -> tuple[Dict[str, str], Optional[str]]:
+        if pack_id not in self._approvals:
+            return {}, "Pack not found"
+        if pack_id == LOCAL_PACK_ID:
+            return self._compute_local_pack_hashes(), None
+        pack_dir = self._resolve_pack_dir(pack_id)
+        if pack_dir is None or not pack_dir.exists():
+            return {}, "Pack directory not found"
+        return self._compute_pack_hashes_nocache(pack_dir), None
+
     def approve_if_snapshot(self, pack_id: str, expected_digest: str) -> ApprovalResult:
         """Approve only if Pack contents still match the reviewed snapshot."""
         with self._lock:
-            snapshot = self.get_pack_approval_snapshot(pack_id)
-            if not snapshot.get("success"):
+            file_hashes, error = self._exact_pack_hashes(pack_id)
+            if error:
                 return ApprovalResult(
                     success=False,
                     pack_id=pack_id,
-                    error=str(snapshot.get("error") or "Pack snapshot unavailable"),
+                    error=error,
                 )
+            snapshot_digest = self._pack_snapshot_digest(pack_id, file_hashes)
             if not hmac.compare_digest(
-                str(snapshot.get("snapshot_digest") or ""),
+                snapshot_digest,
                 str(expected_digest or ""),
             ):
                 return ApprovalResult(
@@ -791,7 +802,29 @@ class ApprovalManager:
                     error="Pack contents changed after approval was requested",
                 )
             self._invalidate_hash_cache(pack_id)
-            return self.approve(pack_id)
+            result = self._persist_approved_snapshot(pack_id, file_hashes)
+            if not result.success:
+                return result
+
+            # Detect a concurrent external writer in the compare→persist
+            # interval.  The grant contains only the inspected hashes above;
+            # it never adopts this verification scan.
+            current_hashes, verify_error = self._exact_pack_hashes(pack_id)
+            if verify_error or current_hashes != file_hashes:
+                approval = self._approvals[pack_id]
+                approval.status = PackStatus.MODIFIED
+                approval.rejection_reason = (
+                    "Pack contents changed while approval was being persisted"
+                )
+                self._save_grant(approval)
+                self._invalidate_hash_cache(pack_id)
+                return ApprovalResult(
+                    success=False,
+                    pack_id=pack_id,
+                    error=approval.rejection_reason,
+                    status=PackStatus.MODIFIED,
+                )
+            return result
     
     def approve_rule(self, pack_id: str) -> ApprovalResult:
         """rule Pack に対するルール拡張承認を実行する。

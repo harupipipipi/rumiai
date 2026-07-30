@@ -122,6 +122,20 @@ struct DebugApprovalState {
     next_lease_epoch: u64,
     operators: HashMap<String, OperatorRecord>,
     consumed_execution_jtis: HashSet<String>,
+    guardians: HashMap<String, GuardianRecord>,
+    audit_degraded: bool,
+}
+
+#[derive(Debug, Clone)]
+struct GuardianRecord {
+    process_id: u32,
+    process_fingerprint: String,
+    executable_identity: String,
+    workspace: PathBuf,
+    http_port: u16,
+    api_token_file: PathBuf,
+    #[cfg(windows)]
+    _process_handle: std::sync::Arc<std::os::windows::io::OwnedHandle>,
 }
 
 #[derive(Debug)]
@@ -143,11 +157,21 @@ pub struct DebugApprovalStatus {
     pub workspace_digest: Option<String>,
     pub pack_id: Option<String>,
     pub profile_id: Option<String>,
-    pub process_id: Option<u32>,
+    pub guardian_owned: bool,
     pub lease_epoch: Option<u64>,
     pub expires_at: Option<u64>,
     pub duration: Option<String>,
     pub instance_nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DebugGuardianStatus {
+    pub run_id: String,
+    pub workspace: String,
+    pub pack_id: String,
+    pub guardian_owned: bool,
+    pub http_port: u16,
+    pub api_token_file: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,7 +181,6 @@ pub struct DebugSessionStartRequest {
     pub workspace: String,
     pub pack_id: String,
     pub profile_id: String,
-    pub process_id: u32,
     pub claim_secret: String,
 }
 
@@ -257,6 +280,8 @@ impl DebugApprovalManager {
                 next_lease_epoch: 1,
                 operators: HashMap::new(),
                 consumed_execution_jtis: HashSet::new(),
+                guardians: HashMap::new(),
+                audit_degraded: false,
             }),
             instance_nonce: random_identifier("launcher"),
             signing_key,
@@ -268,22 +293,130 @@ impl DebugApprovalManager {
         let now_epoch = now_epoch_seconds();
         let now = Instant::now();
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        expire_if_needed(&mut state, now);
+        self.expire_if_needed(&mut state, now);
         status_from_state(&state.lease, &self.instance_nonce, now_epoch, now)
+    }
+
+    pub(crate) fn register_guardian(
+        &self,
+        run_id: String,
+        process_id: u32,
+        executable_identity: String,
+        workspace: PathBuf,
+        http_port: u16,
+        api_token_file: PathBuf,
+    ) -> Result<(), String> {
+        validate_identifier(&run_id, "run_id")?;
+        validate_identifier(&executable_identity, "executable_identity")?;
+        if http_port == 0 {
+            return Err("Launcher-owned guardian HTTP port is invalid".into());
+        }
+        let process_fingerprint = process_fingerprint(process_id)?;
+        let workspace = workspace
+            .canonicalize()
+            .map_err(|_| "Launcher-owned guardian workspace is unavailable")?;
+        let api_token_file = api_token_file
+            .canonicalize()
+            .map_err(|_| "Launcher-owned guardian API token is unavailable")?;
+        if !api_token_file.is_file() {
+            return Err("Launcher-owned guardian API token is unavailable".into());
+        }
+        #[cfg(windows)]
+        let process_handle = retain_process_handle(process_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "debug approval state unavailable")?;
+        if state.guardians.contains_key(&run_id) {
+            return Err("a Launcher-owned guardian already uses this run id".into());
+        }
+        state.guardians.insert(
+            run_id,
+            GuardianRecord {
+                process_id,
+                process_fingerprint,
+                executable_identity,
+                workspace,
+                http_port,
+                api_token_file,
+                #[cfg(windows)]
+                _process_handle: std::sync::Arc::new(process_handle),
+            },
+        );
+        Ok(())
+    }
+
+    pub(crate) fn unregister_guardian(&self, run_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.guardians.remove(run_id);
+            self.expire_if_needed(&mut state, Instant::now());
+        }
+    }
+
+    pub(crate) fn current_guardian(&self) -> Result<DebugGuardianStatus, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "debug approval state unavailable")?;
+        let mut live = state.guardians.iter().filter(|(_, guardian)| {
+            process_fingerprint(guardian.process_id)
+                .is_ok_and(|fingerprint| fingerprint == guardian.process_fingerprint)
+        });
+        let Some((run_id, guardian)) = live.next() else {
+            return Err("no live Launcher-owned Defaultspack child".into());
+        };
+        if live.next().is_some() {
+            return Err("multiple Launcher-owned Defaultspack children are active".into());
+        }
+        Ok(DebugGuardianStatus {
+            run_id: run_id.clone(),
+            workspace: guardian.workspace.to_string_lossy().into_owned(),
+            pack_id: "defaultspack".into(),
+            guardian_owned: true,
+            http_port: guardian.http_port,
+            api_token_file: guardian.api_token_file.to_string_lossy().into_owned(),
+        })
     }
 
     pub fn register_session(
         &self,
         request: DebugSessionStartRequest,
     ) -> Result<DebugApprovalStatus, String> {
-        let pending = pending_from_request(&request)?;
         let now_epoch = now_epoch_seconds();
         let now = Instant::now();
         let mut state = self
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, now);
+        self.expire_if_needed(&mut state, now);
+        if state.audit_degraded {
+            return Err("debug approval audit is degraded; new sessions are blocked".into());
+        }
+        let pending = match pending_from_request(&request, &state.guardians) {
+            Ok(pending) => pending,
+            Err(error) => {
+                let reason = if error.contains("workspace") {
+                    "workspace_mismatch"
+                } else if error.contains("run id") {
+                    "run_mismatch"
+                } else {
+                    "internal_invariant_failure"
+                };
+                if self
+                    .audit(
+                        "session_rejected",
+                        reason,
+                        None,
+                        Some(&request.run_id),
+                        None,
+                    )
+                    .is_err()
+                {
+                    state.audit_degraded = true;
+                }
+                return Err(error);
+            }
+        };
         match &state.lease {
             LeaseState::Disabled { .. } => {}
             LeaseState::Pending(existing)
@@ -326,7 +459,10 @@ impl DebugApprovalManager {
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, now);
+        self.expire_if_needed(&mut state, now);
+        if state.audit_degraded {
+            return Err("debug approval audit is degraded; enabling is blocked".into());
+        }
         let mut pending = match &state.lease {
             LeaseState::Pending(pending) => pending.clone(),
             LeaseState::Armed(existing) if existing.approved_duration == Some(duration) => {
@@ -410,14 +546,17 @@ impl DebugApprovalManager {
         &self,
         request: DebugSessionStartRequest,
     ) -> Result<DebugSessionStartResponse, String> {
-        let candidate = pending_from_request(&request)?;
         let now_epoch = now_epoch_seconds();
         let now = Instant::now();
         let mut state = self
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, now);
+        self.expire_if_needed(&mut state, now);
+        if state.audit_degraded {
+            return Err("debug approval audit is degraded; claiming is blocked".into());
+        }
+        let candidate = pending_from_request(&request, &state.guardians)?;
         let approved = match &state.lease {
             LeaseState::Armed(pending) => pending.clone(),
             LeaseState::Active(_) => return Err("debug approval is already active".into()),
@@ -502,7 +641,7 @@ impl DebugApprovalManager {
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, now);
+        self.expire_if_needed(&mut state, now);
         let active = active_lease(&state.lease)
             .ok_or_else(|| "no active debug approval session".to_string())?
             .clone();
@@ -662,7 +801,7 @@ impl DebugApprovalManager {
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, Instant::now());
+        self.expire_if_needed(&mut state, Instant::now());
         let active = active_lease(&state.lease)
             .ok_or_else(|| "debug approval was revoked or expired".to_string())?
             .clone();
@@ -719,7 +858,7 @@ impl DebugApprovalManager {
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, Instant::now());
+        self.expire_if_needed(&mut state, Instant::now());
         let active = active_lease(&state.lease)
             .ok_or_else(|| "no active debug approval session".to_string())?;
         if active.session_id != session_id || active.run_id != run_id {
@@ -746,7 +885,7 @@ impl DebugApprovalManager {
             .state
             .lock()
             .map_err(|_| "debug approval state unavailable")?;
-        expire_if_needed(&mut state, Instant::now());
+        self.expire_if_needed(&mut state, Instant::now());
         let active = active_lease(&state.lease)
             .ok_or_else(|| "debug approval was revoked or expired".to_string())?;
         if operator.session_id != active.session_id
@@ -773,6 +912,100 @@ impl DebugApprovalManager {
             .map_err(|_| "debug signing key unavailable")?;
         mac.update(unsigned.as_bytes());
         Ok(hex::encode(mac.finalize().into_bytes()))
+    }
+
+    fn expire_if_needed(&self, state: &mut DebugApprovalState, now: Instant) {
+        if state.audit_degraded
+            && self
+                .audit("audit_recovery_probe", "recovered", None, None, None)
+                .is_ok()
+        {
+            state.audit_degraded = false;
+        }
+
+        let expiration = match &state.lease {
+            LeaseState::Pending(pending) | LeaseState::Armed(pending) => {
+                if pending.deadline <= now {
+                    Some(("expired", None, Some(pending.run_id.clone()), None))
+                } else if !state.guardians.contains_key(&pending.run_id) {
+                    Some(("guardian_missing", None, Some(pending.run_id.clone()), None))
+                } else {
+                    None
+                }
+            }
+            LeaseState::Active(active) => {
+                if active.deadline.is_some_and(|deadline| deadline <= now) {
+                    Some((
+                        "expired",
+                        Some(active.lease_hash.clone()),
+                        Some(active.run_id.clone()),
+                        Some(active.lease_epoch),
+                    ))
+                } else {
+                    match state.guardians.get(&active.run_id) {
+                        None => Some((
+                            "guardian_missing",
+                            Some(active.lease_hash.clone()),
+                            Some(active.run_id.clone()),
+                            Some(active.lease_epoch),
+                        )),
+                        Some(guardian) if guardian.process_id != active.process_id => Some((
+                            "internal_invariant_failure",
+                            Some(active.lease_hash.clone()),
+                            Some(active.run_id.clone()),
+                            Some(active.lease_epoch),
+                        )),
+                        Some(guardian) => match process_fingerprint(active.process_id) {
+                            Err(_) => Some((
+                                "guardian_missing",
+                                Some(active.lease_hash.clone()),
+                                Some(active.run_id.clone()),
+                                Some(active.lease_epoch),
+                            )),
+                            Ok(fingerprint)
+                                if fingerprint != active.process_fingerprint
+                                    || fingerprint != guardian.process_fingerprint =>
+                            {
+                                Some((
+                                    "guardian_changed",
+                                    Some(active.lease_hash.clone()),
+                                    Some(active.run_id.clone()),
+                                    Some(active.lease_epoch),
+                                ))
+                            }
+                            Ok(_) => None,
+                        },
+                    }
+                }
+            }
+            LeaseState::Disabled { .. } => None,
+        };
+
+        let Some((reason, lease_hash, run_id, lease_epoch)) = expiration else {
+            return;
+        };
+        // Fail closed before touching the durable log.  A broken audit sink
+        // must never extend the authority lifetime.
+        state.lease = LeaseState::Disabled {
+            reason: reason.to_string(),
+        };
+        state.operators.clear();
+        state.consumed_execution_jtis.clear();
+        if self
+            .audit(
+                "automatic_revoke",
+                reason,
+                lease_hash.as_deref(),
+                run_id.as_deref(),
+                lease_epoch,
+            )
+            .is_err()
+        {
+            state.audit_degraded = true;
+            state.lease = LeaseState::Disabled {
+                reason: "audit_degraded".into(),
+            };
+        }
     }
 
     fn audit(
@@ -820,7 +1053,10 @@ impl DebugApprovalManager {
     }
 }
 
-fn pending_from_request(request: &DebugSessionStartRequest) -> Result<PendingSession, String> {
+fn pending_from_request(
+    request: &DebugSessionStartRequest,
+    guardians: &HashMap<String, GuardianRecord>,
+) -> Result<PendingSession, String> {
     for (value, name) in [
         (&request.session_id, "session_id"),
         (&request.run_id, "run_id"),
@@ -833,7 +1069,19 @@ fn pending_from_request(request: &DebugSessionStartRequest) -> Result<PendingSes
         return Err("debug session claim secret is invalid".into());
     }
     let workspace = canonical_workspace(&request.workspace)?;
-    let process_fingerprint = process_fingerprint(request.process_id)?;
+    let guardian = guardians
+        .get(&request.run_id)
+        .ok_or_else(|| "run id is not a live Launcher-owned Defaultspack child".to_string())?;
+    if guardian.workspace != workspace {
+        return Err("workspace does not match the Launcher-owned Defaultspack child".into());
+    }
+    let process_fingerprint = process_fingerprint(guardian.process_id)?;
+    if process_fingerprint != guardian.process_fingerprint {
+        return Err("Launcher-owned guardian identity changed".into());
+    }
+    if guardian.executable_identity.trim().is_empty() {
+        return Err("Launcher-owned guardian executable identity is unavailable".into());
+    }
     let now = Instant::now();
     Ok(PendingSession {
         session_id: request.session_id.clone(),
@@ -842,7 +1090,7 @@ fn pending_from_request(request: &DebugSessionStartRequest) -> Result<PendingSes
         workspace,
         pack_id: request.pack_id.clone(),
         profile_id: request.profile_id.clone(),
-        process_id: request.process_id,
+        process_id: guardian.process_id,
         process_fingerprint,
         claim_secret_hash: sha256_text(&request.claim_secret),
         approved_duration: None,
@@ -943,7 +1191,7 @@ fn status_from_state(
         workspace_digest: None,
         pack_id: None,
         profile_id: None,
-        process_id: None,
+        guardian_owned: false,
         lease_epoch: None,
         expires_at: None,
         duration: None,
@@ -968,7 +1216,7 @@ fn status_from_state(
             status.workspace_digest = Some(pending.workspace_digest.clone());
             status.pack_id = Some(pending.pack_id.clone());
             status.profile_id = Some(pending.profile_id.clone());
-            status.process_id = Some(pending.process_id);
+            status.guardian_owned = true;
             status.expires_at = Some(pending.expires_at.max(now_epoch));
             status.duration = pending
                 .approved_duration
@@ -983,32 +1231,12 @@ fn status_from_state(
             status.workspace_digest = Some(active.workspace_digest.clone());
             status.pack_id = Some(active.pack_id.clone());
             status.profile_id = Some(active.profile_id.clone());
-            status.process_id = Some(active.process_id);
+            status.guardian_owned = true;
             status.lease_epoch = Some(active.lease_epoch);
             status.expires_at = active.duration.seconds().map(|_| active.expires_at);
             status.duration = Some(active.duration.key().to_string());
             status
         }
-    }
-}
-
-fn expire_if_needed(state: &mut DebugApprovalState, now: Instant) {
-    let expired = match &state.lease {
-        LeaseState::Pending(pending) | LeaseState::Armed(pending) => pending.deadline <= now,
-        LeaseState::Active(active) => {
-            active.deadline.is_some_and(|deadline| deadline <= now)
-                || process_fingerprint(active.process_id)
-                    .map(|fingerprint| fingerprint != active.process_fingerprint)
-                    .unwrap_or(true)
-        }
-        LeaseState::Disabled { .. } => false,
-    };
-    if expired {
-        state.lease = LeaseState::Disabled {
-            reason: "expired_or_guardian_changed".into(),
-        };
-        state.operators.clear();
-        state.consumed_execution_jtis.clear();
     }
 }
 
@@ -1082,6 +1310,28 @@ fn validate_decision(decision: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
+fn retain_process_handle(process_id: u32) -> Result<std::os::windows::io::OwnedHandle, String> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE,
+    };
+
+    // Keeping this handle open ties the guardian record to the concrete
+    // process object even if Windows later reuses its numeric PID.
+    let raw = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            0,
+            process_id,
+        )
+    };
+    if raw.is_null() {
+        return Err("failed to retain Launcher-owned guardian process handle".into());
+    }
+    Ok(unsafe { OwnedHandle::from_raw_handle(raw.cast()) })
+}
+
 fn process_fingerprint(process_id: u32) -> Result<String, String> {
     if process_id == 0 {
         return Err("debug guardian process id is invalid".into());
@@ -1105,16 +1355,73 @@ fn process_fingerprint(process_id: u32) -> Result<String, String> {
     }
     #[cfg(not(unix))]
     {
-        let output = crate::process_utils::command("tasklist")
-            .args(["/FI", &format!("PID eq {process_id}"), "/FO", "CSV", "/NH"])
+        let script = format!(
+            "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = {process_id}\\\";\
+             if($null -eq $p){{exit 3}};\
+             $o=Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid;\
+             $pp=Get-CimInstance Win32_Process -Filter \\\"ProcessId = $($p.ParentProcessId)\\\";\
+             [ordered]@{{pid=[uint32]$p.ProcessId;creation=[string]$p.CreationDate;\
+             owner_sid=[string]$o.Sid;executable=[string]$p.ExecutablePath;\
+             parent=[uint32]$p.ParentProcessId;parent_creation=[string]$pp.CreationDate;\
+             parent_executable=[string]$pp.ExecutablePath}}|ConvertTo-Json -Compress"
+        );
+        let output = crate::process_utils::command("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
             .map_err(|_| "failed to inspect debug guardian process")?;
         let facts = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !output.status.success() || facts.is_empty() || facts.starts_with("INFO:") {
+        if !output.status.success() || facts.is_empty() {
             return Err("debug guardian process is not running".into());
         }
-        Ok(sha256_text(facts))
+        let parsed: serde_json::Value = serde_json::from_str(&facts)
+            .map_err(|_| "debug guardian process identity is unavailable")?;
+        windows_process_fingerprint(&parsed)
     }
+}
+
+#[cfg(any(windows, test))]
+fn windows_process_fingerprint(facts: &serde_json::Value) -> Result<String, String> {
+    let pid = facts
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let parent = facts
+        .get("parent")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let creation = facts
+        .get("creation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let owner_sid = facts
+        .get("owner_sid")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let executable = facts
+        .get("executable")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let parent_creation = facts
+        .get("parent_creation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let parent_executable = facts
+        .get("parent_executable")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if pid == 0
+        || parent == 0
+        || creation.is_empty()
+        || owner_sid.is_empty()
+        || executable.is_empty()
+        || parent_creation.is_empty()
+        || parent_executable.is_empty()
+    {
+        return Err("debug guardian process identity is unavailable".into());
+    }
+    Ok(sha256_text(format!(
+        "{pid}\n{creation}\n{owner_sid}\n{executable}\n{parent}\n{parent_creation}\n{parent_executable}"
+    )))
 }
 
 fn canonical_workspace(value: &str) -> Result<PathBuf, String> {
@@ -1181,10 +1488,28 @@ mod tests {
     use std::sync::Arc;
 
     fn manager() -> DebugApprovalManager {
-        DebugApprovalManager::new(std::env::temp_dir().join(format!(
+        let manager = DebugApprovalManager::new(std::env::temp_dir().join(format!(
             "tobkiri-debug-approval-test-{}.jsonl",
             random_identifier("audit")
-        )))
+        )));
+        manager
+            .register_guardian(
+                "run-12345678".into(),
+                std::process::id(),
+                "test-defaultspack".into(),
+                std::env::temp_dir(),
+                8766,
+                {
+                    let path = std::env::temp_dir().join(format!(
+                        "tobkiri-debug-api-token-{}",
+                        random_identifier("test")
+                    ));
+                    std::fs::write(&path, "test-token").unwrap();
+                    path
+                },
+            )
+            .unwrap();
+        manager
     }
 
     fn request(workspace: &Path) -> DebugSessionStartRequest {
@@ -1194,7 +1519,6 @@ mod tests {
             workspace: workspace.to_string_lossy().into_owned(),
             pack_id: "defaultspack".into(),
             profile_id: "defaults".into(),
-            process_id: std::process::id(),
             claim_secret: "claim-secret-which-is-at-least-thirty-two-bytes".into(),
         }
     }
@@ -1244,6 +1568,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_cli_run_id_that_is_not_launcher_owned() {
+        let manager = manager();
+        let mut forged = request(&std::env::temp_dir());
+        forged.run_id = "unrelated-long-lived-process".into();
+        assert!(manager
+            .register_session(forged)
+            .unwrap_err()
+            .contains("Launcher-owned"));
+    }
+
+    #[test]
     fn selected_duration_is_bound_to_the_active_lease() {
         for (key, seconds) in [
             ("1h", 60 * 60),
@@ -1278,17 +1613,88 @@ mod tests {
     }
 
     #[test]
-    fn general_broker_credential_cannot_claim_or_sign() {
+    fn guardian_removal_revokes_and_durably_audits_reason() {
         let manager = manager();
+        let (status, _) = active(&manager);
+        manager.unregister_guardian(status.run_id.as_deref().unwrap());
+
+        let disabled = manager.status();
+        assert_eq!(disabled.state, "disabled");
+        assert_eq!(disabled.reason.as_deref(), Some("guardian_missing"));
+        let audit = std::fs::read_to_string(&manager.audit_path).unwrap();
+        assert!(audit.contains("\"event\":\"automatic_revoke\""));
+        assert!(audit.contains("\"result\":\"guardian_missing\""));
+    }
+
+    #[test]
+    fn automatic_expiry_is_durable() {
+        let manager = manager();
+        active(&manager);
+        {
+            let mut state = manager.state.lock().unwrap();
+            let LeaseState::Active(active) = &mut state.lease else {
+                panic!("expected active lease");
+            };
+            active.deadline = Some(Instant::now() - Duration::from_secs(1));
+        }
+
+        let disabled = manager.status();
+        assert_eq!(disabled.reason.as_deref(), Some("expired"));
+        let audit = std::fs::read_to_string(&manager.audit_path).unwrap();
+        assert!(audit.contains("\"result\":\"expired\""));
+    }
+
+    #[test]
+    fn windows_fingerprint_ignores_memory_but_binds_creation_time() {
+        let first = json!({
+            "pid": 42,
+            "creation": "20260730010203.000000+000",
+            "owner_sid": "S-1-5-21-test",
+            "executable": "C:\\\\Program Files\\\\Tobkiri\\\\pack-shell.exe",
+            "parent": 7,
+            "parent_creation": "20260730010000.000000+000",
+            "parent_executable": "C:\\\\Program Files\\\\Tobkiri\\\\Tobkiri Launcher.exe",
+            "memory": 1000,
+        });
+        let memory_changed = json!({
+            "pid": 42,
+            "creation": "20260730010203.000000+000",
+            "owner_sid": "S-1-5-21-test",
+            "executable": "C:\\\\Program Files\\\\Tobkiri\\\\pack-shell.exe",
+            "parent": 7,
+            "parent_creation": "20260730010000.000000+000",
+            "parent_executable": "C:\\\\Program Files\\\\Tobkiri\\\\Tobkiri Launcher.exe",
+            "memory": 9000,
+        });
+        let replaced = json!({
+            "pid": 42,
+            "creation": "20260730020203.000000+000",
+            "owner_sid": "S-1-5-21-test",
+            "executable": "C:\\\\Program Files\\\\Tobkiri\\\\pack-shell.exe",
+            "parent": 7,
+            "parent_creation": "20260730010000.000000+000",
+            "parent_executable": "C:\\\\Program Files\\\\Tobkiri\\\\Tobkiri Launcher.exe",
+            "memory": 1000,
+        });
+        assert_eq!(
+            windows_process_fingerprint(&first).unwrap(),
+            windows_process_fingerprint(&memory_changed).unwrap()
+        );
+        assert_ne!(
+            windows_process_fingerprint(&first).unwrap(),
+            windows_process_fingerprint(&replaced).unwrap()
+        );
+    }
+
+    #[test]
+    fn general_broker_credential_cannot_claim_or_sign() {
+        let first_manager = manager();
         let mut request = request(&std::env::temp_dir());
-        manager.register_session(request.clone()).unwrap();
-        manager.arm("1h").unwrap();
+        first_manager.register_session(request.clone()).unwrap();
+        first_manager.arm("1h").unwrap();
         request.claim_secret = "wrong-claim-secret-that-is-at-least-thirty-two".into();
-        assert!(manager.start_session(request).is_err());
-        let second_manager = DebugApprovalManager::new(std::env::temp_dir().join(format!(
-            "tobkiri-debug-approval-test-{}.jsonl",
-            random_identifier("audit")
-        )));
+        assert!(first_manager.start_session(request).is_err());
+        let second_manager = manager();
         let (status, secret) = active(&second_manager);
         let mut operator = operator_request(&status, &secret, "approve");
         operator.session_secret = "not-the-session-secret-at-all-xxxxxxxx".into();

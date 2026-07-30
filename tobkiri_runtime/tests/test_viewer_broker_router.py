@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import sys
 import base64
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -12,6 +16,127 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def test_debug_status_rejects_fake_broker_with_same_bearer_token():
+    import hashlib
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    key = Ed25519PrivateKey.generate()
+    instance_nonce = "real-launcher-instance"
+
+    class SignedLauncherBroker(BaseHTTPRequestHandler):
+        def _signed_response(self):
+            request_nonce = self.headers["X-Rumi-Launcher-Response-Nonce"]
+            payload = json.dumps(
+                {
+                    "ok": True,
+                    "status": {"state": "active"},
+                    "verified": True,
+                    "consumed": True,
+                }
+            ).encode()
+            payload_hash = hashlib.sha256(payload).hexdigest()
+            signed = (
+                "tobkiri-launcher-response-v1\n"
+                f"{instance_nonce}\n{request_nonce}\n{self.command}\n{self.path}\n"
+                f"200\n{payload_hash}"
+            ).encode()
+            body = json.dumps({
+                "ok": True,
+                "status": {"state": "active"},
+                "verified": True,
+                "consumed": True,
+                "_launcher_attestation": {
+                    "version": 1,
+                    "algorithm": "Ed25519",
+                    "instance_nonce": instance_nonce,
+                    "request_nonce": request_nonce,
+                    "method": self.command,
+                    "path": self.path,
+                    "status": 200,
+                    "payload_sha256": payload_hash,
+                    "payload": base64.urlsafe_b64encode(payload).decode().rstrip("="),
+                    "signature": base64.urlsafe_b64encode(
+                        key.sign(signed)
+                    ).decode().rstrip("="),
+                },
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = _signed_response
+        do_POST = _signed_response
+
+        def log_message(self, *_args):
+            pass
+
+    class FakeBroker(BaseHTTPRequestHandler):
+        def _fake_response(self):
+            body = json.dumps(
+                {
+                    "ok": True,
+                    "status": {"state": "active"},
+                    "verified": True,
+                    "consumed": True,
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = _fake_response
+        do_POST = _fake_response
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SignedLauncherBroker)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    public_key = base64.urlsafe_b64encode(
+        key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode().rstrip("=")
+    client = ViewerBrokerClient(
+        url=f"http://127.0.0.1:{port}",
+        token="stolen-token",
+        attestation_public_key=public_key,
+        instance_nonce=instance_nonce,
+    )
+    try:
+        assert client.debug_approval_status()["status"]["state"] == "active"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    fake = ThreadingHTTPServer(("127.0.0.1", port), FakeBroker)
+    fake_thread = threading.Thread(target=fake.serve_forever, daemon=True)
+    fake_thread.start()
+    try:
+        with pytest.raises(RuntimeError, match="attestation is missing"):
+            client.debug_approval_status()
+        with pytest.raises(RuntimeError, match="attestation is missing"):
+            client.verify_debug_cli_operator({}, expected_decision="approve")
+        with pytest.raises(RuntimeError, match="attestation is missing"):
+            client.consume_debug_execution(
+                request_id="request-1",
+                lease_epoch=1,
+                execution_jti="execution-1",
+            )
+    finally:
+        fake.shutdown()
+        fake.server_close()
+        fake_thread.join(timeout=2)
 
 
 def test_viewer_broker_client_reads_env_url_and_token(monkeypatch):

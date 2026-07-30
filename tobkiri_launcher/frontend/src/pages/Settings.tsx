@@ -751,7 +751,7 @@ export function Settings() {
                     <div className="space-y-2 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text-main">
                       <p>CLI session requested. Turn ON to inspect and confirm it in the native Launcher dialog.</p>
                       <p className="break-all text-xs text-text-muted">
-                        {debugApproval.workspace} · {debugApproval.pack_id}/{debugApproval.profile_id} · PID {debugApproval.process_id}
+                        {debugApproval.workspace} · {debugApproval.pack_id}/{debugApproval.profile_id} · Launcher-owned guardian {debugApproval.guardian_owned ? 'verified' : 'unavailable'}
                       </p>
                     </div>
                   )}

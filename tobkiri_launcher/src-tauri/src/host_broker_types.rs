@@ -59,6 +59,10 @@ pub struct HostBrokerConnectionInfo {
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_instance_nonce: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
