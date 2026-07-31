@@ -1886,7 +1886,7 @@ fn is_clean_absolute_path(path: &std::path::Path) -> bool {
             matches!(
                 component,
                 std::path::Component::RootDir | std::path::Component::Normal(_)
-            )
+            ) || cfg!(windows) && matches!(component, std::path::Component::Prefix(_))
         })
 }
 

@@ -797,8 +797,11 @@ mod tests {
 
     #[test]
     fn pack_shell_target_can_be_isolated_outside_the_workspace() {
-        let workspace = PathBuf::from("/workspace/repository");
-        let isolated_target = PathBuf::from("/owned/supervisor/cargo_target");
+        let workspace = std::env::temp_dir().join("workspace").join("repository");
+        let isolated_target = std::env::temp_dir()
+            .join("owned")
+            .join("supervisor")
+            .join("cargo_target");
 
         assert_eq!(
             pack_shell_target_dir_with_override(&workspace, Some(isolated_target.clone())),

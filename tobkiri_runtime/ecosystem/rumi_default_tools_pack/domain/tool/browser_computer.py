@@ -5164,10 +5164,12 @@ class BrowserComputerController:
         selected_identity_observation: Any = None
         use_inventory_diagnostics = bool(
             require_exact_binding
-            and platform.system() == "Darwin"
             and (
                 "_darwin_window_inventory_observation" in self.__dict__
-                or "_list_windows" not in self.__dict__
+                or (
+                    platform.system() == "Darwin"
+                    and "_list_windows" not in self.__dict__
+                )
             )
         )
         if use_inventory_diagnostics:

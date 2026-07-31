@@ -1357,6 +1357,15 @@ fn process_fingerprint(process_id: u32) -> Result<String, String> {
     }
     #[cfg(not(unix))]
     {
+        // CIM can fail transiently when several registrations query it at
+        // once. Serialize identity snapshots so every guardian is checked
+        // against one complete, fail-closed process record.
+        static PROCESS_INSPECTION_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
+        let _inspection_guard = PROCESS_INSPECTION_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .map_err(|_| "debug guardian process inspection is unavailable")?;
         let script = format!(
             "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = {process_id}\\\";\
              if($null -eq $p){{exit 3}};\
