@@ -1313,15 +1313,17 @@ fn validate_decision(decision: &str) -> Result<(), String> {
 #[cfg(windows)]
 fn retain_process_handle(process_id: u32) -> Result<std::os::windows::io::OwnedHandle, String> {
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE,
-    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    // SYNCHRONIZE is a standard access right, but windows-sys 0.61 does not
+    // expose it for process handles.
+    const PROCESS_SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
 
     // Keeping this handle open ties the guardian record to the concrete
     // process object even if Windows later reuses its numeric PID.
     let raw = unsafe {
         OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE_ACCESS,
             0,
             process_id,
         )

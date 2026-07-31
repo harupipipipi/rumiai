@@ -9,24 +9,24 @@ import sys
 
 import pytest
 
-from rumi_ai_1_10.core_runtime.host_broker.computer_host_helper import (
+from core_runtime.host_broker.computer_host_helper import (
     _computer_result_envelope,
     _safe_type_diagnostics,
     _verified_type_result,
 )
-from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer import (
+from ecosystem.rumi_default_tools_pack.domain.computer import (
     ComputerSeatService,
     DriverRegistry,
 )
-from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_swift_host import (
+from ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_swift_host import (
     MacSwiftHostDriver,
 )
-from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.models import (
+from ecosystem.rumi_default_tools_pack.domain.computer.models import (
     ActionResult,
     ComputerCapabilities,
     ComputerTarget,
 )
-from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
+from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
     BrowserComputerController,
 )
 
@@ -266,7 +266,7 @@ def test_controller_returns_error_instead_of_legacy_replay_after_partial_dispatc
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
     controller = _controller(tmp_path, monkeypatch)
     controller._computer_seat = ControllerSeat(
@@ -307,7 +307,7 @@ def test_controller_maps_browser_address_intent_to_terminal_generic_background_a
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
     controller = _controller(tmp_path, monkeypatch)
     seat = SemanticControllerSeat({
@@ -489,7 +489,7 @@ def test_controller_preserves_zero_dispatch_native_failure_diagnostics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
     controller = _controller(tmp_path, monkeypatch)
     diagnostics = {
@@ -531,7 +531,7 @@ def test_controller_propagates_verified_completion_to_viewer_helper(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
     controller = _controller(tmp_path, monkeypatch)
     controller._computer_seat = ControllerSeat(
