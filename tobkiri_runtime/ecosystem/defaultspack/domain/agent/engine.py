@@ -1021,6 +1021,7 @@ class AgentEngine:
             "role": "tool",
             "content": str(tool_content) if not isinstance(tool_content, str) else tool_content,
             "name": pending["tool_name"],
+            "tool_call_id": str(tool_call_id),
         })
         self._transcripts.append_tool_result(
             execution.context["transcript_id"],

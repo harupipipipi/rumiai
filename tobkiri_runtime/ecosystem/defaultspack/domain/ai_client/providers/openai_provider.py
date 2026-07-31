@@ -229,17 +229,75 @@ class OpenAIProvider(BaseProvider):
 
     # ── build_request / parse_response ──────────────────────────────────
 
+    @staticmethod
+    def _openai_tool_call(raw):
+        if not isinstance(raw, dict):
+            return None
+        function = raw.get("function")
+        if raw.get("type") == "function" and isinstance(function, dict):
+            return raw
+        function = function if isinstance(function, dict) else {}
+        name = str(raw.get("name") or raw.get("tool_name") or function.get("name") or "")
+        if not name:
+            return None
+        arguments = (
+            raw.get("input")
+            if "input" in raw
+            else raw.get("args", function.get("arguments", {}))
+        )
+        if not isinstance(arguments, str):
+            arguments = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        return {
+            "id": str(raw.get("id") or raw.get("tool_call_id") or ""),
+            "type": "function",
+            "function": {"name": name, "arguments": arguments},
+        }
+
     def build_request(self, messages):
         """StandardMessage → OpenAI 形式。OpenAI はほぼそのまま。"""
         converted = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            if role == "assistant" and isinstance(content, list):
+                standard_tool_calls = []
+                text_parts = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        text_parts.append(str(block.get("text") or ""))
+                        continue
+                    if block.get("type") != "tool_use":
+                        continue
+                    tool_call = OpenAIProvider._openai_tool_call(block)
+                    if tool_call:
+                        standard_tool_calls.append(tool_call)
+                if standard_tool_calls:
+                    entry = {
+                        "role": "assistant",
+                        "content": "".join(text_parts),
+                        "tool_calls": standard_tool_calls,
+                    }
+                    reasoning_content = self._message_reasoning_content(msg)
+                    if reasoning_content:
+                        entry["reasoning_content"] = reasoning_content
+                    converted.append(entry)
+                    continue
             if role == "assistant" and msg.get("tool_calls"):
+                tool_calls = [
+                    normalized
+                    for raw in msg.get("tool_calls", [])
+                    if (normalized := OpenAIProvider._openai_tool_call(raw)) is not None
+                ]
                 entry = {
                     "role": "assistant",
                     "content": content if isinstance(content, str) else "",
-                    "tool_calls": msg.get("tool_calls", []),
+                    "tool_calls": tool_calls,
                 }
                 reasoning_content = self._message_reasoning_content(msg)
                 if reasoning_content:

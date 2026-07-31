@@ -24,7 +24,7 @@ class OpencodeZenProvider(AnthropicProvider):
     OPENAI_CHAT_MODELS: set[str] = set()
     MODEL_IDS = ANTHROPIC_MESSAGES_MODELS | OPENAI_CHAT_MODELS
     KNOWN_MODELS: List[Dict[str, Any]] = []
-    VERIFIED_TOOL_MODELS = {"mimo-v2.5-free"}
+    VERIFIED_TOOL_MODELS = {"deepseek-v4-flash-free", "mimo-v2.5-free"}
     _OPENAI_CHAT_PARAM_KEYS = {
         "temperature",
         "top_p",

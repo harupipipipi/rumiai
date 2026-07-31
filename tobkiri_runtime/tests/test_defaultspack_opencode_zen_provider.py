@@ -88,10 +88,12 @@ def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
     ]
     assert all(model["metadata"]["inventory_source"] == "live" for model in models)
     assert models[0]["metadata"]["transport"] == "openai_chat_completions"
-    assert all(model["capabilities"]["tool_calling"] is False for model in models)
+    assert models[0]["capabilities"]["tool_calling"] is True
+    assert models[1]["capabilities"]["tool_calling"] is False
     assert all(model["capabilities"]["image_input"] is False for model in models)
     assert all(model["capabilities"]["vision"] is False for model in models)
-    assert all(model["metadata"]["tool_calling_verified"] is False for model in models)
+    assert models[0]["metadata"]["tool_calling_verified"] is True
+    assert models[1]["metadata"]["tool_calling_verified"] is False
 
 
 @pytest.mark.parametrize("payload", [{"data": []}, {"unexpected": []}])
@@ -298,6 +300,136 @@ def test_opencode_zen_mimo_free_preserves_tool_call_continuations(monkeypatch):
         "content": '{"ok": true}',
     }
     assert result["content"] == [{"type": "text", "text": "Done"}]
+
+
+def test_opencode_zen_converts_standard_tool_use_continuation(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
+    captured = {}
+
+    def fake_request_openai_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_tool_followup",
+            "model": "deepseek-v4-flash-free",
+            "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+        }
+
+    messages = [
+        {"role": "user", "content": "Call get_magic_number."},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": ""},
+                {
+                    "type": "tool_use",
+                    "id": "call_magic",
+                    "name": "get_magic_number",
+                    "input": {},
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_magic",
+            "name": "get_magic_number",
+            "content": {"value": 314159},
+        },
+    ]
+
+    with patch.object(provider, "_request_openai_json", side_effect=fake_request_openai_json):
+        result = provider.complete(
+            "opencode-zen/deepseek-v4-flash-free",
+            messages,
+            [],
+            {"max_tokens": 128},
+        )
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["messages"][1] == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_magic",
+                "type": "function",
+                "function": {
+                    "name": "get_magic_number",
+                    "arguments": "{}",
+                },
+            }
+        ],
+    }
+    assert captured["body"]["messages"][2] == {
+        "role": "tool",
+        "tool_call_id": "call_magic",
+        "name": "get_magic_number",
+        "content": '{"value": 314159}',
+    }
+    assert result["content"] == [{"type": "text", "text": "Done"}]
+
+
+def test_opencode_zen_converts_agent_engine_tool_call_continuation(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider._model_inventory_cache = [{"model_id": "deepseek-v4-flash-free"}]
+    captured = {}
+
+    def fake_request_openai_json(path, body, **kwargs):
+        del path, kwargs
+        captured["body"] = body
+        return {
+            "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+            "usage": {},
+        }
+
+    messages = [
+        {"role": "user", "content": "Call get_magic_number."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "type": "tool_use",
+                    "id": "call_magic",
+                    "name": "get_magic_number",
+                    "input": {},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_magic",
+            "name": "get_magic_number",
+            "content": "314159",
+        },
+    ]
+
+    with patch.object(provider, "_request_openai_json", side_effect=fake_request_openai_json):
+        provider.complete(
+            "opencode-zen/deepseek-v4-flash-free",
+            messages,
+            [],
+            {"max_tokens": 128},
+        )
+
+    assert captured["body"]["messages"][1] == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_magic",
+                "type": "function",
+                "function": {
+                    "name": "get_magic_number",
+                    "arguments": "{}",
+                },
+            }
+        ],
+    }
+    assert captured["body"]["messages"][2]["tool_call_id"] == "call_magic"
 
 
 def test_opencode_zen_reasoning_stream_omits_tools_and_applies_token_floor(
