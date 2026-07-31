@@ -84,10 +84,10 @@ RUMI_AUTO_APPROVE_LOCAL=true npm run tauri -- dev
 ## defaultspack を開発中に起動するときの注意
 
 viewer 経由で検証するときは、まず `tobkiri_launcher` を起動し、viewer の Home から `Open Defaultspack` / `Launch Defaultspack` を押してください。
-`pack-shell run defaultspack` を先に直接実行すると、pack-shell が別の kernel を `8765` に起動することがあります。その kernel は viewer が生成した `RUMI_PANEL_BOOTSTRAP_SECRET` を知らないため、あとから viewer を開いたときに bootstrap 401、黒画面、または「Rumi Viewer と Rumi AI/defaultspack が複数起動している」状態に見えます。
+`pack-shell run defaultspack` を先に直接実行すると、pack-shell が別の kernel を `8765` に起動することがあります。その kernel は viewer が生成した `RUMI_PANEL_BOOTSTRAP_SECRET` を知らないため、あとから viewer を開いたときに bootstrap 401、黒画面、または「Tobkiri Viewer と Tobkiri/defaultspack が複数起動している」状態に見えます。`RUMI_PANEL_BOOTSTRAP_SECRET` は互換性のため維持する環境変数名です。
 
 defaultspack の独立 UI は `8766` を使います。viewer 本体は `8765` の kernel を管理し、defaultspack は viewer から必要になったタイミングで別ウィンドウとして開かれるのが通常の流れです。
-fresh checkout から確認するときは、`python -m rumi_ai` や `pack-shell run defaultspack` を先に起動するのではなく、viewer の Home から `Open Defaultspack` / `Launch Defaultspack` を押してください。
+fresh checkout から確認するときは、`python -m tobkiri` や `pack-shell run defaultspack` を先に起動するのではなく、viewer の Home から `Open Defaultspack` / `Launch Defaultspack` を押してください。
 
 `Open Defaultspack` が `desktop_app.execute not granted` または `Pack not allowed for desktop app execution: defaultspack` で失敗するときは、pack 承認とは別に desktop app 起動用 capability grant が不足しています。開発環境でだけ、次のように署名付き grant を確認・修復できます。
 
@@ -129,7 +129,7 @@ bootstrap secret がずれているか、古い kernel がポート `8765` を�
 lsof -nP -iTCP:8765 -sTCP:LISTEN
 ```
 
-viewer で検証する場合、`8765` を掴んでいる古い `python -m rumi_ai`、`python -m app`、または `pack-shell run defaultspack` は終了してから `cd tobkiri_launcher/frontend && npm run tauri -- dev` を実行してください。
+viewer で検証する場合、`8765` を掴んでいる古い `python -m tobkiri`（または 1.x 互換 alias の `python -m rumi_ai`）、`python -m app`、または `pack-shell run defaultspack` は終了してから `cd tobkiri_launcher/frontend && npm run tauri -- dev` を実行してください。
 
 ```bash
 pgrep -fl 'rumi-viewer|python.*-m app|python.*rumi_ai|pack-shell run defaultspack|defaultspack.desktop_app'

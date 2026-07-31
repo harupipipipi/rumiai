@@ -1,14 +1,14 @@
-# Rumi AI OS — 多言語 Pack 開発ガイド
+# Tobkiri — 多言語 Pack 開発ガイド
 
 最終更新: 2026-03-23
 
-本ドキュメントは Rumi AI OS の Pack を **Python 以外の言語**（Rust, Go, Node.js, C/C++ 等）で開発するためのガイドです。stdin/stdout JSON プロトコルの仕様、チュートリアル、ベストプラクティスを含みます。
+本ドキュメントは Tobkiri の Pack を **Python 以外の言語**（Rust, Go, Node.js, C/C++ 等）で開発するためのガイドです。stdin/stdout JSON プロトコルの仕様、チュートリアル、ベストプラクティスを含みます。
 
 ---
 
 ## 1. 多言語 Pack の概要
 
-Rumi AI OS の capability_executor.py には `binary` と `command` の 2 つの calling_convention が実装されています。どちらも **stdin に JSON を渡し、stdout から JSON を読み取る** という共通のプロトコルを使用します。
+Tobkiri の capability_executor.py には `binary` と `command` の 2 つの calling_convention が実装されています。どちらも **stdin に JSON を渡し、stdout から JSON を読み取る** という共通のプロトコルを使用します。
 
 これにより、stdin/stdout で JSON を読み書きできる任意の言語で Pack の Function を実装できます。
 
@@ -295,7 +295,7 @@ Docker で実行される Python Function には `RUMI_PACK_ID` と `RUMI_FUNCTI
 ### 7.1 前提条件
 
 - Rust ツールチェーンがインストール済み（`rustup` + `cargo`）
-- Rumi AI OS が動作する環境
+- Tobkiri が動作する環境
 
 ### 7.2 プロジェクト作成
 
@@ -413,7 +413,7 @@ echo '{"context":{"principal_id":"test_user","pack_id":"my_rust_pack","function_
 
 ### 7.8 配置
 
-ビルド済みバイナリを function_dir 内にコピーまたはシンボリックリンクして、Rumi AI OS の `ecosystem/` に Pack ディレクトリを配置します。
+ビルド済みバイナリを function_dir 内にコピーまたはシンボリックリンクして、Tobkiri の `ecosystem/` に Pack ディレクトリを配置します。
 
 ---
 

@@ -3,7 +3,7 @@
 このチュートリアルは **「今のリポジトリで runtime が動くところまで」** を最短で確認する手順です。
 
 > Tobkiri の公開名への移行中のため、このブランチでは互換 CLI
-> `python -m rumi_ai` を使用します。
+> canonical CLI の `python -m tobkiri` を使用します。
 
 ## 前提
 
@@ -13,7 +13,7 @@
 ## Step 1. ヘルスチェックを実行
 
 ```bash
-python -m rumi_ai --health
+python -m tobkiri --health
 ```
 
 `status: "UP"` なら正常で exit code 0 です。`DEGRADED` と `DOWN` は JSON を出力しますが、
@@ -22,7 +22,7 @@ CI / 監視では異常として exit code 1 になります。
 ## Step 2. runtime を起動
 
 ```bash
-python -m rumi_ai
+python -m tobkiri
 ```
 
 `[Rumi] startup.success` が出れば起動完了です。
@@ -50,7 +50,7 @@ HTTP 200 と JSON が返れば API は利用可能です。
 ## 補足: headless 初期化だけを確認する場合
 
 ```bash
-python -m rumi_ai --headless
+python -m tobkiri --headless
 ```
 
 `--headless` は HTTP server を起動せず、初期化後に終了します。そのため、このモードでは

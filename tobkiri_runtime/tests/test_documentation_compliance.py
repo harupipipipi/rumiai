@@ -231,8 +231,8 @@ class TestDocumentationContent:
 
     def test_readme_has_usage_examples(self, readme_content: str):
         """Test that README contains usage examples."""
-        assert "python -m rumi_ai" in readme_content, \
-            "README should contain usage examples"
+        assert "python -m tobkiri" in readme_content, \
+            "README should use the canonical Tobkiri CLI"
 
     def test_readme_has_troubleshooting_tips(self, readme_content: str):
         """Test that README contains troubleshooting tips."""

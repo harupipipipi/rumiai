@@ -297,7 +297,7 @@ def _check_critical_dependencies():
 def main():
     global _kernel
 
-    parser = argparse.ArgumentParser(description="Rumi AI OS")
+    parser = argparse.ArgumentParser(description="Tobkiri")
     parser.add_argument("command", nargs="?", help="Optional command such as 'migrate-hmac'")
     parser.add_argument("--headless", action="store_true", help="Run without HTTP server")
     parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")

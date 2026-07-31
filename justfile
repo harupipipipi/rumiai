@@ -6,7 +6,7 @@ help:
 
 # Run the package health check.
 health:
-    python -m rumi_ai --health
+    python -m tobkiri --health
 
 # Run root-level contract tests.
 root-test *args:

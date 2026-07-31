@@ -1,4 +1,4 @@
-# Rumi AI Docs Route Map
+# Tobkiri Docs Route Map
 
 「何をしたいか」から、最短で読む場所に辿るための入口です。
 

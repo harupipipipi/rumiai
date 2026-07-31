@@ -1,4 +1,4 @@
-# Rumi AI OS — Architecture
+# Tobkiri — Architecture
 
 設計と仕組みの全体像を説明するドキュメントです。Pack 開発者は [pack-development.md](pack-development.md)、運用者は [operations.md](operations.md) も参照してください。
 
@@ -900,7 +900,7 @@ def check_converter_with_locals(
 
 ### 概要
 
-`backend_core/di_container.py` は Rumi AI OS 全体で使用される軽量な DI（Dependency Injection）コンテナです。全てのサービスはコンテナに登録され、名前ベースで取得されます。グローバルシングルトンとして `get_container()` 経由でアクセスします。
+`backend_core/di_container.py` は Tobkiri 全体で使用される軽量な DI（Dependency Injection）コンテナです。全てのサービスはコンテナに登録され、名前ベースで取得されます。グローバルシングルトンとして `get_container()` 経由でアクセスします。
 
 ### DIContainer クラス
 
@@ -1043,7 +1043,7 @@ Wave 12–15 で追加された、パッケージ全体で共有されるユー�
 
 ### 統一エラー体系（error_messages.py）
 
-`backend_core/error_messages.py` は Rumi AI OS 全体で統一されたエラーコード体系を定義します。
+`backend_core/error_messages.py` は Tobkiri 全体で統一されたエラーコード体系を定義します。
 
 | 要素 | 説明 |
 |------|------|

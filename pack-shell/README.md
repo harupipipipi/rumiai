@@ -31,7 +31,7 @@ pack-shell run my-pack-123 \
   --command "python app.py" \
   --api-token "your-api-token" \
   --port 8765 \
-  --kernel-cmd "python -m rumi_ai" \
+  --kernel-cmd "python -m tobkiri" \
   --timeout 60 \
   --working-dir /path/to/workdir
 

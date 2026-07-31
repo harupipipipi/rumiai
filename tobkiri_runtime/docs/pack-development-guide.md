@@ -10,7 +10,7 @@
 ## 前提条件
 
 - Python 3.10 以上
-- Rumi AI OS リポジトリのクローン済み環境
+- Tobkiri リポジトリのクローン済み環境
 - リポジトリルートでの作業（`tobkiri_runtime/` ディレクトリが存在すること）
 
 ---
@@ -62,7 +62,7 @@ scaffold が生成した `ecosystem.json` を編集します。scaffold の出�
 {
   "pack_id": "my_pack",
   "version": "0.1.0",
-  "description": "my_pack - A Rumi AI OS Pack",
+  "description": "my_pack - A Tobkiri Pack",
   "capabilities": [],
   "flows": [],
   "connectivity": [],
@@ -80,7 +80,7 @@ scaffold が生成した `ecosystem.json` を編集します。scaffold の出�
   "pack_id": "my_pack",
   "pack_identity": "github:your-username/my_pack",
   "version": "0.1.0",
-  "description": "My first Rumi AI OS Pack",
+  "description": "My first Tobkiri Pack",
   "capabilities": [],
   "flows": [],
   "connectivity": [],
@@ -332,7 +332,7 @@ steps:
 
 ## 基盤モジュールの活用
 
-Rumi AI OS のコアランタイムは、Pack 開発で共通して必要になる基盤モジュールを提供しています。以下では各モジュールの基本的な使い方を紹介します。
+Tobkiri のコアランタイムは、Pack 開発で共通して必要になる基盤モジュールを提供しています。以下では各モジュールの基本的な使い方を紹介します。
 
 ### 構造化ログ
 

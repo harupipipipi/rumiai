@@ -471,6 +471,31 @@ def test_openrouter_provider_does_not_load_a_bundled_catalog(monkeypatch):
     assert OpenRouterProvider.KNOWN_MODELS == []
 
 
+def test_openrouter_provider_uses_canonical_tobkiri_attribution(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_HTTP_REFERER", raising=False)
+    monkeypatch.delenv("OPENROUTER_X_TITLE", raising=False)
+    monkeypatch.delenv("OPENROUTER_X_OPENROUTER_TITLE", raising=False)
+
+    provider = OpenRouterProvider(known_models=[])
+
+    assert provider._extra_headers == {
+        "HTTP-Referer": "https://github.com/harupipipipi/tobkiri",
+        "X-Title": "tobkiri-defaultspack",
+    }
+
+
+def test_openrouter_provider_preserves_attribution_overrides(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_HTTP_REFERER", "https://example.test/client")
+    monkeypatch.setenv("OPENROUTER_X_TITLE", "Example client")
+
+    provider = OpenRouterProvider(known_models=[])
+
+    assert provider._extra_headers == {
+        "HTTP-Referer": "https://example.test/client",
+        "X-Title": "Example client",
+    }
+
+
 def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
     monkeypatch.setattr(OpenRouterProvider, "_load_remote_model_cache", lambda self: None)

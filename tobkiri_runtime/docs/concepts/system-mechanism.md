@@ -1,10 +1,10 @@
 # Runtime Mechanism (コード不要版)
 
-このドキュメントは「Rumi AI がどう動くか」を、コードを読まなくても追えるように整理したものです。
+このドキュメントは「Tobkiri がどう動くか」を、コードを読まなくても追えるように整理したものです。
 
 ## 1. 起動時に何が起きるか
 
-1. `python -m rumi_ai` が `tobkiri_runtime/app.py` を起動する。
+1. `python -m tobkiri` が canonical runtime main を通じて `tobkiri_runtime/app.py` を起動する。
 2. `flows/00_startup.flow.yaml` の順序で Kernel ハンドラが実行される。
 3. セキュリティ初期化・Pack スキャン・API サーバー初期化が完了すると `system.ready` が発行される。
 

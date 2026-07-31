@@ -1,6 +1,6 @@
 # Desktop App Pack
 
-Rumi AI OS の **desktop_app.execute** capability を使うサンプル Pack です。
+Tobkiri の **desktop_app.execute** capability を使うサンプル Pack です。
 独立したデスクトップウィンドウ（tkinter）でアプリを起動します。
 
 Pack 開発者がコピーして改造できるテンプレートとしても機能します。
@@ -20,7 +20,7 @@ desktop_app_pack/
 
 ## desktop_app.execute capability とは
 
-`desktop_app.execute` は Rumi AI OS の core capability の一つで、Pack が **独立したデスクトップウィンドウ** でアプリケーションを起動するための権限です。
+`desktop_app.execute` は Tobkiri の core capability の一つで、Pack が **独立したデスクトップウィンドウ** でアプリケーションを起動するための権限です。
 
 Viewer 内のフロントエンド表示（`viewer:display`）とは異なり:
 
@@ -52,7 +52,7 @@ cp -r docs/examples/desktop_app_pack/ ecosystem/desktop_app_pack/
 ### 3. Kernel を起動する
 
 ```bash
-python -m rumi_ai
+python -m tobkiri
 ```
 
 Kernel が起動すると `ecosystem/desktop_app_pack/ecosystem.json` を自動でスキャンします。

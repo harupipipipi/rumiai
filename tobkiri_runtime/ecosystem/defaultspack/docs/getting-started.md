@@ -5,7 +5,7 @@ rumiai defaults Pack のセットアップから最初の会話を送信する�
 ## 前提条件
 
 - **Python 3.11 以上** がインストールされていること
-- **rumiai カーネル** がセットアップ済みであること（`https://github.com/harupipipipi/rumiai` の `tobkiri_runtime/` 配下）
+- **Tobkiri kernel** がセットアップ済みであること（`https://github.com/harupipipipi/tobkiri` の `tobkiri_runtime/` 配下）
 - **git** がインストールされていること
 
 ## インストール

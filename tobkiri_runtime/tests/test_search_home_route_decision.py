@@ -17,10 +17,10 @@ from ecosystem.search_home_pack.domain.route_decision import RouteDecision, deci
     ("raw", "expected"),
     [
         ("https://github.com", "URL_NAVIGATE"),
-        ("github.com/harupipipipi/rumiai", "URL_NAVIGATE"),
+        ("github.com/harupipipipi/tobkiri", "URL_NAVIGATE"),
         ("localhost:3000", "URL_NAVIGATE"),
-        ("!g rumiai profile", "GOOGLE_REDIRECT"),
-        ("google: rumiai", "GOOGLE_REDIRECT"),
+        ("!g tobkiri profile", "GOOGLE_REDIRECT"),
+        ("google: tobkiri", "GOOGLE_REDIRECT"),
         ("!ai rumiai profile設計", "ASK_AI"),
         ("Go fmtって必要？", "ASK_AI"),
         ("日東紡 株価", "ASK_AI_WITH_SEARCH"),

@@ -2,11 +2,14 @@
 
 Tobkiri is a modular AI runtime and tooling workspace.
 
-The project is being renamed from Rumi AI. Existing package names, commands,
-paths, environment variables, and application identifiers remain unchanged
-during the compatibility transition.
+The project was renamed from Rumi AI. Persistence-sensitive paths, environment
+variables, and application identifiers remain unchanged during their dedicated
+compatibility transitions.
 
-The repository keeps the runtime implementation under `tobkiri_runtime/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `tobkiri_launcher/frontend`; the kernel serves its built artifact at `/panel/`.
+The repository keeps the runtime implementation and canonical `python -m tobkiri`
+entrypoint under `tobkiri_runtime/`. The root `rumi_ai/` package is a temporary
+1.x compatibility alias only. The canonical control panel frontend source lives
+in `tobkiri_launcher/frontend`; the kernel serves its built artifact at `/panel/`.
 
 ## Quick Start (5 minutes)
 
@@ -28,10 +31,10 @@ pip install -r tobkiri_runtime/requirements-dev.txt
 pip install -e ./tobkiri_runtime
 
 # 4. Run health check
-python -m rumi_ai --health
+python -m tobkiri --health
 
 # 5. Start the runtime
-python -m rumi_ai
+python -m tobkiri
 ```
 
 After starting, open http://localhost:8765/panel/ in your browser to access the control panel.
@@ -57,7 +60,7 @@ After starting, open http://localhost:8765/panel/ in your browser to access the 
 ## Repository Layout
 
 - `tobkiri_runtime/`: kernel/runtime/API/backend source tree
-- `rumi_ai/`: compatibility Python entrypoint package
+- `rumi_ai/`: deprecated 1.x compatibility alias; not a canonical caller
 - `pack-shell/`: desktop pack launcher
 - `tobkiri_launcher/`: desktop shell and control panel frontend source
 - `tobkiri_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
@@ -146,18 +149,18 @@ Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m rumi_ai --health
+python -m tobkiri --health
 cd tobkiri_launcher\frontend
 npm run tauri -- dev
 ```
 
-When the viewer window opens, complete setup if prompted, then use Home -> `Open Defaultspack` to launch the defaultspack UI. `python -m rumi_ai` is useful for starting or checking the kernel, but the fresh-user desktop path for defaultspack is through the viewer button, not a manual port-8766 launch.
+When the viewer window opens, complete setup if prompted, then use Home -> `Open Defaultspack` to launch the defaultspack UI. `python -m tobkiri` is useful for starting or checking the kernel, but the fresh-user desktop path for defaultspack is through the viewer button, not a manual port-8766 launch.
 
 macOS / Linux:
 
 ```bash
 source .venv/bin/activate
-python -m rumi_ai --health
+python -m tobkiri --health
 cd tobkiri_launcher/frontend
 npm run tauri -- dev
 ```
@@ -179,13 +182,13 @@ just integrity
 ### Backend health check
 
 ```bash
-python -m rumi_ai --health
+python -m tobkiri --health
 ```
 
 ### Runtime startup
 
 ```bash
-python -m rumi_ai
+python -m tobkiri
 ```
 
 ### Viewer development
@@ -228,12 +231,13 @@ python -m pytest tests/test_capability_trust_store.py
 ## HMAC Migration
 
 ```bash
-python -m rumi_ai migrate-hmac
+python -m tobkiri migrate-hmac
 ```
 
 ## Components
 
-- `rumi_ai`: compatibility CLI and module entrypoint
+- `tobkiri`: canonical CLI and module entrypoint
+- `rumi_ai`: deprecated compatibility alias retained through the 1.x release line
 - `tobkiri_runtime`: kernel, runtime, API, backend, and docs
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
 - `tobkiri_launcher`: viewer-side application shell and canonical panel frontend source
@@ -246,7 +250,7 @@ python -m rumi_ai migrate-hmac
 
 #### 1. Health check fails with "disk probe DEGRADED/DOWN"
 
-**Problem**: `python -m rumi_ai --health` shows disk probe as DEGRADED or DOWN.
+**Problem**: `python -m tobkiri --health` shows disk probe as DEGRADED or DOWN.
 
 **Solution**: This is usually a disk space issue, not a code problem. Identify the
 largest workspace or build artifacts first; recreating a virtual environment can
@@ -261,7 +265,7 @@ du -sh .venv node_modules tobkiri_launcher/frontend/node_modules 2>/dev/null
 
 #### 2. Port 8765 already in use
 
-**Problem**: `python -m rumi_ai` fails with "Address already in use".
+**Problem**: `python -m tobkiri` fails with "Address already in use".
 
 **Solution**: Identify the listener first. Stop only the matching old Tobkiri/Rumi
 process gracefully; do not use a forced kill for routine port cleanup.
