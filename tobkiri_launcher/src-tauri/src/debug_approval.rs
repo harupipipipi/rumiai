@@ -1367,10 +1367,11 @@ fn process_fingerprint(process_id: u32) -> Result<String, String> {
             .lock()
             .map_err(|_| "debug guardian process inspection is unavailable")?;
         let script = format!(
-            "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = {process_id}\\\";\
+            "$p=Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = {process_id}';\
              if($null -eq $p){{exit 3}};\
              $o=Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid;\
-             $pp=Get-CimInstance Win32_Process -Filter \\\"ProcessId = $($p.ParentProcessId)\\\";\
+             $parentFilter='ProcessId = '+[string]$p.ParentProcessId;\
+             $pp=Get-CimInstance -ClassName Win32_Process -Filter $parentFilter;\
              [ordered]@{{pid=[uint32]$p.ProcessId;creation=[string]$p.CreationDate;\
              owner_sid=[string]$o.Sid;executable=[string]$p.ExecutablePath;\
              parent=[uint32]$p.ParentProcessId;parent_creation=[string]$pp.CreationDate;\
