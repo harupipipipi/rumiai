@@ -58,7 +58,18 @@ MANAGED_UBUNTU_CAPABILITIES = frozenset(
     }
 )
 GUEST_WORKDIR = LIMA_GUEST_WORKSPACE_ROOT
-GUEST_DEPS = ("Xvfb", "openbox", "xdotool", "import", "python3", "xterm", "unshare", "bwrap")
+GUEST_DEPS = (
+    "Xvfb",
+    "openbox",
+    "xdotool",
+    "import",
+    "python3",
+    "xterm",
+    "unshare",
+    "bwrap",
+    "prlimit",
+    "timeout",
+)
 APT_PACKAGES = (
     "xvfb",
     "openbox",
@@ -68,6 +79,7 @@ APT_PACKAGES = (
     "xterm",
     "x11-utils",
     "ca-certificates",
+    "coreutils",
     "util-linux",
     "bubblewrap",
 )
@@ -1632,7 +1644,9 @@ provision:
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y xvfb openbox xdotool imagemagick python3 xterm x11-utils ca-certificates util-linux bubblewrap
+    apt-get install -y \
+      xvfb openbox xdotool imagemagick python3 xterm x11-utils \
+      ca-certificates coreutils util-linux bubblewrap
     install -d -m 0755 /workspace
     install -d -m 0755 /data
     install -d -m 0711 -o {{.User}} -g {{.User}} /var/lib/rumi/workspaces

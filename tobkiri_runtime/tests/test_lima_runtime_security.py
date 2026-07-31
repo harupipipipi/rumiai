@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +20,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.supervisor import (
     ManagedSandboxSupervisor,
+    _guest_resource_limited_argv,
     _pack_data_migration_commit_script,
     _safe_guest_name,
     _validated_profile_context,
@@ -78,6 +81,23 @@ def test_lima_attestation_rejects_missing_mount_measurement() -> None:
     config.pop("mounts")
 
     assert "mounts" in str(validate_lima_instance_config(payload))
+
+
+def test_guest_resource_limits_include_wall_clock_tree_kill() -> None:
+    argv = _guest_resource_limited_argv(
+        ("bwrap", "--", "python3"),
+        timeout=2.5,
+        memory_mb=512,
+        pids=128,
+    )
+
+    assert argv[:5] == (
+        "timeout",
+        "--signal=TERM",
+        "--kill-after=1s",
+        "2.5s",
+        "prlimit",
+    )
 
 
 def test_lima_attestation_rejects_network_attachments_and_missing_measurement() -> None:
@@ -349,3 +369,35 @@ def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
         "host": False,
         "sibling_pack_secret": False,
     }
+
+    descendant_token = f"rumi-timeout-descendant-{uuid.uuid4().hex}"
+    timeout_result = ManagedSandboxSupervisor().execute_coding_terminal(
+        {
+            "workspace_root": str(coding_workspace),
+            "argv": [
+                "python3",
+                "-c",
+                "import subprocess,time;"
+                "subprocess.Popen(["
+                "'python3','-c','import time;time.sleep(30)',"
+                f"'{descendant_token}'"
+                "]);"
+                "time.sleep(30)",
+            ],
+            "timeout_seconds": 1,
+            "export_workspace": False,
+        }
+    )
+    assert timeout_result["success"] is False
+    assert timeout_result["timed_out"] is True
+    assert timeout_result["provider_id"] == "lima_ubuntu"
+
+    time.sleep(1.5)
+    guest_processes = subprocess.run(
+        [limactl, "shell", instance, "--", "ps", "-eo", "args="],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert descendant_token not in guest_processes.stdout

@@ -44,6 +44,7 @@ MAX_STAGE_FILE_BYTES = 2 * 1024 * 1024
 MAX_CODING_WORKSPACE_EXPORT_BYTES = 128 * 1024 * 1024
 MAX_CODING_WORKSPACE_EXPORT_FILES = 8000
 MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
+GUEST_TIMEOUT_EXIT_CODE = 124
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
 PACK_DATA_MIGRATION_MARKER = ".rumi-host-pack-data-migration-v1"
 
@@ -377,6 +378,14 @@ class ManagedSandboxSupervisor:
                     [limactl, "shell", instance, "--", *guest_argv],
                     timeout=timeout + 2,
                 )
+                if proc.returncode == GUEST_TIMEOUT_EXIT_CODE:
+                    return {
+                        "success": False,
+                        "ok": False,
+                        "error": "Managed sandbox execution timed out",
+                        "error_type": "timeout",
+                        "execution_boundary": "managed_sandbox",
+                    }
                 return self._response_from_process(proc, stage_audit=stage_audit)
         except subprocess.TimeoutExpired:
             return {
@@ -643,6 +652,16 @@ class ManagedSandboxSupervisor:
                 max_stdout_bytes=MAX_SANDBOX_TERMINAL_OUTPUT_BYTES,
                 max_stderr_bytes=MAX_SANDBOX_TERMINAL_OUTPUT_BYTES,
             )
+            if proc.returncode == GUEST_TIMEOUT_EXIT_CODE:
+                return _coding_terminal_response(
+                    sandbox_id=sandbox_id,
+                    command=request.get("command") or request.get("argv"),
+                    returncode=None,
+                    stdout=proc.stdout or "",
+                    stderr="Lima sandbox terminal timed out",
+                    timed_out=True,
+                    provider_id="lima_ubuntu",
+                )
             if request.get("export_workspace") is not False:
                 with tempfile.TemporaryDirectory(prefix=f"{sandbox_id}-lima-export-") as export_tmp:
                     export_path = Path(export_tmp) / "workspace.tar"
@@ -1386,6 +1405,10 @@ def _guest_resource_limited_argv(
     pids: int,
 ) -> tuple[str, ...]:
     return (
+        "timeout",
+        "--signal=TERM",
+        "--kill-after=1s",
+        f"{max(1.0, float(timeout)):g}s",
         "prlimit",
         f"--as={int(memory_mb) * 1024 * 1024}",
         f"--nproc={int(pids)}",
