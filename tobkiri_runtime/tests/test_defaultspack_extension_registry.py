@@ -443,8 +443,8 @@ def test_openrouter_provider_lists_curated_allowlist_from_catalog(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
     monkeypatch.setattr(
         OpenRouterProvider,
-        "_catalog_models",
-        classmethod(lambda cls: _openrouter_catalog_models()),
+        "_merge_remote_models",
+        lambda self, _models: _openrouter_catalog_models(),
     )
 
     provider = OpenRouterProvider()
@@ -473,12 +473,12 @@ def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
     monkeypatch.setattr(
         OpenRouterProvider,
-        "_catalog_models",
-        classmethod(lambda cls: _openrouter_catalog_models()),
+        "_merge_remote_models",
+        lambda self, _models: _openrouter_catalog_models(),
     )
 
     provider = OpenRouterProvider()
-    with pytest.raises(RuntimeError, match="unsupported model"):
+    with pytest.raises(RuntimeError, match="not present in the live or last-known-good catalog"):
         provider.complete("openai/gpt-4o-mini", [{"role": "user", "content": "hi"}], [], {})
 
 
