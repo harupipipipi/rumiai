@@ -20,6 +20,7 @@ from .approval_challenge_store import (
     DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
 )
 from .device_key_registry import DeviceKeyRegistry
+from .debug_cli_operator import verify_authority_debug_operator
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore, sanitize_authority_resource
@@ -403,6 +404,8 @@ class AuthorityService:
         expires_in_seconds: int | None = None,
         related_permissions: list[str] | tuple[str, ...] | None = None,
         ui_operator: dict[str, Any] | None = None,
+        debug_cli_operator: dict[str, Any] | None = None,
+        expected_digest: str = "",
         actor_principal: Any = None,
         attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -470,7 +473,7 @@ class AuthorityService:
                 }
             mobile_attestation_audit = attestation_result.audit
         confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
-        if self._typed_confirmation_required(request):
+        if self._typed_confirmation_required(request) and debug_cli_operator is None:
             if scope != "once":
                 return {
                     "success": False,
@@ -494,6 +497,24 @@ class AuthorityService:
                 }
         if mobile_approver:
             operator_audit = dict(mobile_attestation_audit)
+        elif debug_cli_operator is not None:
+            if str(debug_cli_operator.get("decision") or "") != "approve":
+                return {"success": False, "error": "debug operator decision mismatch", "status_code": 403}
+            if scope != "once" or related_permissions or expires_in_seconds is not None:
+                return {
+                    "success": False,
+                    "error": "Delegated debug approval must be one-shot and unbundled",
+                    "status_code": 400,
+                }
+            operator_ok, operator_error, operator_audit = verify_authority_debug_operator(
+                request, expected_digest, debug_cli_operator
+            )
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_debug_cli_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
             if not operator_ok:
@@ -929,6 +950,8 @@ class AuthorityService:
         reason: str = "",
         persist: bool = False,
         ui_operator: dict[str, Any] | None = None,
+        debug_cli_operator: dict[str, Any] | None = None,
+        expected_digest: str = "",
         actor_principal: Any = None,
         attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -976,6 +999,24 @@ class AuthorityService:
                     "status_code": attestation_result.status_code,
                 }
             operator_audit = dict(attestation_result.audit)
+        elif debug_cli_operator is not None:
+            if str(debug_cli_operator.get("decision") or "") != "deny":
+                return {"success": False, "error": "debug operator decision mismatch", "status_code": 403}
+            if persist:
+                return {
+                    "success": False,
+                    "error": "Delegated debug denial cannot be persistent",
+                    "status_code": 400,
+                }
+            operator_ok, operator_error, operator_audit = verify_authority_debug_operator(
+                request, expected_digest, debug_cli_operator
+            )
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_debug_cli_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
             if not operator_ok:
@@ -1055,6 +1096,7 @@ class AuthorityService:
         *,
         profile_id: str | None = None,
         actor_principal: Any = None,
+        debug_binding: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         requests = [
             self._request_view(item)
@@ -1064,6 +1106,7 @@ class AuthorityService:
                 profile_id=profile_id,
                 actor_principal=actor_principal,
             )
+            and self._matches_debug_binding(item, debug_binding)
         ]
         return {"requests": requests, "pending": [item for item in requests if item.get("status") == "pending"], "count": len(requests)}
 
@@ -1073,6 +1116,7 @@ class AuthorityService:
         *,
         profile_id: str | None = None,
         actor_principal: Any = None,
+        debug_binding: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -1083,7 +1127,31 @@ class AuthorityService:
             actor_principal=actor_principal,
         ):
             return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if not self._matches_debug_binding(request, debug_binding):
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
         return {"success": True, "request": self._request_view(request)}
+
+    @staticmethod
+    def _matches_debug_binding(
+        request: AuthorityRequest,
+        debug_binding: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(debug_binding, dict):
+            return True
+        expected = {
+            "debug_session_id": str(debug_binding.get("debug_session_id") or ""),
+            "lease_epoch": int(debug_binding.get("lease_epoch") or 0),
+            "debug_run_id": str(debug_binding.get("debug_run_id") or ""),
+            "workspace_identity_digest": str(
+                debug_binding.get("workspace_identity_digest") or ""
+            ),
+            "pack_id": str(debug_binding.get("pack_id") or ""),
+            "debug_profile_id": str(debug_binding.get("profile_id") or ""),
+        }
+        return bool(expected["debug_session_id"]) and all(
+            str(getattr(request, key, "") or "") == str(value)
+            for key, value in expected.items()
+        )
 
     @classmethod
     def _actor_can_access_request(
@@ -1170,6 +1238,8 @@ class AuthorityService:
         token: str,
         conversation_id: str | None = None,
         principal_id: str | None = None,
+        resource: dict[str, Any] | None = None,
+        include_consumed: bool = False,
     ) -> bool:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -1184,6 +1254,8 @@ class AuthorityService:
             principal_id=expected_principal,
             permission_id=request.permission_id,
             token=token,
+            resource=resource,
+            include_consumed=include_consumed,
         )
 
     def list_grants(self, principal_id: str = "", *, actor_principal: Any = None) -> dict[str, Any]:

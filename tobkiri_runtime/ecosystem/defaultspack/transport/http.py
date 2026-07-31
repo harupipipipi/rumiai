@@ -1217,10 +1217,24 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
+            debug_binding = None
+            if request_data.get("debug_session_id"):
+                debug_binding = {
+                    key: request_data.get(key)
+                    for key in (
+                        "debug_session_id",
+                        "lease_epoch",
+                        "debug_run_id",
+                        "workspace_identity_digest",
+                        "pack_id",
+                        "profile_id",
+                    )
+                }
             return ok(
                 get_authority_service().list_requests(
                     str(request_data.get("status") or "all"),
                     actor_principal=request_data.get("_authenticated_principal"),
+                    **({"debug_binding": debug_binding} if debug_binding else {}),
                 )
             )
         except Exception as exc:
@@ -1231,9 +1245,23 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
+            debug_binding = None
+            if request_data.get("debug_session_id"):
+                debug_binding = {
+                    key: request_data.get(key)
+                    for key in (
+                        "debug_session_id",
+                        "lease_epoch",
+                        "debug_run_id",
+                        "workspace_identity_digest",
+                        "pack_id",
+                        "profile_id",
+                    )
+                }
             result = get_authority_service().get_request(
                 request_id,
                 actor_principal=request_data.get("_authenticated_principal"),
+                **({"debug_binding": debug_binding} if debug_binding else {}),
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
@@ -1367,6 +1395,9 @@ class DefaultsHttpServer:
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
         }
+        if isinstance(request_data.get("debug_cli_operator"), dict):
+            approval_kwargs["debug_cli_operator"] = request_data["debug_cli_operator"]
+            approval_kwargs["expected_digest"] = str(request_data.get("expected_digest") or "")
         if isinstance(request_data.get("attestation"), dict):
             approval_kwargs["attestation"] = request_data.get("attestation")
         if related_permissions:
@@ -1418,6 +1449,12 @@ class DefaultsHttpServer:
                 reason=str(request_data.get("reason") or ""),
                 persist=bool(request_data.get("persist") or request_data.get("remember")),
                 ui_operator=ui_operator,
+                debug_cli_operator=(
+                    request_data.get("debug_cli_operator")
+                    if isinstance(request_data.get("debug_cli_operator"), dict)
+                    else None
+                ),
+                expected_digest=str(request_data.get("expected_digest") or ""),
                 actor_principal=request_data.get("_authenticated_principal"),
                 **(
                     {"attestation": request_data.get("attestation")}

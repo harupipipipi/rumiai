@@ -4,6 +4,7 @@ import {beforeEach, test} from 'node:test';
 import {
   addPackToStartupProfile,
   apiFetch,
+  armDebugApproval,
   bootstrapPanelSession,
   clearApiPrefetchCache,
   clearStartupProfileNodeOverride,
@@ -17,12 +18,14 @@ import {
   fetchStartupProfileAiInputTraces,
   fetchStartupProfileGraph,
   fetchDesktopSystemInfo,
+  fetchDebugApprovalStatus,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   launchDefaultspackDesktop,
   openExternalUrl,
   prefetchApiGet,
   sendToBackground,
+  revokeDebugApproval,
   setStartupProfileNodeOverride,
   showAppWindow,
   updateStartupProfile,
@@ -69,6 +72,8 @@ let tauriSendToBackgroundCount = 0;
 let tauriShowAppWindowCount = 0;
 let tauriDesktopInfoCount = 0;
 let tauriDesktopLaunchCount = 0;
+let tauriDebugArmArgs: Record<string, unknown> | undefined;
+let tauriDebugRevokeCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
 
@@ -77,7 +82,7 @@ function installBrowser(href: string): MemoryStorage {
   const windowMock = {
     __TAURI__: {
       core: {
-        invoke: async (command: string) => {
+        invoke: async (command: string, args?: Record<string, unknown>) => {
           if (command === 'reauthorize_panel_session') {
             tauriReauthorizeCount += 1;
             return 'desktop-refresh-code';
@@ -137,6 +142,29 @@ function installBrowser(href: string): MemoryStorage {
                   settings_hint: 'System Settings > Privacy & Security > Accessibility',
                 },
               ],
+            };
+          }
+          if (command === 'debug_approval_status') {
+            return {
+              state: 'disabled',
+              reason: 'launcher_started',
+              instance_nonce: 'launcher-test',
+            };
+          }
+          if (command === 'arm_debug_approval') {
+            tauriDebugArmArgs = args;
+            return {
+              state: 'armed',
+              armed_remaining_seconds: 300,
+              instance_nonce: 'launcher-test',
+            };
+          }
+          if (command === 'revoke_debug_approval') {
+            tauriDebugRevokeCount += 1;
+            return {
+              state: 'disabled',
+              reason: 'user_revoked',
+              instance_nonce: 'launcher-test',
             };
           }
           if (command === 'launch_defaultspack_desktop') {
@@ -233,6 +261,8 @@ beforeEach(() => {
   tauriShowAppWindowCount = 0;
   tauriDesktopInfoCount = 0;
   tauriDesktopLaunchCount = 0;
+  tauriDebugArmArgs = undefined;
+  tauriDebugRevokeCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -547,6 +577,19 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
   assert.equal(info?.host_broker?.status, 'running');
   assert.equal(info?.permissions[0]?.id, 'accessibility');
   assert.equal(info?.permissions[0]?.granted, true);
+});
+
+test('debug approval helpers use Launcher-owned status, arm, and revoke commands', async () => {
+  const disabled = await fetchDebugApprovalStatus();
+  const armed = await armDebugApproval('1w');
+  const revoked = await revokeDebugApproval();
+
+  assert.equal(disabled?.state, 'disabled');
+  assert.equal(armed.state, 'armed');
+  assert.equal(armed.armed_remaining_seconds, 300);
+  assert.deepEqual(tauriDebugArmArgs, {duration: '1w'});
+  assert.equal(revoked.reason, 'user_revoked');
+  assert.equal(tauriDebugRevokeCount, 1);
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {

@@ -605,8 +605,127 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
     assert len(router_calls) == 1
     assert router_calls[0]["context"]["_tool_server_approved"] is True
     assert router_calls[0]["payload"]["approval_token"] == decision["token"]
-    assert router_calls[0]["tool_arguments"] == {"action": "apps"}
+    assert router_calls[0]["tool_arguments"] == {
+        "action": "computer.apps",
+        "approval_token": decision["token"],
+    }
     assert resume_client.calls == 2
     final_message = [event["data"]["message"] for event in resumed_events if event["type"] == "done"][-1]
+    assert final_message["raw_text"] == "resumed"
+    ChatStore._instance = None
+
+
+def test_approval_followup_tool_use_unwraps_controller_shaped_computer_payload():
+    from domain.chat.stream_engine import _approval_followup_tool_use
+
+    tool_use = _approval_followup_tool_use(
+        {
+            "approval_followup": {
+                "tool_name": "computer_use",
+                "action": "computer.show_app",
+                "operation": "computer.show_app",
+                "approval_token": "approval-token",
+                "request_id": "apr_1",
+                "payload": {
+                    "action": "computer.show_app",
+                    "payload": {"app": "Vivaldi"},
+                },
+            }
+        }
+    )
+
+    assert tool_use is not None
+    assert tool_use["input"] == {"app": "Vivaldi", "action": "computer.show_app"}
+
+
+def test_approval_followup_replay_unwraps_controller_shaped_computer_payload(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.safety import approval
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    approval.reset_approval_state_for_tests()
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-5.4")
+    approved_args = {"action": "computer.show_app", "payload": {"app": "Vivaldi"}}
+    request = approval.create_approval_request(
+        "computer.show_app",
+        "high",
+        approved_args,
+        details={
+            "tool_name": "computer_use",
+            "action": "computer.show_app",
+            "function_id": "computer.show_app",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation["id"],
+            "arguments": approved_args,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+    assert decision["approved"] is True
+
+    captured: dict[str, object] = {}
+
+    def call_handler(name, payload):
+        captured["name"] = name
+        captured["payload"] = dict(payload)
+        return {"status": "ok", "data": {"result": "shown", "is_error": False}}
+
+    class SummaryClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools=None, params=None):
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "resumed"}}
+            yield {"type": "stream_end", "finish_reason": "stop"}
+
+        def complete(self, model, messages, tools=None, params=None):
+            raise AssertionError("complete should not be called")
+
+    tool_schema = {
+        "type": "function",
+        "function": {
+            "name": "computer_use",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
+    events = list(
+        ChatRunEngine(client=SummaryClient()).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {
+                    "role": "user",
+                    "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                    "metadata": {
+                        "approval_followup": {
+                            "tool_name": "computer_use",
+                            "action": "computer.show_app",
+                            "operation": "computer.show_app",
+                            "approval_token": decision["token"],
+                            "request_id": request["request_id"],
+                            "payload": approved_args,
+                        }
+                    },
+                },
+                "tools": [tool_schema],
+            },
+            {"call_handler": call_handler},
+            stream_mode=True,
+        )
+    )
+
+    assert captured["name"] == "defaults.tool.invoke"
+    invoked = captured["payload"]
+    assert invoked["tool_name"] == "computer_use"
+    assert invoked["arguments"] == {
+        "action": "computer.show_app",
+        "app": "Vivaldi",
+        "approval_token": decision["token"],
+    }
+    assert "payload" not in invoked["arguments"]
+    final_message = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
     assert final_message["raw_text"] == "resumed"
     ChatStore._instance = None

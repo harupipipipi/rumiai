@@ -434,26 +434,23 @@ fn validate_requirement_tokens(req_path: &Path, line_number: usize, tokens: &[&s
         );
     }
 
-    let hash_start = tokens
-        .iter()
-        .position(|token| token.starts_with("--hash=sha256:"))
-        .unwrap_or(tokens.len());
-    if tokens.get(1) == Some(&";") {
+    let hash_start = if tokens.get(1) == Some(&";") {
+        let hash_start = tokens
+            .iter()
+            .position(|token| token.starts_with("--hash=sha256:"))
+            .unwrap_or(tokens.len());
         let marker = tokens.get(1..hash_start).unwrap_or_default();
         if !is_supported_environment_marker(marker) {
             bail!(
-                "{}:{} contains an unsupported environment marker; automatic installation only permits comparisons against Python version or implementation markers",
+                "{}:{} contains an unsupported environment marker; automatic installation only permits safe interpreter-version or implementation comparisons joined by 'and'",
                 req_path.display(),
                 line_number
             );
         }
-    } else if hash_start != 1 {
-        bail!(
-            "{}:{} contains unsupported requirement tokens before the package hashes",
-            req_path.display(),
-            line_number
-        );
-    }
+        hash_start
+    } else {
+        1
+    };
 
     let mut hash_count = 0usize;
     for token in &tokens[hash_start..] {
@@ -490,39 +487,45 @@ fn is_supported_environment_marker(tokens: &[&str]) -> bool {
     if tokens.first() != Some(&";") {
         return false;
     }
-
-    let expressions = &tokens[1..];
-    if expressions.len() < 3 || !(expressions.len() + 1).is_multiple_of(4) {
-        return false;
-    }
-
-    for (index, expression) in expressions.chunks(4).enumerate() {
-        let comparison = if index + 1 == expressions.len().div_ceil(4) {
-            expression
-        } else {
-            if !matches!(expression.get(3), Some(&"and") | Some(&"or")) {
-                return false;
-            }
-            &expression[..3]
+    let mut index = 1usize;
+    while index < tokens.len() {
+        let Some(variable) = tokens.get(index) else {
+            return false;
         };
-        if comparison.len() != 3
-            || !matches!(
-                comparison[0],
-                "python_version"
-                    | "python_full_version"
-                    | "implementation_name"
-                    | "platform_python_implementation"
-            )
-            || !matches!(comparison[1], "<" | "<=" | "==" | "!=" | ">=" | ">")
-            || !is_safe_marker_value(comparison[2])
-        {
+        if !matches!(
+            *variable,
+            "python_version"
+                | "python_full_version"
+                | "platform_python_implementation"
+                | "implementation_name"
+        ) {
             return false;
         }
+        let Some(operator) = tokens.get(index + 1) else {
+            return false;
+        };
+        if !matches!(*operator, "<" | "<=" | "==" | "!=" | ">=" | ">") {
+            return false;
+        }
+        let Some(quoted_value) = tokens.get(index + 2) else {
+            return false;
+        };
+        if !is_safe_quoted_marker_value(quoted_value) {
+            return false;
+        }
+        index += 3;
+        if index == tokens.len() {
+            return true;
+        }
+        if tokens.get(index) != Some(&"and") {
+            return false;
+        }
+        index += 1;
     }
-    true
+    false
 }
 
-fn is_safe_marker_value(value: &str) -> bool {
+fn is_safe_quoted_marker_value(value: &str) -> bool {
     if value.len() < 3 {
         return false;
     }
@@ -530,9 +533,11 @@ fn is_safe_marker_value(value: &str) -> bool {
     if !matches!(quote, b'\'' | b'"') || value.as_bytes().last() != Some(&quote) {
         return false;
     }
-    value[1..value.len() - 1]
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    let inner = &value[1..value.len() - 1];
+    !inner.is_empty()
+        && inner
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
 }
 
 fn is_exact_package_pin(token: &str) -> bool {

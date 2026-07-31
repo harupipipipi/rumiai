@@ -6,7 +6,7 @@ from typing import Any, Callable, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
-from core_runtime.resolved_profile_scope import active_resolved_profile
+from core_runtime.resolved_profile_scope import persisted_resolved_profile
 from domain.safety import approval
 from domain.tool_policy.internal_context import (
     tool_server_approval_context_is_internal,
@@ -43,7 +43,7 @@ def invoke_coding_contract(
     """Invoke exactly one selected coding provider for the active profile."""
 
     registry = get_container().get_or_none("interface_registry")
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if registry is None or plan is None:
         raise RuntimeError("global coding provider is unavailable")
     request = {
@@ -185,7 +185,7 @@ def _approval_token(input_data: Mapping[str, Any]) -> str:
 
 
 def _profile_id() -> str:
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if plan is None:
         raise RuntimeError("resolved profile is unavailable")
     return plan.profile_id

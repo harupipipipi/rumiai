@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -187,8 +188,52 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
 
 
 def _url() -> str:
-    port = os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
-    return f"http://localhost:{port}/chat"
+    port = (
+        os.environ.get("DEFAULTS_HTTP_PORT")
+        or os.environ.get("RUMI_DEFAULTSPACK_PORT")
+        or "8766"
+    )
+    return f"http://127.0.0.1:{port}/chat"
+
+
+def _require_own_bind() -> bool:
+    """Return whether this process must prove ownership of its HTTP listener."""
+    return (
+        os.environ.get("RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND") == "1"
+        or os.environ.get("RUMI_DEFAULTSPACK_DEBUG_ISOLATION") == "1"
+    )
+
+
+def _configure_http_environment() -> None:
+    """Normalize loopback HTTP settings and validate isolated debug ports."""
+    port = (
+        os.environ.get("RUMI_DEFAULTSPACK_PORT")
+        or os.environ.get("DEFAULTS_HTTP_PORT")
+        or "8766"
+    )
+    os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
+    os.environ["DEFAULTS_HTTP_PORT"] = port
+    os.environ["RUMI_DEFAULTSPACK_PORT"] = port
+    if not _require_own_bind():
+        return
+    if os.environ["DEFAULTS_HTTP_HOST"] != "127.0.0.1":
+        raise RuntimeError(
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires "
+            "DEFAULTS_HTTP_HOST=127.0.0.1"
+        )
+    if not port.isascii() or not port.isdecimal() or not 1 <= int(port) <= 65535:
+        raise RuntimeError(
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires a decimal localhost "
+            "port between 1 and 65535"
+        )
+
+
+def _parse_cli_args(argv: list[str]) -> None:
+    """Parse launcher arguments before runtime setup or imports."""
+    parser = argparse.ArgumentParser(
+        description="Launch the Tobkiri Defaultspack desktop app."
+    )
+    parser.parse_args(argv)
 
 
 def _local_auth_token() -> str:
@@ -377,12 +422,12 @@ def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    if argv is not None:
+        _parse_cli_args(argv)
     _ensure_import_path()
     _configure_persistent_user_state()
-    os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
-    os.environ.setdefault("DEFAULTS_HTTP_PORT", os.environ.get("RUMI_DEFAULTSPACK_PORT", "8766"))
-    os.environ.setdefault("RUMI_DEFAULTSPACK_PORT", os.environ["DEFAULTS_HTTP_PORT"])
+    _configure_http_environment()
     url = _url()
     port = _port_from_url(url)
     _write_launch_event(
@@ -399,13 +444,6 @@ def main() -> int:
         load_integration_secrets_into_env()
     except Exception as exc:
         _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
-    try:
-        from domain.scheduler.daemon import start_scheduler_daemon
-
-        start_scheduler_daemon()
-    except Exception as exc:
-        _write_launch_event("scheduler_start_skipped", error=repr(exc), port=port, url=url)
-
     from transport.http import DefaultsHttpServer
 
     server = DefaultsHttpServer(facade=None)
@@ -415,6 +453,17 @@ def main() -> int:
         server.start()
         _write_launch_event("server_started", port=port, url=url)
     except OSError as exc:
+        if _require_own_bind():
+            _write_launch_event(
+                "server_start_oserror",
+                error=repr(exc),
+                existing_ready=False,
+                own_bind_required=True,
+                port=port,
+                port_owners=_port_owner_snapshot(port),
+                url=url,
+            )
+            raise
         existing_ready = _wait_until_ready(url, timeout=1.0)
         _write_launch_event(
             "server_start_oserror",
@@ -428,6 +477,15 @@ def main() -> int:
             raise
         server = None
         reused_existing_server = True
+
+    try:
+        from domain.scheduler.daemon import start_scheduler_daemon
+
+        start_scheduler_daemon()
+    except Exception as exc:
+        _write_launch_event(
+            "scheduler_start_skipped", error=repr(exc), port=port, url=url
+        )
 
     health_ready = _wait_until_ready(url)
     chat_ready = _wait_until_chat_ready(url)
@@ -478,4 +536,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

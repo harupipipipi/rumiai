@@ -11,6 +11,12 @@ from ..tool_policy.internal_context import tool_server_approval_context_is_inter
 
 from .viewer_broker_client import ViewerBrokerClient
 
+_VIEWER_RECOVERY_MESSAGE = (
+    "Rumi Viewer が未接続です。foreground/on-screen 操作は承認と Rumi Viewer 接続後に利用できます。"
+    "承認してください。Rumi Viewer を起動または前面表示して macOS 権限を許可するか、表/前面で作業しますか?"
+)
+
+
 def should_route_to_viewer(action: str) -> bool:
     if os.environ.get("RUMI_COMPUTER_HOST_INTERNAL") == "1":
         return False
@@ -58,28 +64,16 @@ def run_computer_action(
                         result,
                         normalized_context,
                     )
-                return dict(result)
+                return _with_browser_text_input_recommendations(normalized_action, dict(result))
             except Exception as exc:
-                return {
-                    "action": normalized_action,
-                    "is_error": True,
-                    "reason": f"Rumi Viewer host broker is unavailable: {exc}",
-                    "recovery": {
-                        "kind": "open_tobkiri_launcher",
-                        "note": "Open Rumi Viewer and grant macOS permissions there.",
-                    },
-                    "permission_subject": "Rumi Viewer",
-                }
-        return {
-            "action": normalized_action,
-            "is_error": True,
-            "reason": "Rumi Viewer is required for computer control on macOS.",
-            "recovery": {
-                "kind": "open_tobkiri_launcher",
-                "note": "Open Rumi Viewer and grant macOS permissions there.",
-            },
-            "permission_subject": "Rumi Viewer",
-        }
+                return _viewer_connection_required_response(
+                    normalized_action,
+                    f"Rumi Viewer host broker is unavailable: {exc}",
+                )
+        return _viewer_connection_required_response(
+            normalized_action,
+            "Rumi Viewer is required for computer control on macOS.",
+        )
     return _run_local_controller(
         normalized_action,
         normalized_payload,
@@ -127,6 +121,43 @@ def _approval_token_present(payload: dict[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
         return False
     return bool(str(payload.get("approval_token") or "").strip())
+
+
+def _with_browser_text_input_recommendations(action: str, result: dict[str, Any]) -> dict[str, Any]:
+    normalized_action = str(result.get("action") or action or "").strip()
+    result.setdefault("action", normalized_action)
+    pending_approval = bool(result.get("requires_approval") or result.get("approval_required"))
+    if normalized_action in {"computer.observe", "computer.screenshot"} and not (
+        result.get("is_error") or pending_approval
+    ):
+        BrowserComputerController._with_browser_text_input_recommendations(result)
+    return result
+
+
+def _viewer_connection_required_response(action: str, reason: str) -> dict[str, Any]:
+    return {
+        "action": action,
+        "is_error": True,
+        "reason": reason,
+        "message": _VIEWER_RECOVERY_MESSAGE,
+        "user_prompt": _VIEWER_RECOVERY_MESSAGE,
+        "recovery": {
+            "kind": "viewer_connection_required",
+            "requires_approval": True,
+            "requires_viewer_connection": True,
+            "prompt": _VIEWER_RECOVERY_MESSAGE,
+            "note": (
+                "Open Rumi Viewer and approve the request; foreground/on-screen operation is "
+                "available after a connected Rumi Viewer has macOS permissions."
+            ),
+            "recommended_next_actions": [
+                "approve_request",
+                "open_rumi_viewer",
+                "choose_foreground_work",
+            ],
+        },
+        "permission_subject": "Rumi Viewer",
+    }
 
 
 def _approval_token_from_context(
@@ -219,6 +250,7 @@ def _approval_required_response(
             "tool_name": safe_tool_name,
             "action": safe_action,
             "function_id": safe_action,
+            "arguments": dict(request_arguments or {}),
             "payload": dict(payload or {}),
             "pack_id": pack_id,
             "conversation_id": conversation_id,
@@ -246,6 +278,10 @@ def _approval_required_response(
     )
     if not wrapped.get("message") and wrapped.get("approval_hint"):
         wrapped["message"] = wrapped.get("approval_hint")
+    wrapped.setdefault("user_prompt", "承認してください")
+    wrapped.setdefault("message", "承認してください。表/前面で作業しますか?")
+    if isinstance(wrapped.get("recovery"), dict):
+        wrapped["recovery"].setdefault("prompt", wrapped["user_prompt"])
     warning = result.get("approval_warning")
     if isinstance(warning, str) and warning.strip():
         wrapped["approval_warning"] = warning
@@ -256,9 +292,7 @@ def _approval_required_response(
 
 
 def _request_arguments(tool_name: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if tool_name == "browser_computer":
-        return {"action": action, "payload": dict(payload or {})}
-    return {"action": action, **dict(payload or {})}
+    return {"action": action, "payload": dict(payload or {})}
 
 
 def _approval_module():

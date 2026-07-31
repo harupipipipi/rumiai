@@ -31,6 +31,8 @@ import type {
   HealthResponseData,
   BackgroundControlStatus,
   DesktopSystemInfo,
+  DebugApprovalDuration,
+  DebugApprovalStatus,
   CapabilityGraphsResponseData,
   CapabilityGraphResponseData,
   CapabilityGraphCompileResponseData,
@@ -218,6 +220,30 @@ export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null
   }
 
   return invoke<DesktopSystemInfo>('get_desktop_system_info');
+}
+
+export async function fetchDebugApprovalStatus(): Promise<DebugApprovalStatus | null> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke<DebugApprovalStatus>('debug_approval_status');
+}
+
+export async function armDebugApproval(duration: DebugApprovalDuration): Promise<DebugApprovalStatus> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
+  }
+  return invoke<DebugApprovalStatus>('arm_debug_approval', {duration});
+}
+
+export async function revokeDebugApproval(): Promise<DebugApprovalStatus> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
+  }
+  return invoke<DebugApprovalStatus>('revoke_debug_approval');
 }
 
 export async function launchDefaultspackDesktop(): Promise<string> {

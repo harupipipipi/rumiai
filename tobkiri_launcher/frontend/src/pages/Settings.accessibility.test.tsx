@@ -10,13 +10,43 @@ import {Settings} from './Settings';
 interface MountedPage {
   container: HTMLElement;
   root: Root;
+  invocations: string[];
   cleanup: () => Promise<void>;
 }
 
-async function mountSettings(language = 'en'): Promise<MountedPage> {
+async function mountSettings(language = 'en', desktopShell = false): Promise<MountedPage> {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'http://localhost/settings',
   });
+  const invocations: string[] = [];
+  if (desktopShell) {
+    Object.defineProperty(dom.window, '__TAURI__', {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (command: string) => {
+            invocations.push(command);
+            if (command === 'debug_approval_status') {
+              return {state: 'disabled', reason: 'not_armed'};
+            }
+            if (command === 'arm_debug_approval') {
+              return {state: 'armed', armed_remaining_seconds: 300};
+            }
+            if (command === 'get_background_control_status') {
+              return {enabled: true, app_visible: true, kernel_running: true, windows: []};
+            }
+            if (command === 'get_desktop_system_info') {
+              return null;
+            }
+            return null;
+          },
+        },
+      },
+    });
+    dom.window.confirm = () => {
+      throw new Error('native confirmation must not be used');
+    };
+  }
   const previousState = useAppStore.getState();
   Object.defineProperties(globalThis, {
     window: {value: dom.window, configurable: true},
@@ -47,6 +77,7 @@ async function mountSettings(language = 'en'): Promise<MountedPage> {
   return {
     container,
     root,
+    invocations,
     cleanup: async () => {
       await act(async () => root.unmount());
       useAppStore.setState(previousState, true);
@@ -88,6 +119,38 @@ test('Settings exposes field names and visual selector state in English and Japa
     } finally {
       await page.cleanup();
     }
+  }
+});
+
+test('Developer Debug Approval delegates confirmation directly to the native command', async () => {
+  const page = await mountSettings('en', true);
+  try {
+    const versionTab = page.container.querySelector<HTMLButtonElement>('#settings-version-tab');
+    assert.ok(versionTab);
+    await act(async () => {
+      versionTab.click();
+      await Promise.resolve();
+    });
+
+    const toggle = page.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Developer Debug Approval"]',
+    );
+    const duration = page.container.querySelector<HTMLSelectElement>('#debug-approval-duration');
+    assert.ok(toggle);
+    assert.ok(duration);
+    assert.deepEqual(
+      Array.from(duration.options).map(option => option.value),
+      ['1h', '1d', '1w', '1mo', 'permanent'],
+    );
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+
+    assert.equal(page.invocations.includes('arm_debug_approval'), true);
+    assert.match(page.container.textContent ?? '', /ARMED/);
+  } finally {
+    await page.cleanup();
   }
 });
 

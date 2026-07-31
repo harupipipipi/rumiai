@@ -155,6 +155,7 @@ def copy_dev_uv(source: Path, destination: Path) -> None:
         if os.name != "nt":
             temporary.chmod(
                 temporary.stat().st_mode
+                | stat.S_IWUSR
                 | stat.S_IXUSR
                 | stat.S_IXGRP
                 | stat.S_IXOTH

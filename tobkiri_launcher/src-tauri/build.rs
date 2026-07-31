@@ -24,10 +24,19 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/rumi_setup");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
+    println!("cargo:rerun-if-changed=capabilities");
 
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "debug_approval_status",
+            "arm_debug_approval",
+            "revoke_debug_approval",
+            "coding_approval_operator",
+        ]),
+    ))
+    .expect("failed to build Tauri application manifest")
 }
 
 fn warn_legacy_defaultspack_app_bundle() {
@@ -73,21 +82,32 @@ fn stage_runtime_bundle() -> io::Result<()> {
     let runtime_root = repo_root.join(APP_SOURCE_DIR);
     let staged_root = project_dir.join("gen").join("app");
 
-    reset_dir(&staged_root)?;
-    if !copy_tracked_runtime_tree(repo_root, &staged_root)? {
-        copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
+    reset_dir(&staged_root).map_err(|error| stage_error("reset staged runtime", error))?;
+    if !copy_tracked_runtime_tree(repo_root, &staged_root)
+        .map_err(|error| stage_error("copy tracked runtime", error))?
+    {
+        copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)
+            .map_err(|error| stage_error("copy runtime tree", error))?;
     }
-    copy_generated_resource_dirs(&runtime_root, &staged_root)?;
-    stage_setup_brand_icon(&repo_root, &staged_root)?;
+    copy_generated_resource_dirs(&runtime_root, &staged_root)
+        .map_err(|error| stage_error("copy generated resources", error))?;
+    stage_setup_brand_icon(&repo_root, &staged_root)
+        .map_err(|error| stage_error("stage setup brand icon", error))?;
 
     let bundled_src = project_dir.join("bundled");
     if bundled_src.exists() {
-        copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))?;
+        copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
+            .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
     }
 
-    stage_pack_shell(&repo_root, &staged_root)?;
+    stage_pack_shell(&repo_root, &staged_root)
+        .map_err(|error| stage_error("stage pack-shell", error))?;
 
     Ok(())
+}
+
+fn stage_error(step: &str, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{step}: {error}"))
 }
 
 fn stage_setup_brand_icon(repo_root: &Path, staged_root: &Path) -> io::Result<()> {

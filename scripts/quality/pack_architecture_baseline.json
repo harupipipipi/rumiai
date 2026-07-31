@@ -1248,21 +1248,6 @@
       "violation_category": "unscoped_global_secret"
     },
     {
-      "identity": "unscoped_global_secret|tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py|text-v1:38d7c6f0513d802b0776|defaultspack|process-environment",
-      "rule": "unscoped_global_secret",
-      "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
-      "line": 190,
-      "fingerprint": "text-v1:38d7c6f0513d802b0776",
-      "source": "defaultspack",
-      "target": "process-environment",
-      "owner": "pack-architecture",
-      "reason": "Pre-existing process environment edge; migrate to scoped credential handles in Wave 5.",
-      "introduced_at": "2026-07-24",
-      "fix_by_wave": 5,
-      "sunset_at": "2027-07-24",
-      "violation_category": "unscoped_global_secret"
-    },
-    {
       "identity": "unscoped_global_secret|tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py|text-v1:291b3dbfb146cf579227|defaultspack|process-environment",
       "rule": "unscoped_global_secret",
       "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",

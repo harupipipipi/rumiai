@@ -470,6 +470,24 @@
     },
     {
       "method": "POST",
+      "path": "/api/coding/approvals/resume",
+      "flow_id": "transport_direct",
+      "description": "Resume one exact delegated coding approval"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/packs/approval/request",
+      "flow_id": "transport_direct",
+      "description": "Request approval for one exact Pack snapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/packs/status",
+      "flow_id": "transport_direct",
+      "description": "Read Pack approval and verification status"
+    },
+    {
+      "method": "POST",
       "path": "/api/coding/github/pr",
       "flow_id": "transport_direct",
       "description": "Read GitHub pull request metadata"
