@@ -55,114 +55,120 @@ Tobkiri Pack Architecture 再設計・実装計画
   - host importは「Policyで許可可能な権限」ではない。許可すると隔離境界そのものが消えるためである。
   - TCBだけがHost in-processで動ける。TCBをPack扱いしない。
 
-1.3 sandbox内部とPolicyの境界
+1.3 Sandbox authorityとHost authorityの根本境界
 
-Pack専用sandbox内で閉じる次の操作は、RequestごとのPolicy承認を要求しない。
+Runtimeが直接定義する根本authorityは二つだけとする。
 
-  - Pack同梱コードのimport
-  - CPU上の純粋計算
-  - Pack専用tmpの読み書き
-  - Pack専用private stateの読み書き
-  - Pack内部Function呼び出し
-  - 同一execution domain内の内部IPC
-  - 許可済みruntime内での子process起動
+Sandbox authority:
 
-ただし、次の資源上限は常にRuntimeが機械的に強制する。これはユーザー承認ではない。
+  - Pack専用sandbox内の同梱code import、純粋計算、内部Function
+  - Pack専用tmp/private state
+  - sandbox内部だけの子process、内部IPC
+  - 原則としてユーザーApproval不要
+  - CPU、RAM、deadline、disk、process/thread、output、concurrency等のresource limitはHostが常時強制
+  - raw network、Host filesystem、他Pack state、Host process、credential、OS、deviceへ到達不能
 
-  - CPU時間、wall-clock deadline
-  - RAM hard limit、実使用量、host free-memory guard
-  - disk quota、inode/file count、output size
-  - process/thread count
-  - open file/socket/handle数
-  - request concurrency、queue length、rate limit
+Host authority:
 
-次の境界を越える場合だけCapability Function、Policy、CapabilityGrantを使う。
+  - sandbox外のHost resourceまたは外部作用へ到達できる能力
+  - exact Host Capability Provider Function/Operationだけが実装可能
+  - Provider trust、caller-specific Grant、ExecutionDomain enforcement、InvocationLease、authoritative auditが必要
+  - 通常Packのmanifest、publisher署名、Profile activationだけでは取得・昇格不能
 
-  - 別PackへのOperation Request
-  - Hostまたはユーザーのfile/workspace
-  - shared/authoritative storage
-  - network、localhost、external API
-  - credential/secretの使用
-  - device、clipboard、camera、microphone、screen、accessibility
-  - Host process、OS管理機能
-  - security-sensitive UI、外部作用
+別PackへのContract Requestは常にRuntime routing、schema、identity検査を通るが、それ自体をHost authorityとはしない。RequestがHost effect、shared authoritative resource、sensitive data disclosureを要求する場合だけ、対応するGrant/Policyを追加評価する。
 
-Pack private stateはProfile activation時にnamespaceとquotaを割り当て、通常はRequestごとの承認を不要にする。他Packのstate、Host filesystem、credential storeはmountしない。
+Runtime immutable safety policyは、この根本境界、identity、isolation、Grant、Lease、audit、revocation、resource limitだけを非上書き可能な下限として強制する。filesystem、Slack、camera、printer等の全permission taxonomyやvendor semanticsをCoreへ中央実装しない。
 
-1.4 Policyを境界機能の実装主体にせず、承認済みCapability Functionを使う
+1.4 Host CapabilityをFunction/Operationとして拡張する
 
-Policy Kernelはnetwork、file、print、credential、deviceなどの機能を実装しない。Policy Kernelの責務は、Hostが正規化したEffect要求、各authority ceiling、保存済みGrantを比較し、allow/deny/approval_requiredを決定することだけである。
+sandbox外の具体的能力は、Host Extension PackまたはRuntime TCBが提供するHost Capability Provider Functionとして登録する。
 
-境界作用の実装単位はCapability Functionとする。
+  - filesystem、HTTP、credential付きAPI、process、camera、USB、clipboard、print等をFunction/Operationとして追加可能
+  - Host Extension SDKがnamespaced Capability Provider registrationを提供
+  - operation schema、scope schema、attenuation、risk、Approval metadata、audit metadata、Provider ceilingを署名済みdeclarationとして登録
+  - 任意Policy code、identity resolver、Grant matcher、Approval rendererをKernelへin-process loadしない
+  - normalize/subset/intersectionは安全なdeclarative DSL、Host-owned Broker/Handle、capability-restricted Wasm、または明示TCB Host Extension processで強制
+  - semanticsをHostが安全に比較できなければexact-request one-shotまたはopaque trusted-host scopeへ落とし、細粒度永続Grantを装わない
 
-  - 通常のPack Functionはmanifestで必要なEffectと上限を宣言する。
-  - network、file、credential-use、printなどの実処理は、Contractを提供するCapability Functionが実行する。
-  - vendor固有のSlack、Notion、AI等の処理は各Pack Functionが実装し、Policyへvendor固有コードを追加しない。
-  - 新しいvendor機能は既存Capability Functionを組み合わせて拡張し、Policy Kernel本体のvendor固有permission実装追加を不要にする。
-  - Host側コードまたは新しいOS/device権限を必要とするProviderは、通常Packと分離したHost Extension trust classに置く。
-  - Host ExtensionのPackArtifact、publisher、signature、content digest、要求OS capabilityは明示承認する。
-  - 未知の通常PackがmanifestへEffectを書くだけで権限を自己付与することはできない。
+trust classはNormal Sandbox Pack、Host Extension Pack、Runtime TCBの3つとする。Capability ProviderはFunction roleであり、roleだけではauthorityを得ない。Normal Packはmanifest変更やProfile設定によってHost Extensionへ昇格できない。
 
-Capability Functionはroleでありtrust classではない。v1のtrust classはNormal Sandbox Pack、Host Extension Pack、Runtime TCBの3つだけとする。Pure Function、vendor Function、brokered Capability FunctionはNormal Sandbox Pack内のroleであり、Verified Direct-Capability Packは作らない。
+署名、authority、enforcementを三層へ分離する。
 
-Function宣言は権限そのものではなく最大要求範囲である。正規化済みの具体的Effect RequestをRとした場合、次のすべてを満たす場合だけ実行できる。
+  PackArtifact identity:
+    publisher、署名、配布、更新、parent artifact digest、Function subartifact digest inventory。
+    Pack trustはPack内全FunctionへのHost authorityではない。
 
-  R subset-of Function Effect ceiling
-  R subset-of Contract Operation Effect ceiling
-  R subset-of Base Policy allow ceiling
-  R subset-of Profile Policy allow ceiling
-  R subset-of caller delegation ceiling
-  R subset-of Provider enforceable ceiling
-  R subset-of matching Grant scope
+  FunctionPrincipal:
+    exact parent artifact digest + Function implementation/subartifact digest
+    + Function ID + Contract revision digest + Operation ID。
+    ProviderAuthorityRecord、Approval、Grant、Effect scopeのauthority単位。
 
-明示deny、identity不一致、unknown capability/scope semantics、revoke、authoritative audit reservation失敗は常にdenyする。Approvalはこのintersectionへ含めない。
+  ExecutionDomain:
+    process/Wasm Component instance/sandbox + Host-assigned domain ID
+    + authenticated IPC channel + process/component identity + boot epoch
+    + OS sandbox/entitlement + ResourceHandle namespace。
+    Function ID自己申告ではなくHost spawn/routing/channelからprincipalを固定。
 
-Approval、Grant、InvocationLeaseを分離する。
+Host authorityの行使方式は二つとする。
 
-  ApprovalRecord: ユーザーが固定snapshotを見て行った意思決定の変更不能な記録
-  GrantRecord: ApprovalRecordまたはHost-signed Base PolicyからKernelが発行する保存権限
-  InvocationLease: 1回のexact Requestだけに使える短寿命・非移譲token
+  lease_only:
+    raw Host authorityはHost Kernel/Brokerが保持し、Providerへはrequest-bound
+    InvocationLease、opaque ResourceHandle、sealed CredentialLease、限定importだけを渡す。
 
-一つのApprovalRecordはEffect bundle内のatomic Effectごとに複数GrantRecordを生成できる。ProviderへGrantRecord本体を渡さず、Hostが発行したInvocationLeaseだけを渡す。low-risk auto allowもpolicy_ephemeral Grantを発行して同じ経路を通す。
+  os_entitlement:
+    OSがextension processへ直接権限を付与する必要がある能力。
+    exact dedicated processをauthority-bearing TCBとして扱い、least privilege、
+    blast radius表示、egress制限、watchdog、background default deny、revoke時killを必須にする。
 
-通常のサービス追加は既存のgeneric Capability Functionを組み合わせる。
+ApprovalRecord、ProviderAuthorityRecord、GrantRecord、InvocationLeaseを分離する。
 
-  Slack Pack  -> network.http Function + credential.use Function
-  Notion Pack -> network.http Function + credential.use Function
-  Storage Pack -> workspace.read/write Function
+  ApprovalRecord:
+    ユーザー/管理者がimmutable snapshotを見て行った意思決定記録。runtime authorityではない。
 
-Policy KernelはSlackやNotionのAPI仕様を理解しない。ただし任意JSONを一般的に比較してはならない。Foundation Capability Type Registryがtypeごとにscope schema、normalize、subset、intersect、canonical digest、risk、approval fields、audit redaction、conformance vectorsを定義する。unknown type/schema/canonicalizer/subset semanticsはdenyする。Community Packの任意コードをPolicy Kernelへloadしない。
+  ProviderAuthorityRecord:
+    exact Provider FunctionPrincipal/ExecutionDomainが実装できる最大Host authority ceiling。
+    caller利用権限ではない。
 
-ユーザー向けには「FunctionをProfileで利用可能にし、必要なOperationとEffect scopeを承認する」一括UIを提供してよい。ただし内部ではPack全体へのambient authorityへ変換せず、現在のexact PackArtifactが持つOperationとatomic Effect scopeごとのGrantへ展開する。将来追加されるFunctionは含めない。
+  GrantRecord:
+    exact caller FunctionPrincipalがspecific Profileでexact target Provider FunctionPrincipalを
+    normalized scope内で利用できる保存authority。Host authority DBだけが発行・保存する。
 
-v1の承認単位を次で固定する。
+  InvocationLease:
+    exact caller/target FunctionPrincipal、ExecutionDomain、domain boot epoch、
+    Request/effect digest、ResourceHandle namespaceへbindしたsingle-use/non-transferable token。
 
-  context: tenant/user + ProfileAuthoritySnapshot + activation digest + policy revision
-  subject: origin principal + exact caller artifact digest + caller Function + caller Contract Operation
-  workflow: workflow ID + published revision digest + step ID（該当時）
-  chain: Host生成call-chain constraint
-  target: exact Capability Provider artifact digest + target Function + target Contract Operation
-  authority: Effect type + scope schema digest + normalized Effect scope
-  lifetime: one-shot/session/workflow-revision/persistent-profile + TTL + use limit
-  exact binding: high-risk/dynamic/one-shot時のRequest/effect/call-chain digest
+ユーザーUIではProvider trust/審査とcaller-to-Provider Use Approvalを一つのtransactional approvalへまとめてよい。内部recordは分離し、全recordをatomic commitできない場合はauthorityを残さない。matching ProviderAuthorityが既にあればUse Approvalだけを表示し、Grant scope内の反復利用では再promptせずRequestごとにLeaseだけ再発行する。
 
-ProfileはGrantの保存・適用contextであって包括権限ではない。Pack ID、version、publisher、Distributionをauthority wildcardに使わない。通常Profile revisionとは別に、active artifacts、provider routing、policy、credential account selection、Workflow catalog等の権限関連部分だけをhashしたprofile_authority_digestを持つ。
+ProfileはPack/Provider/Function routing、requested caller edge/scope、authority DB内Grantへのopaque reference、ProfileAuthoritySnapshot digestだけを持つ。Profile file、Pack state、通常user configはauthorityをmint、拡張、署名、exportできない。
 
-Grantはimmediate callerへbindし、delegationはdefault false/max_depth=0とする。A -> B -> Capability ProviderではBはAのGrantを継承せず、BからProviderへの別Grantを必要とする。明示委譲でもscopeは縮小のみ、runtime call chainは最大depth 4、cycleはdenyする。
+正規化済みRequest scope Rは、次のすべての範囲内である場合だけ実行できる。
 
-すべてのGrantはexact artifact digestへbindする。更新時に旧Grantを新artifactへ直接一致させない。同一publisher key lineage、同一trust class、同一Function/Operation、Effect/capability/scope/domain/account/entitlementが非拡張、scope semantics同一、未revoke、かつuserのUpdateTrustPolicyがある場合だけKernelが新digest向けsuccessor Grantを発行する。
+  R subset-of caller Function/Operation Effect ceiling
+  R subset-of Runtime immutable safety policy
+  R subset-of Profile/admin ceiling
+  R subset-of caller-specific Use Grant
+  R subset-of ProviderAuthority ceiling
+  R enforceable-by selected ExecutionDomain/OS mode
 
-Production RealmのNormal Packはraw networkを持たず、Host-owned generic network Capabilityを使う。Packへsecret_materialを返さず、credentialはexact audience、target provider、Request digestへbindしたsealed CredentialLeaseとしてHost内で注入する。
+identity/snapshot/domain/revocation binding不一致、unknown/unverifiable semantics、audit/use reservation失敗はdenyする。Approvalはintersectionへ含めず、authority発行のprovenanceとする。
+
+すべてのauthority recordはexact parent artifact digestとFunction implementation digestへbindする。version label単独はidentity/失効根拠にしない。対象Function digest、publisher lineage、authority semantics、ExecutionDomain securityが同じか非拡張で、UpdateTrustPolicyが許可する場合だけ新parent digest向けsuccessor recordを発行する。旧recordを新artifactへ直接一致させない。
 
 正式仕様は docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt を正本とする。
 
-1.5 PackVMの共有単位
+1.5 ExecutionDomain共有とco-location invariant
 
-  - 異なるPack IDを同一native/Python execution guestへ入れない。
-  - 同一Pack IDでもversionまたはcontent digestが異なれば同居させない。
-  - 同一tenant、同一Pack ID、同一version、同一content digest、同一effective isolation policyなら、そのPackArtifactが提供する複数Provider/Operationは一つのexecution domainを共有してよい。
-  - replicaが必要なら別instanceとして作るが、v1ではarbitrary replicasを実装しない。
-  - VMの単位は「登録Pack」ではなく「現在materializeされているnative/Python PackArtifact execution domain」である。
+Packが同じであることはauthority domain共有理由にならない。
+
+  - 異なるProvider ceiling、Effect scope、OS entitlement、ResourceHandle class、credential access、background policy、trust、revocation lifecycleを持つFunctionPrincipalを同一native address spaceへ同居させない。
+  - 承認済みProvider Functionと未承認Functionはraw FD、Handle、Lease、credential、writable memory、environment secret、authenticated capability channelを共有しない。
+  - caller-specific Host Grantを持つNormal Functionも、Function identityをHostが強制できるWasm instance/worker/domainへ置く。同じprocessのFunction ID自己申告だけでcallerを区別しない。
+  - dedicated OS process、per-Function/Operation Wasm Component instance、Host-owned Brokerに対するunprivileged worker、verified authority-equivalence domainを認める。
+  - authority-equivalence domainへ同居できるのは、同一ceiling/scope class/trust/lifecycleで相互co-locationが明示承認されたprincipalだけ。
+  - 一つのFunctionが異なるauthorityの複数Operationを持つ場合、Operation別domainまたはper-invocation capability importで分離する。
+  - 通常の権限を持たない同一Pack内部helperは専用PackVM内で共有してよい。
+  - shared mutable stateはStorage Contract経由とし、domain外のambient共有を作らない。
+  - replicaは同一FunctionPrincipal/authority classの別ExecutionDomainとして扱う。
 
 1.6 Profile有効化とVM起動を分離する
 
@@ -304,12 +310,13 @@ Secret Storeは暗号化され、外部APIへ値を出さない意図がある�
 
 不足:
 
-  - Base Policy Kernelを唯一の非上書き可能な下限にする
-  - Policy Packをrestrict-onlyにする
-  - Request digest、caller/target principal、activation/policy revision、actual isolationをpolicy inputへ固定
-  - ApprovalRecord、GrantRecord、request-bound InvocationLeaseの三分離
+  - Runtime immutable safety policyを、個別Capability taxonomyを持たない最小の非上書き可能境界にする
+  - Profile／管理者ceilingをrestrict-onlyにし、ProfileからHost authorityをmintできなくする
+  - Request digest、exact caller/target FunctionPrincipal、ExecutionDomain/boot epoch、activation/policy revision、actual isolationをauthority inputへ固定
+  - ProviderAuthorityRecord、ApprovalRecord、GrantRecord、request-bound InvocationLeaseの四分離
+  - Host spawn/routing/authenticated channelからFunctionPrincipalを導出し、payload自己申告を信用しない
   - secret valueを返さず、sealed CredentialLeaseを指定Providerがexact Requestにだけ利用する
-  - sandbox内部操作と境界越え権限を明確に分ける
+  - Sandbox authorityとHost authorityを明確に分け、Normal Packからraw Host APIを到達不能にする
 
 2.8 現在のtimeout、cancel、retry
 
@@ -410,10 +417,12 @@ Inbound Brokerには署名検証/replay ledgerがあるが、実HTTP webhookはD
     src/artifact/            verifier、CAS、distribution metadata
     src/contract/            catalog、schema、resolver、adapter planner
     src/profile/             lock、resolved plan、activation journal
-    src/policy/              effect containment、base policy、approval、grant、handles
-    src/capability/          Capability Function catalog、routing、Host Extension binding
-    src/broker/              request配送とHost側enforcement substrate
-    src/isolation/           PackVM/Wasm backend interface
+    src/policy/              immutable safety policy、authority intersection、approval、grant
+    src/capability/          Provider registration、scope DSL、ProviderAuthority、handles
+    src/execution_domain/    FunctionPrincipal、domain identity、co-location、Lease binding
+    src/broker/              request配送とlease_only enforcement substrate
+    src/host_extension/      trust record、SDK registration、process/entitlement supervision
+    src/isolation/           PackVM/Wasm/per-Function worker backend interface
     src/audit/               authoritative journal
     src/security_ui/         approval/security chrome bridge
 
@@ -427,6 +436,7 @@ Inbound Brokerには署名検証/replay ledgerがあるが、実HTTP webhookはD
   tobkiri_sdk/python/
   tobkiri_sdk/typescript/
   tobkiri_sdk/rust/
+  host_extension_sdk/
 
   contracts/
     foundation/
@@ -442,27 +452,27 @@ Rust Host Kernelは既存Tauri Launcher processへ全部埋め込まず、独立
 
 3.2 唯一の実行経路
 
-  1. authenticated IPC sessionからcaller Principalを導出
+  1. Host spawn/routing/authenticated IPC sessionからexact caller FunctionPrincipalを導出
   2. active ActivationRecordをcapture
   3. InvocationFrameをstrict parse
   4. exact ResolvedPlan bindingを選択
   5. contract/version/schema/operationを検証
   6. payload size/depth/typeとResourceHandleを検証
   7. Dormantならadmission queueへ入れsingle-flight materialize
-  8. runtime IsolationAttestationとreadinessを検証
-  9. Provider Function宣言からEffect ceilingを取得し、具体的Request scopeを正規化
- 10. exact Capability Function/Host Extension bindingをResolvedPlanから選択
- 11. Base Policy + restrict-only Policy Packでscope containmentを評価
- 12. matching Grantがなければ必要時だけHost security UIでimmutable ApprovalRecordを確定
- 13. Operation/Effect/caller/target/Profile snapshotへbindしたatomic GrantRecordをHost内で生成
+  8. caller ExecutionDomain identity/boot epochとruntime IsolationAttestationを検証
+  9. exact target FunctionPrincipal、ProviderAuthorityRecord、ExecutionDomainをResolvedPlanから選択
+ 10. Provider declaration/安全なscope semanticsでconcrete Request scopeを正規化
+ 11. Runtime immutable safety + Profile/admin + caller Grant + ProviderAuthority + domain enforcementをintersection評価
+ 12. Provider trust/Use GrantがなければHost security UIでtransactional Approvalを取得
+ 13. ProviderAuthorityRecordとFunction/Operation単位のatomic GrantRecordをHost authority DBへcommit
  14. authoritative audit reservationを耐久化
  15. Grant use-countをatomic reserve
- 16. exact Request向けの短寿命・非移譲InvocationLeaseを生成
- 17. Runtime生成RequestEnvelopeをProviderへ配送
- 18. 境界作用はInvocationLease付きRequestとしてCapability Functionへ配送
- 19. deadline/cancel/backpressureとrevocation epochを監視
+ 16. exact caller/target principal、domain、boot epoch、Request向けInvocationLeaseを生成
+ 17. lease_onlyならopaque Handle/限定import、os_entitlementならexact dedicated processへ配送
+ 18. Runtime生成RequestEnvelopeをProvider ExecutionDomainへ配送
+ 19. deadline/cancel/backpressure、domain identity、revocation epochを監視
  20. Response/error/progress schemaを検証
- 21. effect/audit commit、handle/Lease revoke
+ 21. effect/audit commit、Handle/Lease revoke、必要ならdomain kill
  22. sanitized Responseをcallerへ返す
 
 これ以外のPack execution entrypointを作らない。
@@ -493,9 +503,10 @@ Packが指定できない項目:
 Hostが生成するRequestEnvelopeの必須項目:
 
   request_id、trace_id、correlation_id、causation_id
-  caller principal/pack/artifact/provider instance
+  caller FunctionPrincipal（parent artifact/function implementation/Function/Operation）
+  caller ExecutionDomain ID、process/component identity、domain boot epoch
   profile revision、profile authority digest、policy revision、plan digest、activation digest
-  target provider/pack/artifact
+  target Provider FunctionPrincipal、ProviderAuthority digest、ExecutionDomain ID
   exact contract version、schema digest、operation
   monotonic deadline remaining budget
   opaque request-bound InvocationLease
@@ -519,7 +530,8 @@ Contractは単なるschema置場ではなく、次を必須にする。
   owner/publisher、tier、status
   operation一覧
   operationごとのinput/output/error/progress schema digest
-  effect=pure/read/write/external_effect/privileged
+  broad effect class=pure/read/write/external_effect/privileged（Runtime risk分類であり全Capability taxonomyではない）
+  extension-defined Capability/Effect identity、scope schema/semantics digest
   idempotency=none/keyed/replayable
   timeout default/hard max
   required capability template
@@ -534,7 +546,9 @@ Foundation/Community/Privateはvisibility/governance分類であり、権限の�
 
 3.5 ProviderとAdapter
 
-ProviderDefinitionはmanifest上の宣言、ProviderInstanceは実際のWasm component、PackVM instance、remote endpointである。ResolvedPlanにはexact artifact、contract/schema、provider、adapter hops、execution domain key、minimum isolationを固定する。
+ProviderDefinitionはmanifest上の宣言、ProviderInstanceは実際のWasm component、Function worker、Host Extension process、PackVM instance、remote endpointである。ResolvedPlanにはexact parent artifact、Function implementation digest、Function/Operation、contract/schema、ProviderAuthority、adapter hops、ExecutionDomain identity/profile、minimum isolationを固定する。
+
+Host Capability ProviderのProviderDefinitionはauthorityを自己付与しない。HostExtensionTrustRecord、Function単位ProviderAuthorityRecord、ExecutionDomainRecordがすべて成立した場合だけHost Provider候補になる。
 
 Adapterは通常Packとして扱う。
 
@@ -551,7 +565,8 @@ Adapterは通常Packとして扱う。
 
 Host/PackVM境界へraw host path、secret、open FDを渡さない。Host tableに次を保持し、Packへopaque IDだけ渡す。
 
-  type、owner principal、allowed target、operations
+  type、owner FunctionPrincipal、allowed target FunctionPrincipal、operations
+  ExecutionDomain ID/boot epoch、ResourceHandle namespace
   request binding、profile/policy revision
   TTL、use count、max bytes、quota
   revocation state、provenance
@@ -646,7 +661,7 @@ Phase 1: Protocol、schema、generated SDK
 
   - Contract、Operation、InvocationFrame、RequestEnvelope、Response、Error、Stream frame
   - Profile、ProfileLock、ResolvedPlan、ActivationRecord、IsolationAttestation、MaterializationEvent
-  - PolicyDecision、ApprovalRecord、GrantRecord、ResourceHandle
+  - PolicyDecision、HostExtensionTrustRecord、ProviderAuthorityRecord、ApprovalRecord、GrantRecord、InvocationLease、ExecutionDomainRecord、ResourceHandle
   - Artifact/Distribution manifests
   - JCS canonicalizationとdigest API
   - strict parserとsize/depth/number/duplicate-key検査
@@ -675,6 +690,8 @@ Phase 2: Artifact CAS、Distribution、install/update
   - untrusted stagingへstream download
   - size/file count/compression ratio/path/collision検査
   - exact digest、Pack署名、publisher key、revocation、provenance検証
+  - Function subartifact inventoryと各implementation digestの検証
+  - Host Extension package kind、registration namespace、authority semantics digestの検証
   - read-only content-addressed blobsへatomic rename
   - installed-set append-only journal
   - DistributionはPack一覧とexact digestをpinするだけ
@@ -696,7 +713,10 @@ Phase 3: deterministic resolverとatomic Profile activation
 実装:
 
   - Profile -> Lock -> ResolvedPlan compiler
-  - exact provider/adapter/artifact/schema/isolation/materialization mode固定
+  - exact provider/adapter/artifact/function subartifact/schema/isolation/materialization mode固定
+  - exact FunctionPrincipal、ProviderAuthority、ExecutionDomain、authority modeをrouting planへ固定
+  - requested caller -> Host Capability edgeとopaque Grant referenceだけをProfileへ記録し、authority値をProfileから生成しない
+  - authority-equivalence classをcompileし、非同値principalのnative co-locationを拒否
   - 通常profile_revisionと権限関連部分だけのprofile_authority_digestを別生成
   - activation digestとProfileAuthoritySnapshotをatomic commit
   - tie、cycle、missing required、sunset aliasをerror
@@ -717,46 +737,52 @@ Phase 3: deterministic resolverとatomic Profile activation
   - activation crash後は完全な旧または新のどちらかへ回復する。
   - 100 Pack on_demand Profile activation時のresident VMは0。
 
-Phase 4: Capability Function、Base Policy、Approval、Grant、ResourceHandle
+Phase 4: FunctionPrincipal、Host Capability registration、Approval、Grant、Lease
 
 実装:
 
-  - Function manifestのEffect ceilingとrequired Capability Function宣言
-  - Capability Function catalogとexact artifact/function binding
-  - Foundation Capability Type Registry
-  - typeごとのscope schema/normalize/subset/intersect/digest/render/redact/conformance
-  - Host Extension trust class、署名、明示install approval
-  - effect class別Base Policy（機能実装は含めない）
-  - restrict-only Policy Pack composition
+  - parent artifact/function implementation digest/Function/Contract revision/OperationからFunctionPrincipal生成
+  - Host spawn/routing/authenticated channelによるprincipal binding
+  - Host Extension SDKとnamespaced Capability Provider registration
+  - safe Scope Definition LanguageとHost-owned semantics primitive
+  - unverifiable semanticsのone-shot/opaque trusted-host downgrade
+  - HostExtensionTrustRecord、Function単位ProviderAuthorityRecord、ExecutionDomainRecord
+  - lease_only/os_entitlement authority mode
+  - Runtime immutable safety policyとrestrict-only Profile/admin ceiling
   - policy unavailable/revision mismatch=deny
-  - immutable ApprovalRecord、GrantRecord、request-bound InvocationLeaseの三分離
+  - immutable ApprovalRecord、ProviderAuthorityRecord、GrantRecord、request-bound InvocationLeaseの四分離
   - ProfileAuthoritySnapshotと通常Profile revisionの分離
-  - exact caller/target Function/Operation/artifact/effect/request/call-chain binding
+  - exact caller/target FunctionPrincipal、ExecutionDomain、boot epoch、effect/request/call-chain binding
   - one-shot/session/workflow-revision/persistent-profile/policy-ephemeral Grant
   - Grant groupとatomic Effect bundle
+  - transactional Provider trust + Use Approval compiler
   - delegation default false、scope attenuation、cycle/depth検査
-  - successor GrantとUpdateTrustPolicyの分離
+  - successor ProviderAuthority/GrantとUpdateTrustPolicyの分離
   - encrypted Host authority DB、MAC、revocation index/epoch、atomic use reservation
-  - Host handle tableとrevoke
+  - FunctionPrincipal/domain-bound Handle table、channel/Lease revoke、domain kill
   - private Pack state namespace/quota
 
 Approval UIへ表示するもの:
 
-  caller Pack/Publisher/digest
-  target PackArtifact、Function、Contract/Operation
+  caller/target Pack、publisher、parent artifact/function implementation digest
+  exact Function/Contract Operation、ExecutionDomain、authority mode
   effectと具体的resource diff
   file root/domain/device/account
+  lease_onlyかos_entitlementか、os_entitlementのblast radius
   one-shot/session/workflow/Profileのどれかと期限/use limit
   Profile authority digest、activation digest、policy revision
 
 完了条件:
 
-  - Pack payloadのapproved/caller/grant/profile値を無視する。
+  - Pack payloadのapproved/caller/function/domain/grant/profile値を無視する。
   - ProviderへGrant本体を渡さずInvocationLeaseだけを渡す。
+  - Provider trustをPack内の別Function/Operationへ横展開しない。
+  - transactional approval失敗時にpartial authorityを残さない。
   - Grantの別request、別target、期限後、使用回数超過を拒否する。
   - same pending Approvalをdedupし、snapshot更新時はinvalidateする。
   - one-shotの並列消費はatomic CASで一つだけ成功する。
-  - unknown scope semanticsとarbitrary policy pluginを拒否する。
+  - unknown/unverifiable scope semanticsをfail-openせずone-shot/opaque trustへ落とす。
+  - arbitrary executable policy/subset/approval pluginをKernelへloadしない。
   - sandbox内部計算には不要なApprovalを出さない。
   - 新しいvendor Pack追加にPolicy Kernelのvendor固有permission code追加を必要としない。
   - 未承認Function、別digest、別callerが承認済みCapability FunctionのGrantを再利用できない。
@@ -793,6 +819,9 @@ Phase 6: Wasm L3 runtime
   - network/socket/env/clock/randomをResource/Grant単位で注入
   - fuel/epoch interruption、memory/table/instance limit
   - Contract WIT bindingとcomponent conformance
+  - Function/Operation単位component instance、separate memory/table/import namespace
+  - InvocationLease/resource namespaceをinstance/boot epochへbind
+  - authority-equivalenceを満たさないinstance間のcapability共有禁止
 
 最初に移植する対象:
 
@@ -801,6 +830,7 @@ Phase 6: Wasm L3 runtime
 完了条件:
 
   - ambient env、Host filesystem、network、secretへ到達不能。
+  - 未承認instanceが承認済みinstanceのimport/Handle/Leaseを利用不能。
   - timeout/cancelでcomponentが確実に停止。
 
 Phase 7: PackVM common supervisorとmacOS backend
@@ -834,7 +864,7 @@ Phase 8: lazy materialization、admission、eviction
 
 実装:
 
-  - ExecutionDomainKey単位のsingle-flight start
+  - FunctionPrincipal + authority-equivalence + authority modeを含むExecutionDomainKey
   - priority別bounded queues
   - max resident/background/starts/prewarm
   - admission charge、physical usage telemetry、host free guard
@@ -852,7 +882,8 @@ default queue bounds:
 
 完了条件:
 
-  - 同じDormant Packへの100 RequestでVM startは1回。
+  - 同じDormant ExecutionDomainへの100 Requestでstartは1回。
+  - 異なるauthority principalをsingle-flight/co-locationで誤統合しない。
   - queue overflowはstable busy/unavailable error。
   - 100 logical/0 resident、100 logical/3 busyのmemory gateを満たす。
 
@@ -877,9 +908,9 @@ Phase 9: Request brokerとend-to-end dispatch
   - timeout後にProvider処理、子process、network effectが継続しない。
   - non-idempotent effectの結果不明はambiguous_effectとして残す。
 
-Phase 10: Storage、workspace、credential、network Capability Function
+Phase 10: reference Host Capability ProvidersとHost Extension SDK
 
-ここで実装するものはPolicy ruleではなく、交換可能なCapability FunctionとHost enforcement backendである。Policy Kernelは各Functionのscope schemaに従ってGrantを検証するだけで、vendor固有APIやOS操作の意味を実装しない。
+ここで実装するものは巨大なCore permission taxonomyではなく、最初のreference Capability Provider、共通enforcement primitive、Extension registration/conformanceである。将来のCapabilityは同じSDKとFunctionPrincipal/ExecutionDomain modelで追加できる。
 
 Storage:
 
@@ -907,7 +938,8 @@ Credential:
 Network:
 
   - Production RealmのNormal Packはraw socket/network全面禁止
-  - Host-owned HTTP clientだけが外部通信
+  - 最初のreference providerはHost-owned HTTP clientを使う
+  - 第三者network ProviderはHost Extension trust、exact FunctionPrincipal/domain、egress declaration必須
   - canonical DNS/domain/IP/port/method/path/body size policy
   - private range、localhost、DNS rebinding対策
   - redirectごとに再評価
@@ -916,6 +948,15 @@ Network:
   - persistent semantic Grantにはdeclarative EffectBinding
   - semantic binding不能時はvendor意味を偽らずtransport権限として表示
   - purchase/payment/delete等high-riskはHost-built request、専用semantic Capability、またはone-shot
+
+Host Extension:
+
+  - dedicated package/install/signature namespace
+  - Function subartifact inventory、Function単位Provider registration
+  - lease_only workerとos_entitlement dedicated process
+  - authority-equivalence co-location compiler
+  - Extension提供codeをPolicy Kernelへin-process loadしない
+  - capability conformance、crash/revoke/update/blast-radius test
 
 Phase 11: FunctionからOperationへのPack移植
 
@@ -926,15 +967,17 @@ cutover前に新Policy Kernelをshadow modeで導入する。legacy decisionと�
 移植手順（Packごと）:
 
   1. ecosystem.json/function一覧とstate ownerを棚卸し
-  2. public FunctionをContract Operationへ分類
-  3. 内部helper Functionはprivate実装として残す
-  4. direct import/HTTP/file/secret依存をContract/Handleへ置換
-  5. v4 artifact manifestとexact resource inventory作成
-  6. PythonならPackVM、pure処理ならWasmを選択
-  7. conformance vectorsとmalicious tests追加
-  8. Profile bindingで有効化
-  9. legacy Function ID aliasを必要な開発期間だけsigned data mappingで保持
- 10. migration完了後aliasと旧Functionを削除
+  2. public FunctionをContract Operationへ分類し、各Function subartifact digestを確定
+  3. Host authorityが必要なFunctionをHost Capability Providerとして分離し、Normal Functionと同じnative address spaceへ残さない
+  4. 内部helper Functionはprivate実装として残す。ただしHost handle、Lease、entitlementへ到達可能なら同一authority principalのTCBとして扱う
+  5. direct import/HTTP/file/secret依存をContract/Handleへ置換
+  6. v4 artifact manifestとexact resource inventory作成
+  7. Normal PythonはPackVM、pure処理／軽量なFunction単位隔離はWasm、OS entitlementはdedicated processを選択
+  8. per-Function domainまたは明示承認したauthority-equivalence classを構成
+  9. conformance vectorsとmalicious tests追加
+ 10. Profile requested edgeとHost authority DBのGrant referenceで有効化
+ 11. legacy Function ID aliasを必要な開発期間だけsigned data mappingで保持
+ 12. migration完了後aliasと旧Functionを削除
 
 既存Grantは自動でactive Grantへ変換しない。review_required recommendationとしてFunction/Operation/Effect scopeへ展開し、ユーザー承認後にだけ新Grantを発行する。Authority one-shot storeのatomic consume/HMAC/pending dedup、Credential Storeの暗号化、Host permission mappingのrisk catalogは実装パターンまたはtest vectorとして移植する。PermissionManager、CapabilityExecutor authority logic、principal文字列階層、raw credential resolve、direct host flags、best-effort authority auditはcutover後に削除する。
 
@@ -1142,10 +1185,17 @@ GUI/Workflowで統合対象:
   - fork bomb、memory bomb、disk bomb、output bomb
   - parent/host process signal/debug
   - forged caller/origin/approval/grant/lease/profile/audit
+  - forged Function ID、FunctionPrincipal、ExecutionDomain ID、domain boot epoch
+  - same-Pack未承認Functionから承認済みFunctionのFD/Handle/Lease/channel窃取
+  - native same-process co-locationによるauthority横取り
+  - Wasm instance間memory/import/ResourceHandle namespace escape
   - call-chain substitution/discontinuity/cycle/depth overflow
   - Pack/publisher/Profile/Distribution wildcard authority injection
   - scope canonicalization collision、unknown semantics fail-open
   - artifact hot-swap、successor Grant permission expansion、publisher key substitution
+  - Function subartifact差替え、ProviderAuthorityの別Operation利用
+  - lease_only Providerへのraw Host authority注入
+  - os_entitlement process identity差替え、revoke後の自発作用
   - sealed CredentialLeaseの別Provider/別Request/cross-account利用
   - one-shot Grantの並列二重消費
   - stale/replayed handle/request
@@ -1186,6 +1236,11 @@ GUI/Workflowで統合対象:
   - Pack-writable Approval/Grant/Lease state 0
   - production host execution bypass 0
   - unknown capability/scope semantics allow 0
+  - Pack trustから別Functionへのimplicit ProviderAuthority 0
+  - Function ID自己申告でauthority principal選択 0
+  - non-equivalent authority principalのnative co-location 0
+  - cross-domain FD/Handle/Lease/credential/channel visibility 0
+  - Host Extension executable Policy plugin load 0
   - authoritative audit coverage 100%
   - timeout/cancel後のresidual process/socket/handle 0
   - cross-Pack filesystem/state visibility 0
@@ -1203,7 +1258,7 @@ GUI/Workflowで統合対象:
   Protocol/schema
     -> Artifact identity/CAS
     -> Resolver/Profile/Activation
-    -> Policy/Grant/Handle/Audit
+    -> FunctionPrincipal/ProviderAuthority/Grant/Lease/ExecutionDomain/Audit
     -> Wasmまたは1 OS PackVM
     -> lazy materialization/admission
     -> canonical Request broker
@@ -1233,15 +1288,15 @@ PR-04 immutable artifact identityとCAS staging
 PR-05 signature/provenance/revocation binding
 PR-06 ProfileLock/ResolvedPlan compiler
 PR-07 ActivationRecord atomic journal/recovery
-PR-08 Capability Function model + Effect scope schema
-PR-09 Base Policy + Approval/Grant/ResourceHandle
+PR-08 FunctionPrincipal + Host Capability registration + scope DSL
+PR-09 ProviderAuthority/Approval/Grant/Lease/ExecutionDomain
 PR-10 authoritative audit reservation/commit
-PR-11 Wasmtime minimal provider
+PR-11 Wasmtime per-Function authority instance
 PR-12 PackVM common supervisor/guest protocol
 PR-13 macOS VZ backend
 PR-14 admission/single-flight/idle eviction
 PR-15 canonical Request broker
-PR-16 Notification Contract vertical slice
+PR-16 Notification Host Capability vertical slice
 PR-17 Storage Contract/private state
 PR-18 AI streaming/egress/credential-use
 PR-19 GUI contribution isolation
@@ -1272,12 +1327,12 @@ PR-25 legacy deletion and baseline zero
   ADR-010 private state encryption/quota/backup
   ADR-011 ResourceHandleのlarge binary transport
   ADR-012 audit retention/checkpoint key/recovery
-  ADR-013 Policy rule languageとCapability Function scope containment（Rust DSL/CEL subset等）
-  ADR-014 Boundary capabilities are Function-based and user approvals mint context-bound Grants
+  ADR-013 Safe Scope Definition Languageとunverifiable semanticsのdowngrade
+  ADR-014 Host authority is provided by exact Function principals and context-bound Grants
     -> Accepted。docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txtを正本とする。
   ADR-015 remote ProviderのTLS pin/region/retention semantics
   ADR-016 event-wake/background leaseとbattery policy
-  ADR-017 same PackArtifact内Providerのexecution domain共有条件
+  ADR-017 FunctionPrincipal authority-equivalenceとExecutionDomain co-location条件
   ADR-018 old/new runtime併存期間と強制終了条件
   ADR-019 state reset対象と残すユーザー設定
   ADR-020 benchmark合格値（p95 boot/RAM/disk/cleanup）
@@ -1296,11 +1351,17 @@ PR-25 legacy deletion and baseline zero
   - logical activationとmaterializationが分離される。
   - unknown native/Python Packはcertified L4だけで起動する。
   - internal sandbox操作は不要な承認なしで動き、境界越えだけGrantされる。
+  - Runtime Coreがvendor/Capability固有permission taxonomyを中央列挙しない。
+  - Host Extension SDKから未知CapabilityをFunction/Operationとして追加できる。
   - secret valueをPackへ返さない。
-  - ApprovalRecord、GrantRecord、InvocationLeaseが混同されない。
+  - ApprovalRecord、ProviderAuthorityRecord、GrantRecord、InvocationLeaseが混同されない。
   - Pack/publisher/Profile/Distribution wildcard Grantが存在しない。
-  - Grantはexact caller/target Artifact/Function/Operation/Effect scopeへbindされる。
-  - unknown capability/scope semanticsはfail closed。
+  - ProviderAuthority/Grantはexact caller/target FunctionPrincipal/Operation/domainへbindされる。
+  - Function identityはHost spawn/routing/channelから導出される。
+  - unknown/unverifiable semanticsはfail closedまたはone-shot/opaque trustへdowngradeされる。
+  - lease_onlyとos_entitlementが区別され、後者のblast radiusが表示される。
+  - same-Pack未承認Functionが承認済みFunctionのauthority stateを共有しない。
+  - Profileはauthorityをmint、拡張、exportできない。
   - Production Normal Packのraw networkが0。
   - external effectはPolicy、Grant、request-bound Lease、audit reservationを必ず通る。
   - timeout/cancel/eviction/update後に実行物と権限が残らない。
