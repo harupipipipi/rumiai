@@ -18,6 +18,20 @@
 | API キー / secrets / 運用を知りたい | [operations.md](./operations.md) | [quality_pack/philosophy_memo.md](./quality_pack/philosophy_memo.md) |
 | defaultspack の実装側を追いたい | [../ecosystem/defaultspack/README.md](../ecosystem/defaultspack/README.md) | [../ecosystem/defaultspack/docs/getting-started.md](../ecosystem/defaultspack/docs/getting-started.md) |
 | Codex OSS から取り込んだ coding-tool 観点を見たい | [codex_oss_reference.md](./codex_oss_reference.md) | ルートの [../../AGENTS.md](../../AGENTS.md), [../../justfile](../../justfile) |
+| Pack architecture再設計の正本を確認したい | [TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt](./TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt) | [ADR-014](./ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt), [ADR-015](./ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt), [design inputs](./PACK_ARCHITECTURE_DESIGN_INPUTS.json) |
+
+## Pack architecture v4 canonical precedence
+
+Pack architecture v4について文書が矛盾する場合は、次の順で優先します。
+
+1. Accepted ADR-014 / ADR-015
+2. `TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt`
+3. versioned Protocol/Contract schemas and canonical vectors
+4. migration guides and current implementation notes
+5. legacy runtime, namespace, fallback, Pack authoring documents
+
+v4移行完了まで既存文書は現行実装の説明として残りますが、新しいauthority、
+isolation、activation、distribution、timeout設計の根拠には使用しません。
 
 ## まずここを見れば全体像が分かる3本
 

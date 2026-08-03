@@ -5,6 +5,7 @@
 - Decision owners: Tobkiri Runtime / Pack Architecture
 - Applies to: Runtime TCB, Pack Runtime, Profile activation, Workflow Runtime,
   Capability Providers, Host Extensions, Approval UI
+- Must be read with: ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt
 
 ## Context
 
@@ -364,6 +365,10 @@ Host authority DBには次を保存する。
 - UpdateTrustPolicy
 - RevocationSet/epochs
 - hash-chained authority journal
+
+SecurityEpochの定義、binding、emergency advance、queue/materialization/effect境界での
+再検査はADR-015に従う。互換性pin、version pin、Workflow pinはSecurityEpochまたは
+明示revocationを上書きできない。
 
 Profile file、Pack state、通常user configへauthorityを保存しない。
 PackとExtensionはauthority DBを読み書きできない。
