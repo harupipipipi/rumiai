@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io.tobkiri.profile.v4",
+  "title": "Tobkiri v4 Profile composition",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "profile_id", "base", "shell", "platform"],
+  "properties": {
+    "schema": {"const": "io.tobkiri.profile.v4"},
+    "profile_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,127}$"},
+    "profile_revision": {"type": "string"},
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pack"],
+      "properties": {"pack": {"const": "defaults-basepack"}, "source": {"type": "string"}}
+    },
+    "shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "provider"],
+      "properties": {"contract": {"const": "app.shell.v1"}, "provider": {"type": "string"}, "source": {"type": "string"}}
+    },
+    "packs": {"type": "array", "items": {"type": "string"}},
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture"],
+      "properties": {"os": {"type": "string"}, "architecture": {"type": "string"}}
+    }
+  }
+}

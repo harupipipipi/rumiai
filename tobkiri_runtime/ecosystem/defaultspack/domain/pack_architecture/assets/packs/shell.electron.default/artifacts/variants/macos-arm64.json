@@ -1,0 +1,14 @@
+{
+  "schema": "io.tobkiri.artifact.variant.v1",
+  "artifact_id": "shell.electron.default.macos-arm64",
+  "kind": "signed_prebuilt_bundle",
+  "pack_id": "shell.electron.default",
+  "platform": "macos",
+  "architecture": "arm64",
+  "bundle_identity": "io.tobkiri.shell.electron",
+  "entrypoint": "Tobkiri Electron.app/Contents/MacOS/tobkiri-electron",
+  "source_build": false,
+  "signature_verification": "installation_pipeline_required",
+  "security_boundary": "dedicated_shell_process",
+  "resource_accounting": "profile_charged"
+}

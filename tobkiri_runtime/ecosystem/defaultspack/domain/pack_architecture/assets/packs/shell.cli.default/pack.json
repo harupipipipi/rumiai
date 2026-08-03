@@ -1,0 +1,93 @@
+{
+  "schema": "io.tobkiri.pack.v4",
+  "pack_id": "shell.cli.default",
+  "version": "1.0.0",
+  "kind": "shell",
+  "display_name": "Tobkiri CLI Shell",
+  "experience_role": "shell",
+  "presentation_kind": "terminal_stdio",
+  "presentation_family": "terminal",
+  "technology": "cli",
+  "shell_contract": "app.shell.v1",
+  "contracts": {
+    "provides": ["app.shell.v1"]
+  },
+  "capabilities": [
+    "navigation",
+    "commands",
+    "notifications",
+    "rich_text",
+    "interactive_prompt",
+    "terminal_table",
+    "structured_stdio",
+    "completion",
+    "resize",
+    "cancellation"
+  ],
+  "consumes_contracts": [
+    "cli.command.contribution.v1",
+    "cli.renderer.contribution.v1"
+  ],
+  "cli_protocol": {
+    "version": "cli.io.v1",
+    "structured_stdio": true,
+    "raw_host_terminal": false,
+    "fields": [
+      "command",
+      "arguments",
+      "stdin",
+      "stdout",
+      "stderr",
+      "tty",
+      "prompt",
+      "completion",
+      "resize",
+      "signal",
+      "exit_status",
+      "stream",
+      "cancel",
+      "output_limit"
+    ]
+  },
+  "production": {
+    "launchable": true,
+    "prebuilt_only": true,
+    "build_during_activation": false,
+    "dev_commands_reachable": false
+  },
+  "security": {
+    "execution_domain": "dedicated_shell_process",
+    "host_authority": "structured_protocol_only",
+    "trusted_attention_surface": "host_owned",
+    "native_plugin_loading": "forbidden"
+  },
+  "variants": [
+    {
+      "variant_id": "macos-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "artifact_ref": "artifacts/variants/macos-arm64.json",
+      "digest": "sha256:9eac0ef24ae748c425cff8f9de8710701e6484d5d86872f28a01ce0a9a5f5d26",
+      "entrypoint": "tobkiri-cli",
+      "artifact_kind": "signed_prebuilt_binary"
+    },
+    {
+      "variant_id": "linux-x86_64",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/linux-x86_64.json",
+      "digest": "sha256:22c55273350f1eb61733d1b8a4ba7e81fc7b0fd66b7c74446ccc2d5698d65ad9",
+      "entrypoint": "tobkiri-cli",
+      "artifact_kind": "signed_prebuilt_binary"
+    },
+    {
+      "variant_id": "windows-x86_64",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/windows-x86_64.json",
+      "digest": "sha256:efc1ddc19ab618cf0f072c29acc2a52ba68a54c81a3317ad9caf61e84360ea69",
+      "entrypoint": "tobkiri-cli.exe",
+      "artifact_kind": "signed_prebuilt_binary"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "schema": "io.tobkiri.pack.v4",
+  "pack_id": "runtime.electron.application.default",
+  "version": "1.0.0",
+  "kind": "application_runtime",
+  "display_name": "Tobkiri Electron Application Runtime",
+  "experience_role": "standalone_app",
+  "presentation_kind": "packaged_process",
+  "technology": "electron",
+  "contracts": {
+    "provides": ["runtime.electron.application.v1"]
+  },
+  "capabilities": [
+    "application.validate",
+    "application.launch",
+    "application.stop",
+    "application.observe"
+  ],
+  "production": {
+    "launchable": true,
+    "prebuilt_only": true,
+    "build_during_activation": false,
+    "dev_commands_reachable": false,
+    "source_build": false
+  },
+  "application_definition": {
+    "requires": [
+      "application_id",
+      "presentation_artifact",
+      "native_backend_artifact",
+      "contracts",
+      "execution_domains",
+      "artifact_variants",
+      "lifecycle",
+      "state_ownership"
+    ],
+    "frontend_backend_traffic": "application_internal_only",
+    "published_operations": "contract_provider_only",
+    "sidecars": "separate_execution_domain_unless_equivalent"
+  },
+  "security": {
+    "authority_mode": "lease_only",
+    "host_effects": "adr_014_broker_only",
+    "native_plugin_loading": "forbidden"
+  },
+  "variants": [
+    {
+      "variant_id": "macos-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "artifact_ref": "artifacts/variants/macos-arm64.json",
+      "digest": "sha256:89292e9f383fbf92bcdf74c157d6882dfc85ffd34d6d7af0998080f5c6276218",
+      "entrypoint": "SampleElectron.app/Contents/MacOS/sample-electron",
+      "artifact_kind": "signed_prebuilt_application"
+    },
+    {
+      "variant_id": "linux-x86_64",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/linux-x86_64.json",
+      "digest": "sha256:733b7f8904478689066b93f0c81f692a92753e5be4ae6d1ced342a566fadcffe",
+      "entrypoint": "sample-electron.AppImage",
+      "artifact_kind": "signed_prebuilt_application"
+    },
+    {
+      "variant_id": "windows-x86_64",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/windows-x86_64.json",
+      "digest": "sha256:c1788809816dc17f8d1b32462e543ccd2163a940b38950e0d3740a9a9bafb825",
+      "entrypoint": "SampleElectron.exe",
+      "artifact_kind": "signed_prebuilt_application"
+    }
+  ]
+}

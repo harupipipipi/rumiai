@@ -1,0 +1,14 @@
+{
+  "schema": "io.tobkiri.artifact.variant.v1",
+  "artifact_id": "shell.tauri.default.macos-arm64",
+  "kind": "signed_prebuilt_bundle",
+  "pack_id": "shell.tauri.default",
+  "platform": "macos",
+  "architecture": "arm64",
+  "bundle_identity": "io.tobkiri.shell.tauri",
+  "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+  "source_build": false,
+  "signature_verification": "installation_pipeline_required",
+  "entitlements": ["com.apple.security.network.client"],
+  "security_boundary": "dedicated_shell_process"
+}

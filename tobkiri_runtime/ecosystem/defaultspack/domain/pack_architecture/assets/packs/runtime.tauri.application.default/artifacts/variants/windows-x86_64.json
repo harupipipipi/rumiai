@@ -1,0 +1,14 @@
+{
+  "schema": "io.tobkiri.artifact.variant.v1",
+  "artifact_id": "runtime.tauri.application.default.windows-x86_64",
+  "kind": "signed_prebuilt_application",
+  "pack_id": "runtime.tauri.application.default",
+  "platform": "windows",
+  "architecture": "x86_64",
+  "application_id": "dev.example.sample-tauri",
+  "presentation_artifact": "SampleTauri/resources/frontend.bundle",
+  "native_backend_artifact": "SampleTauri/SampleTauri.exe",
+  "sidecars": [],
+  "source_build": false,
+  "signature_verification": "installation_pipeline_required"
+}

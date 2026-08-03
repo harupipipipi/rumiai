@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io.tobkiri.legacy.startup-input.v1",
+  "title": "Inventory-only legacy Startup Profile input",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "profile_id": {"type": "string"},
+    "version": {"type": "string"},
+    "base_pack": {"type": "string"},
+    "launch": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string"},
+        "shell_provider": {"type": "string"},
+        "desktop_app": {
+          "type": "object",
+          "properties": {"command": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

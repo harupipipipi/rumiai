@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io.tobkiri.application.v1",
+  "title": "Tobkiri standalone application pack",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "application_id", "role", "technology", "presentation_artifact", "native_backend_artifact", "execution_domains", "artifact_variants", "production"],
+  "properties": {
+    "schema": {"const": "io.tobkiri.application.v1"},
+    "application_id": {"type": "string"},
+    "role": {"const": "standalone_app"},
+    "technology": {"enum": ["tauri", "electron", "native"]},
+    "presentation_artifact": {"type": "string"},
+    "native_backend_artifact": {"type": "string"},
+    "execution_domains": {"type": "object"},
+    "artifact_variants": {"type": "array", "minItems": 1},
+    "production": {
+      "type": "object",
+      "required": ["source_build", "dev_commands"],
+      "properties": {"source_build": {"const": false}, "dev_commands": {"const": "forbidden"}}
+    }
+  }
+}

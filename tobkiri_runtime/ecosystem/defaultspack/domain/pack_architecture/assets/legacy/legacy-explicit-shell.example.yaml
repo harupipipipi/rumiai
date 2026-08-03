@@ -1,0 +1,12 @@
+profile_id: legacy-explicit-shell
+version: rumi.profile.v1
+base_pack: defaultspack
+launch:
+  kind: desktop_app
+  shell_provider: shell.tauri.default
+platform:
+  os: macos
+  architecture: arm64
+metadata:
+  migration_fixture: true
+  expected: migrated_but_command_free

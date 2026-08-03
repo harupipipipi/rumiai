@@ -1,0 +1,27 @@
+schema: io.tobkiri.cli.io.v1
+shell_provider: shell.cli.default
+protocol: cli.io.v1
+command:
+  id: chat.send
+  arguments:
+    message: hello locally
+stdin:
+  tty: false
+stdout:
+  mode: stream
+  output_limit: 1048576
+stderr:
+  mode: diagnostic
+prompt:
+  mode: structured_request
+completion:
+  mode: structured_candidates
+signals:
+  resize: supported
+  cancel: authenticated_control_frame
+exit_status:
+  success: 0
+  blocked: 77
+authority:
+  raw_host_terminal: false
+  tool_approval: host_owned

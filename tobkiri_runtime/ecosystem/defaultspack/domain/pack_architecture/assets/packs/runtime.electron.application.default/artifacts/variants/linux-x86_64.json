@@ -1,0 +1,15 @@
+{
+  "schema": "io.tobkiri.artifact.variant.v1",
+  "artifact_id": "runtime.electron.application.default.linux-x86_64",
+  "kind": "signed_prebuilt_application",
+  "pack_id": "runtime.electron.application.default",
+  "platform": "linux",
+  "architecture": "x86_64",
+  "application_id": "dev.example.sample-electron",
+  "presentation_artifact": "sample-electron.AppImage/resources/app.asar",
+  "native_backend_artifact": "sample-electron.AppImage/sample-electron",
+  "sidecars": [],
+  "source_build": false,
+  "signature_verification": "installation_pipeline_required",
+  "framework_runtime": "profile_charged"
+}

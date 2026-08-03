@@ -1,0 +1,13 @@
+{
+  "schema": "io.tobkiri.artifact.variant.v1",
+  "artifact_id": "shell.cli.default.windows-x86_64",
+  "kind": "signed_prebuilt_binary",
+  "pack_id": "shell.cli.default",
+  "platform": "windows",
+  "architecture": "x86_64",
+  "entrypoint": "tobkiri-cli.exe",
+  "source_build": false,
+  "signature_verification": "installation_pipeline_required",
+  "protocol": "cli.io.v1",
+  "raw_terminal_authority": false
+}

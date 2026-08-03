@@ -1,0 +1,51 @@
+schema: io.tobkiri.profile.v4
+profile_id: defaults-modern-electron
+profile_revision: 4.0.0-local
+kind: runtime_profile
+locale: en
+
+display_name:
+  en: Tobkiri Defaults Modern (Electron)
+  ja: Tobkiri Defaults Modern（Electron）
+
+description:
+  en: The same defaultspack backend graph with an exact Electron app.shell.v1 provider.
+  ja: 同じ defaultspack backend graph を Electron の app.shell.v1 Provider で表示する構成。
+
+base:
+  pack: defaults-basepack
+
+shell:
+  contract: app.shell.v1
+  provider: shell.electron.default
+
+packs:
+  - defaultspack
+
+platform:
+  os: macos
+  architecture: arm64
+
+local_first:
+  default_model: stub/default
+  cloud_keys_required: false
+  required_secrets: []
+  required_network: []
+
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  profile_may_mint_host_authority: false
+
+materialization:
+  mode: selected_only
+  unselected_contributions: remain_unmaterialized
+  production_source_build: false
+  production_dev_commands: forbidden
+
+metadata:
+  pack_id: defaults-basepack
+  category: modern_defaults
+  shell_selection_is_exact: true
