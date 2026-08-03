@@ -17,6 +17,8 @@ from .profile_models import (
 
 logger = logging.getLogger(__name__)
 
+_MODERN_PROFILE_SCHEMA = "io.tobkiri.profile.v4"
+
 
 class ProfileDiscoveryError(RuntimeError):
     """Raised when profile discovery finds invalid definitions."""
@@ -80,6 +82,8 @@ class CapabilityProfileLoader:
                 )
                 continue
             for profile_file in self._discover_pack_profile_files(pack_info):
+                if not self._is_legacy_profile_file(profile_file):
+                    continue
                 self._load_profile_file(
                     profile_file,
                     pack_id=pack_id,
@@ -190,6 +194,27 @@ class CapabilityProfileLoader:
         if not profiles_dir.is_dir():
             return []
         return sorted(profiles_dir.glob("*.profile.yaml"))
+
+    @staticmethod
+    def _is_legacy_profile_file(profile_file: Path) -> bool:
+        """Keep v4 pack profiles out of the legacy profile parser.
+
+        The v4 pack architecture resolver owns documents marked with the
+        modern schema.  The legacy loader still discovers the shared profile
+        filename pattern, so it must filter those documents before passing
+        them to the ``rumi.profile.v1`` validator.  If a file cannot be
+        decoded here, retain it as a legacy candidate so the existing loader
+        reports the malformed file instead of silently dropping it.
+        """
+        try:
+            with profile_file.open("r", encoding="utf-8") as stream:
+                document = yaml.safe_load(stream) or {}
+        except (OSError, yaml.YAMLError):
+            return True
+        return not (
+            isinstance(document, dict)
+            and document.get("schema") == _MODERN_PROFILE_SCHEMA
+        )
 
     def _iter_packs(self) -> Iterable[Tuple[str, Any]]:
         registry = self.registry or self._load_registry()

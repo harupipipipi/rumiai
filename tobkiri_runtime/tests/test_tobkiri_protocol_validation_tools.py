@@ -7,7 +7,11 @@ import pytest
 
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import SchemaValidationError
-from tobkiri_protocol.inventory import generate_inventory, inventory_drift
+from tobkiri_protocol.inventory import (
+    _included_paths,
+    generate_inventory,
+    inventory_drift,
+)
 from tobkiri_protocol.scanners import scan_duplicate_ids, scan_v4_scope
 from tobkiri_protocol.validation import validate_document
 
@@ -133,3 +137,11 @@ def test_generated_inventory_is_schema_valid_and_not_drifting() -> None:
         / "architecture"
         / "architecture_inventory.json",
     ) is False
+
+
+def test_generated_inventory_excludes_python_cache_artifacts() -> None:
+    """Python bytecode must not make the tracked inventory nondeterministic."""
+    included = _included_paths(REPOSITORY_ROOT)
+
+    assert all("__pycache__" not in path.parts for path in included)
+    assert all(path.suffix != ".pyc" for path in included)

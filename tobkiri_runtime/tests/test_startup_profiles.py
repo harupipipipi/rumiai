@@ -14,6 +14,7 @@ from core_runtime import startup_profiles
 from core_runtime.startup_profiles import StartupProfileManager, PROFILE_VERSION
 from core_runtime.interface_registry import InterfaceRegistry
 from core_runtime.desktop_app_manager import DesktopAppManager
+from core_runtime.pack_artifact_integrity import write_host_install_record
 
 
 class _FakeActiveEcosystem:
@@ -198,6 +199,23 @@ def _copy_defaultspack_with_host_registration(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    trust_store = destination.parent / "publisher-trust.json"
+    write_host_install_record(
+        trust_store,
+        pack_id="defaultspack",
+        record={
+            "signature_required": False,
+            "developer_mode": True,
+            "publisher_id": "",
+            "key_id": "",
+            "installed_version": "unknown",
+            "signed_manifest_path": "",
+            "contract_versions": {},
+            "requested_capabilities": [],
+        },
+    )
+    monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store))
+    monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "1")
     monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
 
 
@@ -220,6 +238,22 @@ def _write_frontendpack(root: Path, *, component_node: bool = True) -> Path:
     }
     eco_path = pack_dir / "ecosystem.json"
     eco_path.write_text(json.dumps(ecosystem, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # Non-builtin packs require an explicit Host-owned install record before
+    # the v4 resolver will consider their contributions selectable.
+    write_host_install_record(
+        root / "publisher-trust.json",
+        pack_id="frontendpack",
+        record={
+            "signature_required": False,
+            "developer_mode": True,
+            "publisher_id": "",
+            "key_id": "",
+            "installed_version": "unknown",
+            "signed_manifest_path": "",
+            "contract_versions": {},
+            "requested_capabilities": [],
+        },
+    )
     base_dir = pack_dir / "components" / "web" if component_node else pack_dir / "nodes"
     base_dir.mkdir(parents=True, exist_ok=True)
     node_file = base_dir / ("node.json" if component_node else "web_surface.node.json")

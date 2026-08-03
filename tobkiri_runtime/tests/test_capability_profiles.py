@@ -119,6 +119,33 @@ def test_pack_profiles_load_only_from_approved_packs(tmp_path) -> None:
     assert interface_registry.get("profile.approvedpack.coding").profile_id == "approvedpack.coding"
 
 
+def test_legacy_loader_skips_modern_pack_profiles(tmp_path) -> None:
+    pack = _pack(
+        tmp_path,
+        "mixedpack",
+        {
+            "profiles/legacy.profile.yaml": _profile_doc("mixedpack.legacy"),
+            "profiles/modern.profile.yaml": {
+                "schema": "io.tobkiri.profile.v4",
+                "profile_id": "mixedpack.modern",
+            },
+        },
+    )
+    loader = CapabilityProfileLoader(
+        registry=_registry(pack),
+        approval_manager=FakeApprovalManager({"mixedpack"}),
+        shared_profiles_dir=tmp_path / "missing-user-profiles",
+    )
+
+    profiles = loader.load_all_profiles()
+
+    assert set(profiles) == {"mixedpack.legacy"}
+    assert not any(
+        diagnostic["code"] == "invalid_profile_file"
+        for diagnostic in loader.diagnostics
+    )
+
+
 def test_user_shared_profiles_are_schema_validated(tmp_path) -> None:
     shared_dir = tmp_path / "user_data" / "shared" / "profiles"
     shared_dir.mkdir(parents=True)

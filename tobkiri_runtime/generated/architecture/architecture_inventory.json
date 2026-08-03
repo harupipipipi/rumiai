@@ -5360,7 +5360,7 @@
       },
       {
         "evidence": "InterfaceRegistry",
-        "line": 32,
+        "line": 34,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/profile_loader.py",
         "rule_id": "legacy_interface_registry"
@@ -7163,16 +7163,6 @@
       "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
       "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/__init__.py",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/__init__.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/canonical.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/errors.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/ids.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/inventory.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/migration.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/provenance.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/scanners.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/serialization.cpython-313.pyc",
-      "tobkiri_runtime/tobkiri_protocol/__pycache__/validation.cpython-313.pyc",
       "tobkiri_runtime/tobkiri_protocol/canonical.py",
       "tobkiri_runtime/tobkiri_protocol/errors.py",
       "tobkiri_runtime/tobkiri_protocol/fixtures/ambiguous_profile.v3.json",
@@ -13706,14 +13696,14 @@
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:54d877839d0339f36694915381e73007f43bc635ecfe401c84f68f780adc69f7",
+        "evidence_digest": "sha256:24aea7295bf38baa38d441f6d4144bfad21017ddcf489ff87421886849567dee",
         "line": 11,
         "path": "tobkiri_runtime/core_runtime/profile_loader.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:54d877839d0339f36694915381e73007f43bc635ecfe401c84f68f780adc69f7",
-        "line": 32,
+        "evidence_digest": "sha256:24aea7295bf38baa38d441f6d4144bfad21017ddcf489ff87421886849567dee",
+        "line": 34,
         "path": "tobkiri_runtime/core_runtime/profile_loader.py",
         "rule_id": "legacy_interface_registry"
       },
@@ -16852,8 +16842,8 @@
     ]
   },
   "repository": {
-    "commit": "49b589e1d5c3b0761f86947bfaa50e8d9c503d17",
-    "tree_digest": "d82a13067b30440e5705f40d54b22f5f0b7a5b86bef040f76f01fcfc177a5c16"
+    "commit": "9793c784cd09a7c257f8c1ef2fadcba33187c6fe",
+    "tree_digest": "86d4751ff1ca7267db0dd765de4affaa28c5c63c7283c942a9ed47dc7ea9495e"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

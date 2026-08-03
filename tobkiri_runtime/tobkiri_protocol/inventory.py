@@ -130,7 +130,10 @@ def _included_paths(root: Path) -> list[Path]:
         candidates.update(
             path
             for path in protocol_root.rglob("*")
-            if path.is_file() and "generated" not in path.parts
+            if path.is_file()
+            and "generated" not in path.parts
+            and "__pycache__" not in path.parts
+            and path.suffix != ".pyc"
         )
     for relative in NORMATIVE_DOCUMENTS + (DESIGN_INPUTS_RELATIVE_PATH,):
         path = root / relative
