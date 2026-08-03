@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tobkiri.local/io.tobkiri/base-definition.v1.schema.json",
+  "title": "Tobkiri Base Pack definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["base_api_version", "pack_id", "artifact_digest", "required_shell_capabilities", "presentation_families", "backend_contracts", "state_owners", "provenance"],
+  "properties": {
+    "base_api_version": {"const": "io.tobkiri.base.v1"},
+    "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "required_shell_capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "uniqueItems": true},
+    "presentation_families": {"type": "array", "minItems": 1, "items": {"enum": ["graphical", "terminal", "headless"]}, "uniqueItems": true},
+    "backend_contracts": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"}, "uniqueItems": true},
+    "contribution_contracts": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"}, "uniqueItems": true},
+    "state_owners": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "uniqueItems": true},
+    "provenance": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/provenance"}
+  }
+}

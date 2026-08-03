@@ -39,7 +39,10 @@ py-modules = ["app"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core_runtime*", "backend_core*", "rumi_setup*", "tobkiri*", "rumi_ai*"]
+include = ["core_runtime*", "backend_core*", "rumi_setup*", "tobkiri*", "rumi_ai*", "tobkiri_protocol*"]
+
+[tool.setuptools.package-data]
+tobkiri_protocol = ["schemas/*.json", "fixtures/*.json", "fixtures/*.yaml"]
 
 [tool.ruff]
 line-length = 100

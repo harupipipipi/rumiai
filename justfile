@@ -43,6 +43,14 @@ integrity:
 pack-architecture:
     python scripts/quality/scan_pack_architecture.py
 
+# Validate v4 schemas, provenance, migration guards, scanners, and inventory.
+pack-architecture-v4:
+    python scripts/quality/validate_pack_architecture.py
+
+# Migrate one legacy profile to a review-only v4 document.
+migrate-legacy-profile source output:
+    python scripts/quality/migrate_legacy_profile.py {{source}} --output {{output}}
+
 # Validate Command Protocol v1 coverage and generated multi-client Pack SDK.
 command-protocol:
     cd tobkiri_runtime && python scripts/quality/scan_command_protocol.py --inventory generated/pack_sdk/command_inventory.json --check-inventory

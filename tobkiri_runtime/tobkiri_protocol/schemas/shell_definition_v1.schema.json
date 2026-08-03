@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tobkiri.local/io.tobkiri/shell-definition.v1.schema.json",
+  "title": "Tobkiri Shell Pack definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["shell_api_version", "provider_id", "pack_id", "artifact_digest", "contract_id", "experience_role", "presentation_kind", "technology", "consumes_contribution_contracts", "provenance"],
+  "properties": {
+    "shell_api_version": {"const": "io.tobkiri.shell.v1"},
+    "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "contract_id": {"const": "app.shell.v1"},
+    "experience_role": {"const": "shell"},
+    "presentation_kind": {"enum": ["declarative", "isolated_web", "packaged_process", "terminal_stdio", "remote_ui"]},
+    "technology": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "consumes_contribution_contracts": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"}, "uniqueItems": true},
+    "required_capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "uniqueItems": true},
+    "artifact_variants": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["platform", "digest"], "properties": {"platform": {"type": "string", "minLength": 1}, "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "bundle_identity": {"type": "string"}}}},
+    "provenance": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/provenance"}
+  }
+}

@@ -278,6 +278,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install architecture validation dependencies
+        run: python -m pip install "jsonschema>=4.26.0" "PyYAML>=6.0.2"
+
       - name: Run repository pack architecture boundary scan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -298,6 +301,9 @@ jobs:
             echo "::warning::Bootstrap baseline: this reviewed candidate must exactly match its scan. Protected-base shrink-only enforcement starts after the baseline lands on the target branch."
             python scripts/quality/scan_pack_architecture.py
           fi
+
+      - name: Validate v4 schemas, provenance, and generated inventory
+        run: python scripts/quality/validate_pack_architecture.py
 
   conversation-steer:
     name: Conversation steer

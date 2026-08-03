@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tobkiri.local/io.tobkiri/profile-lock.v1.schema.json",
+  "title": "Tobkiri ProfileLock v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lock_api_version", "profile_id", "profile_revision", "security_epoch", "base", "shell", "packs", "plan_digest", "profile_authority_snapshot_digest", "lock_digest"],
+  "properties": {
+    "lock_api_version": {"const": "io.tobkiri.profile-lock.v1"},
+    "profile_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+    "profile_revision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "security_epoch": {"type": "integer", "minimum": 0},
+    "base": {"type": "object", "additionalProperties": false, "required": ["pack_id", "artifact_digest"], "properties": {"pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}},
+    "shell": {"type": "object", "additionalProperties": false, "required": ["provider_id", "pack_id", "artifact_digest", "contract_id"], "properties": {"provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "contract_id": {"const": "app.shell.v1"}}},
+    "packs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["pack_id", "artifact_digest"], "properties": {"pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "role": {"type": "string"}}}},
+    "plan_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "profile_authority_snapshot_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "lock_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

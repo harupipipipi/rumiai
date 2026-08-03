@@ -1,0 +1,53 @@
+{
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "pack": {
+    "id": "example-worker",
+    "version": "1.0.0",
+    "kind": "normal_sandbox",
+    "artifact_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "display_name": "Example Worker"
+  },
+  "functions": [
+    {
+      "id": "worker",
+      "implementation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "contract_revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "operations": ["run"],
+      "role": "pure",
+      "isolation": "wasm_component"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "example.worker.v1",
+      "revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "operations": ["run"]
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "component.wasm",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "kind": "executable",
+      "platform": "wasm32-wasi"
+    }
+  ],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "tobkiri_protocol/fixtures/pack_manifest.v4.json",
+    "source_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "repository_commit": "working-tree",
+    "repository_tree": "5555555555555555555555555555555555555555555555555555555555555555",
+    "generator": "fixture",
+    "generator_version": "1.0.0",
+    "normative": false,
+    "evidence": []
+  },
+  "migration": {
+    "compatibility": "none",
+    "legacy_ids": [],
+    "removal_wave": 0,
+    "sunset_at": "2099-01-01"
+  }
+}
