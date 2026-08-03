@@ -1,9 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
+import { PresentationSelector } from '@/src/components/presentation/PresentationSelector';
 import { useT } from '@/src/lib/i18n';
 import { panelRoutes } from '@/src/lib/routes';
+import {
+  fetchPresentationState,
+  launchSelectedPresentation,
+  selectPresentation,
+} from '@/src/lib/api';
+import type {
+  ApiPresentationSelection,
+  ApiPresentationState,
+} from '@/src/lib/apiTypes';
+import {
+  defaultPresentationSelection,
+  normalizePresentationSelection,
+} from '@/src/lib/presentation';
 import {
   SETUP_PACK_RETURN_PARAM,
   hasSelectedSetupPack,
@@ -26,24 +40,64 @@ export function Setup() {
   const t = useT();
   const [loading, setLoading] = useState(false);
   const [linked, setLinked] = useState(false);
+  const [setupPackReady, setSetupPackReady] = useState(false);
+  const [presentationState, setPresentationState] = useState<ApiPresentationState | null>(null);
+  const [presentationSelection, setPresentationSelection] = useState<ApiPresentationSelection | null>(null);
+  const [presentationLoading, setPresentationLoading] = useState(false);
+  const [presentationSaving, setPresentationSaving] = useState(false);
+  const [presentationLaunching, setPresentationLaunching] = useState(false);
+  const [presentationError, setPresentationError] = useState<string | null>(null);
   const [setupPackError, setSetupPackError] = useState<string | null>(null);
 
-  const finalizeSetup = async (): Promise<boolean> => {
+  const loadPresentation = useCallback(async (): Promise<ApiPresentationState> => {
+    setPresentationLoading(true);
+    setPresentationError(null);
+    try {
+      const nextState = await fetchPresentationState();
+      const nextSelection = normalizePresentationSelection(nextState.catalog, nextState.selection);
+      setPresentationState(nextState);
+      setPresentationSelection(nextSelection ?? defaultPresentationSelection(nextState.catalog));
+      return nextState;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Presentation catalog could not be loaded.';
+      setPresentationError(message);
+      throw error;
+    } finally {
+      setPresentationLoading(false);
+    }
+  }, []);
+
+  const preparePresentationSetup = useCallback(async (): Promise<boolean> => {
     if (!await hasSelectedSetupPack()) {
       return false;
     }
-    setSetupDone(true);
+    setSetupPackReady(true);
+    await loadPresentation();
     return true;
-  };
+  }, [loadPresentation]);
 
-  const openSetupPackSelection = () => {
+  const openSetupPackSelection = useCallback(() => {
     const colorMode = document.documentElement.dataset.colorMode;
     window.location.assign(setupPackSelectionUrl(undefined, colorMode));
-  };
+  }, []);
 
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    let alive = true;
+    void hasSelectedSetupPack()
+      .then((selected) => {
+        if (!alive || !selected) return;
+        setSetupPackReady(true);
+        void loadPresentation().catch(() => undefined);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [loadPresentation]);
 
   useEffect(() => {
     const refreshProfile = () => {
@@ -70,20 +124,15 @@ export function Setup() {
 
     if (isLinked === 'true') {
       let alive = true;
-      let timer: ReturnType<typeof setTimeout> | null = null;
       setLoading(true);
-      void finalizeSetup()
+      void preparePresentationSetup()
         .then((completed) => {
           if (!alive) return;
           if (!completed) {
             openSetupPackSelection();
             return;
           }
-          setLinked(true);
-          addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
-          timer = setTimeout(() => {
-            navigate(panelRoutes.home);
-          }, 1500);
+          setLoading(false);
         })
         .catch((setupError) => {
           if (!alive) return;
@@ -92,14 +141,13 @@ export function Setup() {
         });
       return () => {
         alive = false;
-        if (timer) clearTimeout(timer);
       };
     }
 
     if (error) {
       addToast(`OAuth error: ${error}`, 'error');
     }
-  }, [searchParams, addToast, navigate, t]);
+  }, [searchParams, preparePresentationSetup, openSetupPackSelection]);
 
   useEffect(() => {
     if (searchParams.get(SETUP_PACK_RETURN_PARAM) !== '1') {
@@ -107,9 +155,8 @@ export function Setup() {
     }
 
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
-    void finalizeSetup()
+    void preparePresentationSetup()
       .then((completed) => {
         if (!alive) return;
         if (!completed) {
@@ -117,11 +164,7 @@ export function Setup() {
           setLoading(false);
           return;
         }
-        setLinked(true);
-        addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
-        timer = setTimeout(() => {
-          navigate(panelRoutes.home);
-        }, 800);
+        setLoading(false);
       })
       .catch((setupError) => {
         if (!alive) return;
@@ -131,9 +174,8 @@ export function Setup() {
 
     return () => {
       alive = false;
-      if (timer) clearTimeout(timer);
     };
-  }, [searchParams, addToast, navigate, t]);
+  }, [searchParams, preparePresentationSetup, openSetupPackSelection]);
 
   useEffect(() => {
     if (!profile.connected || linked || searchParams.get(SETUP_PACK_RETURN_PARAM) === '1') {
@@ -141,20 +183,15 @@ export function Setup() {
     }
 
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
-    void finalizeSetup()
+    void preparePresentationSetup()
       .then((completed) => {
         if (!alive) return;
         if (!completed) {
           openSetupPackSelection();
           return;
         }
-        setLinked(true);
-        addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
-        timer = setTimeout(() => {
-          navigate(panelRoutes.home);
-        }, 1500);
+        setLoading(false);
       })
       .catch(() => {
         if (!alive) return;
@@ -164,9 +201,8 @@ export function Setup() {
 
     return () => {
       alive = false;
-      if (timer) clearTimeout(timer);
     };
-  }, [profile.connected, linked, searchParams, addToast, navigate, t]);
+  }, [profile.connected, linked, searchParams, preparePresentationSetup, openSetupPackSelection, addToast, t]);
 
   const handleConnect = async () => {
     setLoading(true);
@@ -188,6 +224,41 @@ export function Setup() {
     openSetupPackSelection();
   };
 
+  const handlePresentationSave = async (selection: ApiPresentationSelection) => {
+    setPresentationSaving(true);
+    setPresentationError(null);
+    try {
+      const nextState = await selectPresentation(selection);
+      setPresentationState(nextState);
+      setPresentationSelection(nextState.selection ?? selection);
+      setSetupDone(true);
+      setLinked(true);
+      addToast(t('setup.link_success') || 'Tobkiri Launcher setup saved.', 'success');
+      window.setTimeout(() => navigate(panelRoutes.home), 800);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Presentation selection could not be saved.';
+      setPresentationError(message);
+      addToast(message, 'error');
+    } finally {
+      setPresentationSaving(false);
+    }
+  };
+
+  const handlePresentationLaunch = async () => {
+    setPresentationLaunching(true);
+    setPresentationError(null);
+    try {
+      const result = await launchSelectedPresentation();
+      addToast(result.message || 'Selected Shell launched.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Selected Shell launch was blocked.';
+      setPresentationError(message);
+      addToast(message, 'error');
+    } finally {
+      setPresentationLaunching(false);
+    }
+  };
+
   if (linked) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg-main p-6">
@@ -201,6 +272,48 @@ export function Setup() {
           </div>
           <TobkiriLoadingMark scene="startup" />
         </motion.div>
+      </div>
+    );
+  }
+
+  if (setupPackReady) {
+    return (
+      <div className="min-h-screen bg-bg-main px-6 py-10">
+        <div className="mx-auto w-full max-w-4xl">
+          <div className="mb-8 flex items-center gap-3 text-sm font-semibold text-text-main">
+            <img
+              src={tobkiriIconUrl}
+              alt="Tobkiri"
+              className="h-9 w-9 rounded-lg border border-border bg-bg-card object-cover"
+            />
+            {LAUNCHER_DISPLAY_NAME}
+          </div>
+          {presentationLoading && !presentationState ? (
+            <div role="status" className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
+              Loading verified Base Pack and Shell metadata…
+            </div>
+          ) : presentationState ? (
+            <PresentationSelector
+              state={presentationState}
+              selection={presentationSelection}
+              saving={presentationSaving}
+              launching={presentationLaunching}
+              error={presentationError}
+              onSelectionChange={setPresentationSelection}
+              onSave={handlePresentationSave}
+              onLaunch={handlePresentationLaunch}
+            />
+          ) : (
+            <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-sm text-text-muted">
+              {presentationError || 'The Launcher could not load the presentation catalog.'}
+              <div className="mt-4">
+                <Button type="button" variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -220,11 +333,11 @@ export function Setup() {
           <div>
             <span className="text-xs font-medium text-text-muted">初期設定</span>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-.035em] text-text-main sm:text-4xl">Tobkiriをセットアップ</h1>
-            <p className="mt-4 max-w-md text-sm leading-7 text-text-muted">アカウントと起動時に読み込むpackを設定します。どちらもあとから変更できます。</p>
+            <p className="mt-4 max-w-md text-sm leading-7 text-text-muted">アカウント、Base Pack、互換Shellを設定します。選択したpresentationはあとから変更できます。</p>
           </div>
           <div className="mt-9 space-y-3 border-l border-border pl-4 text-xs leading-5 text-text-muted">
             <p>1. アカウントを接続</p>
-            <p>2. 起動時のpackと権限を確認</p>
+            <p>2. Base Packと互換Shellを確認</p>
           </div>
         </motion.section>
 
@@ -243,7 +356,7 @@ export function Setup() {
             <Button variant="outline" size="lg" className="w-full" onClick={handleSkip} disabled={loading}>{t('setup.choose_packs')}</Button>
           </div>
           {setupPackError && <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-500">{setupPackError}</p>}
-          <p className="mt-6 border-t border-border pt-4 text-[11px] leading-5 text-text-muted">packごとの権限は次の画面で確認します。</p>
+          <p className="mt-6 border-t border-border pt-4 text-[11px] leading-5 text-text-muted">Base PackはHost authorityを付与しません。ShellのProvider trust、authority mode、production artifactを次の画面で確認します。</p>
         </motion.section>
       </div>
     </div>

@@ -19,12 +19,15 @@ import {
   fetchStartupProfileGraph,
   fetchDesktopSystemInfo,
   fetchDebugApprovalStatus,
+  fetchPresentationState,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   launchDefaultspackDesktop,
+  launchSelectedPresentation,
   openExternalUrl,
   prefetchApiGet,
   sendToBackground,
+  selectPresentation,
   revokeDebugApproval,
   setStartupProfileNodeOverride,
   showAppWindow,
@@ -72,6 +75,9 @@ let tauriSendToBackgroundCount = 0;
 let tauriShowAppWindowCount = 0;
 let tauriDesktopInfoCount = 0;
 let tauriDesktopLaunchCount = 0;
+let tauriPresentationCatalogCount = 0;
+let tauriPresentationSelection: Record<string, unknown> | undefined;
+let tauriPresentationLaunchCount = 0;
 let tauriDebugArmArgs: Record<string, unknown> | undefined;
 let tauriDebugRevokeCount = 0;
 let sessionStorageRef: MemoryStorage;
@@ -171,6 +177,31 @@ function installBrowser(href: string): MemoryStorage {
             tauriDesktopLaunchCount += 1;
             return 'http://127.0.0.1:8766';
           }
+          if (command === 'get_presentation_catalog') {
+            tauriPresentationCatalogCount += 1;
+            return {
+              catalog: {base_packs: [], shell_providers: []},
+              selection: null,
+              materialization: {status: 'not_selected'},
+            };
+          }
+          if (command === 'select_presentation') {
+            tauriPresentationSelection = args?.selection as Record<string, unknown>;
+            return {
+              catalog: {base_packs: [], shell_providers: []},
+              selection: args?.selection,
+              materialization: {status: 'blocked'},
+            };
+          }
+          if (command === 'launch_selected_presentation') {
+            tauriPresentationLaunchCount += 1;
+            return {
+              status: 'launched',
+              provider_id: 'shell.tauri.default',
+              artifact_id: 'fixture-shell',
+              message: 'fixture launched',
+            };
+          }
           throw new Error(`Unknown command: ${command}`);
         },
       },
@@ -261,6 +292,9 @@ beforeEach(() => {
   tauriShowAppWindowCount = 0;
   tauriDesktopInfoCount = 0;
   tauriDesktopLaunchCount = 0;
+  tauriPresentationCatalogCount = 0;
+  tauriPresentationSelection = undefined;
+  tauriPresentationLaunchCount = 0;
   tauriDebugArmArgs = undefined;
   tauriDebugRevokeCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
@@ -590,6 +624,23 @@ test('debug approval helpers use Launcher-owned status, arm, and revoke commands
   assert.deepEqual(tauriDebugArmArgs, {duration: '1w'});
   assert.equal(revoked.reason, 'user_revoked');
   assert.equal(tauriDebugRevokeCount, 1);
+});
+
+test('presentation wrappers use Tauri catalog, selection, and production launch commands', async () => {
+  await fetchPresentationState();
+  await selectPresentation({
+    base_pack_id: 'defaults-basepack',
+    shell_provider_id: 'shell.tauri.default',
+  });
+  const result = await launchSelectedPresentation();
+
+  assert.equal(tauriPresentationCatalogCount, 1);
+  assert.deepEqual(tauriPresentationSelection, {
+    base_pack_id: 'defaults-basepack',
+    shell_provider_id: 'shell.tauri.default',
+  });
+  assert.equal(tauriPresentationLaunchCount, 1);
+  assert.equal(result.status, 'launched');
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {

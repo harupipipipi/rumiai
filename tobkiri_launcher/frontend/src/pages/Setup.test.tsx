@@ -16,6 +16,14 @@ test('panel setup does not bypass setup-pack installation', () => {
   );
 });
 
+test('panel setup requires an exact Base Pack then app.shell.v1 presentation selection', () => {
+  assert.match(source, /PresentationSelector/);
+  assert.match(source, /fetchPresentationState/);
+  assert.match(source, /selectPresentation/);
+  assert.match(source, /launchSelectedPresentation/);
+  assert.match(source, /preparePresentationSetup/);
+});
+
 test('panel entry shows Home first and verifies the setup pack in the background', () => {
   assert.match(appSource, /import \{ hasSelectedSetupPack \} from '@\/src\/lib\/setupPacks'/);
   assert.match(appSource, /requestIdleCallback/);

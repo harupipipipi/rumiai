@@ -772,6 +772,139 @@ export interface SetupStatusResponseData {
   runtime_error?: string | null;
 }
 
+export type PresentationFamily = 'graphical' | 'terminal' | 'headless';
+export type PresentationKind =
+  | 'declarative'
+  | 'isolated_web'
+  | 'packaged_process'
+  | 'terminal_stdio'
+  | 'remote_ui';
+
+export type PresentationApprovalState =
+  | 'verified'
+  | 'pending'
+  | 'blocked'
+  | 'not_required';
+
+export interface ApiPresentationApproval {
+  state: PresentationApprovalState;
+  provider_trust: 'verified' | 'pending' | 'blocked' | 'not_required';
+  grant_state: 'not_minted' | 'available' | 'missing' | 'blocked';
+  authority_mode: 'lease_only' | 'os_entitlement' | 'none';
+  execution_domain: string;
+  effect_scope: string[];
+  blast_radius: string;
+  reason?: string | null;
+}
+
+export type PresentationArtifactStatus =
+  | 'verified'
+  | 'missing'
+  | 'unverified'
+  | 'digest_mismatch'
+  | 'development_only'
+  | 'unsupported_platform';
+
+export interface ApiPresentationArtifact {
+  artifact_id: string;
+  variant: string;
+  platform: string;
+  architecture: string;
+  path: string | null;
+  sha256: string | null;
+  prebuilt: boolean;
+  production: boolean;
+  development_command: string | null;
+  bundle_identifier: string | null;
+  status: PresentationArtifactStatus;
+  status_detail: string;
+}
+
+export interface ApiPresentationArtifactVariant {
+  artifact_id: string;
+  variant: string;
+  platform: string;
+  architecture: string;
+  path: string | null;
+  sha256: string | null;
+  prebuilt: boolean;
+  production: boolean;
+  development_command?: string | null;
+  bundle_identifier?: string | null;
+}
+
+export interface ApiPresentationContribution {
+  contribution_id: string;
+  contract_id: string;
+  family: PresentationFamily;
+  label: string;
+}
+
+export interface ApiBasePackDescriptor {
+  pack_id: string;
+  display_name: string;
+  version: string;
+  artifact_digest: string;
+  required_capabilities: string[];
+  allowed_families: PresentationFamily[];
+  approval: ApiPresentationApproval;
+}
+
+export interface ApiShellProviderDescriptor {
+  provider_id: string;
+  display_name: string;
+  contract_id: 'app.shell.v1' | string;
+  contract_revision_digest: string;
+  experience_role: 'shell';
+  presentation_kind: PresentationKind;
+  presentation_family: PresentationFamily;
+  technology: string;
+  capabilities: string[];
+  contributions: ApiPresentationContribution[];
+  artifact_variants: ApiPresentationArtifactVariant[];
+  artifact: ApiPresentationArtifact | null;
+  approval: ApiPresentationApproval;
+}
+
+export interface ApiPresentationCatalog {
+  schema: 'io.tobkiri.launcher.presentation-catalog.v1' | string;
+  base_packs: ApiBasePackDescriptor[];
+  shell_providers: ApiShellProviderDescriptor[];
+  generated_at: number;
+}
+
+export interface ApiPresentationSelection {
+  base_pack_id: string;
+  shell_provider_id: string;
+}
+
+export type PresentationMaterializationStatus =
+  | 'not_selected'
+  | 'materialized'
+  | 'blocked';
+
+export interface ApiPresentationMaterialization {
+  status: PresentationMaterializationStatus;
+  base_pack_id: string | null;
+  shell_provider_id: string | null;
+  selected_contributions: ApiPresentationContribution[];
+  artifact: ApiPresentationArtifact | null;
+  reason: string | null;
+}
+
+export interface ApiPresentationState {
+  catalog: ApiPresentationCatalog;
+  selection: ApiPresentationSelection | null;
+  materialization: ApiPresentationMaterialization;
+}
+
+export interface PresentationLaunchResponse {
+  status: 'launched';
+  provider_id: string;
+  artifact_id: string;
+  message: string;
+}
+
 export interface HealthResponseData {
   status: 'ok' | 'error';
   needs_setup?: boolean;

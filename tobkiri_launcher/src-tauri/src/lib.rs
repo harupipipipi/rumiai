@@ -12,6 +12,7 @@ mod host_audit;
 mod host_broker;
 mod host_broker_types;
 mod kernel_manager;
+mod presentation;
 mod process_utils;
 mod python_env;
 mod tray;
@@ -2430,7 +2431,10 @@ pub fn run() {
             desktop_system_info::get_host_permission_status,
             desktop_system_info::open_host_permission_settings,
             dock_registration::register_defaultspack_dock,
-            dock_registration::launch_defaultspack_desktop
+            dock_registration::launch_defaultspack_desktop,
+            presentation::get_presentation_catalog,
+            presentation::select_presentation,
+            presentation::launch_selected_presentation
         ])
         .build(tauri::generate_context!());
 

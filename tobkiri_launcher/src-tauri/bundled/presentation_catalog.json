@@ -1,0 +1,192 @@
+{
+  "schema": "io.tobkiri.launcher.presentation-catalog.v1",
+  "base_packs": [
+    {
+      "pack_id": "defaults-basepack",
+      "display_name": "Defaults Base Pack",
+      "version": "4.0.0",
+      "artifact_digest": "sha256:pending-runtime-migration",
+      "required_capabilities": ["navigation", "commands", "notifications"],
+      "allowed_families": ["graphical", "terminal"],
+      "approval": {
+        "state": "verified",
+        "provider_trust": "verified",
+        "grant_state": "not_minted",
+        "authority_mode": "none",
+        "execution_domain": "base-pack:defaults-basepack",
+        "effect_scope": [],
+        "blast_radius": "Base Pack selection grants no Host authority and does not mint a caller Grant."
+      }
+    }
+  ],
+  "shell_providers": [
+    {
+      "provider_id": "shell.tauri.default",
+      "display_name": "Tauri Desktop",
+      "contract_id": "app.shell.v1",
+      "contract_revision_digest": "sha256:app-shell-v1-reference",
+      "experience_role": "shell",
+      "presentation_kind": "packaged_process",
+      "presentation_family": "graphical",
+      "technology": "tauri",
+      "capabilities": ["navigation", "commands", "notifications", "rich_text", "windows", "file_drop"],
+      "contributions": [
+        {
+          "contribution_id": "ui.route.contribution.v1",
+          "contract_id": "ui.route.contribution.v1",
+          "family": "graphical",
+          "label": "Graphical routes"
+        },
+        {
+          "contribution_id": "ui.panel.contribution.v1",
+          "contract_id": "ui.panel.contribution.v1",
+          "family": "graphical",
+          "label": "Graphical panels"
+        },
+        {
+          "contribution_id": "ui.command.contribution.v1",
+          "contract_id": "ui.command.contribution.v1",
+          "family": "graphical",
+          "label": "Graphical commands"
+        }
+      ],
+      "artifact_variants": [
+        {
+          "artifact_id": "shell-tauri-default-macos-arm64",
+          "variant": "macos-arm64",
+          "platform": "macos",
+          "architecture": "arm64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true,
+          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
+        },
+        {
+          "artifact_id": "shell-tauri-default-macos-x86_64",
+          "variant": "macos-x86_64",
+          "platform": "macos",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true,
+          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
+        },
+        {
+          "artifact_id": "shell-tauri-default-windows-x86_64",
+          "variant": "windows-x86_64",
+          "platform": "windows",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true,
+          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
+        },
+        {
+          "artifact_id": "shell-tauri-default-linux-x86_64",
+          "variant": "linux-x86_64",
+          "platform": "linux",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true,
+          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
+        }
+      ],
+      "approval": {
+        "state": "verified",
+        "provider_trust": "verified",
+        "grant_state": "not_minted",
+        "authority_mode": "lease_only",
+        "execution_domain": "shell:shell.tauri.default",
+        "effect_scope": ["app.shell.v1", "ui.route.contribution.v1", "ui.panel.contribution.v1"],
+        "blast_radius": "Shell requests use the Host Broker; the Shell receives no ambient filesystem, network, process, credential, or OS authority."
+      }
+    },
+    {
+      "provider_id": "shell.cli.default",
+      "display_name": "CLI",
+      "contract_id": "app.shell.v1",
+      "contract_revision_digest": "sha256:app-shell-v1-reference",
+      "experience_role": "shell",
+      "presentation_kind": "terminal_stdio",
+      "presentation_family": "terminal",
+      "technology": "native",
+      "capabilities": ["navigation", "commands", "notifications"],
+      "contributions": [
+        {
+          "contribution_id": "cli.command.contribution.v1",
+          "contract_id": "cli.command.contribution.v1",
+          "family": "terminal",
+          "label": "CLI commands"
+        },
+        {
+          "contribution_id": "cli.renderer.contribution.v1",
+          "contract_id": "cli.renderer.contribution.v1",
+          "family": "terminal",
+          "label": "CLI renderer"
+        },
+        {
+          "contribution_id": "cli.completion.contribution.v1",
+          "contract_id": "cli.completion.contribution.v1",
+          "family": "terminal",
+          "label": "CLI completion"
+        }
+      ],
+      "artifact_variants": [
+        {
+          "artifact_id": "shell-cli-default-macos-arm64",
+          "variant": "macos-arm64",
+          "platform": "macos",
+          "architecture": "arm64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true
+        },
+        {
+          "artifact_id": "shell-cli-default-macos-x86_64",
+          "variant": "macos-x86_64",
+          "platform": "macos",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true
+        },
+        {
+          "artifact_id": "shell-cli-default-windows-x86_64",
+          "variant": "windows-x86_64",
+          "platform": "windows",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true
+        },
+        {
+          "artifact_id": "shell-cli-default-linux-x86_64",
+          "variant": "linux-x86_64",
+          "platform": "linux",
+          "architecture": "x86_64",
+          "path": null,
+          "sha256": null,
+          "prebuilt": true,
+          "production": true
+        }
+      ],
+      "approval": {
+        "state": "verified",
+        "provider_trust": "verified",
+        "grant_state": "not_minted",
+        "authority_mode": "lease_only",
+        "execution_domain": "shell:shell.cli.default",
+        "effect_scope": ["app.shell.v1", "cli.command.contribution.v1", "cli.renderer.contribution.v1"],
+        "blast_radius": "CLI input/output is structured and bounded; textual presentation does not imply unrestricted Host terminal authority."
+      }
+    }
+  ]
+}

@@ -28,6 +28,9 @@ import type {
   KernelRestartResponseData,
   OAuthStartResponseData,
   SetupStatusResponseData,
+  ApiPresentationState,
+  ApiPresentationSelection,
+  PresentationLaunchResponse,
   HealthResponseData,
   BackgroundControlStatus,
   DesktopSystemInfo,
@@ -260,6 +263,37 @@ export async function launchDefaultspackDesktop(): Promise<string> {
     }
     throw new Error(String(error || 'Failed to launch Defaultspack'));
   }
+}
+
+export async function fetchPresentationState(): Promise<ApiPresentationState> {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    return invoke<ApiPresentationState>('get_presentation_catalog');
+  }
+  return apiFetch<ApiPresentationState>('/api/panel/presentation/catalog');
+}
+
+export async function selectPresentation(
+  selection: ApiPresentationSelection,
+): Promise<ApiPresentationState> {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    return invoke<ApiPresentationState>('select_presentation', {selection});
+  }
+  return apiFetch<ApiPresentationState>('/api/panel/presentation/selection', {
+    method: 'POST',
+    body: JSON.stringify(selection),
+  });
+}
+
+export async function launchSelectedPresentation(): Promise<PresentationLaunchResponse> {
+  const invoke = await loadTauriInvoke();
+  if (invoke) {
+    return invoke<PresentationLaunchResponse>('launch_selected_presentation');
+  }
+  return apiFetch<PresentationLaunchResponse>('/api/panel/presentation/launch', {
+    method: 'POST',
+  });
 }
 
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {

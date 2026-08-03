@@ -24,6 +24,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/rumi_setup");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
+    println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
     println!("cargo:rerun-if-changed=capabilities");
 
     warn_legacy_defaultspack_app_bundle();
@@ -34,6 +35,9 @@ fn main() {
             "arm_debug_approval",
             "revoke_debug_approval",
             "coding_approval_operator",
+            "get_presentation_catalog",
+            "select_presentation",
+            "launch_selected_presentation",
         ]),
     ))
     .expect("failed to build Tauri application manifest")

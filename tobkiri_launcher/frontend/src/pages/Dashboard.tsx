@@ -11,7 +11,7 @@ import {
   duplicateStartupProfile,
   fetchDashboard,
   fetchStartupProfiles,
-  launchDefaultspackDesktop,
+  launchSelectedPresentation,
   launchStartupProfile,
   removePackFromStartupProfile,
   setStartupProfileNodeOverride,
@@ -149,10 +149,10 @@ export async function launchStartupProfileFromDashboard({
   try {
     await openDesktop();
   } catch (desktopError) {
-    setErrorFeedback(`Profile launched, but Defaultspack desktop did not open: ${translateError(desktopError, 'open Defaultspack desktop')}`);
+    setErrorFeedback(`Profile launched, but the selected Shell did not open: ${translateError(desktopError, 'open the selected Shell')}`);
     return;
   }
-  setSuccessFeedback('Profile launched. Defaultspack window opened.');
+  setSuccessFeedback('Profile launched. Selected Shell opened.');
 }
 
 function formatTimestamp(timestamp: number): string {
@@ -481,7 +481,7 @@ export function Dashboard() {
         launchProfile: launchStartupProfile,
         refreshProfiles,
         refreshDashboard,
-        openDesktop: launchDefaultspackDesktop,
+        openDesktop: launchSelectedPresentation,
         setSuccessFeedback,
         setErrorFeedback,
         translateError: translateActionError,

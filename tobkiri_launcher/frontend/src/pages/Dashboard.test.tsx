@@ -55,7 +55,7 @@ test('copyTextToClipboard copies the complete runtime error message', async () =
   assert.equal(copied, 'Kernel failed to start');
 });
 
-test('launch opens Defaultspack desktop after a restart handoff', async () => {
+test('launch opens the selected Shell after a restart handoff', async () => {
   const calls: string[] = [];
   await launchStartupProfileFromDashboard({
     profileId: 'p1',
@@ -87,11 +87,11 @@ test('launch opens Defaultspack desktop after a restart handoff', async () => {
     'refresh-profiles:p1',
     'refresh-dashboard',
     'open-desktop',
-    'success:Profile launched. Defaultspack window opened.',
+    'success:Profile launched. Selected Shell opened.',
   ]);
 });
 
-test('launch opens Defaultspack desktop immediately when no restart is requested', async () => {
+test('launch opens the selected Shell immediately when no restart is requested', async () => {
   const calls: string[] = [];
   await launchStartupProfileFromDashboard({
     profileId: 'p1',
@@ -123,6 +123,6 @@ test('launch opens Defaultspack desktop immediately when no restart is requested
     'refresh-profiles:p1',
     'refresh-dashboard',
     'open-desktop',
-    'success:Profile launched. Defaultspack window opened.',
+    'success:Profile launched. Selected Shell opened.',
   ]);
 });
