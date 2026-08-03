@@ -11,6 +11,7 @@ Supersedes: 既存のnamespace/runtime/fallback文書のうち本計画と矛盾
 Must be read with:
   - ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt
   - ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt
+  - ADR-016_BASE_SHELL_APPLICATION_MODEL.txt
 
 
 0. この文書の目的
@@ -190,7 +191,7 @@ Profileに100 Packが存在しても100 VMを起動しない。
 
   Artifact: Absent -> Staged -> Verified -> Installed -> Resolved
   Logical:  Resolved -> ProfileMember -> LogicallyActive -> Prepared -> Dormant
-  Physical: Dormant -> AdmissionPending -> Starting -> Attesting -> Ready
+  Physical: Dormant -> AdmissionPending -> Starting -> Evidencing -> Ready
             -> Busy <-> Idle -> Stopping -> Stopped
 
 on_demand/event_wake PackはDormantのままProfile commit可能とする。eager/continuousだけをactivation時のreadiness gateにする。
@@ -214,6 +215,69 @@ on_demand/event_wake PackはDormantのままProfile commit可能とする。eage
   - certified backendが使えなければunknown native/Python Packをactivation拒否する。
   - process-only、shared Lima/WSL、Docker、host executionへ弱くfallbackしない。
   - Wasm-compatible PackはWasmtime Component/WASIのL3を優先する。
+
+1.9 Base Pack、Shell Pack、Application Pack
+
+Base Packとpresentation technologyを直交させる。
+
+  - Base PackはProfileの機能構成rootであり、capability graph、default routing、
+    state owner、backend Provider、Tool/Workflow catalog、Shell要件を定義する。
+  - Base PackはTauri/Electron/CLI runtimeまたはHost authorityを暗黙に含まない。
+  - Shell Packはapp.shell.v1を実装し、ユーザー入出力とpresentation lifecycleを持つ。
+  - setup UIはBase Packを選択した後、compatibleなShell Providerを選択する。
+  - ProfileLockはexact Base Pack、Shell Pack、binding、ArtifactVariantをpinする。
+
+標準候補:
+
+  defaults-basepack
+    + shell.tauri.default
+    + shell.electron.default
+    + shell.cli.default
+
+Profileへ単なるtype=tauri/cli/electronを書いてRuntime Coreを分岐させない。
+内部ではexact app.shell.v1 Providerを解決する。experience role、presentation kind、
+technology、ExecutionDomainを別軸にする。
+
+  experience role:
+    shell、frontend_contribution、standalone_app、cli、headless
+
+  presentation kind:
+    declarative、isolated_web、packaged_process、terminal_stdio、remote_ui
+
+  technology metadata:
+    tauri、electron、native、web等。trust/authority classではない。
+
+CLI Shell選択時はcli.command/prompt/renderer/completion Contributionだけを解決し、
+GUI route/WebView/window artifactをmaterializeしない。Tauri/Electron Shellは
+graphical UI Contributionだけを解決する。同じPackがbackend ProviderとGUI/CLI両方の
+Contributionを提供してよいが、Shell非選択側は起動しない。Shell変更だけでbackend
+Provider identity、state owner、Host Grantを変更しない。
+
+Tauri integrationは三役へ分ける。
+
+  shell.tauri.*:
+    prebuilt Tauri Shell。app.shell.v1とisolated/declarative UI hostを提供。
+
+  runtime.tauri.application.*:
+    完成済みstandalone Tauri artifactの検証、起動、停止、観測を提供。
+
+  dev.tauri.toolchain.*:
+    cargo tauri dev、npm run dev、build、bundle等をDevelopment Realmだけで提供。
+
+production activationでcargo tauri dev、npm run dev、package install、source buildを
+実行しない。macOS .app、Windows bundle、Linux package等の完成済み署名variantを
+ProfileLockへpinする。Electronも同じ分離とし、framework overheadをresource会計する。
+
+standalone Application Packはfrontend、native backend、sidecar、Contract、
+ExecutionDomain、OS別ArtifactVariantを明示する。Tauri内部frontend/native commandは
+application内部通信にできるが、Pack間公開処理はContract、Host effectはADR-014を通す。
+任意PackのRust command/pluginをHost Tauri launcherまたは別Shellへlinkしない。
+
+現行desktop_app.commandは任意Host process起動にすぎず、Tauri対応を意味しない。
+v4 migration時にShell、standalone Application、CLI Contribution、backend Provider、
+Development toolchainへ分類し、productionではarbitrary command-string launchを削除する。
+
+正式仕様は docs/ADR-016_BASE_SHELL_APPLICATION_MODEL.txt を正本とする。
 
 
 2. 現在ブランチの具体的な状態
@@ -452,6 +516,15 @@ Inbound Brokerには署名検証/replay ledgerがあるが、実HTTP webhookはD
   tobkiri_sdk/rust/
   host_extension_sdk/
 
+  shells/
+    tauri_default/          app.shell.v1 graphical reference Shell
+    electron_default/       optional graphical Shell
+    cli_default/            structured terminal Shell
+
+  application_runtimes/
+    tauri/                  prebuilt standalone app validation/lifecycle
+    electron/
+
   contracts/
     foundation/
     community/
@@ -670,7 +743,7 @@ Phase 0: 正本と禁止事項を固定する
 
   - v1.1 schemasをtobkiri_protocol/schemasへ取り込む
   - Architecture Decision Recordを作る
-  - ADR-014/015と本計画をdocs route mapへ登録し、矛盾するlegacy文書をdeprecated表示
+  - ADR-014/015/016と本計画をdocs route mapへ登録し、矛盾するlegacy文書をdeprecated表示
   - Threat Model、TCB、non-goal、canonical precedenceを固定
   - repo commit/tree、根拠file digest、scanner versionを持つinventory JSON生成
   - Markdown/internal link、ADR index、schema/vector、legacy term、ID重複のCI
@@ -699,7 +772,7 @@ Phase 1: Protocol、schema、generated SDK
 
 実装:
 
-  - ADR-014/015をAcceptedとして固定し、security schemaの変更をADR必須にする
+  - ADR-014/015/016をAcceptedとして固定し、security/composition schemaの変更をADR必須にする
   - legacy permission IDの新規追加をfreezeする
   - productionのoff/observe modeがallowへfallbackする経路を禁止する
   - legacy bypass、raw socket、raw secret、Pack-writable Grant、host execution flagをCI scannerへ追加する
@@ -707,6 +780,8 @@ Phase 1: Protocol、schema、generated SDK
 
   - Contract、Operation、InvocationFrame、RequestEnvelope、Response、Error、Stream frame
   - Profile、ProfileLock、ResolvedPlan、ActivationRecord、RuntimeEvidence、MaterializationEvent
+  - BaseDefinition、ShellDefinition、ShellRequirement、ApplicationDefinition、PresentationContribution
+  - graphical UI Contributionとstructured CLI command/prompt/renderer/completion Contract
   - PolicyDecision、HostExtensionTrustRecord、ProviderAuthorityRecord、ApprovalRecord、GrantRecord、InvocationLease、ExecutionDomainRecord、ResourceHandle
   - Artifact/Distribution manifests
   - JCS canonicalizationとdigest API
@@ -767,6 +842,9 @@ Phase 3: deterministic resolverとatomic Profile activation
   - PackVMPoolKey（tenant domain、variant/base image/backend/agent/ABI/SecurityEpoch）と
     WorkloadInstanceKey（Profile/Activation/state generation/config/provider binding）を分離
   - requested caller -> Host Capability edgeとopaque Grant referenceだけをProfileへ記録し、authority値をProfileから生成しない
+  - exact Base Packとcompatible app.shell.v1 Providerを別bindingとしてresolve/pin
+  - Shell requirement、presentation family、Contribution compatibilityをcompileし、
+    incompatible ShellまたはGUI/CLI contribution混在を拒否
   - authority-equivalence classをcompileし、非同値principalのnative co-locationを拒否
   - 通常profile_revisionと権限関連部分だけのprofile_authority_digestを別生成
   - SecurityEpochをResolvedPlan、ActivationRecord、ProfileAuthoritySnapshotへbind
@@ -1061,27 +1139,32 @@ vertical slice順:
   1. Notification: external effect、Approval、Audit、idempotency
   2. Storage: state owner、handle、concurrency、quota
   3. AI text generation: stream、network、credential、cost、cancel
-  4. GUI Shell/Contribution
+  4. Base Pack + Tauri/CLI Shell/Contribution
   5. Workflow/Scheduler
   6. Connectors
   7. Marketplace/Distribution update
 
-Phase 12: GUI Shell/Contribution
+Phase 12: Base Pack、Shell Pack、Application/Contribution
 
 Host/TCBに残すUI:
 
   approval、principal/publisher表示、credential consent
   sandbox/isolation status、security errors、update trust warning
 
-交換可能GUI Pack:
+交換可能Shell Pack:
 
-  shell layout、theme token、normal navigation
-  screen/panel/command/widget contributions
+  - shell.tauri.default: window/WebView、layout、theme、normal navigation、GUI Contribution host
+  - shell.electron.default: Electron window/runtime、GUI Contribution host
+  - shell.cli.default: structured command、stdin/stdout/stderr、TTY、prompt、renderer、completion
+  - Shellはapp.shell.v1 Providerであり、Profileごとにexact一つをpin
 
 実装:
 
-  - ProfileごとにGUI Shell Provider 1つ
-  - contribution descriptor Contract
+  - setup UIをBase Pack選択 -> compatible Shell Provider選択の二段階にする
+  - Base Packはbackend graph/state owner/Shell requirementsを持ち、technologyを持たない
+  - graphicalとCLIのcontribution descriptor Contractを分離
+  - selected ShellがconsumeするContributionだけresolve/materialize
+  - GUI/CLI両対応Packはpresentation別artifactを持ち、backend Providerを共有
   - Packごとのdedicated originまたはallow-same-originなしopaque sandbox
   - storage/service worker/cache/cookie/permission/navigation/download/message partition
   - strict CSP、Permissions Policy、no top navigation、service worker default deny
@@ -1091,8 +1174,25 @@ Host/TCBに残すUI:
   - Profile swap時にroute/listener/timer/handleをrevoke
   - approval/security stateはPackがcover/intercept/navigate/synthesizeできない
     Host-owned surfaceとunforgeable trusted-attention cueで表示
+  - structured CLI protocolはargument、stdin/stdout/stderr、TTY、prompt、completion、
+    resize、signal、exit status、stream、cancel、output limitをversion化
+  - standalone Application manifestはfrontend/native backend/sidecar/Contract/
+    ExecutionDomain/OS別ArtifactVariantを明示
+  - shell.tauri、runtime.tauri.application、dev.tauri.toolchainを別Pack/Contractにする
+  - productionはprebuilt signed Tauri/Electron artifactだけを起動し、dev commandを拒否
+  - legacy desktop_app.commandを分類・移行し、v4 productionからarbitrary command launchを削除
 
-Defaultspack Web UIは交換可能Shell Packへ移し、LauncherはHost/security chromeへ縮小する。
+Defaultspackのbackend graphをdefaults-basepackへ移し、通常Web UIは明示Shell Packへ
+移す。LauncherはHost/security chromeとShell bootstrapへ縮小する。Shell変更だけでは
+backend Provider identity、state、Grantを変更しない。
+
+完了条件:
+
+  - defaults-basepackからTauri/CLI Shellを選び分け、backend conformance結果が一致する。
+  - CLI選択でGUI/WebView/window artifactのmaterializationが0件。
+  - Tauri選択でCLI/TTY Contributionがambient有効化されない。
+  - cargo tauri dev/npm run devはProduction RealmのLaunchから到達不能。
+  - arbitrary Pack native plugin/Rust commandをHost Tauri processへloadしない。
 
 Phase 13: Workflow PackとScheduler Pack
 
@@ -1389,17 +1489,21 @@ PR-17 macOS backend production gateを有効化
 PR-18 Notification Host Capability vertical slice
 PR-19 Storage Contract/private state/migration
 PR-20 AI streaming/egress/credential-use/remote Provider semantics
-PR-21 GUI origin partition/trusted-attention surface
-PR-22 Trigger/Wake Kernel
-PR-23 Workflow state machine/Scheduler/editor connection
-PR-24 Connector gateway
-PR-25 Linux Firecracker backend（feature-disabled -> conformance後enable）
-PR-26 Windows WHPX backend（feature-disabled -> conformance後enable）
-PR-27 Pack migration: Notification/Storage state owners
-PR-28 Pack migration: AI/Connector state owners
-PR-29 Pack migration: GUI/Workflow state owners
-PR-30 remaining Contract owner単位migration
-PR-31 legacy deletion and baseline zero
+PR-21 Base/Shell/Application/Contribution schemaとProfile二段階selection
+PR-22 shell.cli.default + structured CLI protocol vertical slice
+PR-23 shell.tauri.default + prebuilt Tauri ArtifactVariant vertical slice
+PR-24 GUI origin partition/trusted-attention surface
+PR-25 runtime.tauri.application + Development Realm dev.tauri.toolchain分離
+PR-26 Trigger/Wake Kernel
+PR-27 Workflow state machine/Scheduler/editor connection
+PR-28 Connector gateway
+PR-29 Linux Firecracker backend（feature-disabled -> conformance後enable）
+PR-30 Windows WHPX backend（feature-disabled -> conformance後enable）
+PR-31 Pack migration: Notification/Storage state owners
+PR-32 Pack migration: AI/Connector state owners
+PR-33 Pack migration: Base/default Shell/GUI/Workflow state owners
+PR-34 remaining Contract owner単位migration
+PR-35 legacy desktop_app.command/direct launch deletion and baseline zero
 
 各PRは、schema、implementation、unit test、conformance vector、fault test、docsを同時に含める。security invariantを後続PRに先送りしない。unverified CASはquarantine専用、Broker/authority/audit/admission/SecurityEpoch/lifecycle完成前のbackendはfeature-disabledかconformance harness専用とし、temporary direct-call fallbackを作らない。
 
@@ -1426,12 +1530,14 @@ PR-31 legacy deletion and baseline zero
     -> Accepted。docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txtを正本とする。
   ADR-015 Runtime security lifecycle, admission, activation, distribution, and effects
     -> Accepted。docs/ADR-015_RUNTIME_SECURITY_LIFECYCLE.txtを正本とする。
-  ADR-016 remote ProviderのTLS pin/region/retention詳細
-  ADR-017 event-wake/background leaseとbattery policy詳細
-  ADR-018 FunctionPrincipal authority-equivalenceとExecutionDomain co-location条件詳細
-  ADR-018 old/new runtime併存期間と強制終了条件
-  ADR-019 state reset対象と残すユーザー設定
-  ADR-020 benchmark合格値（p95 boot/RAM/disk/cleanup）
+  ADR-016 Base Pack, Shell Pack, and application presentation model
+    -> Accepted。docs/ADR-016_BASE_SHELL_APPLICATION_MODEL.txtを正本とする。
+  ADR-017 remote ProviderのTLS pin/region/retention詳細
+  ADR-018 event-wake/background leaseとbattery policy詳細
+  ADR-019 FunctionPrincipal authority-equivalenceとExecutionDomain co-location条件詳細
+  ADR-020 old/new runtime併存期間と強制終了条件
+  ADR-021 state reset対象と残すユーザー設定
+  ADR-022 benchmark合格値（p95 boot/RAM/disk/cleanup）
 
 
 10. 完成の定義
@@ -1444,6 +1550,10 @@ PR-31 legacy deletion and baseline zero
   - FunctionRegistry、legacy route、python_file_call、host fallbackがない。
   - install/resolveでPack codeを実行しない。
   - Profileがexact artifact/provider/schema/isolationをdeterministicにpinする。
+  - ProfileがBase Packとcompatible Shell Providerを別bindingとしてpinする。
+  - defaults-basepackをTauri/CLI Shellで共有し、backend state/routingを複製しない。
+  - CLI ShellではGUI artifact、Tauri Shellではambient TTY contributionを起動しない。
+  - Production launchからcargo tauri dev/npm run dev/arbitrary command stringへ到達できない。
   - logical activationとmaterializationが分離される。
   - unknown native/Python Packはcertified L4だけで起動する。
   - internal sandbox操作は不要な承認なしで動き、境界越えだけGrantされる。

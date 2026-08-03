@@ -7,7 +7,8 @@
   "normative_documents": [
     "tobkiri_runtime/docs/TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt",
     "tobkiri_runtime/docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt",
-    "tobkiri_runtime/docs/ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt"
+    "tobkiri_runtime/docs/ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt",
+    "tobkiri_runtime/docs/ADR-016_BASE_SHELL_APPLICATION_MODEL.txt"
   ],
   "informative_external_inputs": [
     {
