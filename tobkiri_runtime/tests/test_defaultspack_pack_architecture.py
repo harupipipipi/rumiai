@@ -266,7 +266,10 @@ def test_legacy_explicit_provider_can_migrate_without_command() -> None:
         "provider": "shell.tauri.default",
         "source": "legacy.explicit_shell_provider",
     }
-    assert migrated["migration"]["status"] == "migrated"
+    assert migrated["migration"]["status"] == "review_required"
+    assert migrated["migration"]["selection_mode"] == "explicit_exact_provider"
+    assert migrated["activation_eligible"] is False
+    assert migrated["authority_minted"] is False
 
 
 def test_legacy_unknown_shell_provider_is_rejected() -> None:

@@ -1,192 +1,538 @@
 {
-  "schema": "io.tobkiri.launcher.presentation-catalog.v1",
   "base_packs": [
     {
-      "pack_id": "defaults-basepack",
-      "display_name": "Defaults Base Pack",
-      "version": "4.0.0",
-      "artifact_digest": "sha256:pending-runtime-migration",
-      "required_capabilities": ["navigation", "commands", "notifications"],
-      "allowed_families": ["graphical", "terminal"],
+      "allowed_families": [
+        "graphical",
+        "terminal"
+      ],
       "approval": {
-        "state": "verified",
-        "provider_trust": "verified",
-        "grant_state": "not_minted",
         "authority_mode": "none",
-        "execution_domain": "base-pack:defaults-basepack",
+        "blast_radius": "Base Pack selection grants no Host authority and does not mint a caller Grant.",
         "effect_scope": [],
-        "blast_radius": "Base Pack selection grants no Host authority and does not mint a caller Grant."
-      }
+        "execution_domain": "base-pack:defaults-basepack",
+        "grant_state": "not_minted",
+        "provider_trust": "verified",
+        "state": "verified"
+      },
+      "artifact_digest": "sha256:7101a2bde3e6ff3192e3474199cd61a95f6945b2ed81214188ccd9dfaf7d68ee",
+      "backend_identity_digest": "sha256:8958ebf0857152be8473441d19bfc88aaf629c6aafe1ee6c49fcd5f6ae552610",
+      "backend_provider_ids": [
+        "defaultspack"
+      ],
+      "display_name": "Tobkiri Defaults Base Pack",
+      "pack_id": "defaults-basepack",
+      "required_capabilities": [
+        "navigation",
+        "commands",
+        "notifications",
+        "rich_text",
+        "interactive_prompt"
+      ],
+      "state_owners": [
+        "defaultspack.conversation",
+        "defaultspack.agent",
+        "defaultspack.tool_catalog",
+        "defaultspack.local_settings"
+      ],
+      "version": "4.0.0"
     }
   ],
-  "shell_providers": [
+  "contract_revisions": [
     {
-      "provider_id": "shell.tauri.default",
-      "display_name": "Tauri Desktop",
       "contract_id": "app.shell.v1",
-      "contract_revision_digest": "sha256:app-shell-v1-reference",
-      "experience_role": "shell",
-      "presentation_kind": "packaged_process",
-      "presentation_family": "graphical",
-      "technology": "tauri",
-      "capabilities": ["navigation", "commands", "notifications", "rich_text", "windows", "file_drop"],
-      "contributions": [
-        {
-          "contribution_id": "ui.route.contribution.v1",
-          "contract_id": "ui.route.contribution.v1",
-          "family": "graphical",
-          "label": "Graphical routes"
-        },
-        {
-          "contribution_id": "ui.panel.contribution.v1",
-          "contract_id": "ui.panel.contribution.v1",
-          "family": "graphical",
-          "label": "Graphical panels"
-        },
-        {
-          "contribution_id": "ui.command.contribution.v1",
-          "contract_id": "ui.command.contribution.v1",
-          "family": "graphical",
-          "label": "Graphical commands"
-        }
-      ],
-      "artifact_variants": [
-        {
-          "artifact_id": "shell-tauri-default-macos-arm64",
-          "variant": "macos-arm64",
-          "platform": "macos",
-          "architecture": "arm64",
-          "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true,
-          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
-        },
-        {
-          "artifact_id": "shell-tauri-default-macos-x86_64",
-          "variant": "macos-x86_64",
-          "platform": "macos",
-          "architecture": "x86_64",
-          "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true,
-          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
-        },
-        {
-          "artifact_id": "shell-tauri-default-windows-x86_64",
-          "variant": "windows-x86_64",
-          "platform": "windows",
-          "architecture": "x86_64",
-          "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true,
-          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
-        },
-        {
-          "artifact_id": "shell-tauri-default-linux-x86_64",
-          "variant": "linux-x86_64",
-          "platform": "linux",
-          "architecture": "x86_64",
-          "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true,
-          "bundle_identifier": "dev.tobkiri.shell.tauri.default"
-        }
-      ],
-      "approval": {
-        "state": "verified",
-        "provider_trust": "verified",
-        "grant_state": "not_minted",
-        "authority_mode": "lease_only",
-        "execution_domain": "shell:shell.tauri.default",
-        "effect_scope": ["app.shell.v1", "ui.route.contribution.v1", "ui.panel.contribution.v1"],
-        "blast_radius": "Shell requests use the Host Broker; the Shell receives no ambient filesystem, network, process, credential, or OS authority."
-      }
+      "digest": "sha256:99de05424a29759cb1e6d6424442314495170b0f083cb5d22140336202854318",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/tobkiri_protocol/schemas/shell_definition_v1.schema.json"
     },
     {
-      "provider_id": "shell.cli.default",
-      "display_name": "CLI",
-      "contract_id": "app.shell.v1",
-      "contract_revision_digest": "sha256:app-shell-v1-reference",
-      "experience_role": "shell",
-      "presentation_kind": "terminal_stdio",
-      "presentation_family": "terminal",
-      "technology": "native",
-      "capabilities": ["navigation", "commands", "notifications"],
-      "contributions": [
-        {
-          "contribution_id": "cli.command.contribution.v1",
-          "contract_id": "cli.command.contribution.v1",
-          "family": "terminal",
-          "label": "CLI commands"
-        },
-        {
-          "contribution_id": "cli.renderer.contribution.v1",
-          "contract_id": "cli.renderer.contribution.v1",
-          "family": "terminal",
-          "label": "CLI renderer"
-        },
-        {
-          "contribution_id": "cli.completion.contribution.v1",
-          "contract_id": "cli.completion.contribution.v1",
-          "family": "terminal",
-          "label": "CLI completion"
-        }
-      ],
+      "contract_id": "cli.command.contribution.v1",
+      "digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/tobkiri_protocol/schemas/cli_io_v1.schema.json"
+    },
+    {
+      "contract_id": "cli.io.v1",
+      "digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/tobkiri_protocol/schemas/cli_io_v1.schema.json"
+    },
+    {
+      "contract_id": "cli.renderer.contribution.v1",
+      "digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/tobkiri_protocol/schemas/cli_io_v1.schema.json"
+    },
+    {
+      "contract_id": "ui.panel.contribution.v1",
+      "digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/assets/schemas/presentation-contribution.v1.schema.json"
+    },
+    {
+      "contract_id": "ui.route.contribution.v1",
+      "digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/assets/schemas/presentation-contribution.v1.schema.json"
+    }
+  ],
+  "default_profile_digest": "sha256:e3352140a60798e75b68c4d2ea5fd224144dfdb7ecda682a0be26fe52d659e5a",
+  "default_profile_id": "defaults-modern",
+  "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/profiles/defaults-modern.profile.yaml",
+  "default_selection": {
+    "base_pack_id": "defaults-basepack",
+    "shell_provider_id": "shell.tauri.default"
+  },
+  "generated_at": 0,
+  "generator": "tobkiri-defaultspack-presentation-catalog",
+  "generator_version": "1.0.0",
+  "schema": "io.tobkiri.launcher.presentation-catalog.v1",
+  "shell_providers": [
+    {
+      "approval": {
+        "authority_mode": "lease_only",
+        "blast_radius": "CLI input/output is structured and bounded; textual presentation does not imply unrestricted Host terminal authority.",
+        "effect_scope": [
+          "app.shell.v1",
+          "cli.command.contribution.v1",
+          "cli.renderer.contribution.v1"
+        ],
+        "execution_domain": "shell:shell.cli.default",
+        "grant_state": "not_minted",
+        "provider_trust": "verified",
+        "state": "verified"
+      },
       "artifact_variants": [
         {
-          "artifact_id": "shell-cli-default-macos-arm64",
-          "variant": "macos-arm64",
-          "platform": "macos",
           "architecture": "arm64",
+          "artifact_id": "shell.cli.default.macos-arm64",
+          "artifact_kind": "signed_prebuilt_binary",
+          "artifact_ref": "artifacts/variants/macos-arm64.json",
+          "bundle_identifier": null,
+          "descriptor_digest": "sha256:9eac0ef24ae748c425cff8f9de8710701e6484d5d86872f28a01ce0a9a5f5d26",
+          "development_command": null,
+          "entrypoint": "tobkiri-cli",
           "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true
-        },
-        {
-          "artifact_id": "shell-cli-default-macos-x86_64",
-          "variant": "macos-x86_64",
           "platform": "macos",
-          "architecture": "x86_64",
-          "path": null,
-          "sha256": null,
           "prebuilt": true,
-          "production": true
+          "production": true,
+          "sha256": null,
+          "variant": "macos-arm64"
         },
         {
-          "artifact_id": "shell-cli-default-windows-x86_64",
-          "variant": "windows-x86_64",
-          "platform": "windows",
           "architecture": "x86_64",
+          "artifact_id": "shell.cli.default.linux-x86_64",
+          "artifact_kind": "signed_prebuilt_binary",
+          "artifact_ref": "artifacts/variants/linux-x86_64.json",
+          "bundle_identifier": null,
+          "descriptor_digest": "sha256:22c55273350f1eb61733d1b8a4ba7e81fc7b0fd66b7c74446ccc2d5698d65ad9",
+          "development_command": null,
+          "entrypoint": "tobkiri-cli",
           "path": null,
-          "sha256": null,
-          "prebuilt": true,
-          "production": true
-        },
-        {
-          "artifact_id": "shell-cli-default-linux-x86_64",
-          "variant": "linux-x86_64",
           "platform": "linux",
-          "architecture": "x86_64",
-          "path": null,
-          "sha256": null,
           "prebuilt": true,
-          "production": true
+          "production": true,
+          "sha256": null,
+          "variant": "linux-x86_64"
+        },
+        {
+          "architecture": "x86_64",
+          "artifact_id": "shell.cli.default.windows-x86_64",
+          "artifact_kind": "signed_prebuilt_binary",
+          "artifact_ref": "artifacts/variants/windows-x86_64.json",
+          "bundle_identifier": null,
+          "descriptor_digest": "sha256:efc1ddc19ab618cf0f072c29acc2a52ba68a54c81a3317ad9caf61e84360ea69",
+          "development_command": null,
+          "entrypoint": "tobkiri-cli.exe",
+          "path": null,
+          "platform": "windows",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "windows-x86_64"
         }
       ],
+      "capabilities": [
+        "navigation",
+        "commands",
+        "notifications",
+        "rich_text",
+        "interactive_prompt",
+        "terminal_table",
+        "structured_stdio",
+        "completion",
+        "resize",
+        "cancellation"
+      ],
+      "consumes_contracts": [
+        "cli.command.contribution.v1",
+        "cli.renderer.contribution.v1"
+      ],
+      "contract_id": "app.shell.v1",
+      "contract_revision_digest": "sha256:99de05424a29759cb1e6d6424442314495170b0f083cb5d22140336202854318",
+      "contributions": [
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.route.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.graphical",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical routes",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.panel.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.panel",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical panels",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.command.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.command",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI commands",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.renderer.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.renderer",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI renderer",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        }
+      ],
+      "display_name": "Tobkiri CLI Shell",
+      "experience_role": "shell",
+      "presentation_family": "terminal",
+      "presentation_kind": "terminal_stdio",
+      "protocol_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+      "provider_id": "shell.cli.default",
+      "technology": "cli"
+    },
+    {
       "approval": {
-        "state": "verified",
-        "provider_trust": "verified",
-        "grant_state": "not_minted",
         "authority_mode": "lease_only",
-        "execution_domain": "shell:shell.cli.default",
-        "effect_scope": ["app.shell.v1", "cli.command.contribution.v1", "cli.renderer.contribution.v1"],
-        "blast_radius": "CLI input/output is structured and bounded; textual presentation does not imply unrestricted Host terminal authority."
-      }
+        "blast_radius": "Shell requests use the Host Broker; Electron receives no ambient filesystem, network, process, credential, or OS authority.",
+        "effect_scope": [
+          "app.shell.v1",
+          "ui.route.contribution.v1",
+          "ui.panel.contribution.v1"
+        ],
+        "execution_domain": "shell:shell.electron.default",
+        "grant_state": "not_minted",
+        "provider_trust": "verified",
+        "state": "verified"
+      },
+      "artifact_variants": [
+        {
+          "architecture": "arm64",
+          "artifact_id": "shell.electron.default.macos-arm64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/macos-arm64.json",
+          "bundle_identifier": "io.tobkiri.shell.electron",
+          "descriptor_digest": "sha256:f9107f873ca689b351382f78cfde32661f290e979eb03c64588e71542357ceb7",
+          "development_command": null,
+          "entrypoint": "Tobkiri Electron.app/Contents/MacOS/tobkiri-electron",
+          "path": null,
+          "platform": "macos",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "macos-arm64"
+        },
+        {
+          "architecture": "x86_64",
+          "artifact_id": "shell.electron.default.linux-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/linux-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.electron",
+          "descriptor_digest": "sha256:5b3d87bffde619c21aab4375922109437f4f4329d0b196fdc0df98b5f424ddb5",
+          "development_command": null,
+          "entrypoint": "tobkiri-electron.AppImage",
+          "path": null,
+          "platform": "linux",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "linux-x86_64"
+        },
+        {
+          "architecture": "x86_64",
+          "artifact_id": "shell.electron.default.windows-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/windows-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.electron",
+          "descriptor_digest": "sha256:2944b8b305be4d09689167998ddec7bc4ef5a84c697c8f6ff85918458fb83d72",
+          "development_command": null,
+          "entrypoint": "Tobkiri Electron.exe",
+          "path": null,
+          "platform": "windows",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "windows-x86_64"
+        }
+      ],
+      "capabilities": [
+        "navigation",
+        "commands",
+        "notifications",
+        "rich_text",
+        "interactive_prompt",
+        "windows",
+        "file_drop"
+      ],
+      "consumes_contracts": [
+        "ui.route.contribution.v1",
+        "ui.panel.contribution.v1"
+      ],
+      "contract_id": "app.shell.v1",
+      "contract_revision_digest": "sha256:99de05424a29759cb1e6d6424442314495170b0f083cb5d22140336202854318",
+      "contributions": [
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.route.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.graphical",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical routes",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.panel.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.panel",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical panels",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.command.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.command",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI commands",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.renderer.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.renderer",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI renderer",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        }
+      ],
+      "display_name": "Tobkiri Electron Desktop Shell",
+      "experience_role": "shell",
+      "presentation_family": "graphical",
+      "presentation_kind": "packaged_process",
+      "provider_id": "shell.electron.default",
+      "technology": "electron"
+    },
+    {
+      "approval": {
+        "authority_mode": "lease_only",
+        "blast_radius": "Shell requests use the Host Broker; the Shell receives no ambient filesystem, network, process, credential, or OS authority.",
+        "effect_scope": [
+          "app.shell.v1",
+          "ui.route.contribution.v1",
+          "ui.panel.contribution.v1"
+        ],
+        "execution_domain": "shell:shell.tauri.default",
+        "grant_state": "not_minted",
+        "provider_trust": "verified",
+        "state": "verified"
+      },
+      "artifact_variants": [
+        {
+          "architecture": "arm64",
+          "artifact_id": "shell.tauri.default.macos-arm64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/macos-arm64.json",
+          "bundle_identifier": "io.tobkiri.shell.tauri",
+          "descriptor_digest": "sha256:8256fd436c35709cd87e9937529898d0590b5a9d354ef98509be33aeadad99a8",
+          "development_command": null,
+          "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+          "path": null,
+          "platform": "macos",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "macos-arm64"
+        },
+        {
+          "architecture": "x86_64",
+          "artifact_id": "shell.tauri.default.linux-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/linux-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.tauri",
+          "descriptor_digest": "sha256:beaf0eafc50317e63314e737cdbedf80469f01c77cc4316c520b44769d90997f",
+          "development_command": null,
+          "entrypoint": "tobkiri-shell.AppImage",
+          "path": null,
+          "platform": "linux",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "linux-x86_64"
+        },
+        {
+          "architecture": "x86_64",
+          "artifact_id": "shell.tauri.default.windows-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/windows-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.tauri",
+          "descriptor_digest": "sha256:5751f60e3324e732862b36925d70d649d1fdede97ba6b0d0f4ff56cc1383b28e",
+          "development_command": null,
+          "entrypoint": "Tobkiri.exe",
+          "path": null,
+          "platform": "windows",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "windows-x86_64"
+        }
+      ],
+      "capabilities": [
+        "navigation",
+        "commands",
+        "notifications",
+        "rich_text",
+        "interactive_prompt",
+        "windows",
+        "file_drop"
+      ],
+      "consumes_contracts": [
+        "ui.route.contribution.v1",
+        "ui.panel.contribution.v1"
+      ],
+      "contract_id": "app.shell.v1",
+      "contract_revision_digest": "sha256:99de05424a29759cb1e6d6424442314495170b0f083cb5d22140336202854318",
+      "contributions": [
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.route.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.graphical",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical routes",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.graphical.json",
+          "contract_id": "ui.panel.contribution.v1",
+          "contract_revision_digest": "sha256:b76391816d6c02cbe648100b73449aa372d50d30072f6dc5763fa54df3289a11",
+          "contribution_id": "defaultspack.ui.panel",
+          "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+          "family": "graphical",
+          "host_authority": "none",
+          "label": "Graphical panels",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "declarative",
+          "technology": "web"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.command.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.command",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI commands",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        },
+        {
+          "artifact_ref": "../../contributions/defaultspack.cli.json",
+          "contract_id": "cli.renderer.contribution.v1",
+          "contract_revision_digest": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+          "contribution_id": "defaultspack.cli.renderer",
+          "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+          "family": "terminal",
+          "host_authority": "structured_protocol_only",
+          "label": "CLI renderer",
+          "materialization": "selected_only",
+          "owner_pack_id": "defaultspack",
+          "presentation_kind": "terminal_stdio",
+          "technology": "cli"
+        }
+      ],
+      "display_name": "Tobkiri Tauri Desktop Shell",
+      "experience_role": "shell",
+      "presentation_family": "graphical",
+      "presentation_kind": "packaged_process",
+      "provider_id": "shell.tauri.default",
+      "technology": "tauri"
     }
-  ]
+  ],
+  "source_manifest_digests": {
+    "defaults-basepack": "sha256:7101a2bde3e6ff3192e3474199cd61a95f6945b2ed81214188ccd9dfaf7d68ee",
+    "defaultspack": "sha256:7dc455d2c2e5a86021ca7638a2142b1940b45b33ebe9ec8eef2586f8405e4b8e",
+    "dev.electron.toolchain.default": "sha256:c0af09cd94aa2f75b0c101018f8266eac525da59b7a48f3f132934501052151b",
+    "dev.tauri.toolchain.default": "sha256:b447bc1d8ff508dbc458c6a9460c2cc1a94d5f3ba02bebd7daf11327f81bb6c4",
+    "runtime.electron.application.default": "sha256:3c0055227c8f4e4988e6f5115aa7714306887ce61026fbaf2076399fab1c674a",
+    "runtime.tauri.application.default": "sha256:72b713b264f72c47d8e310bd5e103962d6bb4f61f35b01518d26bada2bb800fb",
+    "shell.cli.default": "sha256:e9983c53d0ab96e2233310d126a0c8a63853bf07e4e936f84c827ca0ff05f518",
+    "shell.electron.default": "sha256:62d3a0923d4cdc2691f02c864e81969ae671a4ddaca6c2960d20700b9e834318",
+    "shell.tauri.default": "sha256:3d55268b164708ce4a8363a283076773ae1b62138edff3acc306def3dac5aab0"
+  }
 }

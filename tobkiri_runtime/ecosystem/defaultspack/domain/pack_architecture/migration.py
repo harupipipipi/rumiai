@@ -14,7 +14,8 @@ from typing import Any, Mapping
 
 import yaml  # type: ignore[import-untyped]
 
-from .errors import LegacyMigrationError
+from .catalog import PackCatalog
+from .errors import CatalogError, LegacyMigrationError
 from .model import APP_SHELL_CONTRACT, PROFILE_SCHEMA
 
 LEGACY_BASE_PACK_ALIASES = {
@@ -23,15 +24,12 @@ LEGACY_BASE_PACK_ALIASES = {
     "defaults": "defaults-basepack",
     "defaults-basepack": "defaults-basepack",
 }
-KNOWN_SHELL_PROVIDERS = frozenset(
-    {"shell.tauri.default", "shell.electron.default", "shell.cli.default"}
-)
 
 
 def migrate_legacy_profile(
     legacy_profile: Mapping[str, Any],
     *,
-    known_shell_providers: frozenset[str] = KNOWN_SHELL_PROVIDERS,
+    known_shell_providers: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Convert a legacy profile into reviewable v4 composition data.
 
@@ -41,6 +39,15 @@ def migrate_legacy_profile(
     """
     if not isinstance(legacy_profile, Mapping):
         raise LegacyMigrationError("legacy profile must be an object")
+    if known_shell_providers is None:
+        try:
+            known_shell_providers = frozenset(
+                pack.pack_id for pack in PackCatalog.from_assets_root().shell_providers()
+            )
+        except CatalogError as exc:
+            raise LegacyMigrationError(
+                "cannot load the checked-in Shell Provider catalog for migration"
+            ) from exc
     profile_id = str(legacy_profile.get("profile_id") or "legacy-migrated").strip()
     if not profile_id:
         raise LegacyMigrationError("legacy profile_id cannot be empty")
@@ -104,9 +111,11 @@ def migrate_legacy_profile(
         },
         "migration": {
             "source_schema": str(legacy_profile.get("version") or "rumi.profile.v1"),
-            "status": "review_required"
-            if command or not explicit_provider
-            else "shell_selection_required",
+            "status": "review_required",
+            "review_required": True,
+            "selection_mode": (
+                "explicit_exact_provider" if explicit_provider else "provider_selection_required"
+            ),
             "legacy_inputs": inventory,
             "command_execution": "forbidden",
             "production_fallback": "deny",
@@ -119,7 +128,9 @@ def migrate_legacy_profile(
             "source": "legacy.explicit_shell_provider",
         }
         if not command:
-            migrated["migration"]["status"] = "migrated"
+            migrated["migration"]["status"] = "review_required"
+    migrated["activation_eligible"] = False
+    migrated["authority_minted"] = False
     platform_value = legacy_profile.get("platform")
     if isinstance(platform_value, Mapping):
         platform_data = {

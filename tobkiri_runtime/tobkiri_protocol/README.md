@@ -15,9 +15,14 @@ Useful checks from the repository root:
 python scripts/quality/validate_pack_architecture.py --write-schema-hashes --write-inventory
 python scripts/quality/validate_pack_architecture.py
 python scripts/quality/migrate_legacy_profile.py path/to/profile.json --output migrated.profile.json
+python scripts/quality/generate_presentation_catalog.py --check
 ```
 
 The migration output is always review-only and cannot activate a profile or
 carry authority references. The security/runtime core owns runtime dataclasses
 and enforcement types; it should consume validated documents rather than
 importing execution behavior from this package.
+
+The `cli_io` schema alias validates the newline-delimited structured protocol
+used by the `tobkiri-cli --structured-stdio` Shell entrypoint. Its command set
+is closed and does not represent arbitrary Host terminal execution.

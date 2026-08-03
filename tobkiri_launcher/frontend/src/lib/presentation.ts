@@ -75,14 +75,11 @@ export function compatibleShellProviders(
 export function defaultPresentationSelection(
   catalog: ApiPresentationCatalog,
 ): ApiPresentationSelection | null {
-  const basePack = catalog.base_packs[0];
-  if (!basePack) return null;
-  const shell = compatibleShellProviders(catalog, basePack.pack_id)[0];
-  if (!shell) return null;
-  return {
-    base_pack_id: basePack.pack_id,
-    shell_provider_id: shell.provider_id,
-  };
+  const selection = catalog.default_selection;
+  if (!selection) return null;
+  const basePack = findBasePack(catalog, selection.base_pack_id);
+  const shell = findShellProvider(catalog, selection.shell_provider_id);
+  return checkShellCompatibility(basePack, shell).compatible ? selection : null;
 }
 
 export function normalizePresentationSelection(
@@ -103,7 +100,12 @@ export function selectShellAfterBaseChange(
   currentShellId: string,
 ): ApiPresentationSelection | null {
   const compatible = compatibleShellProviders(catalog, basePackId);
-  const shell = compatible.find((candidate) => candidate.provider_id === currentShellId) ?? compatible[0];
+  const shell = compatible.find((candidate) => candidate.provider_id === currentShellId)
+    ?? (catalog.default_selection.base_pack_id === basePackId
+      ? compatible.find(
+        (candidate) => candidate.provider_id === catalog.default_selection.shell_provider_id,
+      )
+      : undefined);
   return shell
     ? {base_pack_id: basePackId, shell_provider_id: shell.provider_id}
     : null;

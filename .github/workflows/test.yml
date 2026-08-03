@@ -305,6 +305,17 @@ jobs:
       - name: Validate v4 schemas, provenance, and generated inventory
         run: python scripts/quality/validate_pack_architecture.py
 
+      - name: Verify generated Tobkiri Launcher presentation catalog
+        run: python scripts/quality/generate_presentation_catalog.py --check
+
+      - name: Exercise Base Pack/Shell and structured CLI integration
+        run: |
+          python -m pip install pytest
+          PYTHONPATH=tobkiri_runtime python -m pytest -q \
+            tobkiri_runtime/tests/test_defaultspack_pack_architecture.py \
+            tobkiri_runtime/tests/test_presentation_catalog_generator.py \
+            tobkiri_runtime/tests/test_cli_shell_protocol.py
+
   conversation-steer:
     name: Conversation steer
     runs-on: ubuntu-latest

@@ -9,6 +9,11 @@ from .errors import (
 )
 from .materializer import materialize_selected_artifacts
 from .migration import migrate_legacy_profile, migrate_legacy_profile_file
+from .presentation_catalog import (
+    generate_presentation_catalog,
+    presentation_catalog_drift,
+    write_presentation_catalog,
+)
 from .model import (
     APP_SHELL_CONTRACT,
     PACK_SCHEMA,
@@ -38,5 +43,8 @@ __all__ = [
     "materialize_selected_artifacts",
     "migrate_legacy_profile",
     "migrate_legacy_profile_file",
+    "generate_presentation_catalog",
+    "presentation_catalog_drift",
     "resolve_profile",
+    "write_presentation_catalog",
 ]

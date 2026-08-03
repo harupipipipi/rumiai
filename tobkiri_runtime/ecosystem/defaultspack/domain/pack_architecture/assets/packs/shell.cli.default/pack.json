@@ -28,6 +28,15 @@
     "cli.command.contribution.v1",
     "cli.renderer.contribution.v1"
   ],
+  "approval": {
+    "state": "verified",
+    "provider_trust": "verified",
+    "grant_state": "not_minted",
+    "authority_mode": "lease_only",
+    "execution_domain": "shell:shell.cli.default",
+    "effect_scope": ["app.shell.v1", "cli.command.contribution.v1", "cli.renderer.contribution.v1"],
+    "blast_radius": "CLI input/output is structured and bounded; textual presentation does not imply unrestricted Host terminal authority."
+  },
   "cli_protocol": {
     "version": "cli.io.v1",
     "structured_stdio": true,

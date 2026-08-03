@@ -25,6 +25,15 @@
     "implementation_pack": "defaultspack",
     "implementation_root": "tobkiri_runtime/ecosystem/defaultspack"
   },
+  "approval": {
+    "state": "verified",
+    "provider_trust": "verified",
+    "grant_state": "not_minted",
+    "authority_mode": "none",
+    "execution_domain": "base-pack:defaults-basepack",
+    "effect_scope": [],
+    "blast_radius": "Base Pack selection grants no Host authority and does not mint a caller Grant."
+  },
   "shell_requirements": {
     "contract": "app.shell.v1",
     "presentation_families": ["graphical", "terminal"],
@@ -44,6 +53,7 @@
       "contract_id": "ui.route.contribution.v1",
       "artifact_ref": "../../contributions/defaultspack.graphical.json",
       "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+      "label": "Graphical routes",
       "presentation_kind": "declarative",
       "technology": "web",
       "host_authority": "none",
@@ -56,6 +66,7 @@
       "contract_id": "ui.panel.contribution.v1",
       "artifact_ref": "../../contributions/defaultspack.graphical.json",
       "digest": "sha256:878c7c5a62b931b8a7ae59a6a69c5d2a72b2b0c192096196ee34cd4adc236b19",
+      "label": "Graphical panels",
       "presentation_kind": "declarative",
       "technology": "web",
       "host_authority": "none",
@@ -68,6 +79,7 @@
       "contract_id": "cli.command.contribution.v1",
       "artifact_ref": "../../contributions/defaultspack.cli.json",
       "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+      "label": "CLI commands",
       "presentation_kind": "terminal_stdio",
       "technology": "cli",
       "host_authority": "structured_protocol_only",
@@ -80,6 +92,7 @@
       "contract_id": "cli.renderer.contribution.v1",
       "artifact_ref": "../../contributions/defaultspack.cli.json",
       "digest": "sha256:758ffd28ccd376f05cd02e596904981920a9878699054b04d27a378248e82144",
+      "label": "CLI renderer",
       "presentation_kind": "terminal_stdio",
       "technology": "cli",
       "host_authority": "structured_protocol_only",

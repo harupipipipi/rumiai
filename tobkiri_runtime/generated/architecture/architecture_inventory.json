@@ -25,6 +25,20 @@
         "rule_id": "legacy_arbitrary_command"
       },
       {
+        "evidence": "desktop_app.command",
+        "line": 37,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/migration.py",
+        "rule_id": "legacy_arbitrary_command"
+      },
+      {
+        "evidence": "desktop_app.command",
+        "line": 83,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/migration.py",
+        "rule_id": "legacy_arbitrary_command"
+      },
+      {
         "evidence": "pack_api_server",
         "line": 34,
         "message": "legacy execution or authority path is present",
@@ -7175,6 +7189,7 @@
       "tobkiri_runtime/tobkiri_protocol/schema_hashes.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/activation_record_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/base_definition_v1.schema.json",
+      "tobkiri_runtime/tobkiri_protocol/schemas/cli_io_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/common_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/contract_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/distribution_v1.schema.json",
@@ -9122,6 +9137,18 @@
         "evidence_digest": "sha256:ad9f288110e27ca8a9488bf1f72feac076fd954c0ab814ce1a1368439b23dddb",
         "line": 335,
         "path": "tobkiri_runtime/core_runtime/pack_importer.py",
+        "rule_id": "legacy_arbitrary_command"
+      },
+      {
+        "evidence_digest": "sha256:f11a6517f1609e5b5ab8d06171fb4f10bfdebb68eaf5d6479d5061d2fa77afdf",
+        "line": 37,
+        "path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/migration.py",
+        "rule_id": "legacy_arbitrary_command"
+      },
+      {
+        "evidence_digest": "sha256:f11a6517f1609e5b5ab8d06171fb4f10bfdebb68eaf5d6479d5061d2fa77afdf",
+        "line": 83,
+        "path": "tobkiri_runtime/ecosystem/defaultspack/domain/pack_architecture/migration.py",
         "rule_id": "legacy_arbitrary_command"
       },
       {
@@ -16825,8 +16852,8 @@
     ]
   },
   "repository": {
-    "commit": "42f5ebe43d8d8c880da00bf43440f41321b0d7f2",
-    "tree_digest": "595364b8095b32cda52b8f5e366d09dc76eb2b3e1fc46580c77d14a460ce7282"
+    "commit": "49b589e1d5c3b0761f86947bfaa50e8d9c503d17",
+    "tree_digest": "d82a13067b30440e5705f40d54b22f5f0b7a5b86bef040f76f01fcfc177a5c16"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

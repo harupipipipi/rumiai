@@ -825,6 +825,10 @@ export interface ApiPresentationArtifactVariant {
   variant: string;
   platform: string;
   architecture: string;
+  artifact_ref: string;
+  entrypoint: string;
+  artifact_kind: string;
+  descriptor_digest: string;
   path: string | null;
   sha256: string | null;
   prebuilt: boolean;
@@ -835,9 +839,17 @@ export interface ApiPresentationArtifactVariant {
 
 export interface ApiPresentationContribution {
   contribution_id: string;
+  owner_pack_id: string;
   contract_id: string;
+  contract_revision_digest: string;
   family: PresentationFamily;
   label: string;
+  artifact_ref: string;
+  digest: string;
+  presentation_kind: PresentationKind;
+  technology: string;
+  host_authority: string;
+  materialization: 'selected_only' | string;
 }
 
 export interface ApiBasePackDescriptor {
@@ -845,6 +857,9 @@ export interface ApiBasePackDescriptor {
   display_name: string;
   version: string;
   artifact_digest: string;
+  backend_provider_ids: string[];
+  state_owners: string[];
+  backend_identity_digest: string;
   required_capabilities: string[];
   allowed_families: PresentationFamily[];
   approval: ApiPresentationApproval;
@@ -860,14 +875,31 @@ export interface ApiShellProviderDescriptor {
   presentation_family: PresentationFamily;
   technology: string;
   capabilities: string[];
+  consumes_contracts: string[];
   contributions: ApiPresentationContribution[];
   artifact_variants: ApiPresentationArtifactVariant[];
   artifact: ApiPresentationArtifact | null;
   approval: ApiPresentationApproval;
+  protocol_revision_digest?: string | null;
+}
+
+export interface ApiPresentationContractRevision {
+  contract_id: string;
+  revision: string;
+  digest: string;
+  source_path: string;
 }
 
 export interface ApiPresentationCatalog {
   schema: 'io.tobkiri.launcher.presentation-catalog.v1' | string;
+  generator: string;
+  generator_version: string;
+  default_profile_id: string;
+  default_profile_source: string;
+  default_profile_digest: string;
+  default_selection: ApiPresentationSelection;
+  contract_revisions: ApiPresentationContractRevision[];
+  source_manifest_digests: Record<string, string>;
   base_packs: ApiBasePackDescriptor[];
   shell_providers: ApiShellProviderDescriptor[];
   generated_at: number;

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 tobkiri = "tobkiri.cli:main"
+tobkiri-cli = "tobkiri.cli_shell:main"
 
 [project.optional-dependencies]
 dev = [

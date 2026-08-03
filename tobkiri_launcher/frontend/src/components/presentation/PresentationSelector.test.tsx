@@ -20,12 +20,26 @@ const approval = {
 const state: ApiPresentationState = {
   catalog: {
     schema: 'io.tobkiri.launcher.presentation-catalog.v1',
+    generator: 'test',
+    generator_version: '1.0.0',
+    default_profile_id: 'defaults-modern',
+    default_profile_source: 'profiles/defaults-modern.profile.yaml',
+    default_profile_digest: 'sha256:' + '0'.repeat(64),
+    default_selection: {
+      base_pack_id: 'defaults-basepack',
+      shell_provider_id: 'shell.tauri.default',
+    },
+    contract_revisions: [],
+    source_manifest_digests: {'defaults-basepack': 'sha256:' + '1'.repeat(64)},
     generated_at: 1,
     base_packs: [{
       pack_id: 'defaults-basepack',
       display_name: 'Defaults Base Pack',
       version: '4.0.0',
       artifact_digest: 'sha256:base',
+      backend_provider_ids: ['defaultspack'],
+      state_owners: ['defaultspack.state'],
+      backend_identity_digest: 'sha256:' + '3'.repeat(64),
       required_capabilities: ['navigation', 'commands'],
       allowed_families: ['graphical', 'terminal'],
       approval: {...approval, authority_mode: 'none'},
@@ -40,6 +54,7 @@ const state: ApiPresentationState = {
       presentation_family: 'graphical',
       technology: 'tauri',
       capabilities: ['navigation', 'commands'],
+      consumes_contracts: ['ui.route.contribution.v1', 'ui.panel.contribution.v1'],
       contributions: [],
       artifact_variants: [],
       artifact: {
@@ -57,6 +72,7 @@ const state: ApiPresentationState = {
         status_detail: 'The verified production artifact is not installed.',
       },
       approval,
+      protocol_revision_digest: null,
     }],
   },
   selection: {

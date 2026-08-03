@@ -25,6 +25,15 @@
     "ui.route.contribution.v1",
     "ui.panel.contribution.v1"
   ],
+  "approval": {
+    "state": "verified",
+    "provider_trust": "verified",
+    "grant_state": "not_minted",
+    "authority_mode": "lease_only",
+    "execution_domain": "shell:shell.electron.default",
+    "effect_scope": ["app.shell.v1", "ui.route.contribution.v1", "ui.panel.contribution.v1"],
+    "blast_radius": "Shell requests use the Host Broker; Electron receives no ambient filesystem, network, process, credential, or OS authority."
+  },
   "production": {
     "launchable": true,
     "prebuilt_only": true,

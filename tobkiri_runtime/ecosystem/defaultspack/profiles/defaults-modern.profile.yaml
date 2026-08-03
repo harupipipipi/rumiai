@@ -50,4 +50,5 @@ materialization:
 metadata:
   pack_id: defaults-basepack
   category: modern_defaults
+  default_for_new_setups: true
   shell_selection_is_exact: true

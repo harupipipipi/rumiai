@@ -15,6 +15,7 @@
     "contracts",
     "capabilities",
     "consumes_contracts",
+    "approval",
     "variants",
     "production",
     "security"
@@ -38,6 +39,21 @@
     },
     "capabilities": {"type": "array", "items": {"type": "string"}},
     "consumes_contracts": {"type": "array", "items": {"type": "string"}},
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "provider_trust", "grant_state", "authority_mode", "execution_domain", "effect_scope", "blast_radius"],
+      "properties": {
+        "state": {"enum": ["verified", "pending", "blocked", "not_required"]},
+        "provider_trust": {"enum": ["verified", "pending", "blocked", "not_required"]},
+        "grant_state": {"enum": ["not_minted", "available", "missing", "blocked"]},
+        "authority_mode": {"enum": ["lease_only", "os_entitlement", "none"]},
+        "execution_domain": {"type": "string", "minLength": 1},
+        "effect_scope": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "blast_radius": {"type": "string", "minLength": 1},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
     "cli_protocol": {
       "type": "object",
       "additionalProperties": false,

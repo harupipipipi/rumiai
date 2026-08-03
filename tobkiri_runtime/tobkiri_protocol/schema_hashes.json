@@ -2,6 +2,7 @@
   "files": {
     "activation_record_v1.schema.json": "sha256:6ac353178fdc95815fc3108494f45bf6c74f5ef831747b29cff1abc31fb4870e",
     "base_definition_v1.schema.json": "sha256:a5628ef16d9b70e14a0f1de50abb0bfeb5506e52976687f1659deb0a91170400",
+    "cli_io_v1.schema.json": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
     "common_v1.schema.json": "sha256:8bf407b91311d661744a9c2b160eeda5c54d480ca4859edf92ff4f23471da557",
     "contract_v4.schema.json": "sha256:5a621550fe1445cd81047a4ee9e3cf9336c0bbf9ad10df05229d4c97e17cd869",
     "distribution_v1.schema.json": "sha256:8034be768f305e7f8449b6014c545bb2eb037945313d6f43995032b8f6bd154a",

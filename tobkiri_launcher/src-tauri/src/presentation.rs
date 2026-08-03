@@ -6,6 +6,7 @@
 //! artifact. Development commands are deliberately not represented as a
 //! launch fallback.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -43,6 +44,9 @@ pub struct BasePackDescriptor {
     pub display_name: String,
     pub version: String,
     pub artifact_digest: String,
+    pub backend_provider_ids: Vec<String>,
+    pub state_owners: Vec<String>,
+    pub backend_identity_digest: String,
     pub required_capabilities: Vec<String>,
     pub allowed_families: Vec<String>,
     pub approval: PresentationApproval,
@@ -51,9 +55,17 @@ pub struct BasePackDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationContribution {
     pub contribution_id: String,
+    pub owner_pack_id: String,
     pub contract_id: String,
+    pub contract_revision_digest: String,
     pub family: String,
     pub label: String,
+    pub artifact_ref: String,
+    pub digest: String,
+    pub presentation_kind: String,
+    pub technology: String,
+    pub host_authority: String,
+    pub materialization: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +74,10 @@ pub struct ArtifactVariant {
     pub variant: String,
     pub platform: String,
     pub architecture: String,
+    pub artifact_ref: String,
+    pub entrypoint: String,
+    pub artifact_kind: String,
+    pub descriptor_digest: String,
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
@@ -105,16 +121,35 @@ pub struct ShellProviderDescriptor {
     pub presentation_family: String,
     pub technology: String,
     pub capabilities: Vec<String>,
+    pub consumes_contracts: Vec<String>,
     pub contributions: Vec<PresentationContribution>,
     pub artifact_variants: Vec<ArtifactVariant>,
     #[serde(default)]
     pub artifact: Option<PresentationArtifact>,
     pub approval: PresentationApproval,
+    #[serde(default)]
+    pub protocol_revision_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractRevisionDescriptor {
+    pub contract_id: String,
+    pub revision: String,
+    pub digest: String,
+    pub source_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationCatalog {
     pub schema: String,
+    pub generator: String,
+    pub generator_version: String,
+    pub default_profile_id: String,
+    pub default_profile_source: String,
+    pub default_profile_digest: String,
+    pub default_selection: PresentationSelection,
+    pub contract_revisions: Vec<ContractRevisionDescriptor>,
+    pub source_manifest_digests: BTreeMap<String, String>,
     pub base_packs: Vec<BasePackDescriptor>,
     pub shell_providers: Vec<ShellProviderDescriptor>,
     #[serde(default)]
@@ -305,7 +340,188 @@ fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
     if catalog.base_packs.is_empty() || catalog.shell_providers.is_empty() {
         bail!("presentation catalog must contain a Base Pack and Shell Provider");
     }
+    validate_catalog_integrity(&catalog)?;
     Ok(catalog)
+}
+
+fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
+    if catalog.generator.trim().is_empty() || catalog.generator_version.trim().is_empty() {
+        bail!("presentation catalog generator metadata is missing");
+    }
+    if catalog.default_profile_id.trim().is_empty()
+        || catalog.default_profile_source.trim().is_empty()
+        || !is_sha256_digest(&catalog.default_profile_digest)
+    {
+        bail!("presentation catalog default profile metadata is invalid");
+    }
+    if catalog.default_selection.base_pack_id.trim().is_empty()
+        || catalog
+            .default_selection
+            .shell_provider_id
+            .trim()
+            .is_empty()
+    {
+        bail!("presentation catalog default selection is incomplete");
+    }
+    if catalog.source_manifest_digests.is_empty()
+        || catalog
+            .source_manifest_digests
+            .values()
+            .any(|digest| !is_sha256_digest(digest))
+    {
+        bail!("presentation catalog source manifest digests are incomplete");
+    }
+
+    let mut base_ids = std::collections::HashSet::new();
+    for base in &catalog.base_packs {
+        if !base_ids.insert(&base.pack_id) {
+            bail!("presentation catalog contains duplicate Base Pack IDs");
+        }
+        if !is_sha256_digest(&base.artifact_digest)
+            || !is_sha256_digest(&base.backend_identity_digest)
+            || base.backend_provider_ids.is_empty()
+            || base.state_owners.is_empty()
+        {
+            bail!(
+                "Base Pack {} has incomplete backend identity metadata",
+                base.pack_id
+            );
+        }
+        validate_approval(&base.approval, &base.pack_id)?;
+    }
+
+    let mut contract_ids = std::collections::HashSet::new();
+    for revision in &catalog.contract_revisions {
+        if !contract_ids.insert(&revision.contract_id) {
+            bail!("presentation catalog contains duplicate contract revisions");
+        }
+        if !is_sha256_digest(&revision.digest) || revision.source_path.trim().is_empty() {
+            bail!("contract revision {} is incomplete", revision.contract_id);
+        }
+    }
+    let revision_digests = catalog
+        .contract_revisions
+        .iter()
+        .map(|revision| (revision.contract_id.as_str(), revision.digest.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut shell_ids = std::collections::HashSet::new();
+    for shell in &catalog.shell_providers {
+        if !shell_ids.insert(&shell.provider_id) {
+            bail!("presentation catalog contains duplicate Shell Provider IDs");
+        }
+        if shell.contract_id != SHELL_CONTRACT_ID
+            || !is_sha256_digest(&shell.contract_revision_digest)
+            || shell.consumes_contracts.is_empty()
+            || shell.artifact_variants.is_empty()
+            || revision_digests.get(shell.contract_id.as_str()).copied()
+                != Some(shell.contract_revision_digest.as_str())
+        {
+            bail!(
+                "Shell Provider {} has incomplete contract metadata",
+                shell.provider_id
+            );
+        }
+        if shell
+            .consumes_contracts
+            .iter()
+            .any(|contract| !revision_digests.contains_key(contract.as_str()))
+        {
+            bail!(
+                "Shell Provider {} consumes an unregistered contract",
+                shell.provider_id
+            );
+        }
+        if shell
+            .protocol_revision_digest
+            .as_deref()
+            .is_some_and(|digest| !is_sha256_digest(digest))
+        {
+            bail!(
+                "Shell Provider {} has an invalid protocol revision",
+                shell.provider_id
+            );
+        }
+        validate_approval(&shell.approval, &shell.provider_id)?;
+        let mut contribution_ids = std::collections::HashSet::new();
+        for contribution in &shell.contributions {
+            if !contribution_ids.insert(&contribution.contribution_id)
+                || contribution.owner_pack_id.trim().is_empty()
+                || contribution.artifact_ref.trim().is_empty()
+                || !is_sha256_digest(&contribution.digest)
+                || !is_sha256_digest(&contribution.contract_revision_digest)
+                || revision_digests
+                    .get(contribution.contract_id.as_str())
+                    .copied()
+                    != Some(contribution.contract_revision_digest.as_str())
+                || contribution.materialization != "selected_only"
+            {
+                bail!(
+                    "Shell Provider {} has invalid contribution metadata",
+                    shell.provider_id
+                );
+            }
+        }
+        let mut variants = std::collections::HashSet::new();
+        for variant in &shell.artifact_variants {
+            if !variants.insert((&variant.platform, &variant.architecture))
+                || variant.artifact_id.trim().is_empty()
+                || variant.artifact_ref.trim().is_empty()
+                || variant.entrypoint.trim().is_empty()
+                || !is_sha256_digest(&variant.descriptor_digest)
+                || !variant.prebuilt
+                || !variant.production
+                || variant
+                    .development_command
+                    .as_deref()
+                    .is_some_and(|command| !command.trim().is_empty())
+            {
+                bail!(
+                    "Shell Provider {} has an invalid production variant",
+                    shell.provider_id
+                );
+            }
+            if variant
+                .sha256
+                .as_deref()
+                .is_some_and(|digest| !is_sha256_digest(digest))
+            {
+                bail!(
+                    "Shell Provider {} has an invalid installed digest",
+                    shell.provider_id
+                );
+            }
+        }
+    }
+
+    if !base_ids.contains(&catalog.default_selection.base_pack_id) {
+        bail!("catalog default Base Pack is unavailable");
+    }
+    if !shell_ids.contains(&catalog.default_selection.shell_provider_id) {
+        bail!("catalog default Shell Provider is unavailable");
+    }
+    validate_selection(catalog, &catalog.default_selection)
+}
+
+fn validate_approval(approval: &PresentationApproval, identity: &str) -> AnyResult<()> {
+    if !matches!(
+        approval.state.as_str(),
+        "verified" | "pending" | "blocked" | "not_required"
+    ) || !matches!(
+        approval.provider_trust.as_str(),
+        "verified" | "pending" | "blocked" | "not_required"
+    ) || !matches!(
+        approval.grant_state.as_str(),
+        "not_minted" | "available" | "missing" | "blocked"
+    ) || !matches!(
+        approval.authority_mode.as_str(),
+        "lease_only" | "os_entitlement" | "none"
+    ) || approval.execution_domain.trim().is_empty()
+        || approval.blast_radius.trim().is_empty()
+    {
+        bail!("approval metadata is invalid for {identity}");
+    }
+    Ok(())
 }
 
 fn validate_selection(
@@ -392,7 +608,14 @@ fn materialize_selection(
     let contributions = shell
         .contributions
         .iter()
-        .filter(|contribution| contribution.family == shell.presentation_family)
+        .filter(|contribution| {
+            contribution.family == shell.presentation_family
+                && shell
+                    .consumes_contracts
+                    .iter()
+                    .any(|contract| contract == &contribution.contract_id)
+                && contribution.materialization == "selected_only"
+        })
         .cloned()
         .collect::<Vec<_>>();
     let artifact = shell.artifact.clone();
@@ -767,6 +990,14 @@ fn normalize_digest(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn is_sha256_digest(value: &str) -> bool {
+    let normalized = value.trim().strip_prefix("sha256:").unwrap_or(value.trim());
+    normalized.len() == 64
+        && normalized
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+}
+
 fn current_platform() -> &'static str {
     if cfg!(target_os = "macos") {
         "macos"
@@ -802,13 +1033,36 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn sample_catalog() -> PresentationCatalog {
+        let selection = PresentationSelection {
+            base_pack_id: "defaults-basepack".into(),
+            shell_provider_id: "shell.tauri.default".into(),
+        };
         PresentationCatalog {
             schema: CATALOG_SCHEMA.to_string(),
+            generator: "test".into(),
+            generator_version: "1.0.0".into(),
+            default_profile_id: "defaults-modern".into(),
+            default_profile_source: "test.profile.yaml".into(),
+            default_profile_digest: "sha256:".to_string() + &"0".repeat(64),
+            default_selection: selection.clone(),
+            contract_revisions: vec![ContractRevisionDescriptor {
+                contract_id: SHELL_CONTRACT_ID.into(),
+                revision: "1.0.0".into(),
+                digest: "sha256:".to_string() + &"1".repeat(64),
+                source_path: "test.schema.json".into(),
+            }],
+            source_manifest_digests: BTreeMap::from([(
+                "defaults-basepack".into(),
+                "sha256:".to_string() + &"2".repeat(64),
+            )]),
             base_packs: vec![BasePackDescriptor {
                 pack_id: "defaults-basepack".into(),
                 display_name: "Defaults Base Pack".into(),
                 version: "4.0.0".into(),
-                artifact_digest: "sha256:base".into(),
+                artifact_digest: "sha256:".to_string() + &"3".repeat(64),
+                backend_provider_ids: vec!["defaultspack".into()],
+                state_owners: vec!["defaultspack.state".into()],
+                backend_identity_digest: "sha256:".to_string() + &"4".repeat(64),
                 required_capabilities: vec!["navigation".into(), "commands".into()],
                 allowed_families: vec!["graphical".into(), "terminal".into()],
                 approval: sample_approval("none"),
@@ -817,21 +1071,31 @@ mod tests {
                 provider_id: "shell.tauri.default".into(),
                 display_name: "Tauri Desktop".into(),
                 contract_id: SHELL_CONTRACT_ID.into(),
-                contract_revision_digest: "sha256:shell-contract".into(),
+                contract_revision_digest: "sha256:".to_string() + &"7".repeat(64),
                 experience_role: "shell".into(),
                 presentation_kind: "packaged_process".into(),
                 presentation_family: "graphical".into(),
                 technology: "tauri".into(),
                 capabilities: vec!["navigation".into(), "commands".into()],
+                consumes_contracts: vec!["ui.route.contribution.v1".into()],
                 contributions: vec![PresentationContribution {
                     contribution_id: "ui.route.contribution.v1".into(),
+                    owner_pack_id: "defaultspack".into(),
                     contract_id: "ui.route.contribution.v1".into(),
+                    contract_revision_digest: "sha256:".to_string() + &"5".repeat(64),
                     family: "graphical".into(),
                     label: "Graphical routes".into(),
+                    artifact_ref: "contribution.json".into(),
+                    digest: "sha256:".to_string() + &"6".repeat(64),
+                    presentation_kind: "declarative".into(),
+                    technology: "web".into(),
+                    host_authority: "none".into(),
+                    materialization: "selected_only".into(),
                 }],
                 artifact_variants: Vec::new(),
                 artifact: None,
                 approval: sample_approval("lease_only"),
+                protocol_revision_digest: None,
             }],
             generated_at: 0,
         }
@@ -847,6 +1111,20 @@ mod tests {
             effect_scope: Vec::new(),
             blast_radius: "No ambient Host authority.".into(),
             reason: None,
+        }
+    }
+
+    fn test_config(root: &Path) -> AppConfig {
+        AppConfig {
+            app_dir: root.to_path_buf(),
+            rumi_home: root.to_path_buf(),
+            python_dir: root.join("python"),
+            uv_path: root.join("uv"),
+            venv_dir: root.join("venv"),
+            user_data_dir: root.join("user_data"),
+            log_dir: root.join("logs"),
+            kernel_port: 8765,
+            dev_workspace_root: None,
         }
     }
 
@@ -900,9 +1178,17 @@ mod tests {
             .contributions
             .push(PresentationContribution {
                 contribution_id: "cli.command.contribution.v1".into(),
+                owner_pack_id: "defaultspack".into(),
                 contract_id: "cli.command.contribution.v1".into(),
+                contract_revision_digest: "sha256:".to_string() + &"8".repeat(64),
                 family: "terminal".into(),
                 label: "CLI commands".into(),
+                artifact_ref: "contribution.json".into(),
+                digest: "sha256:".to_string() + &"9".repeat(64),
+                presentation_kind: "terminal_stdio".into(),
+                technology: "cli".into(),
+                host_authority: "structured_protocol_only".into(),
+                materialization: "selected_only".into(),
             });
         catalog.shell_providers[0].artifact = Some(PresentationArtifact {
             artifact_id: "shell-tauri-test".into(),
@@ -929,6 +1215,93 @@ mod tests {
             materialization.selected_contributions[0].family,
             "graphical"
         );
+    }
+
+    #[test]
+    fn bundled_catalog_is_manifest_projection_and_uninstalled_variants_block_launch() {
+        let catalog: PresentationCatalog =
+            serde_json::from_str(include_str!("../bundled/presentation_catalog.json")).unwrap();
+        validate_catalog_integrity(&catalog).unwrap();
+        assert_eq!(catalog.default_profile_id, "defaults-modern");
+        assert_eq!(
+            catalog.default_selection.shell_provider_id,
+            "shell.tauri.default"
+        );
+        assert_eq!(catalog.shell_providers.len(), 3);
+        assert!(catalog.shell_providers.iter().all(|shell| {
+            shell
+                .artifact_variants
+                .iter()
+                .all(|variant| variant.path.is_none() && variant.sha256.is_none())
+        }));
+
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-presentation-catalog-test-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(&root).unwrap();
+        let state = build_state_from_catalog(
+            &test_config(&root),
+            catalog.clone(),
+            Some(catalog.default_selection.clone()),
+        )
+        .unwrap();
+        assert_eq!(state.materialization.status, "blocked");
+        assert_eq!(
+            state.materialization.artifact.as_ref().unwrap().status,
+            "missing"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn verified_installed_variant_materializes_only_selected_contributions() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-presentation-installed-test-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(&root).unwrap();
+        let installed = root.join("installed.bin");
+        let contents = b"verified production artifact";
+        fs::write(&installed, contents).unwrap();
+        let mut digest_input = vec![0_u8];
+        digest_input.extend_from_slice(contents);
+        let digest = format!("sha256:{}", hex::encode(Sha256::digest(digest_input)));
+
+        let mut catalog = sample_catalog();
+        catalog.shell_providers[0].artifact_variants = vec![ArtifactVariant {
+            artifact_id: "shell.tauri.default.macos-arm64".into(),
+            variant: format!("{}-{}", current_platform(), current_architecture()),
+            platform: current_platform().into(),
+            architecture: current_architecture().into(),
+            artifact_ref: "descriptor.json".into(),
+            entrypoint: "tobkiri-shell".into(),
+            artifact_kind: "signed_prebuilt_binary".into(),
+            descriptor_digest: "sha256:".to_string() + &"a".repeat(64),
+            path: Some("installed.bin".into()),
+            sha256: Some(digest),
+            prebuilt: true,
+            production: true,
+            development_command: None,
+            bundle_identifier: None,
+        }];
+
+        let config = test_config(&root);
+        let selection = catalog.default_selection.clone();
+        let state = build_state_from_catalog(&config, catalog, Some(selection)).unwrap();
+        assert_eq!(state.materialization.status, "materialized");
+        assert_eq!(
+            state.materialization.artifact.as_ref().unwrap().status,
+            "verified"
+        );
+        assert_eq!(state.materialization.selected_contributions.len(), 1);
+        assert_eq!(
+            state.materialization.selected_contributions[0].family,
+            "graphical"
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

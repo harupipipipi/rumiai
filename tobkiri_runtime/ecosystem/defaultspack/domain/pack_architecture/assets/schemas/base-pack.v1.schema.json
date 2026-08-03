@@ -4,7 +4,7 @@
   "title": "Tobkiri reusable Base Pack",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "pack_id", "version", "kind", "contracts", "backend", "shell_requirements", "contributions"],
+  "required": ["schema", "pack_id", "version", "kind", "contracts", "backend", "approval", "shell_requirements", "contributions"],
   "properties": {
     "schema": {"const": "io.tobkiri.pack.v4"},
     "pack_id": {"const": "defaults-basepack"},
@@ -22,6 +22,21 @@
         "graph": {"type": "string"},
         "implementation_pack": {"const": "defaultspack"},
         "implementation_root": {"type": "string"}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "provider_trust", "grant_state", "authority_mode", "execution_domain", "effect_scope", "blast_radius"],
+      "properties": {
+        "state": {"enum": ["verified", "pending", "blocked", "not_required"]},
+        "provider_trust": {"enum": ["verified", "pending", "blocked", "not_required"]},
+        "grant_state": {"enum": ["not_minted", "available", "missing", "blocked"]},
+        "authority_mode": {"enum": ["lease_only", "os_entitlement", "none"]},
+        "execution_domain": {"type": "string", "minLength": 1},
+        "effect_scope": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "blast_radius": {"type": "string", "minLength": 1},
+        "reason": {"type": ["string", "null"]}
       }
     },
     "shell_requirements": {
@@ -47,6 +62,7 @@
           "contract_id",
           "artifact_ref",
           "digest",
+          "label",
           "presentation_kind",
           "technology",
           "materialization"
@@ -58,6 +74,7 @@
           "contract_id": {"type": "string"},
           "artifact_ref": {"type": "string"},
           "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "label": {"type": "string", "minLength": 1},
           "presentation_kind": {"type": "string"},
           "technology": {"type": "string"},
           "host_authority": {"type": "string"},

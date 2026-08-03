@@ -39,6 +39,24 @@ must still verify the signed bundle or binary supplied by its distribution
 pipeline before launch; these descriptors are not a development-command escape
 hatch or a substitute for signature verification.
 
+The checked-in Launcher projection is generated from these manifests and the
+protocol revision registry. Check or regenerate it from the repository root:
+
+```bash
+python scripts/quality/generate_presentation_catalog.py --check
+python scripts/quality/generate_presentation_catalog.py
+```
+
+The generated variants intentionally have no installed path or executable
+digest. The Launcher may select them, but materialization and launch remain
+blocked until an installer supplies a safe path and verifies its pinned digest.
+The CLI Shell's local structured-protocol smoke path is:
+
+```bash
+cd tobkiri_runtime
+python -m tobkiri.cli_shell --structured-stdio
+```
+
 Legacy `desktop_app.command` values are retained only as classified migration
 inventory. Migration never turns an arbitrary command string into a Shell or
 production launch target.

@@ -37,6 +37,7 @@ SCHEMA_ALIASES = {
     "resolved_plan": "resolved_plan_v1.schema.json",
     "base": "base_definition_v1.schema.json",
     "shell": "shell_definition_v1.schema.json",
+    "cli_io": "cli_io_v1.schema.json",
     "function_principal": "function_principal_v1.schema.json",
     "provenance": "provenance_v1.schema.json",
     "activation": "activation_record_v1.schema.json",

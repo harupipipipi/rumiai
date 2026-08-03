@@ -104,6 +104,7 @@ class PresentationContribution:
     digest: str
     presentation_kind: str
     technology: str
+    label: str = ""
     host_authority: str = "none"
     materialization: str = "selected_only"
 
@@ -144,6 +145,7 @@ class PresentationContribution:
                 value.get("presentation_kind"), f"{field_name}.presentation_kind"
             ),
             technology=_required_string(value.get("technology"), f"{field_name}.technology"),
+            label=str(value.get("label") or value.get("contribution_id") or "").strip(),
             host_authority=str(value.get("host_authority") or "none").strip(),
             materialization=materialization,
         )

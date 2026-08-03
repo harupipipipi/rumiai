@@ -47,6 +47,10 @@ pack-architecture:
 pack-architecture-v4:
     python scripts/quality/validate_pack_architecture.py
 
+# Check the checked-in Launcher presentation projection against canonical manifests.
+presentation-catalog:
+    python scripts/quality/generate_presentation_catalog.py --check
+
 # Migrate one legacy profile to a review-only v4 document.
 migrate-legacy-profile source output:
     python scripts/quality/migrate_legacy_profile.py {{source}} --output {{output}}
