@@ -1,0 +1,1191 @@
+Tobkiri Pack Architecture 再設計・実装計画
+============================================
+
+文書状態: 実装前の統合計画
+対象リポジトリ: harupipipipi/tobkiri
+対象ブランチ: codex/pack-architecture-program-soon
+確認コミット: b04ca0bff0220d83a03625acd5e53afe60bf7d9a
+作成日: 2026-08-03
+
+
+0. この文書の目的
+------------------
+
+この文書は、現在のTobkiriを次の設計へ全面移行するための、実装可能な粒度の計画である。
+
+  Packが機能を持つ。
+  Contractが意味を定義する。
+  Requestが依頼を表す。
+  Runtimeが解決・隔離・配送する。
+  Policyが境界を越える作用を制御する。
+  Profileが実行環境を構成する。
+
+最終目的は、正確なcontent digestを過去に有効化したことがない未知のPackでも、既知のContractに適合し、必要な隔離・Policy・Grant・監査が成立する場合だけ安全に接続できる実行環境を作ることである。
+
+本計画は、ダウンロード済みの「Tobkiri Pack Architecture v1.1 bundle」を設計上の基準にし、現在ブランチの実コードと3件の読み取り専用subagent調査を照合している。v1.1 bundleのSHA-256は次のとおり。
+
+  507b8c42044c9931a3d10ab5fefbc31eb397f2093ce82f4c01f75a86acb07834
+
+注意:
+
+  - v1.1のメモリ・ディスク・起動時間はengineering estimateであり実測値ではない。
+  - このプロジェクトは未完成で、既存Packの後方互換や重要stateの保持を必須にしない。
+  - したがって、旧Runtimeへ継ぎ足すより、新しい正規経路を別packageとして作り、既存Packを移植後に旧経路を削除する。
+  - この文書自体の作成以外に、実装コードは変更しない。
+
+
+1. 今回確定する設計判断
+----------------------
+
+1.1 Functionは消滅させず、公開境界だけOperationへ置換する
+
+  - UI上の「Function」という呼称は残してよい。
+  - Pack内部のPython/Rust/JS関数は実装詳細として自由に使える。
+  - Pack間公開APIはContract Operationだけにする。
+  - 他Packはmodule名、file path、symbol名、FunctionRegistry IDを指定できない。
+  - legacy FunctionRegistryは最終的に削除する。
+  - Workflow stepもFunction名ではなくcontract_id + operation_idを指定する。
+
+1.2 importの扱い
+
+  - 同一PackArtifact内で、Packに同梱されたmoduleをimportすることは自由。
+  - 同じ専用sandbox/PackVM内の内部module importにPolicy承認は不要。
+  - ecosystem PackをHost processへimportすることは禁止する。
+  - cross-Pack importも禁止する。
+  - host importは「Policyで許可可能な権限」ではない。許可すると隔離境界そのものが消えるためである。
+  - TCBだけがHost in-processで動ける。TCBをPack扱いしない。
+
+1.3 sandbox内部とPolicyの境界
+
+Pack専用sandbox内で閉じる次の操作は、RequestごとのPolicy承認を要求しない。
+
+  - Pack同梱コードのimport
+  - CPU上の純粋計算
+  - Pack専用tmpの読み書き
+  - Pack専用private stateの読み書き
+  - Pack内部Function呼び出し
+  - 同一execution domain内の内部IPC
+  - 許可済みruntime内での子process起動
+
+ただし、次の資源上限は常にRuntimeが機械的に強制する。これはユーザー承認ではない。
+
+  - CPU時間、wall-clock deadline
+  - RAM hard limit、実使用量、host free-memory guard
+  - disk quota、inode/file count、output size
+  - process/thread count
+  - open file/socket/handle数
+  - request concurrency、queue length、rate limit
+
+次の境界を越える場合だけPolicyとCapabilityGrantを使う。
+
+  - 別PackへのOperation Request
+  - Hostまたはユーザーのfile/workspace
+  - shared/authoritative storage
+  - network、localhost、external API
+  - credential/secretの使用
+  - device、clipboard、camera、microphone、screen、accessibility
+  - Host process、OS管理機能
+  - security-sensitive UI、外部作用
+
+Pack private stateはProfile activation時にnamespaceとquotaを割り当て、通常はRequestごとの承認を不要にする。他Packのstate、Host filesystem、credential storeはmountしない。
+
+1.4 PackVMの共有単位
+
+  - 異なるPack IDを同一native/Python execution guestへ入れない。
+  - 同一Pack IDでもversionまたはcontent digestが異なれば同居させない。
+  - 同一tenant、同一Pack ID、同一version、同一content digest、同一effective isolation policyなら、そのPackArtifactが提供する複数Provider/Operationは一つのexecution domainを共有してよい。
+  - replicaが必要なら別instanceとして作るが、v1ではarbitrary replicasを実装しない。
+  - VMの単位は「登録Pack」ではなく「現在materializeされているnative/Python PackArtifact execution domain」である。
+
+1.5 Profile有効化とVM起動を分離する
+
+Profileに100 Packが存在しても100 VMを起動しない。
+
+  Artifact: Absent -> Staged -> Verified -> Installed -> Resolved
+  Logical:  Resolved -> ProfileMember -> LogicallyActive -> Prepared -> Dormant
+  Physical: Dormant -> AdmissionPending -> Starting -> Attesting -> Ready
+            -> Busy <-> Idle -> Stopping -> Stopped
+
+on_demand/event_wake PackはDormantのままProfile commit可能とする。eager/continuousだけをactivation時のreadiness gateにする。
+
+1.6 Distribution、Bundle、Suite
+
+  - Packは署名、version、state、Provider ownershipの行政単位。
+  - Distributionは複数Packの推薦、pin、取得元、互換組合せを記述する署名付き文書。
+  - DistributionはPackではなく、権限も実行コードも持たない。
+  - Bundle/Suiteというユーザー向け配布名は使用してよいが、内部ではDistribution manifestへ正規化する。
+  - 一括installはできるが、一括approval、一括Grant、共有sandbox、共有stateを意味しない。
+  - 現在のPack kind="bundle"は実行意味を持たせず、v4では削除するかdistribution artifactへ移す。
+
+1.7 OSとライトユーザー向け要件
+
+  - Docker、Homebrew、手動shell commandを利用条件にしない。
+  - production backendはアプリに同梱し、guided installerがOS consent、optional feature、reboot resumeを扱う。
+  - macOS: direct Virtualization.framework supervisor。
+  - Windows: WHPX-backed PackVM supervisor。PackごとのWSL distroは使わない。
+  - Linux: Firecracker/KVM + jailer-equivalent hardening。
+  - certified backendが使えなければunknown native/Python Packをactivation拒否する。
+  - process-only、shared Lima/WSL、Docker、host executionへ弱くfallbackしない。
+  - Wasm-compatible PackはWasmtime Component/WASIのL3を優先する。
+
+
+2. 現在ブランチの具体的な状態
+------------------------------
+
+2.1 既に存在する資産
+
+現在はゼロからではない。少なくとも次が実装済みであり、考え方またはテスト資産を再利用できる。
+
+  - strictなPack v3 JSON Schema
+  - PackArtifactのhash、extra file、symlink、tamper検査
+  - Ed25519署名、publisher/key ID/revocation、trust store
+  - ContractDescriptor、ContractRequirement、ProviderDescriptor
+  - semver、priority、one/keyed/chain等のdeterministic resolution
+  - ResolvedProfileとstale detectionの一部
+  - Python/TypeScript/Dartのgenerated contract型とdrift test
+  - Command Protocol v1と55 commandのcatalog/invoke/events/approval系
+  - process provider用bounded process runner
+  - timeout時process-tree cleanupに使えるcancel_event実装
+  - managed sandbox manager、template、policy、state store、auditの土台
+  - macOS Lima、Windows WSL2、Linux Bubblewrap/systemd cgroup経路
+  - Tool brokerのresolve -> validate -> guard -> policy -> authorize -> execute -> normalize -> audit骨格
+  - connector inboundの署名検証とreplay ledger
+  - approval/authority service、Grant manager、secret encryption
+  - archive traversal/zip bomb対策付きPack staging
+  - GUI contribution、scheduler、workflowの部分実装と画面試作
+
+2.2 数量ベースの現状
+
+確認コミット時点で、ecosystem配下には次がある。
+
+  - ecosystem.json: 141個
+  - rumi.pack.v3.json: 95個
+  - v3 provided contracts: 158件
+  - v3 required contracts: 166件
+  - v3 entrypoints: 158件
+  - entrypoint loader: python 143件、process 15件、wasm 0件
+  - declared isolation: in_process 95件、process 63件
+  - ecosystem.json host_execution=true: 58 Pack
+  - *.profile.yaml: 93個
+  - *.flow.yaml: 5個
+
+つまり、v3 manifestは広く作られているが、95件のprovider宣言がin_processであり、productionの悪意あるPack前提とは両立していない。Wasmはschema enumにあるだけでruntime実装がない。
+
+2.3 現在のPack実行経路
+
+現在の主な経路は一本ではない。
+
+  A. legacy ecosystem.json -> FunctionRegistry -> CapabilityExecutor/直接dispatch
+  B. v3 rumi.pack.v3.json -> capability_binding_registration -> InterfaceRegistry
+  C. Pack固有HTTP route -> pack_api_server -> legacy defaultspack route
+  D. kernel flow -> kernel handler / python_file_call
+  E. Tool broker系Pack ->個別contract client群
+  F. connector special-case ingress/egress
+
+v3のloader="process"はmacOS/Linuxでmanaged sandboxへ接続されている。一方loader="python"は承認済みhost execution条件を満たすとimportlibでHost processへloadされる。trusted builtin、core Pack、permissive/legacy経路にもHost実行が残る。
+
+2.4 現在のsandbox
+
+現在のmanaged sandbox foundationは次の構成。
+
+  - macOS: Rumi-owned Lima Ubuntu guest
+  - Windows: RumiUbuntu WSL2 distribution
+  - Linux: native/Bubblewrap/systemd cgroup
+  - Docker provider: optional
+
+重要な制約:
+
+  - macOS/Windowsでは複数sandbox instanceが一つのmanaged guest、同じguest Unix identity、同じkernel namespaceを共有する。
+  - separate work directoryはあるが、強いper-Pack filesystem/process isolationを保証していない。
+  - Lima/WSL launcherが存在しない環境ではbootstrap未完成。
+  - 現行foundationはcoding sandboxやdesktop seatには利用価値があるが、v1.1のunknown native/Python Pack用L4境界ではない。
+
+したがって、現在のsandboxを全部捨てるのではなく、manager、request model、template、audit、workspace overlay、guest protocol、cleanup testを再利用し、provider backendをPackVMへ交換する。
+
+2.5 現在のContractとdispatch
+
+ContractRegistryはsemver、priority、cardinality、chain orderingを解決できる。しかしlive dispatchはInterfaceRegistry/persisted profileを別規則で参照し、実質eligible providerが1件であることを要求する。
+
+不足:
+
+  - resolverが選んだexact providerと実行providerの一致
+  - Operation単位のinput/output/error/progress schema検証
+  - authoritative RequestEnvelope
+  - version/schema digestを含むwire protocol
+  - many/fanout/chain/keyedの実行規則
+  - Adapter chainの実行
+  - deadline/cancelのend-to-end伝播
+
+2.6 現在のProfileとactivation
+
+ResolvedProfile、Profile graph、Capability Profile、Startup Profile、Operating Profileなど複数の概念と正本が併存する。effective_pack_idsが一部activation/graph compile入口へ伝播せず、active identityを解決できないとregistry先頭Packへfallbackする経路もある。
+
+不足:
+
+  - Profile、ProfileLock、ResolvedPlan、ActivationRecordの明確な分離
+  - exact digest/schema/policy/isolation/materialization modeのpin
+  - atomic pointer swapとcrash recovery
+  - Dormant binding
+  - materialization journal
+  - resource/admission budget
+
+2.7 現在のPolicy、権限、secret
+
+PermissionManager、CapabilityExecutor、AuthorityRequest、Approval、Grant、host permission mapping等は存在する。しかし権限判断が複数レイヤーに分散し、legacy routeやdirect handlerが迂回できる。
+
+Secret Storeは暗号化され、外部APIへ値を出さない意図がある。一方Credential Brokerのresolve operationは、scope確認後にsecret_materialをPack processへ返す。v1.1のbroker-use原則には未到達。
+
+不足:
+
+  - Base Policy Kernelを唯一の非上書き可能な下限にする
+  - Policy Packをrestrict-onlyにする
+  - Request digest、caller/target principal、activation/policy revision、actual isolationをpolicy inputへ固定
+  - Approvalとrequest-bound Grantの明確な分離
+  - secret valueを返さず、egress/credential-use brokerが目的操作だけ実行する
+  - sandbox内部操作と境界越え権限を明確に分ける
+
+2.8 現在のtimeout、cancel、retry
+
+bounded_process_runnerにはcancel_eventとprocess-tree cleanupがある。しかしPack API、global contract dispatch、flow executionへdeadlineが一貫して伝播しない。
+
+  - flowはfuture.result(timeout)後に実行を止めない経路がある。
+  - process Contractは固定30秒を使う。
+  - Pack API manifest timeoutは保存されても実行に反映されない。
+  - flow retryは上限/backoff/idempotencyなしでcontinue相当の箇所がある。
+  - non-idempotent external effectのambiguous result管理がない。
+
+2.9 現在のaudit
+
+AuditLoggerと各brokerのaudit eventは存在するが、CapabilityExecutorのauditは例外を握り、writer failure後にbufferをclearする経路がある。write/external_effect/privilegedが監査不能でも成功し得る。
+
+不足:
+
+  - Host生成のauthoritative event
+  - append-only sequence/hash chain/signed checkpoint
+  - effect前reservationとeffect後commit
+  - schema-guided redaction
+  - audit unavailable時のeffect class別fail-closed
+  - invocation、provider provenance、adapter hop、materializationの統一trace
+
+2.10 現在のinstall/update
+
+PackImporterにはZip Slip、symlink、file count、total size対策がある。PackApplierはstagingからecosystem directoryへcopy/replaceしbackupを作る。署名・artifact integrity部品もある。
+
+不足:
+
+  - immutable content-addressed storeへのcommit
+  - artifact identity=(pack_id, version, digest)
+  - code-free install/updateの強制
+  - signed repository metadataとrevocation/freeze/mix-and-match対策
+  - installed set journalとProfile activationの完全分離
+  - active lockを自動変更しないupdate
+  - COW state migration operation
+  - old artifact retention/rollback
+
+2.11 現在のGUI
+
+  - Frontend Design Packはdeclarative onlyで、実際のshell/layout/rendererはDefaultspack FrontendRegistryへハードコードされている。
+  - frontend_loaderはmetadata読込中心で、isolated component登録・renderを完成していない。
+  - Launcher routeとPack contribution registryが別系統。
+  - themeはLauncher localStorage/CSSとDefaultspack固定CSSに分散。
+  - untrusted UI用opaque origin、bridge principal binding、security chrome分離が未完成。
+
+2.12 現在のWorkflow/Scheduler
+
+  - workflow_runは単純な逐次for実行で、終了時だけrecord保存。
+  - checkpoint、StepAttempt、approval待ち、crash resumeがない。
+  - retryは失敗stepからでなく全体再実行。
+  - cancelはrecord status変更だけで実 executorを止めない。
+  - parallel nodeが順次for実行の箇所がある。
+  - Core FlowScheduler、Defaultspack Scheduler、Rumi Scheduler Runtimeの三系統がある。
+  - editor paletteは固定値で、Contract catalogから生成されない。
+  - Launcher実行ボタンにMath.random()を使う擬似実行が残る。
+  - YAML直接writeにETag、revision、compile preview、rollbackがない。
+  - AuthorityRequestにrun_id/step_id/attempt/checkpointがなく、承認後の正確な再開地点を特定できない。
+
+2.13 現在のconnector
+
+Inbound Brokerには署名検証/replay ledgerがあるが、実HTTP webhookはDefaultspack transport registryとpack_api_server special-caseを通り、新Gatewayがcanonical ingress ownerではない。Outbound Brokerはaudit clientがなく、vendor error文字列をpublic projectionへ残す。
+
+2.14 現在の重大なfail-open/迂回路
+
+次は新Runtime公開前にゼロにしなければならない。
+
+  - startup flowのfail_soft/on_missing_step=skip
+  - Runtime初期化完了前、または失敗後のHTTP受付
+  - v3 table dispatch失敗後のlegacy HTTP route fallback
+  - host_execution=trueとRUMI_ALLOW_HOST_EXECUTION
+  - permissive mode、Docker/host fallback
+  - python_file_call
+  - FunctionRegistry/InterfaceRegistry direct dispatch
+  - Pack-specific host route
+  - caller/profile/token identityのpayload自己申告
+  - audit failureを握ってeffect成功
+  - profile context解決失敗のNone/fallback
+  - flow step failureをデータ化して全体success
+
+
+3. 最終アーキテクチャ
+--------------------
+
+3.1 package境界
+
+新しい正規実装は既存core_runtimeへ直接継ぎ足さず、次を目標構造とする。
+
+  tobkiri_protocol/
+    schemas/                 JSON Schema 2020-12
+    wit/                     Wasm Component interfaces
+    vectors/                 canonicalization/conformance vectors
+    generated/               Python/TS/Dart/Rust生成型
+
+  tobkiri_host/
+    Cargo.toml
+    src/artifact/            verifier、CAS、distribution metadata
+    src/contract/            catalog、schema、resolver、adapter planner
+    src/profile/             lock、resolved plan、activation journal
+    src/policy/              base policy、approval、grant、handles
+    src/broker/              request、storage、egress、credential、device
+    src/isolation/           PackVM/Wasm backend interface
+    src/audit/               authoritative journal
+    src/security_ui/         approval/security chrome bridge
+
+  packvm_agent/
+    guest protocol、attestation、exec、cleanup、resource accounting
+
+  packvm_macos_vz/
+  packvm_windows_whpx/
+  packvm_linux_firecracker/
+
+  tobkiri_sdk/python/
+  tobkiri_sdk/typescript/
+  tobkiri_sdk/rust/
+
+  contracts/
+    foundation/
+    community/
+    private/
+
+  packs_v4/
+  distributions/
+  conformance/
+  malicious_fixtures/
+
+Rust Host Kernelは既存Tauri Launcher processへ全部埋め込まず、独立process/crateにする。LauncherはHost Kernelへ認証済みIPCで接続する。UI crashやwebview compromiseがPolicy/Grant/Auditの書換権限を得ないようにする。
+
+3.2 唯一の実行経路
+
+  1. authenticated IPC sessionからcaller Principalを導出
+  2. active ActivationRecordをcapture
+  3. InvocationFrameをstrict parse
+  4. exact ResolvedPlan bindingを選択
+  5. contract/version/schema/operationを検証
+  6. payload size/depth/typeとResourceHandleを検証
+  7. Dormantならadmission queueへ入れsingle-flight materialize
+  8. runtime IsolationAttestationとreadinessを検証
+  9. Base Policy + restrict-only Policy Packを評価
+ 10. 必要時だけHost security UIでApproval取得
+ 11. request-bound GrantをHost内で生成
+ 12. audit reservationを耐久化
+ 13. Runtime生成RequestEnvelopeをProviderへ配送
+ 14. deadline/cancel/backpressureを監視
+ 15. Response/error/progress schemaを検証
+ 16. effect/audit commit、handle revoke
+ 17. sanitized Responseをcallerへ返す
+
+これ以外のPack execution entrypointを作らない。
+
+3.3 Protocol v1
+
+Packが送信できるUntrusted InvocationFrameの必須項目:
+
+  protocol
+  type=invoke
+  contract_id
+  version_range
+  operation_id
+  payload
+  timeout_ms
+  idempotency_key（effect定義に応じて必須）
+
+Packが指定できない項目:
+
+  caller principal
+  target provider
+  approval/grant
+  profile/policy revision
+  exact schema digest
+  actual isolation
+  authoritative request/trace ID
+
+Hostが生成するRequestEnvelopeの必須項目:
+
+  request_id、trace_id、correlation_id、causation_id
+  caller principal/pack/artifact/provider instance
+  profile revision、policy revision、plan digest、activation digest
+  target provider/pack/artifact
+  exact contract version、schema digest、operation
+  monotonic deadline remaining budget
+  opaque session-bound grant handle
+  validated payload/resource handles
+
+Wire format v1:
+
+  - length-prefixed UTF-8 I-JSON
+  - duplicate key、NaN/Infinity、invalid UTF-8、過深nest、oversize拒否
+  - integerは原則±(2^53-1)、高精度値はcanonical decimal string
+  - JCS RFC 8785でhash/signature canonicalization
+  - binary/large objectはResourceHandle
+  - cancelはauthenticated control frame
+  - streamはstart/data/progress/end/error/cancel/credit、credit-based backpressure必須
+
+3.4 Contract v1
+
+Contractは単なるschema置場ではなく、次を必須にする。
+
+  contract_id、semantic version、revision digest
+  owner/publisher、tier、status
+  operation一覧
+  operationごとのinput/output/error/progress schema digest
+  effect=pure/read/write/external_effect/privileged
+  idempotency=none/keyed/replayable
+  timeout default/hard max
+  required capability template
+  size/concurrency/streaming制約
+  stable error codesとunknown error rule
+  compatibility policy
+  conformance vectors/reference implementation
+  deprecation/sunset/replacement
+  signature/provenance
+
+Foundation/Community/Privateはvisibility/governance分類であり、権限の強弱ではない。Foundation署名済みでもambient authorityを得ない。
+
+3.5 ProviderとAdapter
+
+ProviderDefinitionはmanifest上の宣言、ProviderInstanceは実際のWasm component、PackVM instance、remote endpointである。ResolvedPlanにはexact artifact、contract/schema、provider、adapter hops、execution domain key、minimum isolationを固定する。
+
+Adapterは通常Packとして扱う。
+
+  - Profileで明示許可/pinされたものだけ
+  - source/target schemaを各hop前後で検証
+  - cycle拒否
+  - v1最大2 hop
+  - lossless優先
+  - lossyはProfile opt-in、外部作用ならApproval
+  - effective trust/isolationは全hopの最小
+  -曖昧なら推測せずerror
+
+3.6 ResourceHandle
+
+Host/PackVM境界へraw host path、secret、open FDを渡さない。Host tableに次を保持し、Packへopaque IDだけ渡す。
+
+  type、owner principal、allowed target、operations
+  request binding、profile/policy revision
+  TTL、use count、max bytes、quota
+  revocation state、provenance
+
+file handleはrootをHost側で固定し、Packはrelative pathだけ指定する。symlink/hardlink/TOCTOU対策はHost broker側で行う。
+
+3.7 isolation topology
+
+  Wasm-compatible Pack -> isolated Wasm Component (L3)
+  native/Python Pack   -> materialize中だけ専用PackVM (L4)
+  remote Provider      -> remote boundary (L5、payloadを外部開示扱い)
+  GUI contribution     -> Packごとのopaque-origin frontend realm
+  TCB                  -> Host in-process (L0)
+
+L1 subprocessはDevelopment Realmだけ。L2 OS sandboxはverified/local Packでplatform conformanceを通した限定用途だけ。unknown native/Pythonのfallbackには使わない。
+
+3.8 lifecycleとmemory
+
+8/16/32 GiB device classの初期defaultはv1.1の値を採用するが、必ず実測で更新する。
+
+  8 GiB:
+    max resident Python=3、background=1、concurrent starts=2、prewarm=0
+    profile soft/hard=1024/1536 MiB、runtime hard=2048 MiB
+    Python admission/hard=256/384 MiB、idle timeout=30秒
+
+ 16 GiB:
+    max resident Python=8、background=3、starts=3、prewarm=1
+    profile soft/hard=2560/3584 MiB、runtime hard=4096 MiB
+    Python admission/hard=320/512 MiB、idle timeout=90秒
+
+ 32 GiB:
+    max resident Python=16、background=6、starts=4、prewarm=2
+    profile soft/hard=5120/7168 MiB、runtime hard=8192 MiB
+    Python admission/hard=320/512 MiB、idle timeout=180秒
+
+100 logical Pack/3 busyの標準estimateは追加RAM約1.26 GiB(Linux)、1.48 GiB(macOS)、1.71 GiB(Windows)。100 busyは約31.57/37.86/42.63 GiBであり一般PCでは約束しない。
+
+admissionはhard limitの合計ではなく、artifact measured P95、Profile設定、runtime default、backend overheadの最大値をchargeする。SuspendedはRAMを保持するため全額chargeし、memory reclaim扱いにしない。
+
+idle/pressure eviction順序:
+
+  1. 新規Requestを止める
+  2. inflight effectがないことを確認
+  3. Grant/ResourceHandle/credential-use channelをrevoke
+  4. graceful quiesceをbounded待機
+  5. VMM/partition/process treeをkill
+  6. writable overlay、ephemeral key、socket、port forwardを破棄
+  7. materialization journalをStoppedへcommit
+
+used VMを別Packへ再割当てしない。Pack-specific RAM snapshotを作らない。prewarmはPackコード/secret/stateを一度も入れていないclean generic VMだけ。
+
+
+4. 実装フェーズ
+--------------
+
+Phase 0: 正本と禁止事項を固定する
+
+成果物:
+
+  - v1.1 schemasをtobkiri_protocol/schemasへ取り込む
+  - Architecture Decision Recordを作る
+  - architecture scannerを先に作る
+  - old/new runtimeのstate root、IPC port、Profileを分離する
+  - current branchの141 legacy manifest、95 v3 manifest、58 host_execution Packをmigration inventoryへ固定
+
+scannerの初期禁止パターン:
+
+  FunctionRegistry登録、InterfaceRegistry direct invoke、python_file_call
+  ecosystem Packのimportlib Host load、sys.path injection
+  host_execution、RUMI_ALLOW_HOST_EXECUTION、permissive production
+  Pack固有HTTP route、legacy fallback
+  direct urllib/requests/httpx/socket from Pack
+  raw secret resolution、host path payload
+  Pack install.py/update.py execution
+  shared writable dependency directory
+
+完了条件:
+
+  - 新規v4領域では禁止パターン0件をCI gateにする。
+  - 旧領域の既知件数はbaseline化し、増加を拒否する。
+  - old/newを一つのRequest graphで混在させない。
+
+Phase 1: Protocol、schema、generated SDK
+
+実装:
+
+  - Contract、Operation、InvocationFrame、RequestEnvelope、Response、Error、Stream frame
+  - Profile、ProfileLock、ResolvedPlan、ActivationRecord、IsolationAttestation、MaterializationEvent
+  - PolicyDecision、ApprovalRecord、GrantRecord、ResourceHandle
+  - Artifact/Distribution manifests
+  - JCS canonicalizationとdigest API
+  - strict parserとsize/depth/number/duplicate-key検査
+  - Python/TypeScript/Rust/Dart code generation
+  - typed client、provider stub、validator生成
+
+既存から再利用:
+
+  schemas/pack_manifest_v3.schema.json
+  core_runtime/global_contracts/*
+  generated/pack_sdk/*
+  scripts/generate_global_contract_bindings.py
+
+ただしv3 schemaを直接延命せず、Operation単位と二層envelopeを持つv4へ変換する。
+
+完了条件:
+
+  - 全example/vectorが全言語で同じdigestとvalidation結果になる。
+  - malformed frame corpusを全実装が同じstable errorで拒否する。
+  - schema/generated driftがCIで0。
+
+Phase 2: Artifact CAS、Distribution、install/update
+
+実装:
+
+  - untrusted stagingへstream download
+  - size/file count/compression ratio/path/collision検査
+  - exact digest、Pack署名、publisher key、revocation、provenance検証
+  - read-only content-addressed blobsへatomic rename
+  - installed-set append-only journal
+  - DistributionはPack一覧とexact digestをpinするだけ
+  - install時はPack codeを一切起動しない
+  - activation/updateを別transactionにする
+  - active Profile lockを自動変更しない
+  - rollback用old artifact retention
+
+既存PackImporterのarchive defenseとpack_signature/pack_artifact_integrityの検証ロジックはtest vectorとして移す。PackApplierのmutable ecosystem directory replaceは廃止する。
+
+完了条件:
+
+  - install中にPack entrypointが一度も実行されない。
+  - crashの全fault pointでCASかjournalに半端なinstalled stateが残らない。
+  - digest不一致、extra file、symlink、archive bomb、key revocationを拒否する。
+
+Phase 3: deterministic resolverとatomic Profile activation
+
+実装:
+
+  - Profile -> Lock -> ResolvedPlan compiler
+  - exact provider/adapter/artifact/schema/isolation/materialization mode固定
+  - tie、cycle、missing required、sunset aliasをerror
+  - activation preflight
+  - eager/continuousだけmaterializeしてreadiness確認
+  - on_demand/event_wakeをDormantでcommit
+  - immutable ActivationRecordとactive pointer atomic swap
+  - old activation drain
+  - crash recovery
+
+既存ContractRegistryとResolvedProfileのdeterministic sorting/semver testを移植する。live dispatchが別解決しないよう、RuntimeはResolvedPlan entry以外からProviderを検索してはならない。
+
+完了条件:
+
+  - Request開始時にcaptureしたActivationRecordが途中で変わらない。
+  - activation crash後は完全な旧または新のどちらかへ回復する。
+  - 100 Pack on_demand Profile activation時のresident VMは0。
+
+Phase 4: Base Policy、Approval、Grant、ResourceHandle
+
+実装:
+
+  - effect class別Base Policy
+  - capability typeごとのstrict model
+  - restrict-only Policy Pack composition
+  - policy unavailable/revision mismatch=deny
+  - exact request digestにbindしたApproval
+  - caller/target/request/profile/policy/TTL/use-countにbindしたGrant
+  - Host handle tableとrevoke
+  - private Pack state namespace/quota
+
+Approval UIへ表示するもの:
+
+  caller Pack/Publisher/digest
+  target Contract/Operation
+  effectと具体的resource diff
+  file root/domain/device/account
+  one-shotか期間付きか
+  Profile/policy revision
+
+完了条件:
+
+  - Pack payloadのapproved/caller/grant/profile値を無視する。
+  - Grantの別request、別target、期限後、使用回数超過を拒否する。
+  - sandbox内部計算には不要なApprovalを出さない。
+
+Phase 5: authoritative audit
+
+実装:
+
+  - single writer、monotonic sequence、previous digest hash chain
+  - periodic signed checkpoint
+  - request/effect/materialization/activation/install/update event
+  - schema-guided redaction
+  - reservation -> dispatched -> effect_committed/failedの状態
+  - diagnostics storeとsecurity audit storeを分離
+  - bounded emergency journal
+
+failure policy:
+
+  pure/read: emergency journalが書ける場合のみ継続
+  write/external_effect/privileged: authoritative reservation不可ならdeny
+
+完了条件:
+
+  - disk full、permission error、writer crashをfault injectionし、外部作用がfail-closedになる。
+  - Packがauthoritative audit eventを偽造できない。
+
+Phase 6: Wasm L3 runtime
+
+実装:
+
+  - Wasmtime Component Model
+  - deny-by-default WASI
+  - preopened directoryなしをdefault
+  - network/socket/env/clock/randomをResource/Grant単位で注入
+  - fuel/epoch interruption、memory/table/instance limit
+  - Contract WIT bindingとcomponent conformance
+
+最初に移植する対象:
+
+  pure Adapter、formatter、validator、small data transform、Notificationのpure部分
+
+完了条件:
+
+  - ambient env、Host filesystem、network、secretへ到達不能。
+  - timeout/cancelでcomponentが確実に停止。
+
+Phase 7: PackVM common supervisorとmacOS backend
+
+ユーザー環境を優先し、最初のproduction L4はApple Silicon macOSを推奨する。ただし実装開始前にVirtualization.framework entitlement、配布署名、App Store外配布条件をADRで確定する。
+
+common interface:
+
+  probe、install assets、create、boot、attest、invoke、cancel
+  metrics、quiesce、terminate、destroy、recover、collect diagnostics
+
+macOS実装:
+
+  - signed packvm-vz helper
+  - VZLinuxBootLoader/base image/COW overlay
+  - virtio socketの認証済みguest protocol
+  - broker-only network（guestへraw NICを見せない、または強制egress pathのみ）
+  - host shareはartifact read-only、private state scoped、tmp COWだけ
+  - clean base/prewarm image
+  - VMM killとoverlay/key cleanup journal
+
+現在のLima providerはdevelopment/conformance harnessへ降格し、production Pack executionには使わない。
+
+完了条件:
+
+  - malicious fixtureがHost file、他Pack state、localhost、raw network、parent processへ到達不能。
+  - VM停止後にprocess/socket/mount/overlay/keyが残らない。
+  - アプリUIだけでbackend setupが完了し、Docker/Homebrew/manual shell不要。
+
+Phase 8: lazy materialization、admission、eviction
+
+実装:
+
+  - ExecutionDomainKey単位のsingle-flight start
+  - priority別bounded queues
+  - max resident/background/starts/prewarm
+  - admission charge、physical usage telemetry、host free guard
+  - idle timeout、pressure eviction、backoff/quarantine
+  - continuous/event wake lease
+  - cold-start progress UI
+
+default queue bounds:
+
+  per binding 16
+  foreground per Profile 64
+  background 128
+  Runtime total 256
+  foreground waitは30秒またはRequest deadlineの短い方
+
+完了条件:
+
+  - 同じDormant Packへの100 RequestでVM startは1回。
+  - queue overflowはstable busy/unavailable error。
+  - 100 logical/0 resident、100 logical/3 busyのmemory gateを満たす。
+
+Phase 9: Request brokerとend-to-end dispatch
+
+実装:
+
+  - authenticated caller session
+  - exact ResolvedPlan dispatch
+  - schema validation前後
+  - deadline/cancel propagation
+  - idempotency store
+  - response/error sanitization
+  - stream credit/backpressure
+  - provider crash/circuit breaker
+
+既存global_contract_dispatch、InterfaceRegistry、FunctionRegistryを正規経路として再利用しない。必要なテストだけ移植する。
+
+完了条件:
+
+  - public invocationはこのbroker以外に存在しない。
+  - timeout後にProvider処理、子process、network effectが継続しない。
+  - non-idempotent effectの結果不明はambiguous_effectとして残す。
+
+Phase 10: Storage、workspace、credential、network broker
+
+Storage:
+
+  - private stateはPackVM専用volume
+  - shared authoritative dataはStorage Contract
+  - authoritative/derived/cache/ephemeral分類
+  - scope=user/tenant/workspace/profile/pack/provider
+  - uninstallはretain、purgeは別Approval
+
+Workspace/File:
+
+  - Host root handle + relative path
+  - read/write/list/watch/apply-patchを別operation
+  - symlink/hardlink/race/size/quota制御
+
+Credential:
+
+  - Packへsecret_materialを返すresolve operationを廃止
+  - credential-use handleだけを渡す
+  - egress/signing/OAuth brokerが目的operationへsecretを注入
+  - domain/method/path/account/audience/TTL/use-countでscope
+
+Network:
+
+  - raw socket禁止
+  - canonical DNS/domain/IP/port/method/path/body size policy
+  - private range、localhost、DNS rebinding対策
+  - redirectごとに再評価
+  - response size/type/timeout制限
+
+Phase 11: FunctionからOperationへのPack移植
+
+全既存Packを一度disabledにし、優先vertical sliceごとに移植する。
+
+移植手順（Packごと）:
+
+  1. ecosystem.json/function一覧とstate ownerを棚卸し
+  2. public FunctionをContract Operationへ分類
+  3. 内部helper Functionはprivate実装として残す
+  4. direct import/HTTP/file/secret依存をContract/Handleへ置換
+  5. v4 artifact manifestとexact resource inventory作成
+  6. PythonならPackVM、pure処理ならWasmを選択
+  7. conformance vectorsとmalicious tests追加
+  8. Profile bindingで有効化
+  9. legacy Function ID aliasを必要な開発期間だけsigned data mappingで保持
+ 10. migration完了後aliasと旧Functionを削除
+
+vertical slice順:
+
+  1. Notification: external effect、Approval、Audit、idempotency
+  2. Storage: state owner、handle、concurrency、quota
+  3. AI text generation: stream、network、credential、cost、cancel
+  4. GUI Shell/Contribution
+  5. Workflow/Scheduler
+  6. Connectors
+  7. Marketplace/Distribution update
+
+Phase 12: GUI Shell/Contribution
+
+Host/TCBに残すUI:
+
+  approval、principal/publisher表示、credential consent
+  sandbox/isolation status、security errors、update trust warning
+
+交換可能GUI Pack:
+
+  shell layout、theme token、normal navigation
+  screen/panel/command/widget contributions
+
+実装:
+
+  - ProfileごとにGUI Shell Provider 1つ
+  - contribution descriptor Contract
+  - Packごとのopaque origin iframe/WebView/process
+  - strict CSP、no same-origin、no top navigation、no service worker
+  - bridge channel作成時にprincipalをHostがbind
+  - /p/<pack-id>/... namespace
+  - route/CSS/theme/command collision検査
+  - Profile swap時にroute/listener/timer/handleをrevoke
+
+Defaultspack Web UIは交換可能Shell Packへ移し、LauncherはHost/security chromeへ縮小する。
+
+Phase 13: Workflow PackとScheduler Pack
+
+Workflow models:
+
+  Definition: draft -> published -> archived
+  Run: queued -> running <-> paused -> succeeded/failed/cancelled/needs_reconciliation
+  StepAttempt: pending -> dispatching -> running/waiting_approval
+               -> succeeded/failed/cancelled/timed_out/ambiguous_effect
+
+実装:
+
+  - Workflow Definition/Run/StepAttempt/checkpoint store
+  - published revisionとActivationRecordをRun開始時にpin
+  - stepはContract Requestだけ
+  - restricted CEL subset、I/Oなし
+  - parallel child attemptの実並列とbounded concurrency
+  - retry count/backoff/idempotency/attempt history
+  - approval待ちpauseとcontinuation
+  - cancelのRequest/Providerへの伝播
+  - crash recoveryとambiguous effect reconciliation
+  - SchedulerはTrigger Contractで接続する別Pack
+  - occurrence ID + workflow revisionでduplicate start防止
+  - editor paletteをactive Contract Catalogから生成
+  - ETag/revision/optimistic locking/compile preview
+
+三系統のschedulerは一つのScheduler Packへ統合し、Runtimeからdomain scheduling logicを削除する。
+
+Phase 14: Connector gateway
+
+Ingress:
+
+  TLS termination -> connector identification -> signature verification
+  -> replay check -> payload size/schema -> Inbound Request
+
+Egress:
+
+  outbound Operation -> Policy/Approval/Grant -> credential-use broker
+  -> canonical endpoint -> delivery -> receipt/idempotency/audit
+
+実HTTP webhook special-caseをGatewayの下へ接続し、pack_api_serverの旧mappingを削除する。vendor errorはdiagnostics IDへ隔離し、public responseへraw文字列を出さない。
+
+Phase 15: Linux/Windows backend
+
+Linux:
+
+  Firecracker/KVM、jailer-equivalent、cgroup v2、seccomp、namespace
+  broker-only network、read-only base、COW overlay、hard cleanup
+
+Windows:
+
+  signed WHPX helper、PackVM lifecycle、VSOCK相当channel
+  optional feature/UAC/reboot resumeをguided installerで管理
+  WSL shared guest/per-Pack distroをproduction PackVMに使わない
+
+各OSは同じconformance suiteを通った時だけL4対応表示にする。未合格OSでもTobkiri本体、remote provider、対応可能なWasm Packは使用できるが、unknown native/Python Pack activationは拒否する。
+
+Phase 16: legacy削除
+
+削除対象:
+
+  ecosystem.json
+  FunctionRegistry、Function alias runtime
+  InterfaceRegistry direct execution
+  global_contract legacy projection、manifest legacy projection
+  python_file_call
+  Pack固有host route、legacy HTTP/AI fallback
+  host_execution、RUMI_ALLOW_HOST_EXECUTION、permissive production
+  direct Docker ownership/fallback
+  install.py/update.py hook
+  shared /pip-packages
+  raw secret resolution
+  Startup/Capability/Operating Profileの二重正本
+  Runtime内Flow/Scheduler domain logic
+
+削除条件:
+
+  - vertical sliceのv4 replacementがconformance合格
+  - architecture scanner baseline 0
+  - old runtime state rootを参照するproduction code 0
+  -旧route/function IDをgenerated clientが参照しない
+
+
+5. ファイル単位の現行コード取扱い
+--------------------------------
+
+原則は「直接大改造」ではなく「新実装へ概念・テストを移し、最後に削除」。
+
+再利用候補:
+
+  tobkiri_runtime/core_runtime/global_contracts/models.py
+    -> model要件とsemver/cardinality testを移植
+
+  tobkiri_runtime/core_runtime/global_contracts/registry.py
+    -> deterministic ordering/cycle testをresolverへ移植
+
+  tobkiri_runtime/core_runtime/bounded_process_runner.py
+    -> cancel/process-tree cleanup testをPackVM supervisorへ移植
+
+  tobkiri_runtime/core_runtime/pack_importer.py
+    -> archive defenseをCAS installerへ移植
+
+  tobkiri_runtime/core_runtime/pack_signature.py
+  tobkiri_runtime/core_runtime/pack_artifact_integrity.py
+    -> signature/integrity vectorsをRust verifierへ移植
+
+  tobkiri_runtime/core_runtime/authority/*
+    -> Principal/Approval UXとtestを新Policyへ移植
+
+  tobkiri_runtime/ecosystem/defaultspack/backend/sandbox/*
+    -> manager model、template、audit、workspace overlay、guest protocolを再利用
+    -> Lima/WSL/shared guest providerはproduction Pack executionから外す
+
+  tobkiri_runtime/ecosystem/rumi_tool_broker_pack/runtime/broker.py
+    -> pipeline順序を新Request brokerのtest vectorにする
+
+置換・削除候補:
+
+  core_runtime/function_registry.py
+  core_runtime/pack_function_runtime.py
+  core_runtime/capability_binding_registration.pyのHost Python load
+  core_runtime/global_contract_dispatch.py
+  core_runtime/interface_registry.pyのdirect operation storage
+  core_runtime/kernel_handlers_runtime.pyのpython_file_call
+  core_runtime/pack_api_server.pyのlegacy fallback/special-case
+  core_runtime/pack_applier.pyのmutable directory replace
+  core_runtime/secure_executor.pyのhost permissive
+
+GUI/Workflowで統合対象:
+
+  defaultspack/domain/frontend/registry.py
+  defaultspack/frontend/frontend_loader.py
+  launcher/frontend/src/lib/routes.ts
+  launcher/frontend/src/lib/appearance.ts
+  launcher/frontend/src/pages/Flows.tsx
+  launcher/frontend/src/hooks/useFlowExecution.ts
+  launcher/frontend/src/lib/flowUtils.ts
+  core_runtime/kernel_flow_execution.py
+  core_runtime/flow_scheduler.py
+  defaultspack/domain/flow/engine.py
+  defaultspack/domain/scheduler/scheduler.py
+  rumi_scheduler_runtime_pack/runtime/scheduler.py
+
+
+6. テストとrelease gate
+----------------------
+
+6.1 Protocol/Contract
+
+  - malformed JSON、duplicate key、oversize、deep nesting、number boundary
+  - schema input/output/error/progress
+  - semver compatible/incompatible
+  - one/many/keyed/chain/fanout/optional
+  - ambiguity、cycle、missing provider、stale activation
+  - alias sunset、adapter loss/cycle/max hop
+  - Python/Wasm/PackVM/remoteのprotocol parity
+
+6.2 malicious Pack corpus
+
+  - /etc、home、workspace、other Pack state読取
+  - symlink/hardlink/TOCTOU
+  - raw socket、localhost、private IP、DNS rebinding、redirect escape
+  - env/credential/FD探索
+  - fork bomb、memory bomb、disk bomb、output bomb
+  - parent/host process signal/debug
+  - forged caller/approval/grant/profile/audit
+  - stale/replayed handle/request
+  - cancellation無視、child process残留
+  - UI clickjacking/security chrome模倣
+
+6.3 lifecycle/fault injection
+
+全transitionでprocess kill、power loss相当、disk full、journal partial writeを注入する。
+
+  install CAS commit
+  Profile pointer swap
+  VM start/attestation/readiness
+  Request dispatch/effect/audit commit
+  update/drain/eviction
+  Workflow checkpoint/approval/retry
+
+6.4 platform conformance
+
+各OS/backendで次を実測する。
+
+  filesystem/process/network/state isolation
+  CPU/RAM/disk/process limits
+  cold/warm start p50/p95/p99
+  idle termination、pressure eviction
+  timeout/cancel cleanup latency
+  10/100/500/1000 logical Pack disk/RAM
+  100 logical/0 resident、3 busy、10 busy
+  100-request burst single-flight/queue behavior
+
+6.5 mandatory release gate
+
+  - architecture scanner violation 0
+  - unknown Pack host import 0
+  - external effect without Policy/Grant/audit reservation 0
+  - timeout/cancel後のresidual process/socket/handle 0
+  - cross-Pack filesystem/state visibility 0
+  - Profile atomicity fault test 100% pass
+  - protocol/schema/conformance全言語pass
+  - supported platformのL4 conformance pass
+  - memory/boot benchmarkがdevice class予算内
+
+
+7. 実装順の依存関係
+--------------------
+
+最短のcritical path:
+
+  Protocol/schema
+    -> Artifact identity/CAS
+    -> Resolver/Profile/Activation
+    -> Policy/Grant/Handle/Audit
+    -> Wasmまたは1 OS PackVM
+    -> lazy materialization/admission
+    -> canonical Request broker
+    -> Notification vertical slice
+    -> Storage
+    -> AI stream
+    -> GUI/Workflow/Connector
+    -> 残りOS
+    -> legacy完全削除
+
+避ける順序:
+
+  - 先に141 Packをmanifest変換してからRuntimeを作る。
+  - legacy dispatch上に新Policyだけ追加する。
+  - Lima/WSL共有guestをL4と表示する。
+  - 全OS backendを並行着手してProtocolを後回しにする。
+  - GUI editorを完成させてからWorkflow state machineを決める。
+
+
+8. 最初の実装PR候補
+-------------------
+
+PR-01 protocol schemasとcanonical vectors
+PR-02 generated SDKとstrict frame parser
+PR-03 architecture scanner/baseline
+PR-04 immutable artifact identityとCAS staging
+PR-05 signature/provenance/revocation binding
+PR-06 ProfileLock/ResolvedPlan compiler
+PR-07 ActivationRecord atomic journal/recovery
+PR-08 Base Policy + typed capability
+PR-09 Approval/Grant/ResourceHandle
+PR-10 authoritative audit reservation/commit
+PR-11 Wasmtime minimal provider
+PR-12 PackVM common supervisor/guest protocol
+PR-13 macOS VZ backend
+PR-14 admission/single-flight/idle eviction
+PR-15 canonical Request broker
+PR-16 Notification Contract vertical slice
+PR-17 Storage Contract/private state
+PR-18 AI streaming/egress/credential-use
+PR-19 GUI contribution isolation
+PR-20 Workflow state machine/editor connection
+PR-21 Connector gateway
+PR-22 Linux Firecracker backend
+PR-23 Windows WHPX backend
+PR-24 remaining Pack migration
+PR-25 legacy deletion and baseline zero
+
+各PRは、schema、implementation、unit test、conformance vector、fault test、docsを同時に含める。security invariantを後続PRに先送りしない。
+
+
+9. 実装開始前にADRで最終確定する項目
+--------------------------------------
+
+次は曖昧なままcodeへ埋め込まない。
+
+  ADR-001 canonical namespaceをio.tobkiri.*へ移す時期
+  ADR-002 artifact package形式（OCI artifact/独自archive）
+  ADR-003 JCS JSONとCBOR併用の将来方針
+  ADR-004 Foundation/Community/Privateのpublisher/governance
+  ADR-005 macOS VZ helper entitlement、署名、配布方式
+  ADR-006 Windows WHPX prerequisitesとreboot UX
+  ADR-007 Linux KVMなし環境の製品表示
+  ADR-008 PackVM base image更新とCVE対応
+  ADR-009 guest agent更新互換性
+  ADR-010 private state encryption/quota/backup
+  ADR-011 ResourceHandleのlarge binary transport
+  ADR-012 audit retention/checkpoint key/recovery
+  ADR-013 Policy rule language（Rust DSL/CEL subset等）
+  ADR-014 Approval reuse可能なlow-risk class
+  ADR-015 remote ProviderのTLS pin/region/retention semantics
+  ADR-016 event-wake/background leaseとbattery policy
+  ADR-017 same PackArtifact内Providerのexecution domain共有条件
+  ADR-018 old/new runtime併存期間と強制終了条件
+  ADR-019 state reset対象と残すユーザー設定
+  ADR-020 benchmark合格値（p95 boot/RAM/disk/cleanup）
+
+
+10. 完成の定義
+--------------
+
+この再設計は、画面上でPackが動いた時点では完成ではない。次をすべて満たした時点をv1完成とする。
+
+  - public Pack APIがContract Operation Requestだけ。
+  - ecosystem PackのHost import/cross-Pack importがない。
+  - FunctionRegistry、legacy route、python_file_call、host fallbackがない。
+  - install/resolveでPack codeを実行しない。
+  - Profileがexact artifact/provider/schema/isolationをdeterministicにpinする。
+  - logical activationとmaterializationが分離される。
+  - unknown native/Python Packはcertified L4だけで起動する。
+  - internal sandbox操作は不要な承認なしで動き、境界越えだけGrantされる。
+  - secret valueをPackへ返さない。
+  - external effectはPolicy、必要なApproval、request-bound Grant、audit reservationを必ず通る。
+  - timeout/cancel/eviction/update後に実行物と権限が残らない。
+  - GUI security chromeをPackが模倣・被覆できない。
+  - Workflowがcheckpoint、approval pause、cancel、retry、reconciliationを持つ。
+  - 100 logical Packが100 VMを意味しない。
+  - macOS/Windows/Linuxは、それぞれconformance合格したbackendだけを対応表示する。
+  - Docker/Homebrew/manual shellなしでライトユーザーがsetupできる。
+  - malicious fixture、fault injection、resource benchmarkがrelease gateとして常時passする。
+
+
+11. 現実的な難易度評価
+----------------------
+
+これは大規模かつ根本的なrewriteである。特に難しいのはContract schemaではなく、次の4点。
+
+  1. 三OSのproduction-grade PackVM supervisorと配布
+  2. Policy/Grant/Audit/Requestを迂回不能な唯一経路にすること
+  3. logical Profileとphysical VM lifecycleのatomic recovery
+  4. 既存の多数のPack、GUI、Workflow、Connectorを旧direct callから移植すること
+
+一方、既存データ互換を必須にせず、プロジェクトが未完成の段階で全面移行できるため、二重互換を長期間維持するより成功確率は高い。最も重要なのは、全機能を同時に直すことではなく、Notificationの小さなvertical sliceで「artifact -> profile -> request -> policy -> sandbox -> effect -> audit」の完全な一本線を先に完成させ、その線以外の実行経路を増やさないことである。
