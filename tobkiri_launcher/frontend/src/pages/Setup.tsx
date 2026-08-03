@@ -29,6 +29,16 @@ import { motion } from 'motion/react';
 import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import tobkiriIconUrl from '../../../assets/app-icon/tobkiri-launcher-icon.png';
 
+function presentationErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+  return fallback;
+}
+
 export function Setup() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -59,7 +69,7 @@ export function Setup() {
       setPresentationSelection(nextSelection ?? defaultPresentationSelection(nextState.catalog));
       return nextState;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Presentation catalog could not be loaded.';
+      const message = presentationErrorMessage(error, 'Presentation catalog could not be loaded.');
       setPresentationError(message);
       throw error;
     } finally {
@@ -236,7 +246,7 @@ export function Setup() {
       addToast(t('setup.link_success') || 'Tobkiri Launcher setup saved.', 'success');
       window.setTimeout(() => navigate(panelRoutes.home), 800);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Presentation selection could not be saved.';
+      const message = presentationErrorMessage(error, 'Presentation selection could not be saved.');
       setPresentationError(message);
       addToast(message, 'error');
     } finally {
@@ -251,7 +261,7 @@ export function Setup() {
       const result = await launchSelectedPresentation();
       addToast(result.message || 'Selected Shell launched.', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Selected Shell launch was blocked.';
+      const message = presentationErrorMessage(error, 'Selected Shell launch was blocked.');
       setPresentationError(message);
       addToast(message, 'error');
     } finally {

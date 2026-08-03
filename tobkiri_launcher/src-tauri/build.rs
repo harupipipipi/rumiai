@@ -99,14 +99,44 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .map_err(|error| stage_error("stage setup brand icon", error))?;
 
     let bundled_src = project_dir.join("bundled");
-    if bundled_src.exists() {
-        copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
-            .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
+    if !bundled_src.is_dir() {
+        return Err(stage_error(
+            "locate Launcher bundled resources",
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "bundled resource directory is missing at {}",
+                    bundled_src.display()
+                ),
+            ),
+        ));
     }
+    copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
+        .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
+    verify_staged_catalog(&bundled_src, &staged_root.join("bundled"))
+        .map_err(|error| stage_error("verify staged presentation catalog", error))?;
 
     stage_pack_shell(&repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
 
+    Ok(())
+}
+
+fn verify_staged_catalog(source_dir: &Path, staged_dir: &Path) -> io::Result<()> {
+    let source = source_dir.join("presentation_catalog.json");
+    let staged = staged_dir.join("presentation_catalog.json");
+    let expected = fs::read(&source)?;
+    let actual = fs::read(&staged)?;
+    if expected != actual {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "manifest-derived presentation catalog differs between {} and {}",
+                source.display(),
+                staged.display()
+            ),
+        ));
+    }
     Ok(())
 }
 

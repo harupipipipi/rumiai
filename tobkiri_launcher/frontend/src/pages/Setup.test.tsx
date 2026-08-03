@@ -24,6 +24,12 @@ test('panel setup requires an exact Base Pack then app.shell.v1 presentation sel
   assert.match(source, /preparePresentationSetup/);
 });
 
+test('panel setup preserves actionable Tauri string errors', () => {
+  assert.match(source, /function presentationErrorMessage\(error: unknown, fallback: string\)/);
+  assert.match(source, /typeof error === 'string' && error\.trim\(\)/);
+  assert.match(source, /presentationErrorMessage\(error, 'Presentation catalog could not be loaded\.'/);
+});
+
 test('panel entry shows Home first and verifies the setup pack in the background', () => {
   assert.match(appSource, /import \{ hasSelectedSetupPack \} from '@\/src\/lib\/setupPacks'/);
   assert.match(appSource, /requestIdleCallback/);

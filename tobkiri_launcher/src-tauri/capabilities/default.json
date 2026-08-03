@@ -12,6 +12,9 @@
     ]
   },
   "permissions": [
-    "core:default"
+    "core:default",
+    "allow-get-presentation-catalog",
+    "allow-select-presentation",
+    "allow-launch-selected-presentation"
   ]
 }

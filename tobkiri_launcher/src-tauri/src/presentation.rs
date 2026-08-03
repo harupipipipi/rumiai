@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result as AnyResult};
-use log::error;
+use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State};
@@ -194,7 +194,11 @@ pub struct PresentationLaunchResponse {
 
 #[tauri::command]
 pub fn get_presentation_catalog(config: State<'_, AppConfig>) -> Result<PresentationState, String> {
-    build_state(config.inner()).map_err(|error| format!("{error:#}"))
+    build_state(config.inner()).map_err(|error| {
+        let message = format!("presentation catalog could not be loaded: {error:#}");
+        error!("{message}");
+        message
+    })
 }
 
 #[tauri::command]
@@ -202,7 +206,11 @@ pub fn select_presentation(
     config: State<'_, AppConfig>,
     selection: PresentationSelection,
 ) -> Result<PresentationState, String> {
-    select_presentation_impl(config.inner(), selection).map_err(|error| format!("{error:#}"))
+    select_presentation_impl(config.inner(), selection).map_err(|error| {
+        let message = format!("presentation selection could not be saved: {error:#}");
+        error!("{message}");
+        message
+    })
 }
 
 #[tauri::command]
@@ -313,34 +321,57 @@ fn build_state_from_catalog(
     })
 }
 
-fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
-    let path = config
+fn presentation_catalog_path(config: &AppConfig) -> PathBuf {
+    config
         .app_dir
         .join("bundled")
-        .join("presentation_catalog.json");
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
+        .join("presentation_catalog.json")
+}
+
+fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
+    let path = presentation_catalog_path(config);
+    let (raw, source) = match fs::read_to_string(&path) {
+        Ok(raw) => (raw, format!("packaged resource {}", path.display())),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            include_str!("../bundled/presentation_catalog.json").to_string()
+            warn!(
+                "manifest-derived presentation catalog resource is missing at {}; using the embedded generated catalog",
+                path.display()
+            );
+            (
+                include_str!("../bundled/presentation_catalog.json").to_string(),
+                format!(
+                    "embedded generated catalog (packaged resource missing at {})",
+                    path.display()
+                ),
+            )
         }
         Err(error) => {
             return Err(error).with_context(|| {
-                format!("failed to read presentation catalog at {}", path.display())
+                format!(
+                    "failed to read manifest-derived presentation catalog at {} (app root {})",
+                    path.display(),
+                    config.app_dir.display()
+                )
             })
         }
     };
-    let catalog: PresentationCatalog = serde_json::from_str(&raw)
-        .with_context(|| "presentation catalog is malformed and was rejected")?;
+    let catalog: PresentationCatalog = serde_json::from_str(&raw).with_context(|| {
+        format!("manifest-derived presentation catalog from {source} is malformed and was rejected")
+    })?;
     if catalog.schema != CATALOG_SCHEMA {
         bail!(
-            "unsupported presentation catalog schema: {}",
-            catalog.schema
+            "unsupported manifest-derived presentation catalog schema from {source}: {}",
+            catalog.schema,
         );
     }
     if catalog.base_packs.is_empty() || catalog.shell_providers.is_empty() {
-        bail!("presentation catalog must contain a Base Pack and Shell Provider");
+        bail!(
+            "manifest-derived presentation catalog from {source} must contain a Base Pack and Shell Provider"
+        );
     }
-    validate_catalog_integrity(&catalog)?;
+    validate_catalog_integrity(&catalog).with_context(|| {
+        format!("manifest-derived presentation catalog from {source} failed integrity validation")
+    })?;
     Ok(catalog)
 }
 
@@ -1128,6 +1159,34 @@ mod tests {
         }
     }
 
+    fn relocated_release_config(test_name: &str) -> (PathBuf, AppConfig) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-relocated-release-{test_name}-{}-{unique}",
+            std::process::id()
+        ));
+        let app_dir = root
+            .join("Relocated")
+            .join("Tobkiri Launcher.app")
+            .join("Contents")
+            .join("Resources")
+            .join("app");
+        fs::create_dir_all(app_dir.join("bundled")).unwrap();
+        fs::write(
+            app_dir.join("bundled").join("presentation_catalog.json"),
+            include_str!("../bundled/presentation_catalog.json"),
+        )
+        .unwrap();
+
+        let mut config = test_config(&app_dir);
+        config.user_data_dir = root.join("Application Support").join("user_data");
+        config.log_dir = root.join("Application Support").join("logs");
+        (root, config)
+    }
+
     #[test]
     fn production_rejects_known_development_commands() {
         for command in ["cargo tauri dev", "npm run dev", "pnpm dev"] {
@@ -1252,6 +1311,88 @@ mod tests {
             state.materialization.artifact.as_ref().unwrap().status,
             "missing"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn relocated_release_resources_load_base_and_compatible_shells() {
+        let (root, config) = relocated_release_config("catalog");
+        let state = build_state(&config).unwrap();
+        let base = state.catalog.base_packs.first().unwrap();
+        let profile_identity = (
+            state.catalog.default_profile_id.clone(),
+            state.catalog.default_profile_digest.clone(),
+            base.backend_identity_digest.clone(),
+            base.backend_provider_ids.clone(),
+            base.state_owners.clone(),
+        );
+
+        assert_eq!(state.catalog.base_packs.len(), 1);
+        assert_eq!(state.catalog.shell_providers.len(), 3);
+        assert_eq!(state.selection, None);
+        assert_eq!(state.materialization.status, "not_selected");
+
+        let compatible_shells = state
+            .catalog
+            .shell_providers
+            .iter()
+            .map(|shell| PresentationSelection {
+                base_pack_id: base.pack_id.clone(),
+                shell_provider_id: shell.provider_id.clone(),
+            })
+            .filter(|selection| validate_selection(&state.catalog, selection).is_ok())
+            .collect::<Vec<_>>();
+        assert_eq!(compatible_shells.len(), 3);
+
+        for selection in compatible_shells {
+            let selected_state =
+                build_state_from_catalog(&config, state.catalog.clone(), Some(selection.clone()))
+                    .unwrap();
+            let selected_base = selected_state.catalog.base_packs.first().unwrap();
+            assert_eq!(
+                (
+                    selected_state.catalog.default_profile_id.clone(),
+                    selected_state.catalog.default_profile_digest.clone(),
+                    selected_base.backend_identity_digest.clone(),
+                    selected_base.backend_provider_ids.clone(),
+                    selected_base.state_owners.clone(),
+                ),
+                profile_identity
+            );
+            assert_eq!(selected_state.materialization.status, "blocked");
+            let artifact = selected_state.materialization.artifact.as_ref().unwrap();
+            assert_eq!(artifact.status, "missing");
+            assert!(selected_state
+                .materialization
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("not installed"));
+        }
+
+        let arbitrary_dev_path = root
+            .join("Relocated")
+            .join("Tobkiri Launcher.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Tobkiri Launcher")
+            .to_string_lossy()
+            .into_owned();
+        let error = reject_development_command(Some(&arbitrary_dev_path)).unwrap_err();
+        assert!(error.to_string().contains("arbitrary commands"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn relocated_release_catalog_errors_name_the_packaged_resource() {
+        let (root, config) = relocated_release_config("error");
+        let catalog_path = presentation_catalog_path(&config);
+        fs::write(&catalog_path, "{\"schema\": \"broken\"}").unwrap();
+        let error = load_catalog(&config).unwrap_err().to_string();
+        assert!(error.contains("packaged resource"));
+        assert!(error.contains("is malformed and was rejected"));
+        let catalog_path_text = catalog_path.to_string_lossy();
+        assert!(error.contains(catalog_path_text.as_ref()));
         fs::remove_dir_all(&root).unwrap();
     }
 
