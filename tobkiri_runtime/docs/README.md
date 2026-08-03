@@ -16,6 +16,7 @@
 | viewer 表示 Pack を作りたい | [examples/viewer_hello_pack/README.md](./examples/viewer_hello_pack/README.md) | [examples/viewer_pack/README.md](./examples/viewer_pack/README.md) |
 | Capability Graph / node / profile 仕様を確認したい | [capability_graph.md](./capability_graph.md) | [node_spec.md](./node_spec.md), [profile_spec.md](./profile_spec.md), [capability_graph_pr_plan.md](./capability_graph_pr_plan.md) |
 | API キー / secrets / 運用を知りたい | [operations.md](./operations.md) | [quality_pack/philosophy_memo.md](./quality_pack/philosophy_memo.md) |
+| v4 authority 実装境界を統合したい | [runtime-authority-v4.md](./runtime-authority-v4.md) | [ADR-014](./ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt), [ADR-015](./ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt) |
 | defaultspack の実装側を追いたい | [../ecosystem/defaultspack/README.md](../ecosystem/defaultspack/README.md) | [../ecosystem/defaultspack/docs/getting-started.md](../ecosystem/defaultspack/docs/getting-started.md) |
 | Codex OSS から取り込んだ coding-tool 観点を見たい | [codex_oss_reference.md](./codex_oss_reference.md) | ルートの [../../AGENTS.md](../../AGENTS.md), [../../justfile](../../justfile) |
 | Pack architecture再設計の正本を確認したい | [TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt](./TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt) | [ADR-014](./ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt), [ADR-015](./ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt), [ADR-016](./ADR-016_BASE_SHELL_APPLICATION_MODEL.txt), [design inputs](./PACK_ARCHITECTURE_DESIGN_INPUTS.json) |
