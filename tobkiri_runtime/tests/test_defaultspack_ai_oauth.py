@@ -477,6 +477,57 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(imported["rejected_capabilities"], ["cloudflare.runner.deploy"])
         self.assertNotIn(raw_token, json.dumps(imported, ensure_ascii=False))
 
+    def test_connection_registry_reuses_and_invalidates_manifest_cache(self):
+        from core_runtime.connections.registry import ConnectionsRegistry
+        from domain.ai_client import oauth_store
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            providers_dir = pack_root / "config" / "settings_control_center" / "providers"
+            providers_dir.mkdir(parents=True)
+            manifest_path = providers_dir / "google.connection.json"
+            source_manifest = (
+                DEFAULTSPACK_ROOT
+                / "config"
+                / "settings_control_center"
+                / "providers"
+                / "google.connection.json"
+            )
+            manifest_path.write_text(
+                source_manifest.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            load_calls = 0
+            original_load_manifest_dir = ConnectionsRegistry.load_manifest_dir
+
+            def counted_load_manifest_dir(registry, root):
+                nonlocal load_calls
+                load_calls += 1
+                return original_load_manifest_dir(registry, root)
+
+            with patch.object(
+                ConnectionsRegistry,
+                "load_manifest_dir",
+                counted_load_manifest_dir,
+            ):
+                first = oauth_store._connection_registry(pack_root)
+                second = oauth_store._connection_registry(pack_root)
+                manifest_path.write_text(
+                    manifest_path.read_text(encoding="utf-8") + "\n",
+                    encoding="utf-8",
+                )
+                changed = oauth_store._connection_registry(pack_root)
+                manifest_path.unlink()
+                deleted = oauth_store._connection_registry(pack_root)
+
+        self.assertIs(first, second)
+        self.assertIsNot(first, changed)
+        self.assertIsNot(changed, deleted)
+        self.assertEqual(load_calls, 2)
+        with self.assertRaises(KeyError):
+            deleted.get("google")
+
     def test_connection_provider_manifest_extensibility_with_dummy_provider(self):
         from domain.ai_client.oauth_store import provider_oauth_statuses
         from domain.connections.store import import_connection_bundle, resolve_capabilities_for_provider

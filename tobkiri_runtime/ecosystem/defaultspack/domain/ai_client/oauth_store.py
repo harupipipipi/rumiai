@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -114,6 +115,11 @@ _OAUTH_RUNTIME_PROVIDER_IDS = {"cloudflare", "google"}
 _PENDING_STATE_TTL_SECONDS = 600
 _ACCESS_TOKEN_SKEW_SECONDS = 60
 _pending_states: dict[str, dict[str, Any]] = {}
+_connection_cache_lock = threading.RLock()
+_connection_registry_cache: dict[str, tuple[tuple[Any, ...], Any]] = {}
+_connection_manifest_signature_cache: dict[
+    str, tuple[tuple[Any, ...], tuple[tuple[str, int, int], ...]]
+] = {}
 
 
 def _pack_root() -> Path:
@@ -127,14 +133,106 @@ def _connection_manifest_root(pack_root: Path | None = None) -> Path:
     return _pack_root() / "config" / "settings_control_center" / "providers"
 
 
+def _connection_manifest_signature(
+    root: Path,
+) -> tuple[tuple[str, int, int], ...]:
+    """Return a manifest signature without rescanning an unchanged tree.
+
+    The registry is read on several provider-status paths.  The fast path
+    checks the known files and directories with ``stat``; a recursive scan is
+    only needed after a directory changes.  This still notices additions,
+    removals, and edits to manifests while avoiding repeated JSON loading.
+    """
+    cache_key = str(root)
+    try:
+        root.stat()
+    except OSError:
+        with _connection_cache_lock:
+            _connection_manifest_signature_cache.pop(cache_key, None)
+            _connection_registry_cache.pop(cache_key, None)
+        return ()
+
+    with _connection_cache_lock:
+        cached = _connection_manifest_signature_cache.get(cache_key)
+        if cached is not None:
+            tree_signature, manifest_signature = cached
+            tree_unchanged = True
+            for relative_path, mtime_ns, size in tree_signature:
+                path = root / relative_path
+                try:
+                    stat = path.stat()
+                except OSError:
+                    tree_unchanged = False
+                    break
+                if stat.st_mtime_ns != mtime_ns or stat.st_size != size:
+                    tree_unchanged = False
+                    break
+            if tree_unchanged:
+                for relative_path, mtime_ns, size in manifest_signature:
+                    path = root / relative_path
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        tree_unchanged = False
+                        break
+                    if stat.st_mtime_ns != mtime_ns or stat.st_size != size:
+                        tree_unchanged = False
+                        break
+            if tree_unchanged:
+                return manifest_signature
+
+        directories: list[Path] = [root]
+        try:
+            directories.extend(path for path in root.rglob("*") if path.is_dir())
+        except OSError:
+            directories = [root]
+        tree_entries: list[tuple[str, int, int]] = []
+        for directory in directories:
+            try:
+                stat = directory.stat()
+            except OSError:
+                continue
+            relative_path = str(directory.relative_to(root))
+            tree_entries.append((relative_path, stat.st_mtime_ns, stat.st_size))
+
+        manifest_entries: list[tuple[str, int, int]] = []
+        try:
+            manifest_paths = root.rglob("*.connection.json")
+            for path in manifest_paths:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                manifest_entries.append(
+                    (str(path.relative_to(root)), stat.st_mtime_ns, stat.st_size)
+                )
+        except OSError:
+            pass
+
+        tree_signature = tuple(sorted(set(tree_entries)))
+        manifest_signature = tuple(sorted(manifest_entries))
+        _connection_manifest_signature_cache[cache_key] = (
+            tree_signature,
+            manifest_signature,
+        )
+        return manifest_signature
+
+
 def _connection_registry(pack_root: Path | None = None):
     from core_runtime.connections.registry import ConnectionsRegistry
 
-    registry = ConnectionsRegistry()
     root = _connection_manifest_root(pack_root)
-    if root.exists():
-        registry.load_manifest_dir(root)
-    return registry
+    signature = _connection_manifest_signature(root)
+    cache_key = str(root)
+    with _connection_cache_lock:
+        cached = _connection_registry_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        registry = ConnectionsRegistry()
+        if signature:
+            registry.load_manifest_dir(root)
+        _connection_registry_cache[cache_key] = (signature, registry)
+        return registry
 
 
 def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
@@ -148,19 +246,12 @@ def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
 
 
 def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
-    root = _connection_manifest_root(pack_root)
-    ids: set[str] = set()
-    if not root.exists():
-        return ids
-    for path in root.rglob("*.connection.json"):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        provider_id = str(payload.get("provider_id") or "").strip()
-        if provider_id:
-            ids.add(provider_id)
-    return ids
+    return {
+        str(item.get("provider_id") or item.get("providerId") or "").strip()
+        for item in _connection_registry(pack_root).list_providers()
+        if isinstance(item, dict)
+        and str(item.get("provider_id") or item.get("providerId") or "").strip()
+    }
 
 
 def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:

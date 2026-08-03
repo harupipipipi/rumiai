@@ -24,6 +24,7 @@ class _FakeInterfaceRegistry:
 
 @pytest.fixture(autouse=True)
 def _reset_singletons(monkeypatch, tmp_path):
+    from ecosystem.defaultspack.backend.ai_client import provider_catalog
     from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
     try:
         from backend.tool import permission_policy as top_level_permission_policy_module
@@ -71,11 +72,13 @@ def _reset_singletons(monkeypatch, tmp_path):
     permission_policy_module._POLICY_STORE = None
     if top_level_permission_policy_module is not None:
         top_level_permission_policy_module._POLICY_STORE = None
+    provider_catalog._clear_runtime_inventory_cache()
     _reset_defaultspack_domain_singletons()
     yield
     permission_policy_module._POLICY_STORE = None
     if top_level_permission_policy_module is not None:
         top_level_permission_policy_module._POLICY_STORE = None
+    provider_catalog._clear_runtime_inventory_cache()
     _reset_defaultspack_domain_singletons()
 
 
@@ -217,6 +220,82 @@ def test_catalog_and_profiles_include_live_models_from_an_active_provider():
     assert models["openrouter/acme/all-model"]["metadata"]["source"] == "openrouter_models_api"
     assert "openrouter/acme/all-model" in profiles
     assert profiles["openrouter/acme/all-model"]["availability"]["active"] is True
+
+
+def test_runtime_inventory_cache_reuses_client_and_tracks_provider_registration(monkeypatch):
+    from core_runtime.global_contract_dispatch import GlobalContractUnavailable
+    from ecosystem.defaultspack.backend.ai_client import provider_catalog
+
+    class _RuntimeClient:
+        def __init__(self):
+            self._providers = {}
+            self.calls = 0
+
+        def list_models(self, provider=None):
+            self.calls += 1
+            return [
+                {
+                    "id": f"{provider}/live",
+                    "qualified_model_id": f"{provider}/live",
+                    "provider_id": provider,
+                    "model_id": "live",
+                    "metadata": {"source": "native_server_api"},
+                }
+            ]
+
+    client = _RuntimeClient()
+
+    def unavailable(*_args, **_kwargs):
+        raise GlobalContractUnavailable("test fallback")
+
+    monkeypatch.setattr(provider_catalog, "_runtime_client", lambda: client)
+    monkeypatch.setattr(provider_catalog, "_invoke", unavailable)
+    provider_catalog._clear_runtime_inventory_cache()
+
+    first = provider_catalog.list_model_catalog(provider="cache-provider")
+    second = provider_catalog.list_model_catalog(provider="cache-provider")
+
+    assert first[0]["qualified_model_id"] == "cache-provider/live"
+    assert second[0]["qualified_model_id"] == "cache-provider/live"
+    assert client.calls == 1
+
+    client._providers["cache-provider"] = object()
+    provider_catalog.list_model_catalog(provider="cache-provider")
+    assert client.calls == 2
+
+
+def test_runtime_inventory_reentry_guard_returns_without_recursive_discovery(monkeypatch):
+    from ecosystem.defaultspack.backend.ai_client import provider_catalog
+
+    class _ReentrantClient:
+        def __init__(self):
+            self._providers = {}
+            self.calls = 0
+            self.nested_result = None
+
+        def list_models(self, provider=None):
+            self.calls += 1
+            if self.nested_result is None:
+                self.nested_result = provider_catalog._merge_runtime_inventory([], provider)
+            return [
+                {
+                    "id": f"{provider}/live",
+                    "qualified_model_id": f"{provider}/live",
+                    "provider_id": provider,
+                    "model_id": "live",
+                    "metadata": {"source": "native_server_api"},
+                }
+            ]
+
+    client = _ReentrantClient()
+    monkeypatch.setattr(provider_catalog, "_runtime_client", lambda: client)
+    provider_catalog._clear_runtime_inventory_cache()
+
+    models = provider_catalog._merge_runtime_inventory([], "reentrant")
+
+    assert client.calls == 1
+    assert client.nested_result == []
+    assert [model["qualified_model_id"] for model in models] == ["reentrant/live"]
 
 
 def test_custom_openai_compatible_provider_discovers_and_exposes_all_live_models(monkeypatch):
