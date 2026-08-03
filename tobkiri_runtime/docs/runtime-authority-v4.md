@@ -40,6 +40,14 @@ whole transaction back. The audit journal has a monotonic sequence and previous-
 digest chain. A crash after dispatch is recovered as `ambiguous`, never automatically
 retried.
 
+Schema migration is fail closed. Before upgrading the historical v1 lease table to
+schema v2, startup verifies the exact known table/column topology and the complete
+encrypted audit hash chain. Unknown versions, partial schemas, missing tables, and
+corrupt audit rows are rejected without normalization. The v1-to-v2 change is one
+transaction: unused legacy leases become `revoked`, dispatched legacy effects become
+`ambiguous`, Grant-use counters are reconciled, audit events are appended, and only
+then is the schema version advanced. Audit failure rolls back the entire migration.
+
 ## `tobkiri_host` call surface
 
 The Host package imports only from:

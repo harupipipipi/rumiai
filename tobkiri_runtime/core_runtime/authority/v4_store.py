@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -49,7 +49,7 @@ class AuditUnavailable(AuthorityStoreError):
     """Raised when an authoritative audit reservation cannot be committed."""
 
 
-Record = (
+Record: TypeAlias = (
     ProviderAuthorityRecord
     | ApprovalRecord
     | GrantRecord
@@ -163,6 +163,35 @@ class AuthorityStore:
 
     def _initialize(self) -> None:
         with self._lock, self._connect() as connection:
+            existing_tables = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            }
+            existing_version: str | None = None
+            if existing_tables:
+                required_tables = {
+                    "authority_meta",
+                    "authority_records",
+                    "execution_sessions",
+                    "grant_usage",
+                    "invocation_leases",
+                    "revocations",
+                    "authority_audit",
+                }
+                if existing_tables != required_tables:
+                    raise AuthorityStoreError(
+                        "authority database table set is partial or inconsistent"
+                    )
+                version_row = connection.execute(
+                    "SELECT value FROM authority_meta WHERE key='schema_version'"
+                ).fetchone()
+                if version_row is None:
+                    raise AuthorityStoreError("authority database schema version is missing")
+                existing_version = str(version_row["value"])
+                if existing_version not in {"1", "2"}:
+                    raise AuthorityStoreError("authority database schema version is unsupported")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS authority_meta (
@@ -259,12 +288,48 @@ class AuthorityStore:
                 str(row["name"])
                 for row in connection.execute("PRAGMA table_info(invocation_leases)").fetchall()
             }
-            if "request_id" not in lease_columns:
+            expected_v2_columns = {
+                "lease_id",
+                "request_id",
+                "lease_digest",
+                "encrypted_payload",
+                "caller_principal_id",
+                "target_principal_id",
+                "caller_artifact_digest",
+                "target_artifact_digest",
+                "caller_publisher_lineage",
+                "target_publisher_lineage",
+                "host_extension_id",
+                "caller_domain_id",
+                "target_domain_id",
+                "profile_id",
+                "activation_id",
+                "grant_id",
+                "provider_authority_id",
+                "audit_reservation_id",
+                "security_epoch",
+                "expires_at",
+                "state",
+                "outcome_digest",
+            }
+            expected_columns = (
+                expected_v2_columns - {"request_id"}
+                if existing_version == "1"
+                else expected_v2_columns
+            )
+            if lease_columns != expected_columns:
+                raise AuthorityStoreError(
+                    "authority database lease schema is partial or inconsistent"
+                )
+            self._verify_audit_connection(connection)
+            if existing_version == "1":
                 self._migrate_request_bound_leases(connection)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS leases_request ON invocation_leases(request_id)"
             )
             connection.execute("UPDATE authority_meta SET value='2' WHERE key='schema_version'")
+            if existing_version == "1":
+                connection.commit()
 
     def _migrate_request_bound_leases(self, connection: sqlite3.Connection) -> None:
         """Fail closed when upgrading pre-adapter lease rows.
@@ -280,11 +345,40 @@ class AuthorityStore:
         )
         connection.execute("UPDATE invocation_leases SET request_id='legacy-' || lease_id")
         rows = connection.execute(
-            "SELECT lease_id, grant_id, audit_reservation_id, state"
+            "SELECT lease_id, lease_digest, encrypted_payload, grant_id,"
+            " audit_reservation_id, state"
             " FROM invocation_leases WHERE state IN (?, ?)",
             (LeaseState.ISSUED.value, LeaseState.DISPATCHED.value),
         ).fetchall()
         for row in rows:
+            legacy_payload = self._decrypt(row["encrypted_payload"])
+            if legacy_payload.get("lease_id") != row["lease_id"]:
+                raise AuthorityStoreError("historical InvocationLease identity is inconsistent")
+            if not hmac.compare_digest(
+                authority_digest(legacy_payload),
+                str(row["lease_digest"]),
+            ):
+                raise AuthorityStoreError("historical InvocationLease digest is inconsistent")
+            legacy_payload["request_id"] = f"legacy-{row['lease_id']}"
+            legacy_payload["activation_digest"] = authority_digest(
+                {
+                    "legacy_unbound_activation": row["lease_id"],
+                }
+            )
+            legacy_payload["plan_digest"] = authority_digest(
+                {
+                    "legacy_unbound_plan": row["lease_id"],
+                }
+            )
+            migrated_lease = InvocationLease.from_dict(legacy_payload)
+            connection.execute(
+                "UPDATE invocation_leases SET lease_digest=?, encrypted_payload=? WHERE lease_id=?",
+                (
+                    migrated_lease.digest,
+                    self._encrypt(migrated_lease.to_dict()),
+                    row["lease_id"],
+                ),
+            )
             dispatched = row["state"] == LeaseState.DISPATCHED.value
             state = LeaseState.AMBIGUOUS if dispatched else LeaseState.REVOKED
             outcome_digest = authority_digest(
@@ -321,9 +415,10 @@ class AuthorityStore:
                     "lease_id": row["lease_id"],
                     "reservation_id": row["audit_reservation_id"],
                     "outcome_digest": outcome_digest,
+                    "legacy_lease_digest": row["lease_digest"],
+                    "migrated_lease_digest": migrated_lease.digest,
                 },
             )
-        connection.commit()
 
     def _encrypt(self, payload: Mapping[str, Any]) -> bytes:
         return self._fernet.encrypt(canonical_json(dict(payload)))
@@ -1554,6 +1649,17 @@ class AuthorityStore:
                 ).fetchall()
         except sqlite3.Error as exc:
             raise AuthorityStoreError("audit read failed") from exc
+        return self._verify_audit_rows(rows)
+
+    def _verify_audit_connection(self, connection: sqlite3.Connection) -> None:
+        """Verify the authoritative chain before any schema migration write."""
+
+        rows = connection.execute("SELECT * FROM authority_audit ORDER BY sequence").fetchall()
+        self._verify_audit_rows(rows)
+
+    def _verify_audit_rows(self, rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
+        """Verify and decode ordered authoritative audit rows."""
+
         previous_digest = "sha256:" + "0" * 64
         output: list[dict[str, Any]] = []
         for row in rows:
