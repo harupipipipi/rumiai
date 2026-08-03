@@ -153,9 +153,11 @@ class _Harness:
         max_delegation_depth: int = 0,
         audit_fault=None,
         terminated: list[str] | None = None,
+        scope: AuthorityScope | None = None,
+        binding_scope: AuthorityScope | None = None,
     ) -> None:
         self.clock = _MutableClock()
-        self.scope = _scope()
+        self.scope = scope or _scope()
         self.store = AuthorityStore(
             tmp_path / "authority.sqlite3",
             clock=self.clock,
@@ -171,7 +173,7 @@ class _Harness:
         )
         self.kernel = AuthorityKernel(
             self.store,
-            _Resolver(self.scope),
+            _Resolver(binding_scope or self.scope),
             clock=self.clock,
             lease_ttl_seconds=10,
             terminate_domain=(terminated.append if terminated is not None else None),

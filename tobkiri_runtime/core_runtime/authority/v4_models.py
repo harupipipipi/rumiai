@@ -191,8 +191,10 @@ class AuthorityScope:
     """Declarative, comparable scope for one Capability/Effect.
 
     Each dimension is a finite set of canonical values.  ``"*"`` is the only
-    wildcard and must be explicit.  Quotas are upper bounds.  Opaque semantics
-    require an exact request digest and are therefore one-request scopes.
+    explicit wildcard.  An omitted dimension has no restriction and is therefore
+    equivalent to a wildcard for lattice comparisons.  Quotas are upper bounds;
+    an omitted quota has no upper bound.  Opaque semantics require an exact request
+    digest and are therefore one-request scopes.
     """
 
     capability: str
@@ -289,7 +291,14 @@ class AuthorityScope:
         )
 
     def is_subset_of(self, ceiling: "AuthorityScope") -> bool:
-        """Return whether this concrete scope is safely within ``ceiling``."""
+        """Return whether this scope is safely within ``ceiling``.
+
+        Missing dimensions and quotas are unbounded (the lattice top), never an
+        empty request.  Consequently an omitted or wildcard request dimension
+        cannot fit within a finite ceiling, and an omitted request quota cannot fit
+        within a bounded quota.  A finite request remains within an omitted ceiling
+        because that ceiling imposes no restriction for the key.
+        """
 
         if (
             self.capability != ceiling.capability
@@ -301,15 +310,25 @@ class AuthorityScope:
                 return False
         if self.opaque != ceiling.opaque and (self.opaque or ceiling.opaque):
             return False
-        for name, requested in self.dimensions.items():
+        dimension_names = set(self.dimensions) | set(ceiling.dimensions)
+        for name in dimension_names:
+            requested = self.dimensions.get(name)
             allowed = ceiling.dimensions.get(name)
-            if allowed is None:
+            requested_is_unbounded = requested is None or requested == ("*",)
+            allowed_is_unbounded = allowed is None or allowed == ("*",)
+            if requested_is_unbounded:
+                if not allowed_is_unbounded:
+                    return False
+            elif not allowed_is_unbounded and not set(requested).issubset(allowed):
                 return False
-            if allowed != ("*",) and not set(requested).issubset(allowed):
-                return False
-        for quota_name, requested_quota in self.quotas.items():
+        quota_names = set(self.quotas) | set(ceiling.quotas)
+        for quota_name in quota_names:
+            requested_quota = self.quotas.get(quota_name)
             allowed_quota = ceiling.quotas.get(quota_name)
-            if allowed_quota is None or requested_quota > allowed_quota:
+            if requested_quota is None:
+                if allowed_quota is not None:
+                    return False
+            elif allowed_quota is not None and requested_quota > allowed_quota:
                 return False
         return True
 
@@ -326,25 +345,24 @@ def intersect_scopes(*scopes: AuthorityScope) -> AuthorityScope:
     ):
         raise AuthorityValidationError("scope semantics do not match")
 
-    dimension_names = set(first.dimensions)
-    for scope in scopes[1:]:
-        dimension_names &= set(scope.dimensions)
+    dimension_names = set().union(*(scope.dimensions for scope in scopes))
     dimensions: dict[str, tuple[str, ...]] = {}
     for name in sorted(dimension_names):
         values: set[str] | None = None
         for scope in scopes:
-            current = scope.dimensions[name]
-            if current == ("*",):
+            current = scope.dimensions.get(name)
+            if current is None or current == ("*",):
                 continue
             values = set(current) if values is None else values & set(current)
         dimensions[name] = ("*",) if values is None else tuple(sorted(values))
         if not dimensions[name]:
             raise AuthorityValidationError("scope intersection is empty")
 
-    quota_names = set(first.quotas)
-    for scope in scopes[1:]:
-        quota_names &= set(scope.quotas)
-    quotas = {name: min(scope.quotas[name] for scope in scopes) for name in quota_names}
+    quota_names = set().union(*(scope.quotas for scope in scopes))
+    quotas = {
+        name: min(scope.quotas[name] for scope in scopes if name in scope.quotas)
+        for name in quota_names
+    }
 
     exact_values = {scope.exact_request_digest for scope in scopes if scope.exact_request_digest}
     if len(exact_values) > 1:

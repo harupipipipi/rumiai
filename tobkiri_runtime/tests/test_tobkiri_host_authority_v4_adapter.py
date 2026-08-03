@@ -312,6 +312,28 @@ def test_stale_epoch_and_caller_identity_swap_fail_before_lease(tmp_path: Path) 
     assert harness.store.grant_usage(harness.grant.grant_id) == (0, 0)
 
 
+@pytest.mark.parametrize("field", ["path", "max_bytes"])
+def test_adapter_rejects_omitted_scope_bounds_before_lease(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    harness = _Harness(tmp_path)
+    adapter = _adapter(harness)
+    context = _context(harness)
+    static, final = _queries(harness, context, _digest(f"omitted-{field}"))
+    unbounded = harness.scope.to_dict()
+    if field == "path":
+        unbounded["dimensions"].pop("path")
+    else:
+        unbounded["quotas"].pop("max_bytes")
+
+    with pytest.raises(AuthorityDenied):
+        adapter.check_static_path(replace(static, effect_scope=unbounded))
+    with pytest.raises(AuthorityDenied):
+        adapter.authorize_and_issue_lease(replace(final, effect_scope=unbounded))
+    assert harness.store.grant_usage(harness.grant.grant_id) == (0, 0)
+
+
 def test_captured_plan_and_runtime_evidence_swaps_fail_closed(tmp_path: Path) -> None:
     harness = _Harness(tmp_path)
     adapter = _adapter(harness)

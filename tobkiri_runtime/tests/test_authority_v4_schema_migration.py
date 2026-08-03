@@ -11,6 +11,7 @@ import pytest
 from core_runtime.authority.v4 import (
     AuthorityDenied,
     AuthorityKernel,
+    AuthorityScope,
     AuthorityStore,
     AuthorityStoreError,
     AuditUnavailable,
@@ -222,6 +223,13 @@ def test_historical_v1_migrates_without_silent_authority_expansion(
     }
 
     kernel = AuthorityKernel(migrated, _Resolver(fixture.harness.scope))
+    omitted_quota = fixture.harness.scope.to_dict()
+    omitted_quota["quotas"] = {}
+    with pytest.raises(AuthorityDenied):
+        kernel.authorize(
+            fixture.harness.context(request_id="request-unbounded-after-migration"),
+            AuthorityScope.from_dict(omitted_quota),
+        )
     for token in (fixture.issued_token, fixture.dispatched_token):
         with pytest.raises(AuthorityDenied):
             kernel.dispatch(

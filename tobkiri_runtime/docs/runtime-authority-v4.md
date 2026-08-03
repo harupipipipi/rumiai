@@ -28,10 +28,15 @@ The implementation keeps these records distinct:
   and never exposes the Grant to the Provider.
 
 Scopes use explicit capability and semantics digests, finite canonical dimensions,
-and quota upper bounds. Missing or mismatched semantics deny. Opaque semantics are
-limited to exact-request one-shot Grants. Final authorization requires the concrete
-request to be within the caller Effect, immutable runtime safety, Profile/admin,
-caller Grant, and Provider ceilings.
+and quota upper bounds. An omitted dimension is unbounded, like an explicit `*`, and
+an omitted quota has no upper bound. Therefore omission or wildcard in a request is
+never a subset of a corresponding bounded ceiling; finite restrictions are subsets
+of omitted/unbounded ceilings. Intersection retains the union of restricted keys and
+applies set intersection or the smallest quota, so an omitted field cannot erase a
+bound from another ceiling. Missing or mismatched semantics deny. Opaque semantics
+are limited to exact-request one-shot Grants. Final authorization requires the
+concrete request to be within the caller Effect, immutable runtime safety,
+Profile/admin, caller Grant, and Provider ceilings.
 
 Authority records and audit payloads are Fernet-encrypted in a SQLite database. WAL
 with `synchronous=FULL` and `BEGIN IMMEDIATE` transactions make Grant-use reservation,

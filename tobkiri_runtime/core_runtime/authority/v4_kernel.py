@@ -246,6 +246,8 @@ class AuthorityKernel:
             )
             if grant.target_publisher_lineage != matching_provider.publisher_lineage:
                 raise AuthorityValidationError("Grant target publisher does not match")
+            if not grant.scope.is_subset_of(matching_provider.scope):
+                raise AuthorityValidationError("Grant exceeds Provider authority")
             provider_domain = self.store.get_domain(matching_provider.execution_domain_id)
             if (
                 provider_domain is None
