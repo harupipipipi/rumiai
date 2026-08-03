@@ -124,11 +124,13 @@ class _Resolver:
             caller_effect_ceiling=self.scope,
             runtime_safety_ceiling=self.scope,
             profile_admin_ceiling=self.scope,
-            profile_id=context.profile_id,
-            activation_id=context.activation_id,
-            profile_authority_digest=context.profile_authority_digest,
-            fencing_token=context.fencing_token,
-            security_epoch=context.security_epoch,
+            profile_id="profile-1",
+            activation_id="activation-1",
+            activation_digest=_digest("activation"),
+            plan_digest=_digest("plan"),
+            profile_authority_digest=_digest("4"),
+            fencing_token=7,
+            security_epoch=1,
         )
 
 
@@ -257,6 +259,8 @@ class _Harness:
             "target_boot_epoch": self.target_domain.boot_epoch,
             "profile_id": "profile-1",
             "activation_id": "activation-1",
+            "activation_digest": _digest("activation"),
+            "plan_digest": _digest("plan"),
             "profile_authority_digest": _digest("4"),
             "fencing_token": self.target_domain.fencing_token,
             "security_epoch": 1,

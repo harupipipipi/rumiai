@@ -131,10 +131,7 @@ class FunctionArtifact:
             raise InvalidArtifactError("a public Function must expose an operation")
         if not self.exported and self.operations:
             raise InvalidArtifactError("a private Function cannot expose operations")
-        keys = {
-            (operation.contract_id, operation.operation_id)
-            for operation in self.operations
-        }
+        keys = {(operation.contract_id, operation.operation_id) for operation in self.operations}
         if len(keys) != len(self.operations):
             raise InvalidArtifactError("duplicate operation in Function inventory")
 
@@ -219,16 +216,29 @@ class RequestContext:
     activation_digest: str
     plan_digest: str
     security_epoch: int
+    caller_session_id: str
     caller_domain_id: str
     caller_boot_epoch: int
+    target_domain_id: str
+    target_boot_epoch: int
+    target_backend_digest: str
+    profile_authority_digest: str
+    fencing_token: int
     handle_namespace: str
     delegation_chain: tuple[OpaqueAuthorityRef, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         require_digest(self.activation_digest, "activation")
         require_digest(self.plan_digest, "plan")
-        if self.security_epoch < 0 or self.caller_boot_epoch < 0:
-            raise ValueError("epochs cannot be negative")
+        require_digest(self.profile_authority_digest, "profile authority")
+        require_digest(self.target_backend_digest, "target backend")
+        if (
+            self.security_epoch <= 0
+            or self.caller_boot_epoch <= 0
+            or self.target_boot_epoch <= 0
+            or self.fencing_token <= 0
+        ):
+            raise ValueError("epochs and fencing token must be positive")
         if len(self.delegation_chain) > 4:
             raise ValueError("delegation depth exceeds four")
         if len(set(self.delegation_chain)) != len(self.delegation_chain):

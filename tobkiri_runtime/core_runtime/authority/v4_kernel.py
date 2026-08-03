@@ -42,6 +42,8 @@ class AuthorityBinding:
     profile_admin_ceiling: AuthorityScope
     profile_id: str
     activation_id: str
+    activation_digest: str
+    plan_digest: str
     profile_authority_digest: str
     fencing_token: int
     security_epoch: int
@@ -53,6 +55,8 @@ class AuthorityBinding:
             (
                 self.profile_id == context.profile_id,
                 self.activation_id == context.activation_id,
+                self.activation_digest == context.activation_digest,
+                self.plan_digest == context.plan_digest,
                 self.profile_authority_digest == context.profile_authority_digest,
                 self.fencing_token == context.fencing_token,
                 self.security_epoch == context.security_epoch,
@@ -103,6 +107,9 @@ class AuthorityKernelProtocol(Protocol):
     ) -> AuthorizationResult:
         """Evaluate the full intersection and issue an audited one-use Lease."""
 
+    def check_static_path(self, context: InvocationContext, request_scope: AuthorityScope) -> None:
+        """Check an exact potential authority path without issuing authority."""
+
     def dispatch(
         self,
         lease_token: str,
@@ -115,6 +122,9 @@ class AuthorityKernelProtocol(Protocol):
 
     def finish(self, lease_id: str, *, state: LeaseState, outcome_digest: str) -> None:
         """Commit the authoritative effect outcome."""
+
+    def fence_request(self, request_id: str) -> list[str]:
+        """Revoke unused authority for one exact request."""
 
     def revoke(self, *, target_kind: str, target_id: str, reason: str) -> str:
         """Revoke exact authority and fence affected runtime state."""
@@ -349,6 +359,9 @@ class AuthorityKernel:
             request_scope=request_scope,
             now=now,
         )
+        reserved_uses, committed_uses = self.store.grant_usage(grant.grant_id)
+        if grant.max_uses is not None and reserved_uses + committed_uses >= grant.max_uses:
+            raise AuthorityDenied("Grant use limit is exhausted")
         ceilings = (
             binding.caller_effect_ceiling,
             binding.runtime_safety_ceiling,
@@ -365,6 +378,7 @@ class AuthorityKernel:
         self._validate_call_chain(context, caller, grant, request_scope)
         lease = InvocationLease(
             lease_id="lease-" + secrets.token_hex(16),
+            request_id=context.request_id,
             caller=caller,
             target=context.target,
             caller_domain_id=caller_domain.domain_id,
@@ -377,6 +391,8 @@ class AuthorityKernel:
             resource_namespace=target_domain.resource_namespace,
             profile_id=context.profile_id,
             activation_id=context.activation_id,
+            activation_digest=context.activation_digest,
+            plan_digest=context.plan_digest,
             profile_authority_digest=context.profile_authority_digest,
             fencing_token=context.fencing_token,
             caller_publisher_lineage=grant.caller_publisher_lineage,
@@ -420,6 +436,10 @@ class AuthorityKernel:
                 "target_domain_id": target_domain.domain_id,
                 "profile_id": context.profile_id,
                 "activation_id": context.activation_id,
+                "activation_digest": context.activation_digest,
+                "plan_digest": context.plan_digest,
+                "profile_authority_digest": context.profile_authority_digest,
+                "fencing_token": context.fencing_token,
                 "security_epoch": epoch,
                 "authority_mode": provider.authority_mode.value,
                 "scope_digest": request_scope.digest,
@@ -435,6 +455,67 @@ class AuthorityKernel:
             authority_mode=provider.authority_mode,
             resource_namespace=target_domain.resource_namespace,
         )
+
+    def check_static_path(self, context: InvocationContext, request_scope: AuthorityScope) -> None:
+        """Validate a potential exact authority path without reserving a use.
+
+        Static admission is deliberately read-only: it neither creates a lease
+        nor appends an audit event.  Final authorization repeats every check.
+        """
+
+        if self._emergency_stop:
+            raise AuthorityDenied("authority kernel is emergency-fenced")
+        if context.security_epoch != self.store.security_epoch:
+            raise AuthorityDenied("invocation has a stale SecurityEpoch", code="stale_epoch")
+        caller_domain, caller_principal_id = self.store.resolve_authenticated_session(
+            context.caller_session_id
+        )
+        caller = self._principal_in_domain(caller_domain, caller_principal_id)
+        if (
+            caller_domain.profile_id != context.profile_id
+            or caller_domain.activation_id != context.activation_id
+            or caller_domain.fencing_token != context.fencing_token
+        ):
+            raise AuthorityDenied("caller execution-domain binding is stale")
+        target_domain = self.store.get_domain(context.target_domain_id)
+        if target_domain is None:
+            raise AuthorityDenied("target execution domain is unavailable")
+        self._validate_target_domain(context, target_domain)
+        binding = self._binding_resolver.resolve_authority_binding(
+            context=context,
+            caller=caller,
+            target=context.target,
+        )
+        if not binding.validates_context(context):
+            raise AuthorityDenied("ResolvedPlan authority binding does not match")
+        now = self._clock()
+        provider = self._select_provider_authority(
+            context=context,
+            target_domain=target_domain,
+            request_scope=request_scope,
+            now=now,
+        )
+        grant = self._select_grant(
+            context=context,
+            caller=caller,
+            request_scope=request_scope,
+            now=now,
+        )
+        reserved_uses, committed_uses = self.store.grant_usage(grant.grant_id)
+        if grant.max_uses is not None and reserved_uses + committed_uses >= grant.max_uses:
+            raise AuthorityDenied("Grant use limit is exhausted")
+        effective_scope = intersect_scopes(
+            binding.caller_effect_ceiling,
+            binding.runtime_safety_ceiling,
+            binding.profile_admin_ceiling,
+            grant.scope,
+            provider.scope,
+        )
+        if not request_scope.is_subset_of(effective_scope):
+            raise AuthorityDenied("request exceeds effective authority intersection")
+        if request_scope.opaque and request_scope.exact_request_digest != context.request_digest:
+            raise AuthorityDenied("opaque scope is not bound to this request")
+        self._validate_call_chain(context, caller, grant, request_scope)
 
     def dispatch(
         self,
@@ -471,6 +552,17 @@ class AuthorityKernel:
 
         self.store.expire_leases()
         return self.store.recover_incomplete_effects()
+
+    def fence_request(self, request_id: str) -> list[str]:
+        """Fence unused request leases, emergency-stopping on audit failure."""
+
+        try:
+            return self.store.fence_request(request_id)
+        except (AuditUnavailable, AuthorityStoreError):
+            self._emergency_stop = True
+            for domain in self.store.list_domains():
+                self._terminate_domain(domain.domain_id)
+            raise
 
     def revoke(self, *, target_kind: str, target_id: str, reason: str) -> str:
         """Durably revoke exact authority before terminating affected domains."""

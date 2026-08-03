@@ -195,6 +195,7 @@ class AuthorityStore:
                 ) STRICT;
                 CREATE TABLE IF NOT EXISTS invocation_leases (
                     lease_id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL,
                     lease_digest TEXT NOT NULL,
                     encrypted_payload BLOB NOT NULL,
                     caller_principal_id TEXT NOT NULL,
@@ -254,6 +255,75 @@ class AuthorityStore:
                     authority_digest({"reason": "genesis"}),
                 ),
             )
+            lease_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(invocation_leases)").fetchall()
+            }
+            if "request_id" not in lease_columns:
+                self._migrate_request_bound_leases(connection)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS leases_request ON invocation_leases(request_id)"
+            )
+            connection.execute("UPDATE authority_meta SET value='2' WHERE key='schema_version'")
+
+    def _migrate_request_bound_leases(self, connection: sqlite3.Connection) -> None:
+        """Fail closed when upgrading pre-adapter lease rows.
+
+        Old leases lack request, activation-snapshot, and plan bindings. They
+        cannot safely be reissued: unused leases are revoked and dispatched
+        effects become ambiguous in the authoritative journal.
+        """
+
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "ALTER TABLE invocation_leases ADD COLUMN request_id TEXT NOT NULL DEFAULT ''"
+        )
+        connection.execute("UPDATE invocation_leases SET request_id='legacy-' || lease_id")
+        rows = connection.execute(
+            "SELECT lease_id, grant_id, audit_reservation_id, state"
+            " FROM invocation_leases WHERE state IN (?, ?)",
+            (LeaseState.ISSUED.value, LeaseState.DISPATCHED.value),
+        ).fetchall()
+        for row in rows:
+            dispatched = row["state"] == LeaseState.DISPATCHED.value
+            state = LeaseState.AMBIGUOUS if dispatched else LeaseState.REVOKED
+            outcome_digest = authority_digest(
+                {
+                    "status": "ambiguous_after_authority_schema_upgrade"
+                    if dispatched
+                    else "revoked_after_authority_schema_upgrade",
+                    "lease_id": row["lease_id"],
+                }
+            )
+            connection.execute(
+                "UPDATE invocation_leases SET state=?, outcome_digest=? WHERE lease_id=?",
+                (state.value, outcome_digest, row["lease_id"]),
+            )
+            if dispatched:
+                connection.execute(
+                    "UPDATE grant_usage SET reserved_uses=reserved_uses-1,"
+                    " committed_uses=committed_uses+1 WHERE grant_id=?"
+                    " AND reserved_uses > 0",
+                    (row["grant_id"],),
+                )
+            else:
+                connection.execute(
+                    "UPDATE grant_usage SET reserved_uses=reserved_uses-1"
+                    " WHERE grant_id=? AND reserved_uses > 0",
+                    (row["grant_id"],),
+                )
+            self._append_audit(
+                connection,
+                event_id=f"schema-v2-{row['lease_id']}",
+                event_type="host_effect",
+                event_state=state.value,
+                payload={
+                    "lease_id": row["lease_id"],
+                    "reservation_id": row["audit_reservation_id"],
+                    "outcome_digest": outcome_digest,
+                },
+            )
+        connection.commit()
 
     def _encrypt(self, payload: Mapping[str, Any]) -> bytes:
         return self._fernet.encrypt(canonical_json(dict(payload)))
@@ -1026,17 +1096,19 @@ class AuthorityStore:
                 connection.execute(
                     "INSERT INTO invocation_leases"
                     " (lease_id, lease_digest, encrypted_payload, caller_principal_id,"
+                    " request_id,"
                     " target_principal_id, caller_artifact_digest, target_artifact_digest,"
                     " caller_publisher_lineage, target_publisher_lineage, host_extension_id,"
                     " caller_domain_id, target_domain_id, profile_id,"
                     " activation_id, grant_id, audit_reservation_id, security_epoch,"
                     " provider_authority_id, expires_at, state)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         lease.lease_id,
                         lease.digest,
                         self._encrypt(lease.to_dict()),
                         lease.caller.principal_id,
+                        lease.request_id,
                         lease.target.principal_id,
                         lease.caller.parent_artifact_digest,
                         lease.target.parent_artifact_digest,
@@ -1136,6 +1208,65 @@ class AuthorityStore:
             raise
         except (ValueError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
             raise AuthorityDenied("InvocationLease token is malformed") from exc
+
+    def inspect_lease_token(self, token: str) -> tuple[InvocationLease, LeaseState]:
+        """Authenticate a lease token and return its durable Host-side record.
+
+        This is a TCB adapter operation.  It does not consume the lease and must
+        never be exposed to a Provider or Pack process.
+        """
+
+        lease_id, expected_digest = self._decode_lease_token(token)
+        result = self.get_lease(lease_id)
+        if result is None:
+            raise AuthorityDenied("InvocationLease is unknown")
+        lease, state = result
+        if not hmac.compare_digest(lease.digest, expected_digest):
+            raise AuthorityDenied("InvocationLease digest does not match")
+        return lease, state
+
+    def fence_request(self, request_id: str) -> list[str]:
+        """Revoke every unused lease for one exact Host request."""
+
+        try:
+            with self._lock, self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                rows = connection.execute(
+                    "SELECT lease_id, grant_id FROM invocation_leases"
+                    " WHERE request_id=? AND state=?",
+                    (request_id, LeaseState.ISSUED.value),
+                ).fetchall()
+                lease_ids = [str(row["lease_id"]) for row in rows]
+                for row in rows:
+                    connection.execute(
+                        "UPDATE invocation_leases SET state=? WHERE lease_id=? AND state=?",
+                        (
+                            LeaseState.REVOKED.value,
+                            row["lease_id"],
+                            LeaseState.ISSUED.value,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE grant_usage SET reserved_uses=reserved_uses-1"
+                        " WHERE grant_id=? AND reserved_uses > 0",
+                        (row["grant_id"],),
+                    )
+                    self._append_audit(
+                        connection,
+                        event_id=f"fence-{row['lease_id']}",
+                        event_type="host_effect",
+                        event_state=LeaseState.REVOKED.value,
+                        payload={
+                            "lease_id": row["lease_id"],
+                            "request_id": request_id,
+                        },
+                    )
+                connection.commit()
+                return lease_ids
+        except AuditUnavailable:
+            raise
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("request fencing failed") from exc
 
     def dispatch_lease(
         self,

@@ -2,10 +2,11 @@
 
 This module is the canonical runtime implementation of the authority and effect
 lifecycle defined by ADR-014 and the SecurityEpoch/audit portions of ADR-015. It is
-implemented under `core_runtime.authority.v4` and is intentionally unreachable from
-legacy `AuthorityService`, `CapabilityExecutor`, `FunctionRegistry`, and HTTP
-dispatch. Until the canonical `tobkiri_host` broker integrates it, it grants no
-production authority.
+implemented under `core_runtime.authority.v4` and remains unreachable from legacy
+`AuthorityService`, `CapabilityExecutor`, `FunctionRegistry`, and HTTP dispatch.
+The canonical `tobkiri_host.authority_v4.AuthorityV4Adapter` is the only Pack v4
+bridge. It must be explicitly constructed by a Host-owned composition root; no
+legacy or incomplete backend is enabled by importing it.
 
 ## Security boundary
 
@@ -81,6 +82,18 @@ The integration sequence is:
    must supply a `terminate_domain` callback that kills dedicated entitlement
    processes and other affected domains after durable fencing.
 
+The Host `RequestContext` passed to this bridge includes the authenticated caller
+session/domain/boot epoch, exact target domain/boot epoch, ProfileAuthoritySnapshot
+digest, and activation fencing token. Opaque principal references resolve through a
+Host-owned captured-plan resolver and must equal the resolved exact principal digest.
+The adapter rejects aliases and never reads identity from the invocation payload.
+
+The adapter also implements `AuditPort`. Authorization already creates the audit
+reservation atomically with Grant-use reservation and Lease issuance; `reserve_effect`
+therefore returns that canonical reservation, boundary recheck performs canonical
+`dispatch`, and audit completion performs canonical `finish`. `recover()` marks any
+crash-surviving dispatched effect ambiguous.
+
 The Provider receives no `ApprovalRecord`, `ProviderAuthorityRecord`, or
 `GrantRecord`. `os_entitlement` Providers require a single-principal dedicated
 process. Multi-principal native co-location is rejected unless the domain has an
@@ -96,3 +109,5 @@ explicit complete `AuthorityEquivalence` record and mutual principal approval.
   principal/global Grant fallback.
 - ResourceHandle and credential material remain opaque integration inputs; this
   authority kernel binds their namespace but does not expose raw paths or secrets.
+- Production backends remain unreachable until their independent backend status has
+  every required gate and explicitly leaves conformance-only mode.

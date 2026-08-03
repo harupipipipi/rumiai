@@ -291,16 +291,11 @@ class RequestBroker:
         context: RequestContext,
         binding: ResolvedOperationBinding,
         request_digest: str,
-    ) -> OpaqueAuditReservation | None:
-        effect = binding.operation.effect_class
-        if effect is EffectClass.PURE:
-            return None
+    ) -> OpaqueAuditReservation:
         try:
             return self._audit.reserve_effect(context, binding, request_digest)
         except Exception as exc:
-            raise AuditUnavailableError(
-                "authoritative audit reservation failed"
-            ) from exc
+            raise AuditUnavailableError("authoritative audit reservation failed") from exc
 
     def _dispatch(
         self,

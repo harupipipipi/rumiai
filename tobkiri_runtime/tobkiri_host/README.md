@@ -32,6 +32,13 @@ An adapter from `core_runtime.authority` must implement `AuthorityPort` exactly:
 - `fence_request(request_id)`
 - `issue_trigger_lease(registration_id, occurrence_id, target, security_epoch)`
 
+The production-shaped implementation is `AuthorityV4Adapter`. Construct it with an
+`AuthorityKernel` and a Host-owned `PrincipalReferenceResolver` backed only by the
+captured ResolvedPlan/Activation. The `RequestContext` must carry exact authenticated
+caller session/domain/boot and target domain/boot bindings, the
+ProfileAuthoritySnapshot digest, and the activation fencing token. Principal aliases
+are rejected.
+
 The authoritative audit implementation must implement `AuditPort` exactly:
 
 - `reserve_effect(context, binding, request_digest)`
@@ -42,3 +49,8 @@ The authoritative audit implementation must implement `AuditPort` exactly:
 All exceptions from these ports fail closed. A backend is production-selectable only
 when `production_enabled` is true, `conformance_only` is false, and every gate in
 `REQUIRED_PRODUCTION_GATES` is present. There is no weaker backend fallback.
+
+`AuthorityV4Adapter` implements both ports against one v4 authority-store lifecycle;
+it does not create a secondary best-effort audit log. Call `recover()` at Host startup
+before accepting requests. Trigger support additionally requires a Host-owned durable
+`TriggerAuthorityResolver`; without it trigger lease issuance is denied.

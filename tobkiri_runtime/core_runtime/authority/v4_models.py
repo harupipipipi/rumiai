@@ -831,6 +831,7 @@ class InvocationLease:
     """Short-lived, single-use, non-transferable request authority."""
 
     lease_id: str
+    request_id: str
     caller: FunctionPrincipal
     target: FunctionPrincipal
     caller_domain_id: str
@@ -843,6 +844,8 @@ class InvocationLease:
     resource_namespace: str
     profile_id: str
     activation_id: str
+    activation_digest: str
+    plan_digest: str
     profile_authority_digest: str
     fencing_token: int
     caller_publisher_lineage: str
@@ -859,6 +862,7 @@ class InvocationLease:
 
     def __post_init__(self) -> None:
         _require_id("lease_id", self.lease_id)
+        _require_id("request_id", self.request_id)
         for name, value in (
             ("caller_domain_id", self.caller_domain_id),
             ("target_domain_id", self.target_domain_id),
@@ -876,6 +880,8 @@ class InvocationLease:
         for name, value in (
             ("request_digest", self.request_digest),
             ("effect_digest", self.effect_digest),
+            ("activation_digest", self.activation_digest),
+            ("plan_digest", self.plan_digest),
             ("profile_authority_digest", self.profile_authority_digest),
             ("provider_authority_digest", self.provider_authority_digest),
         ):
@@ -902,6 +908,7 @@ class InvocationLease:
 
         return {
             "lease_id": self.lease_id,
+            "request_id": self.request_id,
             "caller": self.caller.to_dict(),
             "target": self.target.to_dict(),
             "caller_domain_id": self.caller_domain_id,
@@ -914,6 +921,8 @@ class InvocationLease:
             "resource_namespace": self.resource_namespace,
             "profile_id": self.profile_id,
             "activation_id": self.activation_id,
+            "activation_digest": self.activation_digest,
+            "plan_digest": self.plan_digest,
             "profile_authority_digest": self.profile_authority_digest,
             "fencing_token": self.fencing_token,
             "caller_publisher_lineage": self.caller_publisher_lineage,
@@ -957,6 +966,8 @@ class InvocationContext:
     target_boot_epoch: int
     profile_id: str
     activation_id: str
+    activation_digest: str
+    plan_digest: str
     profile_authority_digest: str
     fencing_token: int
     security_epoch: int
@@ -975,6 +986,8 @@ class InvocationContext:
         for name, value in (
             ("request_digest", self.request_digest),
             ("effect_digest", self.effect_digest),
+            ("activation_digest", self.activation_digest),
+            ("plan_digest", self.plan_digest),
             ("profile_authority_digest", self.profile_authority_digest),
         ):
             _require_digest(name, value)

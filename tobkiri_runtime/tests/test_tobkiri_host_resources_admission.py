@@ -39,8 +39,14 @@ def context(**changes: object) -> RequestContext:
         activation_digest=digest("a"),
         plan_digest=digest("p"),
         security_epoch=7,
+        caller_session_id="caller-session",
         caller_domain_id="domain-caller",
         caller_boot_epoch=2,
+        target_domain_id="domain-target",
+        target_boot_epoch=3,
+        target_backend_digest=digest("backend"),
+        profile_authority_digest=digest("profile-authority"),
+        fencing_token=1,
         handle_namespace="caller-handles",
     )
     return replace(base, **changes)
@@ -219,9 +225,7 @@ def test_queue_round_robins_across_bindings() -> None:
     queue = FairAdmissionQueue(resource_ledger)
     first = queue.enqueue(scope("b1"), ResourceAmount(100), wait_timeout_seconds=10)
     second = queue.enqueue(scope("b1"), ResourceAmount(100), wait_timeout_seconds=10)
-    third = queue.enqueue(
-        scope("b2", "c2"), ResourceAmount(100), wait_timeout_seconds=10
-    )
+    third = queue.enqueue(scope("b2", "c2"), ResourceAmount(100), wait_timeout_seconds=10)
     assert queue.pop() == first
     assert queue.pop() == third
     assert queue.pop() == second

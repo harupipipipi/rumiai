@@ -10,9 +10,11 @@ from .models import (
     PackArtifact,
     RequestContext,
 )
+from .authority_v4 import AuthorityV4Adapter
 
 __all__ = [
     "ArtifactVariant",
+    "AuthorityV4Adapter",
     "ContractOperation",
     "EffectClass",
     "FunctionArtifact",

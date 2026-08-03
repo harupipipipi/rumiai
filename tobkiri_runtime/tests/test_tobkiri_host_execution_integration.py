@@ -146,8 +146,14 @@ def context() -> RequestContext:
         activation_digest=digest("x"),
         plan_digest=digest("y"),
         security_epoch=9,
+        caller_session_id="caller-session",
         caller_domain_id="caller-domain",
         caller_boot_epoch=2,
+        target_domain_id="target-domain",
+        target_boot_epoch=3,
+        target_backend_digest=digest("b"),
+        profile_authority_digest=digest("profile-authority"),
+        fencing_token=1,
         handle_namespace="caller-handles",
     )
 
@@ -347,9 +353,9 @@ def frame(timeout_ms: int | None = None) -> InvocationFrame:
 def test_canonical_broker_orders_all_security_gates() -> None:
     fixture = make_broker()
     try:
-        assert fixture.broker.invoke(
-            frame(), context(), effect_scope={"user": "u1"}
-        ) == {"delivered": True}
+        assert fixture.broker.invoke(frame(), context(), effect_scope={"user": "u1"}) == {
+            "delivered": True
+        }
     finally:
         fixture.broker.close()
     assert fixture.events == [
