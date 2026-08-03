@@ -91,26 +91,39 @@ Pack private stateはProfile activation時にnamespaceとquotaを割り当て、
 
 1.4 Policyを境界機能の実装主体にせず、承認済みCapability Functionを使う
 
-Policy Kernelはnetwork、file、print、credential、deviceなどの機能を実装しない。Policy Kernelの責務は、Functionが宣言したEffect要求、実際のRequest scope、保存済みGrant、Base Policyを比較し、allow/deny/approval_requiredを返すことだけである。
+Policy Kernelはnetwork、file、print、credential、deviceなどの機能を実装しない。Policy Kernelの責務は、Hostが正規化したEffect要求、各authority ceiling、保存済みGrantを比較し、allow/deny/approval_requiredを決定することだけである。
 
 境界作用の実装単位はCapability Functionとする。
 
   - 通常のPack Functionはmanifestで必要なEffectと上限を宣言する。
   - network、file、credential-use、printなどの実処理は、Contractを提供するCapability Functionが実行する。
   - vendor固有のSlack、Notion、AI等の処理は各Pack Functionが実装し、Policyへvendor固有コードを追加しない。
-  - 新しい境界能力はCapability Packを追加して拡張し、Policy Kernel本体のpermission実装追加を原則不要にする。
-  - Host側コードまたは新しいOS/device権限を必要とするCapability Packは、通常Packと分離したHost Extension trust classに置く。
+  - 新しいvendor機能は既存Capability Functionを組み合わせて拡張し、Policy Kernel本体のvendor固有permission実装追加を不要にする。
+  - Host側コードまたは新しいOS/device権限を必要とするProviderは、通常Packと分離したHost Extension trust classに置く。
   - Host ExtensionのPackArtifact、publisher、signature、content digest、要求OS capabilityは明示承認する。
   - 未知の通常PackがmanifestへEffectを書くだけで権限を自己付与することはできない。
 
-Function宣言は権限そのものではなく最大要求範囲である。実効権限は次の積集合とする。
+Capability Functionはroleでありtrust classではない。v1のtrust classはNormal Sandbox Pack、Host Extension Pack、Runtime TCBの3つだけとする。Pure Function、vendor Function、brokered Capability FunctionはNormal Sandbox Pack内のroleであり、Verified Direct-Capability Packは作らない。
 
-  Function effect ceiling
-    ∩ Base Policy
-    ∩ Profile Policy
-    ∩ caller/target constraints
-    ∩ Approval/Grant scope
-    ∩ concrete Request scope
+Function宣言は権限そのものではなく最大要求範囲である。正規化済みの具体的Effect RequestをRとした場合、次のすべてを満たす場合だけ実行できる。
+
+  R subset-of Function Effect ceiling
+  R subset-of Contract Operation Effect ceiling
+  R subset-of Base Policy allow ceiling
+  R subset-of Profile Policy allow ceiling
+  R subset-of caller delegation ceiling
+  R subset-of Provider enforceable ceiling
+  R subset-of matching Grant scope
+
+明示deny、identity不一致、unknown capability/scope semantics、revoke、authoritative audit reservation失敗は常にdenyする。Approvalはこのintersectionへ含めない。
+
+Approval、Grant、InvocationLeaseを分離する。
+
+  ApprovalRecord: ユーザーが固定snapshotを見て行った意思決定の変更不能な記録
+  GrantRecord: ApprovalRecordまたはHost-signed Base PolicyからKernelが発行する保存権限
+  InvocationLease: 1回のexact Requestだけに使える短寿命・非移譲token
+
+一つのApprovalRecordはEffect bundle内のatomic Effectごとに複数GrantRecordを生成できる。ProviderへGrantRecord本体を渡さず、Hostが発行したInvocationLeaseだけを渡す。low-risk auto allowもpolicy_ephemeral Grantを発行して同じ経路を通す。
 
 通常のサービス追加は既存のgeneric Capability Functionを組み合わせる。
 
@@ -118,18 +131,30 @@ Function宣言は権限そのものではなく最大要求範囲である。実
   Notion Pack -> network.http Function + credential.use Function
   Storage Pack -> workspace.read/write Function
 
-Policy KernelはSlackやNotionのAPI仕様を理解しない。scope containment、Function identity、Grant validityだけを共通処理する。
+Policy KernelはSlackやNotionのAPI仕様を理解しない。ただし任意JSONを一般的に比較してはならない。Foundation Capability Type Registryがtypeごとにscope schema、normalize、subset、intersect、canonical digest、risk、approval fields、audit redaction、conformance vectorsを定義する。unknown type/schema/canonicalizer/subset semanticsはdenyする。Community Packの任意コードをPolicy Kernelへloadしない。
 
-ユーザー向けには「承認済みFunctionをProfileへ追加する」操作を提供してよい。ただし内部ではPack全体へのambient authorityへ変換せず、exact PackArtifactとFunction/Operation、Effect scopeに分解して保存する。
+ユーザー向けには「FunctionをProfileで利用可能にし、必要なOperationとEffect scopeを承認する」一括UIを提供してよい。ただし内部ではPack全体へのambient authorityへ変換せず、現在のexact PackArtifactが持つOperationとatomic Effect scopeごとのGrantへ展開する。将来追加されるFunctionは含めない。
 
-承認の最終粒度は未確定である。少なくとも次を別の判断として扱い、ADRで固定する。
+v1の承認単位を次で固定する。
 
-  - Profile: Grantの保存先と適用範囲
-  - PackArtifact digest: 承認したコードidentity
-  - Function/Operation: 権限を行使できる機能単位
-  - Effect scope: domain、file root、credential、device、外部作用の上限
-  - Request digest: one-shot承認時の具体的内容
-  - caller: Grantを利用できるPack、Workflow revision、user action
+  context: tenant/user + ProfileAuthoritySnapshot + activation digest + policy revision
+  subject: origin principal + exact caller artifact digest + caller Function + caller Contract Operation
+  workflow: workflow ID + published revision digest + step ID（該当時）
+  chain: Host生成call-chain constraint
+  target: exact Capability Provider artifact digest + target Function + target Contract Operation
+  authority: Effect type + scope schema digest + normalized Effect scope
+  lifetime: one-shot/session/workflow-revision/persistent-profile + TTL + use limit
+  exact binding: high-risk/dynamic/one-shot時のRequest/effect/call-chain digest
+
+ProfileはGrantの保存・適用contextであって包括権限ではない。Pack ID、version、publisher、Distributionをauthority wildcardに使わない。通常Profile revisionとは別に、active artifacts、provider routing、policy、credential account selection、Workflow catalog等の権限関連部分だけをhashしたprofile_authority_digestを持つ。
+
+Grantはimmediate callerへbindし、delegationはdefault false/max_depth=0とする。A -> B -> Capability ProviderではBはAのGrantを継承せず、BからProviderへの別Grantを必要とする。明示委譲でもscopeは縮小のみ、runtime call chainは最大depth 4、cycleはdenyする。
+
+すべてのGrantはexact artifact digestへbindする。更新時に旧Grantを新artifactへ直接一致させない。同一publisher key lineage、同一trust class、同一Function/Operation、Effect/capability/scope/domain/account/entitlementが非拡張、scope semantics同一、未revoke、かつuserのUpdateTrustPolicyがある場合だけKernelが新digest向けsuccessor Grantを発行する。
+
+Production RealmのNormal Packはraw networkを持たず、Host-owned generic network Capabilityを使う。Packへsecret_materialを返さず、credentialはexact audience、target provider、Request digestへbindしたsealed CredentialLeaseとしてHost内で注入する。
+
+正式仕様は docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt を正本とする。
 
 1.5 PackVMの共有単位
 
@@ -282,8 +307,8 @@ Secret Storeは暗号化され、外部APIへ値を出さない意図がある�
   - Base Policy Kernelを唯一の非上書き可能な下限にする
   - Policy Packをrestrict-onlyにする
   - Request digest、caller/target principal、activation/policy revision、actual isolationをpolicy inputへ固定
-  - Approvalとrequest-bound Grantの明確な分離
-  - secret valueを返さず、egress/credential-use brokerが目的操作だけ実行する
+  - ApprovalRecord、GrantRecord、request-bound InvocationLeaseの三分離
+  - secret valueを返さず、sealed CredentialLeaseを指定Providerがexact Requestにだけ利用する
   - sandbox内部操作と境界越え権限を明確に分ける
 
 2.8 現在のtimeout、cancel、retry
@@ -428,15 +453,17 @@ Rust Host Kernelは既存Tauri Launcher processへ全部埋め込まず、独立
   9. Provider Function宣言からEffect ceilingを取得し、具体的Request scopeを正規化
  10. exact Capability Function/Host Extension bindingをResolvedPlanから選択
  11. Base Policy + restrict-only Policy Packでscope containmentを評価
- 12. 必要時だけHost security UIでApproval取得
- 13. Function/Effect/Request/ProfileへbindしたGrantをHost内で生成
- 14. audit reservationを耐久化
- 15. Runtime生成RequestEnvelopeをProviderへ配送
- 16. 境界作用はGrant付きRequestとしてCapability Functionへ配送
- 17. deadline/cancel/backpressureを監視
- 18. Response/error/progress schemaを検証
- 19. effect/audit commit、handle revoke
- 20. sanitized Responseをcallerへ返す
+ 12. matching Grantがなければ必要時だけHost security UIでimmutable ApprovalRecordを確定
+ 13. Operation/Effect/caller/target/Profile snapshotへbindしたatomic GrantRecordをHost内で生成
+ 14. authoritative audit reservationを耐久化
+ 15. Grant use-countをatomic reserve
+ 16. exact Request向けの短寿命・非移譲InvocationLeaseを生成
+ 17. Runtime生成RequestEnvelopeをProviderへ配送
+ 18. 境界作用はInvocationLease付きRequestとしてCapability Functionへ配送
+ 19. deadline/cancel/backpressureとrevocation epochを監視
+ 20. Response/error/progress schemaを検証
+ 21. effect/audit commit、handle/Lease revoke
+ 22. sanitized Responseをcallerへ返す
 
 これ以外のPack execution entrypointを作らない。
 
@@ -457,8 +484,8 @@ Packが指定できない項目:
 
   caller principal
   target provider
-  approval/grant
-  profile/policy revision
+  approval/grant/InvocationLease
+  profile/policy/authority snapshot revision
   exact schema digest
   actual isolation
   authoritative request/trace ID
@@ -467,11 +494,11 @@ Hostが生成するRequestEnvelopeの必須項目:
 
   request_id、trace_id、correlation_id、causation_id
   caller principal/pack/artifact/provider instance
-  profile revision、policy revision、plan digest、activation digest
+  profile revision、profile authority digest、policy revision、plan digest、activation digest
   target provider/pack/artifact
   exact contract version、schema digest、operation
   monotonic deadline remaining budget
-  opaque session-bound grant handle
+  opaque request-bound InvocationLease
   validated payload/resource handles
 
 Wire format v1:
@@ -611,6 +638,12 @@ Phase 1: Protocol、schema、generated SDK
 
 実装:
 
+  - ADR-014をAcceptedとして固定し、authority schemaの変更をADR必須にする
+  - legacy permission IDの新規追加をfreezeする
+  - productionのoff/observe modeがallowへfallbackする経路を禁止する
+  - legacy bypass、raw socket、raw secret、Pack-writable Grant、host execution flagをCI scannerへ追加する
+  - Development RealmとProduction authority store/update policyを分離する
+
   - Contract、Operation、InvocationFrame、RequestEnvelope、Response、Error、Stream frame
   - Profile、ProfileLock、ResolvedPlan、ActivationRecord、IsolationAttestation、MaterializationEvent
   - PolicyDecision、ApprovalRecord、GrantRecord、ResourceHandle
@@ -664,6 +697,8 @@ Phase 3: deterministic resolverとatomic Profile activation
 
   - Profile -> Lock -> ResolvedPlan compiler
   - exact provider/adapter/artifact/schema/isolation/materialization mode固定
+  - 通常profile_revisionと権限関連部分だけのprofile_authority_digestを別生成
+  - activation digestとProfileAuthoritySnapshotをatomic commit
   - tie、cycle、missing required、sunset aliasをerror
   - activation preflight
   - eager/continuousだけmaterializeしてreadiness確認
@@ -677,6 +712,8 @@ Phase 3: deterministic resolverとatomic Profile activation
 完了条件:
 
   - Request開始時にcaptureしたActivationRecordが途中で変わらない。
+  - 権限に無関係なtheme/layout変更だけではGrantが失効しない。
+  - artifact/provider/policy/credential/workflow catalog変更はauthority digestへ反映される。
   - activation crash後は完全な旧または新のどちらかへ回復する。
   - 100 Pack on_demand Profile activation時のresident VMは0。
 
@@ -686,13 +723,20 @@ Phase 4: Capability Function、Base Policy、Approval、Grant、ResourceHandle
 
   - Function manifestのEffect ceilingとrequired Capability Function宣言
   - Capability Function catalogとexact artifact/function binding
-  - generic capability typeごとのscope schemaとcontainment rule
+  - Foundation Capability Type Registry
+  - typeごとのscope schema/normalize/subset/intersect/digest/render/redact/conformance
   - Host Extension trust class、署名、明示install approval
   - effect class別Base Policy（機能実装は含めない）
   - restrict-only Policy Pack composition
   - policy unavailable/revision mismatch=deny
-  - exact request digestにbindしたApproval
-  - caller/target Function/artifact/effect/request/profile/policy/TTL/use-countにbindしたGrant
+  - immutable ApprovalRecord、GrantRecord、request-bound InvocationLeaseの三分離
+  - ProfileAuthoritySnapshotと通常Profile revisionの分離
+  - exact caller/target Function/Operation/artifact/effect/request/call-chain binding
+  - one-shot/session/workflow-revision/persistent-profile/policy-ephemeral Grant
+  - Grant groupとatomic Effect bundle
+  - delegation default false、scope attenuation、cycle/depth検査
+  - successor GrantとUpdateTrustPolicyの分離
+  - encrypted Host authority DB、MAC、revocation index/epoch、atomic use reservation
   - Host handle tableとrevoke
   - private Pack state namespace/quota
 
@@ -702,13 +746,17 @@ Approval UIへ表示するもの:
   target PackArtifact、Function、Contract/Operation
   effectと具体的resource diff
   file root/domain/device/account
-  one-shotか期間付きか
-  Profile/policy revision
+  one-shot/session/workflow/Profileのどれかと期限/use limit
+  Profile authority digest、activation digest、policy revision
 
 完了条件:
 
   - Pack payloadのapproved/caller/grant/profile値を無視する。
+  - ProviderへGrant本体を渡さずInvocationLeaseだけを渡す。
   - Grantの別request、別target、期限後、使用回数超過を拒否する。
+  - same pending Approvalをdedupし、snapshot更新時はinvalidateする。
+  - one-shotの並列消費はatomic CASで一つだけ成功する。
+  - unknown scope semanticsとarbitrary policy pluginを拒否する。
   - sandbox内部計算には不要なApprovalを出さない。
   - 新しいvendor Pack追加にPolicy Kernelのvendor固有permission code追加を必要としない。
   - 未承認Function、別digest、別callerが承認済みCapability FunctionのGrantを再利用できない。
@@ -850,21 +898,30 @@ Workspace/File:
 Credential:
 
   - Packへsecret_materialを返すresolve operationを廃止
-  - credential-use handleだけを渡す
-  - egress/signing/OAuth brokerが目的operationへsecretを注入
+  - non-enumerable opaque CredentialHandleだけをユーザー選択後に渡す
+  - target Provider/audience/exact Requestへbindしたsealed CredentialLease
+  - egress/signing/OAuth providerがHost内部でtoken refresh、署名、secret注入
   - domain/method/path/account/audience/TTL/use-countでscope
+  - cross-domain redirectでcredential除去、response secret sanitization
 
 Network:
 
-  - raw socket禁止
+  - Production RealmのNormal Packはraw socket/network全面禁止
+  - Host-owned HTTP clientだけが外部通信
   - canonical DNS/domain/IP/port/method/path/body size policy
   - private range、localhost、DNS rebinding対策
   - redirectごとに再評価
   - response size/type/timeout制限
+  - exact HTTP request digestとatomic Effect bundle binding
+  - persistent semantic Grantにはdeclarative EffectBinding
+  - semantic binding不能時はvendor意味を偽らずtransport権限として表示
+  - purchase/payment/delete等high-riskはHost-built request、専用semantic Capability、またはone-shot
 
 Phase 11: FunctionからOperationへのPack移植
 
 全既存Packを一度disabledにし、優先vertical sliceごとに移植する。
+
+cutover前に新Policy Kernelをshadow modeで導入する。legacy decisionと新decisionを同一Requestで比較し、新Kernelがlegacyより広くallowした場合はCI/runtime faultとする。shadowは監査だけを行い、完成前にdispatch権限を持たせない。
 
 移植手順（Packごと）:
 
@@ -878,6 +935,8 @@ Phase 11: FunctionからOperationへのPack移植
   8. Profile bindingで有効化
   9. legacy Function ID aliasを必要な開発期間だけsigned data mappingで保持
  10. migration完了後aliasと旧Functionを削除
+
+既存Grantは自動でactive Grantへ変換しない。review_required recommendationとしてFunction/Operation/Effect scopeへ展開し、ユーザー承認後にだけ新Grantを発行する。Authority one-shot storeのatomic consume/HMAC/pending dedup、Credential Storeの暗号化、Host permission mappingのrisk catalogは実装パターンまたはtest vectorとして移植する。PermissionManager、CapabilityExecutor authority logic、principal文字列階層、raw credential resolve、direct host flags、best-effort authority auditはcutover後に削除する。
 
 vertical slice順:
 
@@ -927,11 +986,15 @@ Workflow models:
 
   - Workflow Definition/Run/StepAttempt/checkpoint store
   - published revisionとActivationRecordをRun開始時にpin
+  - Workflow全体のambient Grantは禁止し、各Step向けatomic Grantへ展開
+  - Grantをworkflow ID/published revision digest/step/attempt/call chainへbind
   - stepはContract Requestだけ
   - restricted CEL subset、I/Oなし
   - parallel child attemptの実並列とbounded concurrency
   - retry count/backoff/idempotency/attempt history
-  - approval待ちpauseとcontinuation
+  - approval待ちpauseとcontinuation。checkpointへRequest/effect/call chain/idempotencyを保存
+  - checkpointへInvocationLease/raw credential/unbounded Host handleを保存しない
+  - resume/retry/parallel/sub-workflowの各StepAttemptでGrantとsnapshotを再評価
   - cancelのRequest/Providerへの伝播
   - crash recoveryとambiguous effect reconciliation
   - SchedulerはTrigger Contractで接続する別Pack
@@ -1078,7 +1141,13 @@ GUI/Workflowで統合対象:
   - env/credential/FD探索
   - fork bomb、memory bomb、disk bomb、output bomb
   - parent/host process signal/debug
-  - forged caller/approval/grant/profile/audit
+  - forged caller/origin/approval/grant/lease/profile/audit
+  - call-chain substitution/discontinuity/cycle/depth overflow
+  - Pack/publisher/Profile/Distribution wildcard authority injection
+  - scope canonicalization collision、unknown semantics fail-open
+  - artifact hot-swap、successor Grant permission expansion、publisher key substitution
+  - sealed CredentialLeaseの別Provider/別Request/cross-account利用
+  - one-shot Grantの並列二重消費
   - stale/replayed handle/request
   - cancellation無視、child process残留
   - UI clickjacking/security chrome模倣
@@ -1111,7 +1180,13 @@ GUI/Workflowで統合対象:
 
   - architecture scanner violation 0
   - unknown Pack host import 0
-  - external effect without Policy/Grant/audit reservation 0
+  - external effect without Policy/Grant/InvocationLease/audit reservation 0
+  - raw network from Production Normal Pack 0
+  - raw secret material crossing Pack IPC 0
+  - Pack-writable Approval/Grant/Lease state 0
+  - production host execution bypass 0
+  - unknown capability/scope semantics allow 0
+  - authoritative audit coverage 100%
   - timeout/cancel後のresidual process/socket/handle 0
   - cross-Pack filesystem/state visibility 0
   - Profile atomicity fault test 100% pass
@@ -1198,7 +1273,8 @@ PR-25 legacy deletion and baseline zero
   ADR-011 ResourceHandleのlarge binary transport
   ADR-012 audit retention/checkpoint key/recovery
   ADR-013 Policy rule languageとCapability Function scope containment（Rust DSL/CEL subset等）
-  ADR-014 Approval/Grant粒度（Profile/PackArtifact/Function/Effect/Request/caller）と再利用可能なlow-risk class
+  ADR-014 Boundary capabilities are Function-based and user approvals mint context-bound Grants
+    -> Accepted。docs/ADR-014_BOUNDARY_CAPABILITY_GRANTS.txtを正本とする。
   ADR-015 remote ProviderのTLS pin/region/retention semantics
   ADR-016 event-wake/background leaseとbattery policy
   ADR-017 same PackArtifact内Providerのexecution domain共有条件
@@ -1221,7 +1297,12 @@ PR-25 legacy deletion and baseline zero
   - unknown native/Python Packはcertified L4だけで起動する。
   - internal sandbox操作は不要な承認なしで動き、境界越えだけGrantされる。
   - secret valueをPackへ返さない。
-  - external effectはPolicy、必要なApproval、request-bound Grant、audit reservationを必ず通る。
+  - ApprovalRecord、GrantRecord、InvocationLeaseが混同されない。
+  - Pack/publisher/Profile/Distribution wildcard Grantが存在しない。
+  - Grantはexact caller/target Artifact/Function/Operation/Effect scopeへbindされる。
+  - unknown capability/scope semanticsはfail closed。
+  - Production Normal Packのraw networkが0。
+  - external effectはPolicy、Grant、request-bound Lease、audit reservationを必ず通る。
   - timeout/cancel/eviction/update後に実行物と権限が残らない。
   - GUI security chromeをPackが模倣・被覆できない。
   - Workflowがcheckpoint、approval pause、cancel、retry、reconciliationを持つ。

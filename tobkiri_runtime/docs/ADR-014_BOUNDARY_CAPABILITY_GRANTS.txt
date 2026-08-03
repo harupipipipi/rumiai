@@ -1,0 +1,368 @@
+# ADR-014: Boundary capabilities are Function-based and user approvals mint context-bound Grants
+
+- Status: Accepted
+- Date: 2026-08-03
+- Decision owners: Tobkiri Runtime / Pack Architecture
+- Applies to: Runtime TCB, Pack Runtime, Profile activation, Workflow Runtime,
+  Capability Providers, Host Extensions, Approval UI
+
+## Context
+
+Tobkiri Packは、network、filesystem、credential、device、process等の
+Host境界作用を必要とする。一方、Policy Kernel自身へvendor固有処理や
+すべてのHost機能実装を組み込むと、Runtime TCBが肥大化し、新しいサービスや
+deviceの追加ごとにCore変更が必要になる。
+
+Capability Functionは境界作用の実装を提供するが、FunctionのEffect宣言、
+Pack manifest、publisher署名、Profile activationのいずれも、それ自体を
+実行権限として扱ってはならない。
+
+Approval、Grant、Policy、caller identity、artifact update、Workflow retry、
+Host Extension trustの責任境界を統一しない場合、ambient authority、
+Confused Deputy、silent permission expansion、raw secret leakage、
+audit bypassが発生する。
+
+## Decision
+
+### 1. Trust classes
+
+Tobkiri v1のtrust classは次の3つとする。
+
+1. Normal Sandbox Pack
+2. Host Extension Pack
+3. Runtime TCB
+
+Pure Function、vendor Function、brokered Capability Functionはすべて
+Normal Sandbox Pack内のroleであり、別trust classとはしない。
+
+Verified Direct-Capability Packは導入しない。
+
+Development Realmはtrust classではなく、Productionとauthorityを共有しない
+別environmentとする。
+
+### 2. Capability Provider
+
+Capability Functionはroleであり、authorityではない。
+
+Host境界作用を実装するProviderは、Runtime TCBまたは明示的に信頼された
+Host Extension Packでなければならない。
+
+Normal Packはraw Host import、cross-Pack import、raw path、raw secret、
+raw networkを利用できず、Host-owned Request Broker経由でCapabilityを利用する。
+
+### 3. Public identity
+
+Pack外の公開境界はContract Operationとする。
+
+一つのFunctionは複数Operationを実装できるが、各Operationは独立した
+input/output schema、Effect ceiling、capability requirements、
+idempotency classを持たなければならない。
+
+GrantはContract Operation identityとexact Function implementation identityの
+両方へbindする。
+
+### 4. Approval and Grant
+
+ApprovalRecordは、ユーザーまたは管理者が固定されたApproval snapshotを見て
+行った意思決定の変更不能な記録である。
+
+ApprovalRecordはruntime authorityではない。
+
+GrantRecordは、ApprovalRecordまたはHost-signed Base Policyから
+Policy Kernelが発行する、機械評価可能な正のauthorityである。
+
+一つのApprovalRecordは複数のatomic GrantRecordを生成できる。
+
+PackはApprovalRecordまたはGrantRecordを作成、変更、保存、列挙、
+コピーできない。
+
+ProviderへGrantRecord本体を渡さず、各Invocation向けの短寿命かつ
+non-transferableなInvocationLeaseのみを渡す。
+
+### 5. Grant unit
+
+Grantの正式な単位は次の複合identityとする。
+
+- tenant/user
+- Profile ID
+- Profile authority digest
+- activation digest
+- policy revision
+- origin principal
+- exact caller PackArtifact digest
+- caller Function
+- caller Contract Operation
+- Workflow ID/revision/step when applicable
+- call-chain constraint
+- exact target Capability Provider artifact digest
+- target Function
+- target Contract Operation
+- capability/effect type
+- scope schema identity and digest
+- normalized Effect scope
+- lifetime and use limit
+- exact request/effect/call-chain digest when required
+
+Pack ID、version、publisher、Distribution、Profile全体をauthority wildcardとして
+使用してはならない。
+
+### 6. Formal authorization rule
+
+具体的な正規化済みEffect Request Rは、次のすべての部分集合である場合だけ
+実行可能とする。
+
+- Function Effect ceiling
+- Contract Operation Effect ceiling
+- Base Policy allow ceiling
+- Profile Policy allow ceiling
+- caller delegation ceiling
+- Provider enforceable ceiling
+- matching Grant scope
+
+明示的deny、identity不一致、unknown capability、unknown scope semantics、
+revoke、audit reservation failureは常にdenyする。
+
+Approvalは上記intersectionへ含めない。ApprovalはGrant発行のprovenanceである。
+
+Base Policyによるlow-risk auto allowもpolicy_ephemeral Grantを発行し、
+通常Grantと同じruntime pathを使用する。
+
+### 7. Lifecycle
+
+download、verify/install、activate、Function enable、Effect approve、
+Grant issue、Invokeを分離する。
+
+Installまたはactivateだけではboundary authorityを取得しない。
+
+Activate後にGrantなしで利用できるのは、sandbox内部のpure operationと
+Hostが明示したprivate/low-risk internal capabilityのみとする。
+
+すべてのboundary invocationはRequest Broker、Policy Kernel、
+authoritative audit、Grant use reservation、InvocationLease発行を通る。
+
+### 8. UI batching
+
+UIではPack単位またはProfile template単位の一括承認を表示できる。
+
+ただし内部では、現在のexact artifactに存在する各OperationとEffect scopeへ
+個別Grantを生成する。
+
+「Packの全Function」は将来追加されるFunctionを含まない。
+
+publisher更新の継続許可はGrantではなく、別のUpdateTrustPolicyとする。
+
+### 9. Grant lifetimes
+
+- one-shot:
+  exact Request、Effect bundle、call chain、user actionへbindし、
+  max_uses=1、default TTL=10分とする。
+
+- session:
+  exact session IDとRuntime boot epochへbindし、
+  default最大8時間、idle 30分とする。Runtime再起動で失効する。
+
+- workflow revision:
+  exact published Workflow revisionとStepへbindし、
+  すべてのStepAttemptで再評価する。
+
+- persistent Profile:
+  exact Profile authority snapshot、caller、target、Effect scopeへbindし、
+  default最大180日とする。critical Effectにはdefaultで提供しない。
+
+### 10. Artifact update
+
+すべてのGrantはexact artifact digestへbindする。
+
+新artifactは旧Grantへ直接一致しない。
+
+同じpublisher key lineage、同じtrust class、同じFunction/Operation、
+Effect・capability・scope・domain・account・OAuth scope・OS entitlement等が
+非拡張であり、ユーザーがnon-expanding updateを許可している場合のみ、
+Policy Kernelが新digest向けsuccessor Grantを発行できる。
+
+権限増加、domain追加、unknown schema semantics、publisher lineage断絶、
+trust class変更、artifact revokeでは再承認を要求する。
+
+Security updateという表示だけで承認を省略してはならない。
+
+### 11. Caller and delegation
+
+InvocationContextのorigin、caller、target、Profile、Workflow、call chainは
+Hostが認証済みchannelとActivationRecordから生成する。
+
+Packがこれらを申告または上書きしてはならない。
+
+Grantはexact immediate caller Function/Operationへbindする。
+
+A→B→Capability Providerでは、BはAのGrantを継承しない。
+BからProviderへの別Grantが必要である。
+
+Delegationはdefault false、max_depth=0とし、明示時もscope attenuationを
+必須とする。runtime call chainの最大depthは4とし、cycleをdenyする。
+
+### 12. Workflow
+
+Workflow全体へambient authorityを与えない。
+
+revision単位の一括Approvalは、各Step向けGrantへ展開する。
+
+Workflow編集後は旧revision Grantを使用できない。
+
+pause/checkpointにはRequest、Effect、call chain、activation、
+idempotency情報を保存するが、InvocationLeaseまたはraw credentialを保存しない。
+
+resume、retry、parallel attempt、sub-workflowでは毎回Grantを再評価する。
+
+非idempotentな外部作用の成否が不明な場合はambiguous_effectとし、
+自動retryせずreconciliationへ移行する。
+
+### 13. Capability type registry
+
+Capability typeごとに、Hostが信頼する次の定義を持たせる。
+
+- scope schema
+- normalization
+- subset/intersection semantics
+- canonical digest rules
+- risk class
+- approval field definition
+- audit redaction
+- Provider conformance vectors
+
+unknown capability type、unknown schema digest、unknown subset semanticsはdenyする。
+
+Normal community PackはHost-enforced capability typeを追加できない。
+
+Host Extensionはnamespaced typeを登録できるが、Policy Kernelへ任意実行コードを
+loadしてはならず、Runtimeが定義するdeclarative Scope Definition Languageを
+使用しなければならない。
+
+### 14. Network
+
+Production RealmのNormal Packにはraw networkを許可しない。
+
+すべてのHTTP通信はgeneric network Capabilityを経由する。
+
+network providerはorigin、DNS/IP、port、TLS identity、method、path、
+request/response size、redirect、credential audience、rate、cost、
+data classification等を強制する。
+
+OS packet filterは補助防御であり、HTTP method/path/body等の強制を
+application-layer brokerの代替としてはならない。
+
+Generic network Capabilityは任意payloadのsemantic meaningを完全には
+検証できない。
+
+one-shotではexact HTTP request digestへbindする。
+
+Persistent semantic GrantにはHostが理解するdeclarative EffectBindingを
+要求し、bindingがない場合はgeneric transport effectとして表示・承認する。
+
+Purchase、payment、delete等のhigh-risk semantic effectには、
+専用semantic Capability、Host-built request、またはexact one-shotを要求する。
+
+### 15. Credential
+
+Packへsecret materialを返すoperationを提供しない。
+
+CredentialHandleはnon-enumerableなopaque referenceとし、Profile、
+caller Function/Operation、account、audience/domain、OAuth scope、
+purpose、Workflow revision/stepへbindする。
+
+Token refresh、request signing、credential injectionはHost内部で行う。
+
+CredentialLeaseは指定network providerとexact Requestだけがredeemできる
+sealed tokenとする。
+
+Cross-domain redirectではcredentialを除去し、responseはHost側でsanitizeする。
+
+### 16. Host Extension
+
+Host ExtensionはNormal Packとは別package kind、別install API、
+別署名namespaceとする。
+
+Exact digest、publisher signature、platform code signing/notarization、
+OS permission、capability registrations、entitlementsを
+HostExtensionTrustRecordへbindする。
+
+Host Extension trustはFunction Grantとは別であり、Extensionをinstallしても
+Normal Packへ利用権限を与えない。
+
+Extensionは別processで実行し、Policy Kernelへin-process pluginとして
+loadしない。
+
+Extensionはdeclarative approval metadataを登録できるが、Approval UIを
+描画できない。TCBが固定security chromeで表示する。
+
+Normal Packはmanifest変更によってHost Extensionへ昇格できない。
+
+Third-party Host Extensionの自動更新はdefault OFFとする。
+
+### 17. Storage and revocation
+
+Approval、Grant、revocation、UpdateTrustPolicy、HostExtensionTrustRecordは
+Host Kernel専用のencrypted authority databaseへ保存する。
+
+Profile file、Pack state、通常user configへauthorityを保存しない。
+
+GrantにはMACを付け、tenant、device、Profile、artifact、revocation epochへ
+bindする。
+
+PackはGrantを読み書きできない。
+
+RevocationはFunction、Pack、artifact、publisher、credential、domain、
+Profile、Workflow、Host Extension、global emergency stop単位で可能とする。
+
+RevocationはRequest受付時、Lease発行時、Provider dispatch直前、
+可能ならirreversible commit直前に再確認する。
+
+### 18. Distribution
+
+Distributionは非実行artifactでありauthorityを持たない。
+
+Distributionはsigned recommended Grant templateを含められるが、
+recommendationは自動承認にならない。
+
+Bundle approvalは現在列挙されたexact Grant候補のbatch approvalに限定し、
+将来のPack、Function、Effectを含めない。
+
+## Consequences
+
+- Policy Kernelはvendor API実装を持たず、判定とGrant発行に集中できる。
+- 新しいvendor serviceはContract、Function、declarative EffectBindingで追加できる。
+- Unknown Packは既知Capabilityを安全なscope内で利用できる。
+- Host Extensionは明確な高trust境界となる。
+- Grant数は増えるが、UI batchingとGrant groupによって一般ユーザーの操作量を抑える。
+- Exact digest bindingのまま、非拡張updateのみsuccessor Grantで継承できる。
+- Generic transportだけではsemantic honestyを完全保証できないため、
+  high-risk operationには追加のbindingまたはone-shotが必要になる。
+
+## Rejected alternatives
+
+- Pack IDまたはpublisher単位のauthority wildcard
+- Profile activationによる自動Grant
+- Function effect declarationの自己承認
+- ApprovalとGrantを同じruntime authorityとして扱うこと
+- Contract compatibilityだけによるGrant継承
+- Verified Packへのraw network
+- Function専用sandboxを理由としたdirect network
+- Community Packによるarbitrary Policy Kernel plugin
+- Workflow全体へのambient authority
+- Host Extension提供の実行可能Approval renderer
+- raw secret materialをPackへ返すCredential API
+- best-effort auditで外部作用を続行すること
+
+## Security invariants
+
+1. Unknown Normal PackはHost importできない。
+2. Unknown Normal Packはcross-Pack importできない。
+3. Raw Host path、raw secret、raw networkを取得できない。
+4. Caller identity、Profile identity、Grant identityをPackが設定できない。
+5. GrantはHost Kernelだけが発行・保存・変更できる。
+6. Grantはexact artifact、Function、Operation、Effect scopeへbindされる。
+7. Caller chainが一致しないGrantは利用できない。
+8. Profile変更とartifact更新によるsilent authority expansionを許さない。
+9. Unknown capability/scope semanticsはfail closedとする。
+10. Authoritative audit reservationなしでboundary effectを開始しない。
+11. Revocationはcached GrantとInvocationLeaseへ反映される。
+12. Distribution、publisher reputation、version labelはauthorityを付与しない。
