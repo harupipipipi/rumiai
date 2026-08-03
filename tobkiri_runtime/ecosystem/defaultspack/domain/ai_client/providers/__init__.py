@@ -318,7 +318,9 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "base_url_envs": ["LMSTUDIO_BASE_URL"],
         "catalog_only": True,
         "supports_invoke": False,
-        "default_model": "deepseek-r1",
+        # LM Studio reports the installed model inventory through its native
+        # management API.  A checked-in default would be a stale placeholder.
+        "default_model": "",
         "default_base_url": "http://127.0.0.1:1234/v1",
         "capabilities": ["chat", "embedding", "local", "openai_compatible"],
     },
@@ -1212,21 +1214,11 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     # saved definitions exactly like extension manifests so they are discoverable
     # by the provider/model catalog and not merely shown as inert API-key rows.
     for provider_id, manifest in _custom_openai_provider_manifests().items():
-        existing = manifests.get(provider_id, {})
-        existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
         # A saved endpoint is an explicit user choice.  It must override both
         # a program placeholder and a built-in OpenAI-compatible default so
         # account/project/proxy-specific model inventories are fetched from
         # the endpoint the user actually configured.
-        if manifest.get("default_base_url") and (
-            existing_config.get("provider_program")
-            or str(existing.get("adapter") or "")
-            in {
-                "openai_compatible",
-                "connection_required",
-                "catalog_only",
-            }
-        ):
+        if manifest.get("default_base_url"):
             manifests[provider_id] = manifest
         else:
             manifests.setdefault(provider_id, manifest)

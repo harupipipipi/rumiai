@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -33,8 +34,34 @@ from core_runtime.resolved_profile_scope import (
 @pytest.fixture(autouse=True)
 def _isolate_profile_resolution_from_pack_install_policy(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
-    """These resolver fixtures model already Host-verified installed Packs."""
+    """Keep resolver tests off user state and synchronize both import aliases.
+
+    Some runtime tests import ``core_runtime`` while others use the
+    ``tobkiri_runtime.core_runtime`` compatibility alias.  Without resetting
+    both module copies, a preceding startup-profile test can leave the real
+    Defaults Profile cache or approval path in this module, making trust and
+    invalidation assertions order-dependent.
+    """
+
+    for module_name in (
+        "core_runtime.resolved_profile_scope",
+        "tobkiri_runtime.core_runtime.resolved_profile_scope",
+    ):
+        try:
+            scope_module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        monkeypatch.setattr(scope_module, "USER_DATA_DIR", tmp_path)
+        monkeypatch.setattr(scope_module, "_PERSISTED_PROFILE_CACHE", None)
+        monkeypatch.setattr(scope_module, "_PERSISTED_PROFILE_INVALIDATION_REVISION", 0)
+        # A preceding startup-profile test can leave a ContextVar-bound plan
+        # active.  Clear it before and after each resolver test so persisted
+        # recovery actually exercises the isolated temporary state.
+        scope_module._ACTIVE_PROFILE.set(None)
+        request.addfinalizer(lambda module=scope_module: module._ACTIVE_PROFILE.set(None))
 
     monkeypatch.setattr(
         "core_runtime.resolved_profile.verify_declared_artifacts",

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core_runtime.interface_registry import InterfaceRegistry
+from core_runtime.pack_artifact_integrity import write_host_install_record
 from core_runtime.startup_profiles import StartupProfileManager
 
 
@@ -42,12 +43,29 @@ def test_search_home_compile_preview_points_surface_launch_target_to_search_home
         json.dumps(defaultspack_manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     shutil.copytree(
         repo_root / "ecosystem" / "search_home_pack",
         eco_root / "search_home_pack",
         ignore=shutil.ignore_patterns("node_modules", "__pycache__"),
     )
+    # Both copied Packs are non-builtin in this fixture. Register them with
+    # the Host trust policy so v4 resolution exercises the real install gate.
+    trust_store = eco_root / "publisher-trust.json"
+    host_record = {
+        "signature_required": False,
+        "developer_mode": True,
+        "publisher_id": "",
+        "key_id": "",
+        "installed_version": "unknown",
+        "signed_manifest_path": "",
+        "contract_versions": {},
+        "requested_capabilities": [],
+    }
+    for pack_id in ("defaultspack", "search_home_pack"):
+        write_host_install_record(trust_store, pack_id=pack_id, record=host_record)
+    monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store))
+    monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "1")
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
 
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",

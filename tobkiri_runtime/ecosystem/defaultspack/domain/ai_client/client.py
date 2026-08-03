@@ -78,7 +78,8 @@ class AIClient:
                 entry = provider_catalog.get(name, {})
                 availability = entry.get("availability", {}) if isinstance(entry.get("availability"), dict) else {}
                 if (
-                    availability.get("configuration_source") == "default_local_endpoint"
+                    availability.get("configuration_source")
+                    in {"default_local_endpoint", "builtin_local_provider"}
                     and not local_default_enabled
                 ):
                     continue

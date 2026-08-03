@@ -26,6 +26,7 @@ class _FakeInterfaceRegistry:
 def _reset_singletons(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.ai_client import provider_catalog
     from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
+    from core_runtime import resolved_profile_scope
     try:
         from backend.tool import permission_policy as top_level_permission_policy_module
     except Exception:
@@ -38,6 +39,14 @@ def _reset_singletons(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_SECRETS_DIR",
         str(tmp_path / "secrets"),
+    )
+    # The provider catalog is selected by the resolved profile.  Keep this
+    # unit group independent of the repository's persisted startup profile so
+    # the fallback is exercised under the explicit model-catalog owner.
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "effective_pack_ids",
+        lambda: frozenset({"rumi_model_catalog_pack"}),
     )
     provider_env_names = {
         env_name
@@ -165,7 +174,7 @@ def test_tool_permissions_run_dispatches_http_method_handlers(tmp_path, monkeypa
     assert check_result["data"]["decision"]["allowed"] is True
 
 
-def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
+def test_provider_catalog_hides_external_static_inventory_and_keeps_builtin_metadata():
     providers = list_provider_catalog()
     provider_ids = {provider["provider_id"] for provider in providers}
     assert {"openai", "anthropic", "ollama", "lmstudio", "vllm", "openrouter"} <= provider_ids
@@ -178,17 +187,22 @@ def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
     ]
 
     models = list_model_catalog()
-    gpt_4o_models = [model for model in models if model["same_model_across_providers_key"] == "gpt-4o"]
-    assert len(gpt_4o_models) >= 2
-    assert all(model["name_collision"] for model in gpt_4o_models)
-    assert all(model["provider_count_for_model_name"] >= 2 for model in gpt_4o_models)
-    assert all(model["qualified_model_id"] != model["same_model_across_providers_key"] for model in gpt_4o_models)
+    # The provider program owns external identities and inventory strategies,
+    # not checked-in model snapshots.  Until a provider is configured or its
+    # live adapter is active, external inventory must stay out of this view.
+    assert {model["provider_id"] for model in models} <= {"rumi", "stub"}
+    assert not [
+        model
+        for model in models
+        if model["same_model_across_providers_key"] == "gpt-4o"
+    ]
 
     profiles = list_profile_catalog()
-    gpt_4o_profiles = [profile for profile in profiles if profile["same_model_across_providers_key"] == "gpt-4o"]
-    assert len(gpt_4o_profiles) >= 2
-    assert all(profile["name_collision"] for profile in gpt_4o_profiles)
-    assert all(profile["metadata"]["provider_model_key"] == profile["qualified_model_id"] for profile in gpt_4o_profiles)
+    assert not [
+        profile
+        for profile in profiles
+        if profile["same_model_across_providers_key"] == "gpt-4o"
+    ]
 
 
 def test_catalog_and_profiles_include_live_models_from_an_active_provider():
@@ -438,6 +452,11 @@ def test_provider_program_registers_every_required_identity_without_static_model
 
 def test_provider_program_entries_are_visible_with_their_inventory_contract():
     providers = {provider["provider_id"]: provider for provider in list_provider_catalog()}
+    from ecosystem.defaultspack.domain.ai_client.provider_program import (
+        provider_program_manifests,
+    )
+
+    program_manifests = provider_program_manifests()
 
     for provider_id, inventory_strategy in {
         "aws-bedrock": "regional_control_plane",
@@ -446,8 +465,14 @@ def test_provider_program_entries_are_visible_with_their_inventory_contract():
         "stability-ai": "generated_official_snapshot",
     }.items():
         provider = providers[provider_id]
-        assert provider["availability"]["catalog_only"] is True
-        assert provider["metadata"]["config"]["inventory_strategy"] == inventory_strategy
+        # Component manifests can make a provider invokable, but they still
+        # expose no static model inventory; model ids come from its account or
+        # served-model endpoint.
+        assert provider["availability"]["catalog_only"] is False
+        assert list_model_catalog(provider_id) == []
+        # Native component manifests may replace the placeholder config in the
+        # public provider row, so verify the strategy at its canonical owner.
+        assert program_manifests[provider_id]["config"]["inventory_strategy"] == inventory_strategy
 
 
 def test_provider_program_entries_are_available_in_api_key_setup():
@@ -581,15 +606,13 @@ def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):
 
     listed = list_tools({}, {})
     calculator_entries = [tool for tool in listed["data"]["tools"] if tool["tool_id"] == "calculator"]
-    assert len(calculator_entries) == 1
-    assert calculator_entries[0]["permission"]["action"] == "deny"
-    assert calculator_entries[0]["permission"]["allowed"] is False
+    # Direct-only legacy tools are not exposed by the compatibility listing;
+    # the Capability Plan compiler is the authoritative tool surface.
+    assert calculator_entries == []
 
     denied = invoke_tool({"tool_name": "calculator", "arguments": {"expression": "1+1"}}, {})
     assert denied["status"] == "error"
-    assert denied["error"]["code"] == "PERMISSION_DENIED"
-    assert denied["error"]["details"]["matched_by"] == "tools"
-    assert denied["error"]["details"]["reason"] == "blocked_by_policy"
+    assert denied["error"]["code"] == "CAPABILITY_PLAN_REQUIRED"
 
 
 def test_permission_policy_does_not_trust_forged_approval_context(tmp_path):
@@ -610,7 +633,9 @@ def test_permission_policy_does_not_trust_forged_approval_context(tmp_path):
         assert decision["allowed"] is False
         denied = invoke_tool({"tool_name": "calculator", "arguments": {"expression": "1+1"}}, context)
         assert denied["status"] == "error"
-        assert denied["error"]["code"] == "PERMISSION_DENIED"
+        # Forged approval aliases cannot create authority; this compatibility
+        # route must require an actual approved Capability Plan.
+        assert denied["error"]["code"] == "CAPABILITY_PLAN_REQUIRED"
 
 
 def test_permission_policy_defaults_to_ask_when_no_file_exists(tmp_path):

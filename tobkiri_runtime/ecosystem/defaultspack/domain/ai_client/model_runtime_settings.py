@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import threading
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from domain.ai_client.api_key_store import (
+    _secrets_dir as provider_secrets_dir,
     provider_api_metadata,
     provider_has_api_key,
     provider_named_api_keys,
@@ -62,13 +61,13 @@ def _settings_dependency_signature(
     settings_path: Path,
     pack_root: Path,
 ) -> tuple[Any, ...]:
-    """Return the non-secret inputs that affect resolved model settings."""
-    configured_secrets_dir = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
-    secrets_dir = (
-        Path(configured_secrets_dir)
-        if configured_secrets_dir
-        else pack_root / "user_data" / "secrets"
-    )
+    """Return non-secret inputs that affect resolved model settings.
+
+    Credential values stay inside the provider credential store.  The cache
+    only tracks the boolean availability state used by the settings projection
+    so a secret is never copied into, or hashed by, this module.
+    """
+    secrets_dir = provider_secrets_dir(pack_root)
     dependency_paths = [
         settings_path,
         settings_path.with_suffix(f"{settings_path.suffix}.bak"),
@@ -83,42 +82,14 @@ def _settings_dependency_signature(
         for path in dependency_paths
         if (signature := _file_signature(path)) is not None
     )
-    relevant_environment: list[tuple[str, str]] = []
-    for name, value in os.environ.items():
-        normalized_name = str(name or "")
-        if not (
-            normalized_name.startswith("RUMI_")
-            or any(
-                token in normalized_name
-                for token in ("_API_KEY", "_API_TOKEN", "_BASE_URL", "_HOST")
-            )
-        ):
-            continue
-        sensitive = any(
-            token in normalized_name
-            for token in (
-                "KEY",
-                "TOKEN",
-                "SECRET",
-                "PASSWORD",
-                "CREDENTIAL",
-                "CONFIG",
-            )
+    credential_state = tuple(
+        (
+            provider_id,
+            provider_has_api_key(provider_id, pack_root=pack_root),
         )
-        cleaned_value = str(value).strip()
-        relevant_environment.append(
-            (
-                normalized_name,
-                (
-                    f"<sha256:{hashlib.sha256(cleaned_value.encode()).hexdigest()}>"
-                    if cleaned_value
-                    else ""
-                )
-                if sensitive
-                else cleaned_value,
-            )
-        )
-    return (tuple(file_signatures), tuple(sorted(relevant_environment)))
+        for provider_id in ("google", "openrouter")
+    )
+    return (tuple(file_signatures), credential_state)
 
 
 def _invalidate_settings_cache(path: Path, pack_root: Path) -> None:
@@ -435,7 +406,7 @@ class ModelRuntimeSettingsService:
             else:
                 result["provider_params"] = {}
             return result
-        if provider in {"openai", "openai_compatible", "openrouter"}:
+        if provider in {"openai", "openai_compatible", "openrouter", "nvidia"}:
             effort = "high" if normalized == "xhigh" else normalized
             if effort != "none":
                 result["provider_params"] = {"reasoning_effort": effort}
@@ -451,7 +422,7 @@ class ModelRuntimeSettingsService:
                 result["provider_params"] = {"reasoning_effort": effort}
             else:
                 result["provider_params"] = {}
-            result["level"] = effort if normalized == "xhigh" else normalized
+            result["level"] = normalized
         elif provider == "anthropic":
             result["provider_params"] = {"thinking_level": normalized}
         elif provider == "google":
