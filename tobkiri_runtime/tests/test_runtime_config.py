@@ -11,6 +11,7 @@ test_runtime_config.py — 施策4: ecosystem.json runtime セクションのテ
 
 import json
 import os
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -312,32 +313,32 @@ class TestRuntimeRegistryCodePresence(unittest.TestCase):
             self.content = f.read()
 
     def test_pack_runtime_read(self):
-        """Pack level runtime 読み取りコードが存在する"""
-        self.assertIn(
-            'pack_runtime = pack_info.ecosystem.get("runtime"',
-            self.content,
-        )
+        """The removed Registry cannot read pack-level runtime metadata."""
+        from backend_core.ecosystem.registry import LegacyRegistryUnavailable, Registry
+
+        with self.assertRaises(LegacyRegistryUnavailable):
+            Registry().load_all_packs()
 
     def test_manifest_injection(self):
-        """manifest 注入コードが存在する"""
-        self.assertIn(
-            'manifest["calling_convention"] = pack_runtime_type',
-            self.content,
-        )
+        """Manifest identity is supplied by the finite v4 catalog."""
+        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+
+        catalog = BundledCatalog.load(_project_root / "ecosystem" / "defaultspack" / "v4")
+        self.assertTrue(catalog.packs)
+        self.assertTrue(all("artifact_digest" in item["pack"] for item in catalog.packs.values()))
 
     def test_docker_image_injection(self):
-        """docker_image 注入コードが存在する"""
-        self.assertIn(
-            'manifest["docker_image"] = pack_runtime_docker_image',
-            self.content,
-        )
+        """A v4 pack pins its artifact bytes instead of injected runtime defaults."""
+        from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+
+        assert_profile_resolver_requires_authority_snapshot()
 
     def test_host_execution_injection(self):
-        """host_execution 注入コードが存在する"""
-        self.assertIn(
-            'manifest["host_execution"] = True',
-            self.content,
-        )
+        """Host execution is an Authority Kernel decision, not a manifest flag."""
+        from tests.legacy_authority_contracts import assert_authority_kernel_rejects_payload_substitution
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            assert_authority_kernel_rejects_payload_substitution(Path(tmp_dir))
 
 
 if __name__ == "__main__":

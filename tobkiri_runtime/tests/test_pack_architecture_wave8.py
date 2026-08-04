@@ -104,8 +104,9 @@ def test_viewer_helper_does_not_import_legacy_tool_controller() -> None:
     )
     assert "domain.tool" not in helper
     assert "BrowserComputerController" not in helper
-    assert "rumi_browser_host_service_pack.runtime.runner" in helper
-    assert "rumi_clipboard_host_service_pack.runtime.runner" in helper
+    assert "invoke_global_contract" in helper
+    assert "_run_v4_host_action" in helper
+    assert "computer_action_trace" in helper
 
 
 def test_defaultspack_media_has_no_clipboard_or_capture_executor() -> None:

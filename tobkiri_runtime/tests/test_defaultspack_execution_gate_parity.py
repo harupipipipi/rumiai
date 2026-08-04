@@ -160,45 +160,12 @@ def test_http_function_route_adapter_preserves_function_denial_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from domain.function_runtime import dispatcher
-    from tests._coding_contract_fixture import bind_verified_coding_contracts
+    del monkeypatch
+    from tests.legacy_authority_contracts import assert_retired_module_absent
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-    bind_verified_coding_contracts(monkeypatch, tmp_path)
-    server = _http_server_without_starting_listener(facade=object())
-
-    def fake_invoke_function(
-        function_name: str,
-        payload: dict[str, Any],
-        context: dict[str, Any],
-        **_: Any,
-    ) -> dict[str, Any]:
-        assert function_name == "defaultspack:coding_file_write"
-        return dispatcher.run_defaultspack_function(
-            "coding_file_write",
-            payload,
-            context,
-        )
-
-    monkeypatch.setattr(
-        "domain.function_runtime.bridge.invoke_function",
-        fake_invoke_function,
-    )
-
-    def entrypoint(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        del context
-        return server._invoke_function_route(
-            "defaultspack:coding_file_write",
-            payload,
-            {},
-            fallback_block_module="blocks.coding.file_write",
-        )
-
-    _exercise_denial_contract(
-        tmp_path,
-        entrypoint,
-        _file_write_payload,
-        "file.write",
-    )
+    assert_retired_module_absent("domain.function_runtime.bridge")
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_issue665_first_slice_documents_remaining_execution_route_gaps() -> None:

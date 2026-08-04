@@ -191,40 +191,27 @@ def test_stale_pre_auth_entry_stops_skipping_auth_after_hash_change():
 
 
 def test_function_registry_trusts_manifest_entrypoint_file(tmp_path):
-    from core_runtime.function_registry import FunctionRegistry
-
-    func_dir = tmp_path / "func"
-    func_dir.mkdir()
-    (func_dir / "main.py").write_text("def run(ctx, args): return {'wrong': True}\n", encoding="utf-8")
-    trusted = func_dir / "trusted.py"
-    trusted.write_text("def run(ctx, args): return {'ok': True}\n", encoding="utf-8")
-
-    registry = FunctionRegistry()
-    assert registry.register(
-        pack_id="pack",
-        function_id="fn",
-        manifest={"entrypoint": "trusted.py:run"},
-        function_dir=func_dir,
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
     )
-    entry = registry.get("pack:fn")
-    assert entry is not None
-    assert Path(entry.main_py_path).resolve() == trusted.resolve()
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
+
+    assert_retired_module_absent("core_runtime.function_registry")
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_function_registry_rejects_escaping_entrypoint(tmp_path):
-    from core_runtime.function_registry import FunctionRegistry
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-    func_dir = tmp_path / "func"
-    func_dir.mkdir()
-    (tmp_path / "evil.py").write_text("def run(ctx, args): return {}\n", encoding="utf-8")
-
-    with pytest.raises(ValueError):
-        FunctionRegistry().register(
-            pack_id="pack",
-            function_id="fn",
-            manifest={"entrypoint": "../evil.py:run"},
-            function_dir=func_dir,
-        )
+    assert_retired_module_absent("core_runtime.function_registry")
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_staging_helpers_reject_path_like_ids(tmp_path):

@@ -38,7 +38,6 @@ class TestRegisterDefaultsPhase4:
         "network_grant_manager",
         "store_registry",
         "approval_manager",
-        "permission_manager",
         "container_orchestrator",
         "host_privilege_manager",
         "flow_composer",
@@ -52,6 +51,7 @@ class TestRegisterDefaultsPhase4:
         container = get_container()
         for name in self.EXPECTED_SERVICES:
             assert container.has(name), f"Service '{name}' not registered"
+        assert not container.has("permission_manager")
 
     def test_registered_names_count(self) -> None:
         container = get_container()

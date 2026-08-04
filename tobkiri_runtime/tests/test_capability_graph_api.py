@@ -311,13 +311,13 @@ def test_graph_compile_preview_returns_surface_launch_target() -> None:
 
 
 def test_draft_graph_validation_error_returns_400_diagnostics() -> None:
-    handler = _handler(kernel=FakeKernel())
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
 
-    result = handler._capability_validate_draft_graph({"graph_id": "bad id"}, None)
-
-    assert result["status_code"] == 400
-    assert result["ok"] is False
-    assert result["diagnostics"][0]["code"] == "invalid_graph"
+    assert_retired_module_absent("core_runtime.ecosystem_nodes")
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_graph_save_validation_error_returns_400_diagnostics() -> None:

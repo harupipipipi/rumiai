@@ -1209,52 +1209,19 @@ class TestCheckAuth:
         assert "_raw_body" not in request_data
 
     def test_api_route_pack_function_preserves_authenticated_profile_subject(self, monkeypatch) -> None:
-        from core_runtime.access_tokens import AuthenticatedPrincipal
-        from core_runtime import capability_executor as capability_executor_module
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
 
-        principal = AuthenticatedPrincipal(
-            token_id="tok",
-            profile_id="work",
-            surface_id="mobile",
-            device_id="phone-1",
-            role="mobile_client",
-            audiences=("kernel_api",),
-            issued_at="",
-            expires_at=None,
+        from tests.legacy_authority_contracts import (
+            assert_profile_resolver_requires_authority_snapshot,
+            assert_retired_module_absent,
         )
-        captured = {}
+        from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-        class FakeExecutor:
-            def execute(self, principal_id, request):
-                captured["principal_id"] = principal_id
-                captured["request"] = request
-                return SimpleNamespace(success=True, output={"ok": True})
-
-        monkeypatch.setattr(
-            capability_executor_module,
-            "get_capability_executor",
-            lambda: FakeExecutor(),
-        )
-        handler = _make_handler()
-
-        result = handler._execute_api_route_pack_function(
-            "defaultspack",
-            "test_function",
-            {"value": 1},
-            {
-                "method": "POST",
-                "path": "/api/test",
-                "_authenticated_principal": principal.to_dict(),
-                "_authority_subject": principal.to_internal_subject(owner_pack_id="defaultspack"),
-            },
-        )
-
-        assert result == {"ok": True}
-        assert captured["principal_id"] == "profile:work__surface:mobile__device:phone-1"
-        context = captured["request"]["context"]
-        assert context["_authenticated_principal"]["profile_id"] == "work"
-        assert context["_authority_subject"]["profile_id"] == "work"
-        assert context["_api_route"] is True
+        assert_retired_module_absent("core_runtime.capability_executor")
+        assert_profile_resolver_requires_authority_snapshot()
+        with TemporaryDirectory() as root:
+            assert_payload_mutations_denied(harness(Path(root)))
 
     def test_auth_issue_access_token_rejects_non_mobile_roles(self, tmp_path) -> None:
         from core_runtime.access_tokens import (

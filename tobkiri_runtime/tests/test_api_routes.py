@@ -295,81 +295,18 @@ class TestApiRouteTableBuild(unittest.TestCase):
         handler._send_response.assert_not_called()
 
     def test_api_route_strips_reserved_body_and_query_keys(self):
-        from core_runtime.access_tokens import AuthenticatedPrincipal
-        from core_runtime.api.request_authorizer import RouteAuthorization
-        from core_runtime.api.route_handlers import _compile_template_path
-        from core_runtime.pack_api_server import PackAPIHandler
+        from tempfile import TemporaryDirectory
 
-        captured = {}
-
-        class FakeExecutor:
-            def execute(self, principal_id, request):
-                captured["principal_id"] = principal_id
-                captured["request"] = request
-                return MagicMock(success=True, output={"ok": True})
-
-        entry = {
-            "pack_id": "defaultspack",
-            "owner_pack_id": "defaultspack",
-            "handler": "",
-            "function_id": "echo",
-            "pass_body": True,
-            "pass_query": True,
-            "response_mode": "result",
-            "args": {"static": "kept", "_authority_subject": {"profile_id": "evil"}},
-            "path_param_map": {
-                "safe_id": "id",
-                "_authenticated_principal": "id",
-            },
-            "resource_template": {},
-            "core_only": False,
-        }
-        pattern, param_names = _compile_template_path("/api/test/{id}")
-        PackAPIHandler._api_route_exact = {}
-        PackAPIHandler._api_route_patterns = [("POST", pattern, param_names, entry)]
-        handler = PackAPIHandler.__new__(PackAPIHandler)
-        handler._authenticated_principal = AuthenticatedPrincipal(
-            token_id="tok",
-            profile_id="work",
-            surface_id="mobile",
-            device_id="phone-1",
-            role="mobile_client",
-            audiences=("kernel_api",),
-            issued_at="",
-            expires_at=None,
+        from tests.legacy_authority_contracts import (
+            assert_profile_resolver_requires_authority_snapshot,
+            assert_retired_module_absent,
         )
-        handler._send_result = MagicMock()
-        handler._send_response = MagicMock()
-        handler._send_sse = MagicMock()
+        from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-        with patch.object(PackAPIHandler, "_is_pack_approved_for_runtime_routes", return_value=True):
-            with patch.object(PackAPIHandler, "_pack_allows_in_process_api_metadata", return_value=True):
-                with patch("core_runtime.api.router_table.authorize_route", return_value=RouteAuthorization(True)):
-                    with patch("core_runtime.capability_executor.get_capability_executor", return_value=FakeExecutor()):
-                        dispatched = handler._dispatch_api_route(
-                            "POST",
-                            "/api/test/abc",
-                            body={
-                                "visible": "body",
-                                "_authenticated_principal": {"profile_id": "evil"},
-                            },
-                            query={
-                                "q": "query",
-                                "_authority_subject": {"profile_id": "evil"},
-                            },
-                        )
-
-        self.assertTrue(dispatched)
-        args = captured["request"]["args"]
-        self.assertEqual(args["visible"], "body")
-        self.assertEqual(args["q"], "query")
-        self.assertEqual(args["static"], "kept")
-        self.assertEqual(args["safe_id"], "abc")
-        self.assertNotIn("_authenticated_principal", args)
-        self.assertNotIn("_authority_subject", args)
-        context = captured["request"]["context"]
-        self.assertEqual(context["_authenticated_principal"]["profile_id"], "work")
-        self.assertEqual(context["_authority_subject"]["profile_id"], "work")
+        assert_retired_module_absent("core_runtime.capability_executor")
+        assert_profile_resolver_requires_authority_snapshot()
+        with TemporaryDirectory() as root:
+            assert_payload_mutations_denied(harness(Path(root)))
 
     def test_none_registry(self):
         """registry が None の場合は 0 を返す"""

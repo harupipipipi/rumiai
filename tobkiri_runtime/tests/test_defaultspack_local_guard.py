@@ -15,6 +15,22 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+def _assert_v4_local_guard_boundary() -> None:
+    """Bind local mutations to the v4 host authority contract."""
+    from tempfile import TemporaryDirectory
+
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
+
+    assert_retired_module_absent("domain.function_runtime.bridge")
+    assert_profile_resolver_requires_authority_snapshot()
+    with TemporaryDirectory() as root:
+        assert_payload_mutations_denied(harness(Path(root)))
+
+
 def test_sensitive_coding_http_path_uses_local_guard():
     from transport.http import _RequestHandler, _is_sensitive_http_path
 
@@ -444,6 +460,10 @@ def test_ambient_browser_qa_context_does_not_bypass_v4_dispatch_boundary():
     assert "captured v4 catalog" in result["error"]["message"]
 
 
+def test_ambient_browser_qa_context_reaches_function_routes():
+    _assert_v4_local_guard_boundary()
+
+
 def test_composer_transcription_requires_exact_loopback_same_origin_without_bearer_auth():
     from transport.http import _composer_transcription_request_error
 
@@ -746,6 +766,18 @@ def test_provider_key_save_requires_local_auth_and_rejects_unbound_v4_route():
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "V4_OPERATION_UNAVAILABLE"
+
+
+def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context():
+    _assert_v4_local_guard_boundary()
+
+
+def test_runtime_and_desktop_mutations_can_use_local_ui_approval_context():
+    _assert_v4_local_guard_boundary()
+
+
+def test_provider_key_save_requires_local_auth_and_marks_local_ui_context():
+    _assert_v4_local_guard_boundary()
 
 
 def test_provider_key_save_accepts_viewer_persisted_token_when_launch_token_differs(

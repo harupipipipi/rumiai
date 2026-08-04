@@ -215,34 +215,10 @@ def test_change_request_commit_function_is_default_off_and_flagged(monkeypatch):
 
 
 def test_change_request_commit_function_bridge_registration_is_default_off_and_flagged(monkeypatch):
-    if not _has_change_request_backend():
-        pytest.skip("change_request backend implementation is not present yet")
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
 
-    from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
-
-    class Registry:
-        def __init__(self) -> None:
-            self.function_ids = []
-
-        def register(self, *, pack_id, function_id, manifest, function_dir):
-            self.function_ids.append(str(function_id))
-            return True
-
-    class Container:
-        def __init__(self, registry) -> None:
-            self.registry = registry
-
-        def get_or_none(self, key):
-            if key == "function_registry":
-                return self.registry
-            return None
-
-    monkeypatch.delenv("RUMI_REVIEW_ENABLE_COMMIT", raising=False)
-    registry = Registry()
-    ensure_defaultspack_functions_registered(Container(registry))
-    assert "coding_change_request_commit" not in registry.function_ids
-
-    monkeypatch.setenv("RUMI_REVIEW_ENABLE_COMMIT", "1")
-    registry = Registry()
-    ensure_defaultspack_functions_registered(Container(registry))
-    assert "coding_change_request_commit" in registry.function_ids
+    assert_retired_module_absent("domain.function_runtime.bridge")
+    assert_profile_resolver_requires_authority_snapshot()

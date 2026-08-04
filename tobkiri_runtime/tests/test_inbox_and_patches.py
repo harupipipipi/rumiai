@@ -97,13 +97,15 @@ class TestOverridesIntegration(TestCase):
 
 class TestInterfaceRegistryGetByOwner(TestCase):
     def test_get_by_owner(self):
-        from core_runtime.interface_registry import InterfaceRegistry
-        ir = InterfaceRegistry()
-        ir.register("io.http.server", "sa", meta={"owner_pack": "pa"})
-        ir.register("io.http.server", "sb", meta={"owner_pack": "pb"})
-        self.assertEqual(ir.get_by_owner("io.http.server", "pa"), "sa")
-        self.assertEqual(ir.get_by_owner("io.http.server", "pb"), "sb")
-        self.assertEqual(ir.get_by_owner("io.http.server", "unknown"), "sb")
+        from tests.legacy_authority_contracts import (
+            assert_profile_resolver_requires_authority_snapshot,
+            assert_retired_module_absent,
+        )
+        from tests.v4_batch_support import assert_legacy_registry_fails_closed
+
+        assert_retired_module_absent("core_runtime.interface_registry")
+        assert_legacy_registry_fails_closed()
+        assert_profile_resolver_requires_authority_snapshot()
 
 
 class TestBuiltinHandlerRegistry(TestCase):

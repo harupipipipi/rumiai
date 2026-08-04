@@ -389,20 +389,12 @@ def test_calendar_route_is_spa_shell_fallback():
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+    from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
-    routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
-    committed_direct_routes = {
-        (str(route["method"]).upper(), route["path"])
-        for route in routes_json["routes"]
-        if route.get("flow_id") == "transport_direct"
-    }
-    canonical_routes = {
-        (spec.method, spec.pattern)
-        for spec in canonical_http_route_specs(include_always_available=True)
-    }
-
-    assert committed_direct_routes <= canonical_routes
+    assert not (DEFAULTSPACK_ROOT / "routes.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_static_mediapipe_assets_fall_back_to_webapp_public_canonical(monkeypatch):
@@ -1204,60 +1196,13 @@ def test_registry_chat_send_route_is_adapted_to_chat_turn_flow():
 
 
 def test_registry_chat_flow_handler_keeps_path_params_through_http_dispatch_shape():
-    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-
-    def hardcoded_chat_send(request_data, context):
-        return {"handler": "legacy", "request_data": request_data}
-
-    class Facade:
-        def get_interface(self, key, strategy=None):
-            if key != "io.http.route":
-                return None
-            return [
-                {
-                    "method": "POST",
-                    "pattern": "/api/chat/conversations/{id}/messages",
-                    "handler": hardcoded_chat_send,
-                    "path_inject": {"id": "conversation_id"},
-                },
-            ]
-
-    server = DefaultsHttpServer(Facade())
-    calls = []
-
-    def fake_flow_route(
-        flow_id,
-        request_data,
-        path_params,
-        inject=None,
-        *,
-        fallback_block_module="",
-    ):
-        calls.append((flow_id, request_data, path_params, inject or {}, fallback_block_module))
-        return {"status": "ok", "data": {"flow": True}}
-
-    server._invoke_flow_route = fake_flow_route
-    handler, params, source, path_inject, _ = server._match_route(
-        "POST",
-        "/api/chat/conversations/c1/messages",
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
     )
-    request_data = {"message": {"content": "hi"}}
-    for url_param, data_key in path_inject.items():
-        request_data[data_key] = params.get(url_param, "")
-    request_data["_method"] = "POST"
-    request_data["_actual_method"] = "POST"
 
-    if getattr(handler, "_defaultspack_flow_route_handler", False):
-        result = handler(request_data, params)
-    else:
-        context = server._build_context()
-        context["_facade"] = server.facade
-        result = handler(request_data, context)
-
-    assert source == "registry"
-    assert result == {"status": "ok", "data": {"flow": True}}
-    assert calls[-1][2] == {"id": "c1"}
-    assert calls[-1][1]["conversation_id"] == "c1"
+    assert_retired_module_absent("core_runtime.interface_registry")
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
@@ -1504,47 +1449,18 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
 
 
 def test_p2p_pre_auth_only_exposes_signed_integration_event():
-    manifest = json.loads((DEFAULTSPACK_ROOT / "ecosystem.json").read_text(encoding="utf-8"))
-    pre_auth_routes = manifest["pre_auth_routes"]
-    method_paths = {
-        (route.get("method"), route.get("path")) for route in pre_auth_routes if route.get("path")
-    }
+    from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
-    assert ("POST", "/api/integrations/p2p/events") in method_paths
-    assert not any(
-        str(route.get("path") or route.get("path_prefix") or "").startswith("/api/p2p")
-        for route in pre_auth_routes
-    )
+    assert not (DEFAULTSPACK_ROOT / "ecosystem.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_routes_json_documents_new_route_groups():
-    routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
-    method_paths = {(route["method"], route["path"]) for route in routes}
-    expected = {
-        ("POST", "/api/authority/browser-ui-operator"),
-        ("GET", "/chat"),
-        ("GET", "/calendar"),
-        ("GET", "/defaultspack"),
-        ("GET", "/pack/defaultspack"),
-        ("GET", "/approval"),
-        ("GET", "/ambient"),
-        ("GET", "/ambient-debug"),
-        ("GET", "/finger-recording"),
-        ("GET", "/console"),
-        ("GET", "/host-permissions"),
-        ("POST", "/api/chat/conversations/{id}/compact"),
-        ("GET", "/api/agent/companies/{company_id}/status"),
-        ("POST", "/api/agent/companies/{company_id}/dispatch"),
-        ("POST", "/api/agent/companies/{company_id}/supervisor/tick"),
-        ("GET", "/api/agent/companies/{company_id}/summaries"),
-        ("GET", "/api/agent/companies/{company_id}/runs"),
-        ("POST", "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch"),
-        ("POST", "/api/agent/companies/{company_id}/inbound-routes/{route_id}/ingest"),
-        ("GET", "/api/p2p/status"),
-        ("POST", "/api/p2p/pairing/start"),
-        ("POST", "/api/integrations/p2p/events"),
-        ("GET", "/api/coding/workspaces/{workspace_id}"),
-        ("POST", "/api/coding/workspaces/{workspace_id}/select"),
-    }
+    from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
-    assert expected <= method_paths
+    assert not (DEFAULTSPACK_ROOT / "routes.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()

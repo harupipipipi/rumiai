@@ -19,6 +19,20 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+def _assert_v4_ui_boundary() -> None:
+    """Require UI dispatch to use verified Pack v4 ownership and authority."""
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
+
+    assert_retired_module_absent("domain.function_runtime.bridge")
+    assert_retired_module_absent("core_runtime.interface_registry")
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
+
+
 class TestDefaultspackUiRegistry(unittest.TestCase):
     @staticmethod
     def _jwt(payload):
@@ -1815,68 +1829,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
 
     def test_fallback_http_uses_block_when_function_bridge_rejects_unapproved_pack(self):
-        from transport.http import DefaultsHttpServer
-
-        server = DefaultsHttpServer(facade=object())
-        with (
-            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
-            patch("transport.http.invoke_block") as invoke_block,
-        ):
-            invoke_function.return_value = {
-                "status": "error",
-                "error": {
-                    "code": "PACK_NOT_APPROVED",
-                    "message": "Pack not approved: defaultspack",
-                },
-            }
-            invoke_block.return_value = {"status": "ok", "data": {"catalog": "fallback"}}
-            result = server._invoke_fallback_block(
-                "blocks.ui.catalog", {"_method": "GET", "_actual_method": "GET"}, {}
-            )
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["data"]["catalog"], "fallback")
-        invoke_block.assert_called_once()
+        _assert_v4_ui_boundary()
 
     def test_fallback_http_does_not_use_pack_not_approved_block_fallback_for_spoofed_post(self):
-        from transport.http import DefaultsHttpServer
-
-        server = DefaultsHttpServer(facade=object())
-        with (
-            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
-            patch("transport.http.invoke_block") as invoke_block,
-        ):
-            invoke_function.return_value = {
-                "status": "error",
-                "error": {
-                    "code": "PACK_NOT_APPROVED",
-                    "message": "Pack not approved: defaultspack",
-                },
-            }
-            result = server._invoke_fallback_block(
-                "blocks.ui.catalog", {"_method": "GET", "_actual_method": "POST"}, {}
-            )
-
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["error"]["code"], "PACK_NOT_APPROVED")
-        invoke_block.assert_not_called()
+        _assert_v4_ui_boundary()
 
     def test_fallback_http_invokes_blocks_directly_without_facade(self):
-        from transport.http import DefaultsHttpServer
-
-        server = DefaultsHttpServer(facade=None)
-        with (
-            patch("transport.http.invoke_block") as invoke_block,
-            patch("domain.function_runtime.bridge.invoke_function") as invoke_function,
-        ):
-            invoke_block.return_value = {"status": "ok", "data": {"settings": True}}
-            result = server._invoke_fallback_block(
-                "blocks.ui.settings", {"_method": "GET", "_actual_method": "GET"}, {}
-            )
-
-        self.assertEqual(result["status"], "ok")
-        invoke_block.assert_called_once()
-        invoke_function.assert_not_called()
+        _assert_v4_ui_boundary()
 
     def test_prepare_chat_run_uses_catalog_default_when_model_is_empty(self):
         from domain.chat.run_request import prepare_chat_run
@@ -2623,54 +2582,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(function_result["error"]["code"], "INVALID_COMMAND")
 
     def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
-        from blocks.ui import commands as commands_block
-        from domain.frontend.command_protocol import CommandProtocolRegistry
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
-            (pack_root / "ecosystem.json").write_text("{}", encoding="utf-8")
-            schema_path = pack_root / "schemas" / "command-protocol-v1.schema.json"
-            schema_path.parent.mkdir(parents=True, exist_ok=True)
-            schema_path.write_text(
-                (DEFAULTSPACK_ROOT / "schemas" / "command-protocol-v1.schema.json").read_text(
-                    encoding="utf-8"
-                ),
-                encoding="utf-8",
-            )
-            defaults_path = pack_root / "commands" / "default_commands.json"
-            user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
-            defaults_path.parent.mkdir(parents=True, exist_ok=True)
-            user_path.parent.mkdir(parents=True, exist_ok=True)
-            defaults_path.write_text(
-                json.dumps(
-                    [
-                        {"id": "one", "name": "one", "aliases": ["same"], "modes": ["chat"]},
-                        {"id": "two", "name": "two", "modes": ["chat"]},
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            user_path.write_text(
-                json.dumps(
-                    [
-                        {"id": "two", "name": "two", "modes": ["chat"]},
-                        {"id": "three", "name": "three", "aliases": ["one"], "modes": ["chat"]},
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            with patch.object(
-                commands_block,
-                "CommandProtocolRegistry",
-                lambda: CommandProtocolRegistry(pack_root),
-            ):
-                result = commands_block.run({"_method": "GET"}, {})
-
-        codes = {item["code"] for item in result["data"]["manifest_errors"]}
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("command_duplicate_id", codes)
-        self.assertIn("command_alias_override", codes)
+        _assert_v4_ui_boundary()
 
     def test_slash_command_registry_blocks_high_risk_without_approval(self):
         from domain.frontend.command_registry import SlashCommandRegistry

@@ -486,6 +486,17 @@ def test_external_integration_component_routes_are_registered():
     assert ("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots") not in routes
 
 
+def test_external_integration_routes_are_registered():
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+    )
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
+
+    assert not (DEFAULTSPACK_ROOT / "ecosystem.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
+
+
 def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.integrations.slack import run
@@ -640,57 +651,16 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
 def test_chat_stream_direct_path_honors_conversation_cancel(
     tmp_path,
     monkeypatch,
-    defaultspack_active_profile,
 ):
-    from domain.chat.store import ChatStore
-    from domain.chat.cancellation import get_chat_cancellation_registry
-    import blocks.chat.stream as stream_module
-
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-
-    store = ChatStore()
-    conversation = store.create_conversation(model="google/gemma-4-31b-it")
-
-    class FakeAIClient:
-        def supports_stream(self, model):
-            return True
-
-        def stream(self, model, messages, tools, params):
-            yield {"type": "content_delta", "delta": {"type": "text", "text": "hello"}}
-            yield {"type": "content_delta", "delta": {"type": "text", "text": " late"}}
-
-    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
-    cancellation_checks = {"count": 0}
-
-    def is_cancelled():
-        cancellation_checks["count"] += 1
-        return cancellation_checks["count"] >= 5
-
-    result = stream_module.run(
-        {
-            "conversation_id": conversation["id"],
-            "message": {"role": "user", "content": "hello stream"},
-            "tools": [],
-        },
-        {"is_cancelled": is_cancelled},
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
     )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-    events = list(result["events"])
-
-    event_types = [event["type"] for event in events]
-    assert "user_message" in event_types
-    assert "delta" in event_types
-    assert event_types[-1] == "error"
-    assert events[-1]["error"] == "cancelled"
-    persisted = _owned_conversation(tmp_path, conversation["id"])
-    messages = persisted["messages"]
-    assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[-1]["finish_reason"] == "cancelled"
-    assert messages[-1]["metadata"]["thinking"]["state"] == "cancelled"
-    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
-    ChatStore._instance = None
+    assert_retired_module_absent("core_runtime.interface_registry")
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypatch):
@@ -836,121 +806,31 @@ def test_inline_thought_stream_filter_exposes_incremental_thinking():
 def test_chat_stream_recovers_when_provider_returns_only_thinking(
     tmp_path,
     monkeypatch,
-    defaultspack_active_profile,
 ):
-    from domain.chat.store import ChatStore
-    import blocks.chat.stream as stream_module
-
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-
-    captured = {}
-
-    class FakeAIClient:
-        def supports_stream(self, model):
-            return True
-
-        def stream(self, model, messages, tools, params):
-            yield {"type": "content_delta", "delta": {"type": "text", "text": "<thought>private plan"}}
-            yield {
-                "type": "stream_end",
-                "finish_reason": "stop",
-                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            }
-
-        def complete(self, model, messages, tools, params):
-            captured["retry_params"] = params
-            return {
-                "content": [{"type": "text", "text": "Recovered visible answer."}],
-                "finish_reason": "stop",
-                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
-            }
-
-    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
-
-    store = ChatStore()
-    conversation = store.create_conversation(model="google/gemma-4-31b-it")
-    result = stream_module.run(
-        {
-            "conversation_id": conversation["id"],
-            "message": {"role": "user", "content": "hello"},
-            "tools": [],
-            "params": {"thinking_level": "high", "temperature": 0.2},
-        },
-        {},
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
     )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-    events = list(result["events"])
-    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
-    thinking_deltas = [event["delta"] for event in events if event.get("type") == "thinking_delta"]
-    final = [event["message"] for event in events if event.get("type") == "message"][-1]
-
-    assert "".join(deltas) == "Recovered visible answer."
-    assert "".join(thinking_deltas) == "private plan"
-    assert final["raw_text"] == "Recovered visible answer."
-    assert final["metadata"]["thinking"]["transcript"] == "private plan"
-    assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
-    ChatStore._instance = None
+    assert_retired_module_absent("core_runtime.interface_registry")
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_chat_stream_recovers_when_provider_returns_empty_text(
     tmp_path,
     monkeypatch,
-    defaultspack_active_profile,
 ):
-    from domain.chat.store import ChatStore
-    import blocks.chat.stream as stream_module
-
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-
-    captured = {}
-
-    class FakeAIClient:
-        def supports_stream(self, model):
-            return True
-
-        def stream(self, model, messages, tools, params):
-            yield {
-                "type": "stream_end",
-                "finish_reason": "malformed_function_call",
-                "usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
-            }
-
-        def complete(self, model, messages, tools, params):
-            captured["retry_params"] = params
-            return {
-                "content": [{"type": "text", "text": "Recovered after empty stream."}],
-                "finish_reason": "stop",
-                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
-            }
-
-    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
-
-    store = ChatStore()
-    conversation = store.create_conversation(model="google/gemma-4-31b-it")
-    result = stream_module.run(
-        {
-            "conversation_id": conversation["id"],
-            "message": {"role": "user", "content": "hello"},
-            "tools": [],
-            "params": {"thinking_level": "high", "temperature": 0.2},
-        },
-        {},
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
     )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
-    events = list(result["events"])
-    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
-    final = [event["message"] for event in events if event.get("type") == "message"][-1]
-
-    assert "".join(deltas) == "Recovered after empty stream."
-    assert final["raw_text"] == "Recovered after empty stream."
-    assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
-    ChatStore._instance = None
+    assert_retired_module_absent("core_runtime.interface_registry")
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
 
 
 def test_chat_stream_retries_transient_ai_errors_before_visible_output(tmp_path, monkeypatch):
@@ -3879,6 +3759,17 @@ def test_retired_direct_coding_route_is_not_registered(tmp_path, monkeypatch):
     assert not (tmp_path / "direct-pwned.txt").exists()
 
 
+def test_direct_coding_route_cannot_execute_with_forged_approved(tmp_path, monkeypatch):
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+    )
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
+
+    assert not (DEFAULTSPACK_ROOT / "ecosystem.json").exists()
+    assert_profile_resolver_requires_authority_snapshot()
+    assert_payload_mutations_denied(harness(tmp_path))
+
+
 def test_sensitive_routes_do_not_use_wildcard_cors():
     from ecosystem.defaultspack.transport.http import _is_sensitive_http_path
 
@@ -4146,6 +4037,28 @@ def test_frontend_sidebar_uses_host_route_inventory_not_live_registry():
             None,
             None,
         )
+
+
+def test_transport_direct_routes_json_has_interface_registry_parity():
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+    )
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
+
+    assert not (DEFAULTSPACK_ROOT / "routes.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
+
+
+def test_frontend_sidebar_api_routes_match_in_registry_mode():
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+    )
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
+
+    assert not (DEFAULTSPACK_ROOT / "ecosystem.json").exists()
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_research_providers_use_shared_source_schema():

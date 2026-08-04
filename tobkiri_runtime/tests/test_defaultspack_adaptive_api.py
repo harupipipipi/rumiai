@@ -306,25 +306,16 @@ def test_adaptive_guard_splits_git_commit_push_and_merge_actions() -> None:
 
 
 def test_adaptive_generated_functions_register_into_shared_registry() -> None:
-    from core_runtime.function_registry import FunctionRegistry
-    from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
+    from tests.legacy_authority_contracts import (
+        assert_profile_resolver_requires_authority_snapshot,
+        assert_retired_module_absent,
+    )
+    from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
-    registry = FunctionRegistry()
-
-    class Container:
-        def get_or_none(self, name: str):
-            if name == "function_registry":
-                return registry
-            return None
-
-    registered = ensure_defaultspack_functions_registered(Container())
-    entry = registry.get("defaultspack:adaptive_onboarding_status")
-
-    assert registered > 0
-    assert entry is not None
-    assert entry.entrypoint == "main.py:run"
-    assert entry.function_dir.name == "adaptive_onboarding_status"
-    assert entry.manifest["extensions"]["defaultspack"]["block_module"] == "blocks.adaptive"
+    assert_retired_module_absent("core_runtime.function_registry")
+    assert_retired_module_absent("domain.function_runtime.bridge")
+    assert_legacy_registry_fails_closed()
+    assert_profile_resolver_requires_authority_snapshot()
 
 
 def test_adaptive_function_route_defaults_ignore_client_operation_override(

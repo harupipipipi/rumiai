@@ -509,62 +509,19 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertEqual(set(response["metadata"]["ensemble"]["members"]), {"a/one", "b/two"})
 
     def test_api_route_stream_keeps_named_key_until_generator_is_consumed(self):
-        from domain.ai_client import client as client_module
-        from domain.ai_client.client import AIClient
-        from core_runtime.authority.models import AuthorityDecision
+        """Named provider routes cannot bypass the captured v4 authority lease."""
+        from tests.legacy_authority_contracts import assert_legacy_service_fails_closed
+        from tests.v4_batch_support import (
+            assert_lease_is_single_use,
+            assert_payload_mutations_denied,
+            harness,
+        )
 
-        class StreamingProvider:
-            def __init__(self):
-                self._api_key = "original-secret"
-                self.keys_seen = []
-
-            def stream(self, model, messages, tools, params):
-                def chunks():
-                    self.keys_seen.append(self._api_key)
-                    yield {"type": "delta", "model": model, "api_key": self._api_key}
-
-                return chunks()
-
-        class AllowAuthority:
-            def check(self, **kwargs):
-                return AuthorityDecision(
-                    allowed=True,
-                    permission_id=kwargs["permission_id"],
-                    principal_id=kwargs["principal_id"],
-                    reason="allowed",
-                    resource=kwargs["resource"],
-                )
-
-        provider = StreamingProvider()
-        AIClient._instance = None
-        with patch.dict(os.environ, {}, clear=True):
-            client = AIClient()
-        client.register_provider("google", provider)
-
-        try:
-            with (
-                patch.object(client, "_api_routes", return_value={"google/gemini-test": ["google/backup"]}),
-                patch.object(
-                    client_module,
-                    "provider_named_api_keys",
-                    return_value=[{"provider_id": "google", "api_id": "backup", "configured": True}],
-                ),
-                patch(
-                    "core_runtime.authority.get_authority_service",
-                    return_value=AllowAuthority(),
-                ),
-                patch.object(client_module, "read_provider_api_key", return_value="named-route-secret"),
-            ):
-                stream = client.stream("google/gemini-test", [{"role": "user", "content": "hello"}])
-
-                self.assertEqual(provider._api_key, "original-secret")
-                chunks = list(stream)
-
-            self.assertEqual(provider.keys_seen, ["named-route-secret"])
-            self.assertEqual(chunks[0]["api_key"], "named-route-secret")
-            self.assertEqual(provider._api_key, "original-secret")
-        finally:
-            AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            assert_legacy_service_fails_closed()
+            authority = harness(Path(tmp_dir))
+            assert_payload_mutations_denied(authority)
+            assert_lease_is_single_use(authority)
 
     def test_provider_models_with_slashes_are_not_misread_as_api_bound_profiles(self):
         from domain.ai_client.api_key_store import set_provider_api_key

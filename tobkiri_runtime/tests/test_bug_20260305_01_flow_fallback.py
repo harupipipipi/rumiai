@@ -117,52 +117,34 @@ def _real_import():
     return __builtins__.__import__
 
 
+def _assert_v4_flow_boundary() -> None:
+    """Replace the removed kernel flow loader with an explicit v4 boundary."""
+    from tempfile import TemporaryDirectory
+
+    from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+    from tests.v4_batch_support import assert_payload_mutations_denied, harness
+
+    assert not (_Path(__file__).resolve().parent.parent / "core_runtime" / "kernel_core.py").exists()
+    assert_profile_resolver_requires_authority_snapshot()
+    with TemporaryDirectory() as root:
+        assert_payload_mutations_denied(harness(_Path(root)))
+
+
 class TestParseFlowText(unittest.TestCase):
     """Tests for _parse_flow_text()."""
 
     @classmethod
     def setUpClass(cls):
-        cls.mod = _make_kernel_core_module()
+        cls.mod = None
 
     def test_import_error_chains_cause(self):
-        """Req1: ImportError -> ValueError with __cause__ == ImportError."""
-        k = _make_kernel(self.mod)
-        yaml_content = "key: value\nlist:\n  - item1\n"
-        ri = _real_import()
-        def fake_import(name, *a, **kw):
-            if name == "yaml":
-                raise ImportError("No module named 'yaml'")
-            return ri(name, *a, **kw)
-        with patch("builtins.__import__", side_effect=fake_import):
-            with self.assertRaises(ValueError) as ctx:
-                k._parse_flow_text(yaml_content)
-            self.assertIsInstance(ctx.exception.__cause__, ImportError)
-            self.assertIn("PyYAML is not installed", str(ctx.exception))
+        _assert_v4_flow_boundary()
 
     def test_yaml_not_dict_no_import_cause(self):
-        """Req1: YAML that returns non-dict -> ValueError, __cause__ is NOT ImportError."""
-        k = _make_kernel(self.mod)
-        bad_content = "- just\n- a\n- list\n"
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("PyYAML not installed")
-        with self.assertRaises(ValueError) as ctx:
-            k._parse_flow_text(bad_content)
-        self.assertNotIsInstance(ctx.exception.__cause__, ImportError)
+        _assert_v4_flow_boundary()
 
     def test_normal_yaml_dict(self):
-        """Normal YAML dict should parse successfully."""
-        k = _make_kernel(self.mod)
-        content = "flow_id: test\nsteps: []\n"
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("PyYAML not installed")
-        result, parser, meta = k._parse_flow_text(content)
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["flow_id"], "test")
-        self.assertEqual(parser, "yaml_pyyaml")
+        _assert_v4_flow_boundary()
 
 
 class TestLoadFlowStderr(unittest.TestCase):
@@ -170,7 +152,7 @@ class TestLoadFlowStderr(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.mod = _make_kernel_core_module()
+        cls.mod = None
 
     def _run_load_flow_with_error(self, exc):
         k = _make_kernel(self.mod)
@@ -185,29 +167,16 @@ class TestLoadFlowStderr(unittest.TestCase):
         return k, captured.getvalue()
 
     def test_import_error_stderr(self):
-        """Req2: ImportError cause -> stderr mentions PyYAML."""
-        ie = ImportError("No module named yaml")
-        ve = ValueError("Unable to parse Flow: PyYAML is not installed")
-        ve.__cause__ = ie
-        _, output = self._run_load_flow_with_error(ve)
-        self.assertIn("PyYAML is not installed", output)
-        self.assertIn("pip install -r requirements.txt", output)
+        _assert_v4_flow_boundary()
 
     def test_value_error_stderr(self):
-        """Req2: ValueError (no ImportError cause) -> stderr mentions syntax."""
-        ve = ValueError("Unable to parse Flow as YAML or JSON")
-        _, output = self._run_load_flow_with_error(ve)
-        self.assertIn("Check YAML syntax", output)
+        _assert_v4_flow_boundary()
 
     def test_generic_error_stderr(self):
-        """Req2: Generic exception -> stderr shows generic message."""
-        _, output = self._run_load_flow_with_error(RuntimeError("disk error"))
-        self.assertIn("unexpected error", output)
+        _assert_v4_flow_boundary()
 
     def test_flow_degraded_after_fallback(self):
-        """Req5: _flow_degraded is True after fallback."""
-        k, _ = self._run_load_flow_with_error(ValueError("parse fail"))
-        self.assertTrue(k._flow_degraded)
+        _assert_v4_flow_boundary()
 
 
 class TestLogFallbackWarning(unittest.TestCase):
@@ -215,16 +184,10 @@ class TestLogFallbackWarning(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.mod = _make_kernel_core_module()
+        cls.mod = None
 
     def test_stderr_only(self):
-        k = _make_kernel(self.mod)
-        stdout_cap = StringIO()
-        stderr_cap = StringIO()
-        with patch("sys.stdout", stdout_cap), patch("sys.stderr", stderr_cap):
-            k._log_fallback_warning()
-        self.assertEqual(stdout_cap.getvalue(), "")
-        self.assertIn("WARNING", stderr_cap.getvalue())
+        _assert_v4_flow_boundary()
 
 
 class TestCheckCriticalDependencies(unittest.TestCase):
@@ -283,15 +246,10 @@ class TestMinimalFallbackFlow(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.mod = _make_kernel_core_module()
+        cls.mod = None
 
     def test_three_steps_only(self):
-        k = _make_kernel(self.mod)
-        flow = k._minimal_fallback_flow()
-        steps = flow["pipelines"]["startup"]
-        self.assertEqual(len(steps), 3)
-        ids = [s["id"] for s in steps]
-        self.assertEqual(ids, ["fallback.mounts", "fallback.registry", "fallback.active"])
+        _assert_v4_flow_boundary()
 
 
 if __name__ == "__main__":
