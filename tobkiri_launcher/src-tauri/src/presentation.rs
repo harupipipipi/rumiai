@@ -7,9 +7,11 @@
 //! launch fallback.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result as AnyResult};
@@ -364,15 +366,7 @@ pub(crate) fn launch_selected_presentation_impl(
     validate_production_artifact(artifact)?;
     let artifact_path = artifact_path(config, artifact)?;
 
-    // The only launch input is a verified artifact path. No shell string,
-    // package-manager command, or caller-provided arguments reach the process
-    // boundary.
-    open::that_detached(&artifact_path).with_context(|| {
-        format!(
-            "failed to launch verified Shell artifact {}",
-            artifact_path.display()
-        )
-    })?;
+    launch_verified_artifact(&artifact_path)?;
 
     Ok(PresentationLaunchResponse {
         status: "launched".to_string(),
@@ -383,6 +377,51 @@ pub(crate) fn launch_selected_presentation_impl(
             shell.display_name
         ),
     })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct VerifiedLaunchSpec {
+    program: PathBuf,
+    args: Vec<OsString>,
+}
+
+fn verified_launch_spec(platform: &str, artifact_path: &Path) -> AnyResult<VerifiedLaunchSpec> {
+    if !artifact_path.is_absolute() {
+        bail!("verified Shell artifact launch path must be absolute");
+    }
+    match platform {
+        // LaunchServices is required to open an application bundle. Its client
+        // is an absolute system path; PATH and caller-provided launchers are
+        // deliberately not consulted.
+        "macos" => Ok(VerifiedLaunchSpec {
+            program: PathBuf::from("/usr/bin/open"),
+            args: vec![OsString::from("--"), artifact_path.as_os_str().to_owned()],
+        }),
+        // Linux AppImages and Windows executables are the verified artifacts,
+        // so execute their exact absolute paths without a shell or opener.
+        "linux" | "windows" => Ok(VerifiedLaunchSpec {
+            program: artifact_path.to_path_buf(),
+            args: Vec::new(),
+        }),
+        other => bail!("verified Shell artifact launch is unsupported on {other}"),
+    }
+}
+
+fn launch_verified_artifact(artifact_path: &Path) -> AnyResult<()> {
+    let spec = verified_launch_spec(current_platform(), artifact_path)?;
+    Command::new(&spec.program)
+        .args(&spec.args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to launch verified Shell artifact {}",
+                artifact_path.display()
+            )
+        })?;
+    Ok(())
 }
 
 fn build_state(config: &AppConfig) -> AnyResult<PresentationState> {
@@ -2000,6 +2039,36 @@ mod tests {
         assert!(error.to_string().contains("wrong platform"));
         let error = validate_release_target(current_platform(), "wrong-architecture").unwrap_err();
         assert!(error.to_string().contains("wrong platform"));
+    }
+
+    #[test]
+    fn verified_launch_spec_never_uses_path_or_a_runtime_opener() {
+        let artifact = Path::new("/verified/release/Tobkiri Shell.app");
+        let macos = verified_launch_spec("macos", artifact).unwrap();
+        assert_eq!(macos.program, Path::new("/usr/bin/open"));
+        assert_eq!(
+            macos.args,
+            vec![OsString::from("--"), artifact.as_os_str().to_owned()]
+        );
+
+        for platform in ["linux", "windows"] {
+            let direct = verified_launch_spec(platform, artifact).unwrap();
+            assert_eq!(direct.program, artifact);
+            assert!(direct.args.is_empty());
+        }
+    }
+
+    #[test]
+    fn verified_launch_spec_rejects_relative_and_unsupported_targets() {
+        let relative = verified_launch_spec("linux", Path::new("Tobkiri.AppImage"))
+            .unwrap_err()
+            .to_string();
+        assert!(relative.contains("must be absolute"));
+
+        let unsupported = verified_launch_spec("fixture-os", Path::new("/verified/shell"))
+            .unwrap_err()
+            .to_string();
+        assert!(unsupported.contains("unsupported"));
     }
 
     #[test]
