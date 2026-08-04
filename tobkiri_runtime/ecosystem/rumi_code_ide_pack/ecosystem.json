@@ -1,7 +1,6 @@
 {
   "components": {},
   "dependencies": {
-    "defaultspack": ">=2.0.0",
     "rumi_default_tools_pack": ">=1.0.0"
   },
   "load_order": [],
@@ -61,6 +60,9 @@
           "reason": "Can coexist with starter local-agent presets; this pack is narrower and IDE/CLI specific.",
           "version": ">=1.0.0"
         }
+      ],
+      "runtime_dependency_aliases": [
+        "defaultspack"
       ]
     },
     "license": "MIT",

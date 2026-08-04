@@ -6,9 +6,7 @@
   "entrypoints": [],
   "extensions": {
     "rumi.legacy_projection": {
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "host_execution": false,
       "manifest": {
         "components": {},
@@ -16,9 +14,7 @@
           "provides": [],
           "requires": []
         },
-        "dependencies": {
-          "defaultspack": ">=2.0.0"
-        },
+        "dependencies": {},
         "description": "Customer research workflow and UI content without host authority.",
         "display_name": "Rumi Customer Research Content",
         "host_execution": false,
@@ -100,6 +96,11 @@
           "executable_code": false,
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
+          },
+          "legacy_annotations": {
+            "runtime_dependency_aliases": [
+              "defaultspack"
+            ]
           },
           "network_policy": "none_by_default",
           "non_owner_surfaces": [

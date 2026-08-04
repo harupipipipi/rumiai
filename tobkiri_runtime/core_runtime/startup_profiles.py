@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from .paths import discover_pack_locations
+from .pack_boundary import finite_children, finite_files, finite_matching_files
 from .profile_runtime_selection import apply_profile_graph_selection
 from .profile_workspace import ProfileWorkspaceManager
 from .node_models import make_core_start_node
@@ -766,16 +767,14 @@ class StartupProfileManager:
         entries: List[Dict[str, Any]] = []
         if not root.is_dir():
             return entries
-        for pattern in patterns:
-            for path in sorted(root.glob(pattern)):
-                if path.is_file():
-                    entries.append(
-                        {
-                            "name": path.name,
-                            "path": str(path),
-                            "size": path.stat().st_size,
-                        }
-                    )
+        for path in finite_matching_files(root, patterns):
+            entries.append(
+                {
+                    "name": path.name,
+                    "path": str(path),
+                    "size": path.stat().st_size,
+                }
+            )
         return entries
 
     def _workspace_flow_yaml(self, paths: Any, base_pack: str) -> Dict[str, Any]:
@@ -1380,11 +1379,7 @@ class StartupProfileManager:
             return []
         result: List[Dict[str, Any]] = []
         loader = _get_graph_loader()
-        for f in sorted(graphs_dir.iterdir()):
-            if not f.is_file():
-                continue
-            if f.suffix not in (".yaml", ".yml", ".json"):
-                continue
+        for f in finite_files(graphs_dir, (".yaml", ".yml", ".json"), recursive=False):
             try:
                 graph = loader(f)
                 if graph is not None:
@@ -1407,12 +1402,16 @@ class StartupProfileManager:
         candidates: List[Path] = []
         nodes_dir = pack_path / "nodes"
         if nodes_dir.is_dir():
-            candidates.extend(sorted(nodes_dir.glob("*.node.json")))
+            candidates.extend(
+                path
+                for path in finite_files(nodes_dir, (".json",), recursive=False)
+                if path.name.endswith(".node.json")
+            )
         components_dir = pack_path / "components"
         if components_dir.is_dir():
             candidates.extend(
                 component_dir / "node.json"
-                for component_dir in sorted(components_dir.iterdir())
+                for component_dir in finite_children(components_dir, directories_only=True)
                 if component_dir.is_dir() and (component_dir / "node.json").is_file()
             )
         seen = {node["node_id"] for node in result if node.get("node_id")}
@@ -1599,9 +1598,7 @@ class StartupProfileManager:
             if not graphs_dir.is_dir():
                 return None
             loader = _get_graph_loader()
-            for f in sorted(graphs_dir.iterdir()):
-                if not f.is_file() or f.suffix not in (".yaml", ".yml", ".json"):
-                    continue
+            for f in finite_files(graphs_dir, (".yaml", ".yml", ".json"), recursive=False):
                 try:
                     graph = loader(f)
                     if graph is not None and graph.graph_id == graph_id:

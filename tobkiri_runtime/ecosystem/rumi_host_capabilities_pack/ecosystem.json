@@ -3,9 +3,7 @@
     "host.permission.status",
     "host.permission.open_settings"
   ],
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "metadata": {
     "author": "Rumi AI Team",
     "canonical_v4": {
@@ -51,6 +49,9 @@
         "store_microphone_audio": false,
         "store_screen_images": false
       },
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ],
       "security_boundary": {
         "approval_authority": "core_runtime.authority",
         "approval_token_binding": [

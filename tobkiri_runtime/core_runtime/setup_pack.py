@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .dependency_resolver import validate_dependencies, version_satisfies
+from .pack_boundary import finite_files
 from .paths import BASE_DIR, USER_DATA_DIR, discover_pack_locations
 from .setup_pack_metadata import (
     as_dict as _as_dict,
@@ -93,7 +94,11 @@ class SetupPackManager:
     def _definition_files(self) -> List[Path]:
         if not self.root.is_dir():
             return []
-        return sorted(self.root.glob("*/pack.json"))
+        return tuple(
+            path
+            for path in finite_files(self.root, (".json",), recursive=True)
+            if path.name == "pack.json" and path.parent.parent == self.root
+        )
 
     def _load_definitions(self) -> Dict[str, SetupPackDefinition]:
         result: Dict[str, SetupPackDefinition] = {}

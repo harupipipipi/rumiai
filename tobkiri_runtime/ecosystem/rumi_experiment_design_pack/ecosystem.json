@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative hypothesis, metric, sample-size, assignment, guardrail, instrumentation, and decision-record design pack.",
   "display_name": "Rumi Experiment Design Pack",
   "host_execution": false,
@@ -83,6 +81,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "analytics query execution",

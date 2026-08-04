@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative end-to-end agent QA, scenario replay, acceptance, and regression triage pack.",
   "display_name": "Rumi Agentic QA Pack",
   "load_order": [],
@@ -61,6 +59,11 @@
     },
     "declarative_only": true,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

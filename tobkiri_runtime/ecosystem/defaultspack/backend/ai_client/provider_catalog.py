@@ -322,11 +322,8 @@ def _merge_selected_openrouter_inventory(
         if not approved:
             return models
 
-        from ecosystem.rumi_model_catalog_pack.runtime.catalog import (
-            create_model_catalog_operation,
-        )
-
-        result = create_model_catalog_operation(None)(
+        result = _invoke(
+            _MODEL_CATALOG_CONTRACT,
             "list",
             {"provider_id": "openrouter"},
         )

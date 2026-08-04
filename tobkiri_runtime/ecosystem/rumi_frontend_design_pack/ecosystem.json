@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative frontend, UI design, responsive QA, and component acceptance workflow pack.",
   "display_name": "Rumi Frontend Design Pack",
   "load_order": [],
@@ -60,6 +58,11 @@
     },
     "declarative_only": true,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

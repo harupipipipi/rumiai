@@ -4,9 +4,7 @@
     "host.camera.capture",
     "ambient.trigger.dispatch"
   ],
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "metadata": {
     "author": "Rumi AI Team",
     "canonical_v4": {
@@ -43,6 +41,9 @@
         "audit": "trigger_events_only",
         "privacy": "policies/ambient_privacy.policy.yaml"
       },
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ],
       "services": {
         "ambient_trigger_router": {
           "dispatches_to": [

@@ -278,6 +278,28 @@ def _normalize_legacy(data: dict[str, Any]) -> dict[str, Any]:
         }
     elif depends_on is not None:
         annotations["depends_on"] = depends_on
+    dependencies = result.get("dependencies")
+    if isinstance(dependencies, dict) and "defaultspack" in dependencies:
+        annotations["runtime_dependency_aliases"] = ["defaultspack"]
+        dependencies = dict(dependencies)
+        dependencies.pop("defaultspack", None)
+        result["dependencies"] = dependencies
+    elif isinstance(dependencies, list):
+        runtime_aliases = []
+        filtered = []
+        for dependency in dependencies:
+            dependency_id = (
+                dependency.get("pack_id") or dependency.get("id")
+                if isinstance(dependency, dict)
+                else dependency
+            )
+            if str(dependency_id or "").strip() == "defaultspack":
+                runtime_aliases.append("defaultspack")
+                continue
+            filtered.append(dependency)
+        if runtime_aliases:
+            annotations["runtime_dependency_aliases"] = runtime_aliases
+            result["dependencies"] = filtered
     allowed = _schema_properties()
     for key in sorted(set(result) - allowed):
         annotations[key] = result.pop(key)

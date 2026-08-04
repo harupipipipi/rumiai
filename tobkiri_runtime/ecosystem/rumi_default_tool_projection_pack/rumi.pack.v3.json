@@ -87,9 +87,7 @@
       "domain_service_owner": false
     },
     "rumi.legacy_projection": {
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "host_execution": true,
       "manifest": {
         "connectivity": {
@@ -99,9 +97,7 @@
           ],
           "requires": []
         },
-        "dependencies": {
-          "defaultspack": ">=2.0.0"
-        },
+        "dependencies": {},
         "description": "Finite legacy definition migration source and local execution compatibility projection.",
         "display_name": "Rumi Default Tool Projection",
         "host_execution": true,
@@ -115,6 +111,11 @@
           },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
+          },
+          "legacy_annotations": {
+            "runtime_dependency_aliases": [
+              "defaultspack"
+            ]
           },
           "owner_surfaces": [
             "legacy_tool_projection"

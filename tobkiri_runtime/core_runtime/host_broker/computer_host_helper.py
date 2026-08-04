@@ -30,6 +30,112 @@ from core_runtime.global_contracts.computer_trace import (  # noqa: E402
     emit_computer_trace,
     result_trace_facts,
 )
+from core_runtime.di_container import get_container  # noqa: E402
+from core_runtime.global_contract_dispatch import (  # noqa: E402
+    GlobalContractInvocationError,
+    GlobalContractUnavailable,
+    invoke_global_contract,
+)
+
+
+_HOST_ACTIONS: dict[str, tuple[str, str]] = {
+    "browser.session": ("rumi.resource.browser.host.v1", "browser.session.get"),
+    "browser.profiles.list": (
+        "rumi.resource.browser.host.v1",
+        "browser.profiles.list",
+    ),
+    "browser.cookies.list": (
+        "rumi.resource.browser.host.v1",
+        "browser.cookies.list",
+    ),
+    "browser.open_url": ("rumi.action.browser.host.v1", "browser.navigate"),
+    "browser.profile.create": (
+        "rumi.action.browser.host.v1",
+        "browser.profile.create",
+    ),
+    "browser.profile.set_active": (
+        "rumi.action.browser.host.v1",
+        "browser.profile.set_active",
+    ),
+    "browser.profile.delete": (
+        "rumi.action.browser.host.v1",
+        "browser.profile.delete",
+    ),
+    "browser.profile.clear_cache": (
+        "rumi.action.browser.host.v1",
+        "browser.profile.clear_cache",
+    ),
+    "browser.profile.clear_cookies": (
+        "rumi.action.browser.host.v1",
+        "browser.profile.clear_cookies",
+    ),
+    "browser.cookies.import": (
+        "rumi.action.browser.host.v1",
+        "browser.cookies.import",
+    ),
+    "browser.cookies.delete": (
+        "rumi.action.browser.host.v1",
+        "browser.cookies.delete",
+    ),
+    "computer.context": ("rumi.resource.desktop.host.v1", "desktop.state"),
+    "computer.apps": (
+        "rumi.resource.desktop.host.v1",
+        "desktop.applications.list",
+    ),
+    "computer.windows": ("rumi.resource.desktop.host.v1", "desktop.windows.list"),
+    "computer.screenshot": (
+        "rumi.resource.desktop.host.v1",
+        "desktop.capture.frame",
+    ),
+    "computer.observe": (
+        "rumi.resource.desktop.host.v1",
+        "desktop.capture.frame",
+    ),
+    "computer.ax_tree": (
+        "rumi.resource.desktop.host.v1",
+        "desktop.accessibility.snapshot",
+    ),
+    "computer.ocr": (
+        "rumi.resource.desktop.host.v1",
+        "desktop.accessibility.snapshot",
+    ),
+    "computer.doctor": ("rumi.resource.desktop.host.v1", "desktop.state"),
+    "computer.select_app": (
+        "rumi.action.desktop.host.v1",
+        "desktop.application.select",
+    ),
+    "computer.show_app": (
+        "rumi.action.desktop.host.v1",
+        "desktop.application.activate",
+    ),
+    "computer.select_window": (
+        "rumi.action.desktop.host.v1",
+        "desktop.window.select",
+    ),
+    "computer.move": ("rumi.action.desktop.host.v1", "desktop.pointer.move"),
+    "computer.click": ("rumi.action.desktop.host.v1", "desktop.pointer.click"),
+    "computer.drag": ("rumi.action.desktop.host.v1", "desktop.pointer.drag"),
+    "computer.type": ("rumi.action.desktop.host.v1", "desktop.keyboard.type"),
+    "computer.key": ("rumi.action.desktop.host.v1", "desktop.keyboard.key"),
+    "computer.scroll": ("rumi.action.desktop.host.v1", "desktop.scroll"),
+    "computer.semantic_action": (
+        "rumi.action.desktop.host.v1",
+        "desktop.accessibility.action",
+    ),
+    "computer.click_text": (
+        "rumi.action.desktop.host.v1",
+        "desktop.accessibility.action",
+    ),
+    "computer.pid_event": (
+        "rumi.action.desktop.host.v1",
+        "desktop.accessibility.action",
+    ),
+    "computer.clipboard.read": ("rumi.resource.clipboard.v1", "read"),
+    "computer.clipboard.get": ("rumi.resource.clipboard.v1", "read"),
+    "computer.clipboard.write": ("rumi.action.clipboard.v1", "write"),
+    "computer.clipboard.set": ("rumi.action.clipboard.v1", "write"),
+    "computer.clipboard.clear": ("rumi.action.clipboard.v1", "write"),
+}
 
 
 def main() -> int:
@@ -53,38 +159,12 @@ def main() -> int:
             run_id=str(trace_context.get("run_id") or ""),
             action_id=str(trace_context.get("action_id") or ""),
         ):
-            if action.startswith("browser."):
-                from ecosystem.rumi_browser_host_service_pack.runtime.runner import (
-                    run_browser_host_action,
-                )
-
-                result = run_browser_host_action(
-                    action,
-                    payload,
-                    viewer_host_approved=viewer_host_approved,
-                    artifact_root=artifact_root,
-                )
-            elif action.startswith("computer.clipboard."):
-                from ecosystem.rumi_clipboard_host_service_pack.runtime.runner import (
-                    run_clipboard_host_action,
-                )
-
-                result = run_clipboard_host_action(
-                    action,
-                    payload,
-                    viewer_host_approved=viewer_host_approved,
-                )
-            else:
-                from ecosystem.rumi_default_tools_pack.domain.computer import (
-                    create_default_computer_tool_service,
-                )
-
-                result = _run_desktop_action(
-                    create_default_computer_tool_service(),
-                    action,
-                    payload,
-                    viewer_host_approved=viewer_host_approved,
-                )
+            result = _run_v4_host_action(
+                action,
+                payload,
+                viewer_host_approved=viewer_host_approved,
+                artifact_root=artifact_root,
+            )
             envelope = _computer_result_envelope(
                 action,
                 result,
@@ -131,118 +211,92 @@ def main() -> int:
     return 0
 
 
-def _run_desktop_action(
-    service: Any,
+def _run_v4_host_action(
     action: str,
     payload: dict[str, Any],
     *,
     viewer_host_approved: bool,
+    artifact_root: Path | None,
 ) -> dict[str, Any]:
+    """Dispatch a host action through the captured v4 session only.
+
+    The helper is intentionally unable to discover or import a Pack runtime.
+    A missing or stale session therefore returns an explicit unavailable
+    result instead of silently selecting an installed implementation.
+    """
+
     if not viewer_host_approved:
         raise PermissionError("Viewer approval is required")
-    target = {
-        key: payload.get(key)
-        for key in (
-            "surface_id",
-            "observation_revision",
-            "coordinate_space",
-            "app",
-            "application",
-            "pid",
-            "window_id",
-            "window_title",
-            "title",
-        )
-        if payload.get(key) not in (None, "")
+    target = _HOST_ACTIONS.get(action)
+    if target is None:
+        return {
+            "action": action,
+            "is_error": True,
+            "error_type": "host_operation_unavailable",
+            "reason": "The action is not declared by the active v4 catalog.",
+        }
+    session = get_container().get_or_none("v4_dispatch_session")
+    if session is None:
+        return {
+            "action": action,
+            "is_error": True,
+            "error_type": "v4_dispatch_session_unavailable",
+            "reason": "A captured v4 dispatch session is required.",
+        }
+    request = {
+        key: value
+        for key, value in payload.items()
+        if key
+        not in {
+            "approved",
+            "approval_token",
+            "authority_token",
+            "viewer_host_approved",
+            "yolo_mode",
+        }
     }
-    if action == "computer.doctor":
-        return dict(service.doctor())
-    if action in {
-        "computer.observe",
-        "computer.screenshot",
-        "computer.ocr",
-        "computer.ax_tree",
-        "computer.context",
-    }:
-        result = dict(service.observe(target))
-        result.setdefault("action", action)
-        return result
-    if action in {"computer.apps", "computer.windows"}:
-        surfaces = list(service.list_surfaces())
-        return {"action": action, "surfaces": surfaces}
-    if action == "computer.move":
-        return dict(service.move(target, _int(payload, "x"), _int(payload, "y")))
-    if action == "computer.click":
-        return dict(
-            service.click(
-                target,
-                _int(payload, "x"),
-                _int(payload, "y"),
-                str(payload.get("button") or "left"),
-            )
-        )
-    if action == "computer.drag":
-        return dict(
-            service.drag(
-                target,
-                _int(payload, "x1", "from_x"),
-                _int(payload, "y1", "from_y"),
-                _int(payload, "x2", "to_x"),
-                _int(payload, "y2", "to_y"),
-            )
-        )
-    if action == "computer.type":
-        text = str(payload.get("text") or "")
-        if not text:
-            raise ValueError("computer.type requires text")
-        return dict(service.type_text(target, text))
-    if action == "computer.key":
-        key = str(payload.get("key_combo") or payload.get("key") or "")
-        if not key:
-            raise ValueError("computer.key requires a key")
-        return dict(service.key(target, key))
-    if action == "computer.scroll":
-        return dict(
-            service.scroll(
-                target,
-                _int(payload, "x"),
-                _int(payload, "y"),
-                str(payload.get("direction") or "down"),
-                max(1, min(100, _int(payload, "clicks", "amount", default=3))),
-            )
-        )
-    if action in {
-        "computer.select_app",
-        "computer.show_app",
-        "computer.select_window",
-        "computer.click_text",
-        "computer.semantic_action",
-    }:
-        intent = str(payload.get("intent") or action.removeprefix("computer."))
-        return dict(service.semantic_action(target, intent, dict(payload)))
-    if action == "computer.pid_event":
-        intent = str(payload.get("intent") or payload.get("action_type") or "")
-        return dict(service.pid_event(intent, target, dict(payload)))
-    return {
-        "action": action,
-        "is_error": True,
-        "error_type": "desktop_runner_unavailable",
-    }
+    if target[0] == "rumi.action.clipboard.v1":
+        request = {"text": "" if action.endswith(".clear") else str(request.get("text", request.get("content", "")))}
+    elif target[0] == "rumi.resource.clipboard.v1":
+        request = {}
+    if action == "computer.ocr":
+        request["include_ocr"] = True
+    request.update(
+        {
+            "profile_id": str(getattr(session, "profile_id", "")).strip(),
+            "artifact_root": str(artifact_root) if artifact_root else "",
+            "_contract_consumer_pack_id": "kernel",
+            "_contract_consumer_function_id": "computer_host_helper",
+        }
+    )
+    if not request["profile_id"]:
+        return {
+            "action": action,
+            "is_error": True,
+            "error_type": "v4_profile_unavailable",
+            "reason": "The captured v4 session has no profile identity.",
+        }
+    try:
+        result = invoke_global_contract(session, target[0], target[1], request)
+    except (GlobalContractInvocationError, GlobalContractUnavailable) as exc:
+        return {
+            "action": action,
+            "is_error": True,
+            "error_type": "host_operation_unavailable",
+            "reason": str(exc),
+        }
+    if not isinstance(result, dict):
+        raise RuntimeError("host contract returned an invalid result")
+    return dict(result)
 
 
-def _int(
-    payload: dict[str, Any],
-    *keys: str,
-    default: int = 0,
-) -> int:
-    for key in keys:
-        value = payload.get(key)
-        if value is None:
-            continue
-        if isinstance(value, bool):
-            raise ValueError(f"{key} must be an integer")
-        return int(value)
-    return default
+def _run_desktop_action(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Tombstone for the removed pre-v4 desktop implementation."""
+
+    del args, kwargs
+    raise GlobalContractUnavailable(
+        "legacy desktop action dispatch was removed; use the v4 host contract"
+    )
 
 
 def _computer_result_envelope(

@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
   "display_name": "Rumi Voice Mobile Pack",
   "host_execution": false,
@@ -59,6 +57,11 @@
       "source_identity": "sha256:8201126d702f42e03b5850740e9dce0f7ab5901aa7b735b6c0952451c866da29"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

@@ -459,34 +459,27 @@ def _recent_events(store: Any, sessions: list[dict[str, Any]], *, limit: int) ->
 
 
 def _computer_driver_order() -> dict[str, list[str]]:
-    try:
-        _ensure_import_roots()
-        from ecosystem.rumi_default_tools_pack.domain.computer.registry import (
-            MAC_DRIVER_ORDER,
-            WINDOWS_DRIVER_ORDER,
-        )
+    """Return the finite driver order advertised by the v4 host catalog."""
 
-        return {"darwin": list(MAC_DRIVER_ORDER), "win32": list(WINDOWS_DRIVER_ORDER)}
-    except Exception:
-        return {
-            "darwin": [
-                "browser_cdp",
-                "browser_companion",
-                "mac_accessibility",
-                "mac_apple_events",
-                "mac_cgevent_pid",
-                "mac_screen_capture",
-                "mac_foreground",
-            ],
-            "win32": [
-                "browser_cdp",
-                "browser_companion",
-                "windows_uia",
-                "windows_postmessage",
-                "windows_foreground",
-                "local_visible",
-            ],
-        }
+    return {
+        "darwin": [
+            "browser_cdp",
+            "browser_companion",
+            "mac_accessibility",
+            "mac_apple_events",
+            "mac_cgevent_pid",
+            "mac_screen_capture",
+            "mac_foreground",
+        ],
+        "win32": [
+            "browser_cdp",
+            "browser_companion",
+            "windows_uia",
+            "windows_postmessage",
+            "windows_foreground",
+            "local_visible",
+        ],
+    }
 
 
 def _truncate(value: str, max_length: int) -> str:

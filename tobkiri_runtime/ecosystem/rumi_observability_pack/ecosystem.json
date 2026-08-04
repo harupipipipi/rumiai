@@ -10,9 +10,7 @@
       "defaultspack.grants"
     ]
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative local-first observability pack for run ledgers, event evidence, privacy-safe cost/latency summaries, and incident review handoffs.",
   "display_name": "Rumi Observability Pack",
   "host_execution": false,
@@ -73,6 +71,11 @@
       "source_identity": "sha256:705b72dcc521527d30e4b7b699f74b99bd19c55c0e2f142c1ca4b98951eb411a"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative runtime benchmark, latency, cost, reproducibility, sampling, environment-capture, and tool-loop measurement pack.",
   "display_name": "Rumi Runtime Benchmark Pack",
   "license": "MIT",
@@ -65,6 +63,11 @@
       "source_identity": "sha256:fafb328798b19f20c4d7c9b847168881e6cd12ea5fdf15149da27b98b1462914"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

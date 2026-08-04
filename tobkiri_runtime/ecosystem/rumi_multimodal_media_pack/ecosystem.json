@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "display_name": "Rumi Multimodal Media Pack",
   "load_order": [],
   "metadata": {
@@ -13,6 +11,11 @@
       "source_identity": "sha256:fda7414cbcc9f2bac0a77c65fdec42732f462287a3a10e3ea09c214f339c8467"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

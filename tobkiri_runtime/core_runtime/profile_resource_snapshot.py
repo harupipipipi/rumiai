@@ -12,6 +12,7 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 from .paths import discover_pack_locations
+from .pack_boundary import finite_files
 from .profile_workspace import ProfileWorkspaceManager
 from .resolved_profile import (
     ResolvedProfile,
@@ -166,7 +167,7 @@ class ProfileResourceSnapshotManager:
         flows_dir = pack_path / "flows"
         if not flows_dir.is_dir():
             return None
-        for candidate in sorted(list(flows_dir.glob("*.yaml")) + list(flows_dir.glob("*/*.yaml"))):
+        for candidate in finite_files(flows_dir, (".yaml", ".yml"), recursive=True):
             try:
                 data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
             except (OSError, yaml.YAMLError):
@@ -302,7 +303,7 @@ class ProfileResourceSnapshotManager:
         graphs_dir = pack_path / "graphs"
         if not graphs_dir.is_dir():
             return None
-        for candidate in sorted(list(graphs_dir.glob("*.yaml")) + list(graphs_dir.glob("*.yml"))):
+        for candidate in finite_files(graphs_dir, (".yaml", ".yml"), recursive=False):
             try:
                 data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
             except (OSError, yaml.YAMLError):

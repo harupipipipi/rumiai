@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative API, OpenAPI, GraphQL, webhook, and tool-schema review workflow pack.",
   "display_name": "Rumi API Toolsmith Pack",
   "host_execution": false,
@@ -56,6 +54,11 @@
       "source_identity": "sha256:20cce767dc2a831df2b2d806be8c6c584115df3eef2247574ff6dcb48643c4d1"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

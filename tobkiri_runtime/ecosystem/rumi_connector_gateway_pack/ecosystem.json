@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "display_name": "Rumi Connector Gateway Pack",
   "load_order": [],
   "metadata": {
@@ -13,6 +11,11 @@
       "source_identity": "sha256:828e8016e8aa53b983417f249516ad6f51dd691edde52f7107eeb6ab74e5461d"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

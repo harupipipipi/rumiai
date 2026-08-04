@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .validation import validate_pack_id
+from .pack_boundary import finite_children
 
 # ======================================================================
 # 定数
@@ -272,7 +273,7 @@ class PackScaffold:
         pack_dir = target_dir / pack_id
 
         # --- 上書き防止 ---
-        if pack_dir.exists() and any(pack_dir.iterdir()) and not force:
+        if pack_dir.exists() and finite_children(pack_dir) and not force:
             raise FileExistsError(
                 f"Directory already exists and is not empty: {pack_dir}. "
                 f"Use force=True to overwrite."

@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative browser form recognition, field mapping, action staging, risk review, and submission safety pack.",
   "display_name": "Rumi Browser Form Operator Pack",
   "host_execution": false,
@@ -60,6 +58,11 @@
       "source_identity": "sha256:d7a68cfac697fdcfa04f9c65d71feeba62dd804a1ce3c33dbbedf60c96d2622c"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

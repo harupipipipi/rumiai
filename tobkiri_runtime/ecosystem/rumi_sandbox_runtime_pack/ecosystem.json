@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative sandbox/runtime pack for safe code execution boundaries, secret-mount review, runtime receipts, and reproducibility checklists.",
   "display_name": "Rumi Sandbox Runtime Pack",
   "host_execution": false,
@@ -71,6 +69,11 @@
       "source_identity": "sha256:b82a405fb0076f0ee2c89ffb2d6e787770b7713d45f37b97a114f310708b77cc"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

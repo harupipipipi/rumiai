@@ -6,9 +6,7 @@
       "defaultspack"
     ]
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative trace-to-SOP, checklist, runbook, and human-approved workflow recipe pack.",
   "display_name": "Rumi SOP Mining Pack",
   "host_execution": false,
@@ -90,6 +88,11 @@
       "external_message_delivery"
     ],
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

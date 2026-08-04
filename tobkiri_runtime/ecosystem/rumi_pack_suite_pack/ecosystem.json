@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "display_name": "Rumi Pack Suite Pack",
   "load_order": [],
   "metadata": {
@@ -13,6 +11,11 @@
       "source_identity": "sha256:408c180da66cac5a4df8016434bf6f1d07248575eaf34cce0d3a0a2626af9f8f"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

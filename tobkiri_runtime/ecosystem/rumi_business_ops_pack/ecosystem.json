@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative business operations pack for sales, support, marketing, procurement, CRM hygiene, and admin workflows.",
   "display_name": "Rumi Business Ops Pack",
   "load_order": [],
@@ -61,6 +59,11 @@
     },
     "declarative_only": true,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

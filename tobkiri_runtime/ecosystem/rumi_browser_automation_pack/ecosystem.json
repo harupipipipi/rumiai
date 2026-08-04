@@ -1,7 +1,6 @@
 {
   "components": {},
   "dependencies": {
-    "defaultspack": ">=2.0.0",
     "rumi_default_tools_pack": ">=1.0.0"
   },
   "display_name": "Rumi Browser Automation Pack",
@@ -14,6 +13,11 @@
       "source_identity": "sha256:70fd1a1625bf4ce121e294be101e2750f75aec4373656d8372e5df5d87468134"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

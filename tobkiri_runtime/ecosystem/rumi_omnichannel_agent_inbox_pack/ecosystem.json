@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative omnichannel agent inbox contracts for channel payloads, identity mapping, ACL gates, thread routing, outbound draft approvals, notification preferences, and inbox UI review.",
   "display_name": "Rumi Omnichannel Agent Inbox Pack",
   "host_execution": false,
@@ -95,6 +93,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "actual app connectors",

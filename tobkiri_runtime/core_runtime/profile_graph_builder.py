@@ -18,6 +18,7 @@ from .profile_graph_models import (
 )
 from .profile_workspace import ProfileWorkspaceManager
 from .profile_runtime_selection import apply_profile_graph_selection
+from .pack_boundary import finite_files, resolve_selected_pack_roots
 
 _DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
 if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
@@ -173,7 +174,7 @@ def _available_catalog(
         "api_routes": [_api_route_candidate(spec) for spec in canonical_http_route_specs(include_always_available=True)],
         "prompts": _prompt_candidates(profile, capability_catalog, workspace_manager, defaultspack_root),
         "frontend": _frontend_candidates(frontend_catalog),
-        "flows": _flow_candidates(ecosystem_dir),
+        "flows": _flow_candidates(ecosystem_dir, profile),
         "capability_nodes": startup_nodes,
         "input_profiles": [_input_profile_candidate(profile_item) for profile_item in input_profiles],
     }
@@ -656,9 +657,7 @@ def _prompt_files(root: Path) -> List[Dict[str, Any]]:
     if not root.is_dir():
         return []
     prompts: Dict[str, Dict[str, Any]] = {}
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
+    for path in finite_files(root, (".md", ".txt"), recursive=True):
         prompt_id = _prompt_id_from_path(path)
         if not prompt_id:
             continue
@@ -734,14 +733,30 @@ def _frontend_candidates(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sorted(items.values(), key=lambda item: (item["source_kind"], item["id"]))
 
 
-def _flow_candidates(ecosystem_dir: str | None) -> List[Dict[str, Any]]:
-    roots = _ecosystem_roots(ecosystem_dir)
+def _flow_candidates(
+    ecosystem_dir: str | None, profile: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    selected = {
+        str(value).strip()
+        for value in profile.get("packs", [])
+        if str(value).strip()
+    }
+    base_pack = str(profile.get("base_pack") or "").strip()
+    if base_pack:
+        selected.add(base_pack)
+    if not selected:
+        return []
+    roots = tuple(
+        resolve_selected_pack_roots(sorted(selected), ecosystem_dir).values()
+    )
     flows: Dict[str, Dict[str, Any]] = {}
     for pack_root in roots:
         flows_dir = pack_root / "flows"
         if not flows_dir.is_dir():
             continue
-        for path in sorted(flows_dir.glob("*.flow.yaml")):
+        for path in finite_files(flows_dir, (".yaml",), recursive=False):
+            if not path.name.endswith(".flow.yaml"):
+                continue
             try:
                 data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             except (OSError, yaml.YAMLError):
@@ -922,10 +937,8 @@ def _defaultspack_root(ecosystem_dir: str | None) -> Path:
 
 
 def _ecosystem_roots(ecosystem_dir: str | None) -> List[Path]:
-    root = Path(ecosystem_dir) if ecosystem_dir else Path(__file__).resolve().parents[1] / "ecosystem"
-    if not root.is_dir():
-        return [_defaultspack_root(ecosystem_dir)]
-    return [path for path in sorted(root.iterdir()) if path.is_dir() and (path / "ecosystem.json").is_file()]
+    del ecosystem_dir
+    return []
 
 
 def _edge_id(from_id: str, to_id: str, kind: str) -> str:

@@ -44,9 +44,7 @@
   ],
   "extensions": {
     "rumi.legacy_projection": {
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "host_execution": false,
       "manifest": {
         "components": {},
@@ -56,9 +54,7 @@
           ],
           "requires": []
         },
-        "dependencies": {
-          "defaultspack": ">=2.0.0"
-        },
+        "dependencies": {},
         "description": "Namespace-isolated approved MCP tool-call adapter and declarative gateway catalog.",
         "display_name": "Rumi MCP Gateway",
         "host_execution": false,
@@ -106,6 +102,11 @@
           },
           "description": "Namespace-isolated MCP tool-call adapter plus declarative discovery, routing, template, registry, and safety metadata.",
           "executable_connector_code": true,
+          "legacy_annotations": {
+            "runtime_dependency_aliases": [
+              "defaultspack"
+            ]
+          },
           "license": "MIT",
           "name": "Rumi MCP Gateway Pack",
           "network_policy": "none_by_default",

@@ -1,7 +1,6 @@
 {
   "components": {},
   "dependencies": {
-    "defaultspack": ">=2.0.0",
     "rumi_default_tools_pack": ">=1.0.0"
   },
   "load_order": [],
@@ -64,6 +63,11 @@
     "description": "Declarative local-first computer and desktop control playbooks for screenshots, keyboard/mouse workflows, foreground app context, terminal observation, sandbox/host boundaries, and evidence-before-action safety.",
     "executable_code": false,
     "grant_override": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "license": "MIT",
     "name": "Rumi Computer Control Pack",
     "network_policy": "none_by_default",

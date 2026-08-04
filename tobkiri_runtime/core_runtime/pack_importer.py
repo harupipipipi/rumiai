@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .validation import check_path_within, is_safe_staging_id
+from .pack_boundary import finite_children
 
 
 STAGING_ROOT = "user_data/pack_staging"
@@ -360,7 +361,7 @@ class PackImporter:
         warnings: List[str] = []
         build_commands: List[Dict[str, Any]] = []
 
-        top_dirs = [d for d in payload_dir.iterdir() if d.is_dir()]
+        top_dirs = list(finite_children(payload_dir, directories_only=True))
         if len(top_dirs) != 1:
             raise ValueError(
                 f"Expected exactly one top-level directory in payload, "
@@ -401,7 +402,7 @@ class PackImporter:
         packs_dir = top_dir / "packs"
         if packs_dir.is_dir():
             pack_ids = []
-            for d in sorted(packs_dir.iterdir()):
+            for d in finite_children(packs_dir, directories_only=True):
                 if d.is_dir() and (d / "ecosystem.json").exists():
                     if _check_and_collect(d / "ecosystem.json", d.name):
                         pack_ids.append(d.name)
@@ -413,7 +414,7 @@ class PackImporter:
                 return [top_dir.name], False, warnings, build_commands
             # validation failed -> warning already recorded, fall through
 
-        for d in sorted(top_dir.iterdir()):
+        for d in finite_children(top_dir, directories_only=True):
             if d.is_dir() and (d / "ecosystem.json").exists():
                 if _check_and_collect(d / "ecosystem.json", top_dir.name):
                     return [top_dir.name], False, warnings, build_commands
@@ -442,7 +443,7 @@ class PackImporter:
         results = []
         if not self._staging_root.exists():
             return results
-        for d in sorted(self._staging_root.iterdir()):
+        for d in finite_children(self._staging_root, directories_only=True):
             if d.is_dir() and is_safe_staging_id(d.name):
                 meta = self.get_staging_meta(d.name)
                 if meta:

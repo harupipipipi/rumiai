@@ -15,9 +15,7 @@
       "defaultspack.model_routing"
     ]
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative local-first marketplace pack for tag-based capability requirements, provider-independent model tiers, capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
   "display_name": "Rumi Knowledge Marketplace Pack",
   "host_execution": false,
@@ -85,6 +83,11 @@
       "source_identity": "sha256:fb61896947908cc882a6bb8de2ea793bfbaf45269982c082d1157cf241cb9f3c"
     },
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

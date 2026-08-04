@@ -6,9 +6,7 @@
       "defaultspack"
     ]
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative local-note study coaching, diagnostic assessment, quiz generation, spaced review, and progress reporting pack.",
   "display_name": "Rumi Study Coach Pack",
   "host_execution": false,
@@ -89,6 +87,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "document parsing",

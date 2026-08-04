@@ -6,9 +6,7 @@
       "defaultspack"
     ]
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
   "display_name": "Rumi Localization Pack",
   "host_execution": false,
@@ -74,6 +72,11 @@
     },
     "declarative_only": true,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "optional_integrations": [
       {

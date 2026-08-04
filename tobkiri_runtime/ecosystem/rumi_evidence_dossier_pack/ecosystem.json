@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative evidence dossier contracts for source registry, claim graphs, evidence links, contradiction review, citation ledgers, reviewer queues, quality labels, and export manifests.",
   "display_name": "Rumi Evidence Dossier Pack",
   "host_execution": false,
@@ -90,6 +88,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "source retrieval",

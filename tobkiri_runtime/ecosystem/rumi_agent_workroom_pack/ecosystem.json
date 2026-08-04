@@ -1,8 +1,6 @@
 {
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative async agent workroom contracts for run state, plans, progress events, checkpoint/resume, intervention, replay, and run-board review.",
   "display_name": "Rumi Agent Workroom Pack",
   "host_execution": false,
@@ -92,6 +90,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "tool execution",

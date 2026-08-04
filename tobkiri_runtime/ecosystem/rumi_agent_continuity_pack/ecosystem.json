@@ -11,9 +11,7 @@
     "rumi_agent_continuity_pack.continuity_artifact_manifest"
   ],
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative continuity packets for long-running agent restarts, compaction handoffs, attention drift recovery, and resume evidence.",
   "display_name": "Rumi Agent Continuity Pack",
   "host_execution": false,
@@ -99,6 +97,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "run boards live run events checkpoints interventions replay indexes",

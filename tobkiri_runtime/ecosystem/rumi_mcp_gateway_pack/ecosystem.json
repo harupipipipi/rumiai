@@ -6,9 +6,7 @@
     ],
     "requires": []
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Namespace-isolated approved MCP tool-call adapter and declarative gateway catalog.",
   "display_name": "Rumi MCP Gateway",
   "host_execution": false,
@@ -61,7 +59,12 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:68d2cd92eb4ea78d04e9087b8ac5c8dc8ef4bfb5490e3a943957eca9acf76824"
+      "source_content_hash": "sha256:64bae33af5c8cf54def16a56367475d19d84ba090f13aca583df5375364a1c04"
+    },
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
     },
     "license": "MIT",
     "manifest_authority": "v3-authoritative",

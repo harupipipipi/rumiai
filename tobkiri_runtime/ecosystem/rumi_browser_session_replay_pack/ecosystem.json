@@ -11,9 +11,7 @@
     "rumi_browser_session_replay_pack.selector_drift_report"
   ],
   "components": {},
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Declarative browser session trace, evidence bundle, replay manifest, selector drift, and redaction contracts.",
   "display_name": "Rumi Browser Session Replay Pack",
   "host_execution": false,
@@ -99,6 +97,11 @@
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
+    },
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "browser execution",

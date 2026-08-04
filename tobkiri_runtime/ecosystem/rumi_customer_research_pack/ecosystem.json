@@ -4,9 +4,7 @@
     "provides": [],
     "requires": []
   },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
+  "dependencies": {},
   "description": "Customer research workflow and UI content without host authority.",
   "display_name": "Rumi Customer Research Content",
   "host_execution": false,
@@ -91,10 +89,15 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:b6b7e3ef9ace5e8f6abdfe16ed6036484c56e02ea39eec247601144377d3660f"
+      "source_content_hash": "sha256:60f07330cb4772a879eff28917b5e571395648d65ba8845e9adadd077fe75ab8"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
+    },
+    "legacy_annotations": {
+      "runtime_dependency_aliases": [
+        "defaultspack"
+      ]
     },
     "manifest_authority": "v3-authoritative",
     "network_policy": "none_by_default",

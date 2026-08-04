@@ -93,19 +93,30 @@ class LinuxNativeProvider:
                 )
             )
         else:
-            session = self._new_session()
-            missing_commands = list(session.missing_commands())
-            installed = not missing_commands
-            if missing_commands:
-                missing.extend(f"command:{name}" for name in missing_commands)
+            try:
+                session = self._new_session()
+            except SandboxContractError as exc:
+                missing.append("v4_desktop_host_session")
                 diagnostics.append(
                     Diagnostic(
-                        code="LINUX_NATIVE_COMMANDS_MISSING",
-                        message="Linux native desktop helper commands are not available in the runtime.",
+                        code="LINUX_NATIVE_V4_SESSION_UNAVAILABLE",
+                        message=str(exc),
                         severity="warning",
-                        details={"missing_commands": missing_commands},
                     )
                 )
+            else:
+                missing_commands = list(session.missing_commands())
+                installed = not missing_commands
+                if missing_commands:
+                    missing.extend(f"command:{name}" for name in missing_commands)
+                    diagnostics.append(
+                        Diagnostic(
+                            code="LINUX_NATIVE_COMMANDS_MISSING",
+                            message="Linux native desktop helper commands are not available in the runtime.",
+                            severity="warning",
+                            details={"missing_commands": missing_commands},
+                        )
+                    )
 
         missing_capabilities = sorted(request.required_capabilities - capabilities)
         missing.extend(missing_capabilities)
@@ -318,13 +329,12 @@ class LinuxNativeProvider:
     def _new_session(self, *, width: int | None = None, height: int | None = None) -> Any:
         if self._session_factory is not None:
             return self._session_factory(width=width, height=height)
-        from ecosystem.rumi_default_tools_pack.domain.computer.linux.x11_virtual import (
-            X11VirtualSession,
-            X11VirtualSessionConfig,
+        del width, height
+        raise SandboxContractError(
+            RUNTIME_PROVIDER_UNAVAILABLE,
+            "Linux native desktop requires an injected v4 desktop host session.",
+            status_code=503,
         )
-
-        config = X11VirtualSessionConfig(width=width or 1440, height=height or 900)
-        return X11VirtualSession(config)
 
     def _apply_startup(self, session: Any, instance: ProviderInstance) -> dict[str, Any]:
         startup = instance.opaque_state.get("startup") if isinstance(instance.opaque_state, Mapping) else {}
@@ -589,11 +599,11 @@ def _cleanup_persisted_x11_session(opaque_state: Mapping[str, Any]) -> dict[str,
 
 
 def _cleanup_owned_x11_session(metadata: Mapping[str, Any]) -> dict[str, Any]:
-    try:
-        from ecosystem.rumi_default_tools_pack.domain.computer.linux.x11_virtual import cleanup_owned_display
-    except Exception:
-        return {"cleaned": False}
-    return cleanup_owned_display(metadata)
+    del metadata
+    return {
+        "cleaned": False,
+        "reason": "Linux native cleanup requires the owning v4 desktop host session.",
+    }
 
 
 def _without_x11_runtime_state(opaque_state: Mapping[str, Any]) -> dict[str, Any]:
