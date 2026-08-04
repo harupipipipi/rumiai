@@ -1,2 +1,61 @@
-{"pack_id":"rumi_kanban_state_store_pack","pack_identity":"rumi:ecosystem/rumi_kanban_state_store_pack","display_name":"Rumi Kanban State Store Pack","version":"1.0.0","description":"Authoritative Kanban boards, columns, cards, and audit events.","dependencies":{"rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.service.host.authorize.v1"],"provides":["rumi.resource.kanban.v1","rumi.action.kanban.v1"]},"required_secrets":[],"required_capabilities":["kanban.state.read","kanban.state.manage","host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:ef59b4ba18f8711cb16c08524067c132459fbcb307f020f81e946fc0b1d532a7","build_identity":"rumi-kanban-state-store-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":true,"owner_surfaces":["kanban_boards","kanban_columns","kanban_cards","kanban_events","legacy_kanban_migration"]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.kanban.v1",
+      "rumi.resource.kanban.v1"
+    ],
+    "requires": [
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Authoritative Kanban state with receipt-bound mutations.",
+  "display_name": "Rumi Kanban State Store",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:64edeedacac0a9b5ffef37fc284994777d72b6d04aadcdd17afadfdb173c45a7"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "kanban_boards",
+      "kanban_columns",
+      "kanban_cards",
+      "kanban_events",
+      "legacy_kanban_migration"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_kanban_state_store_pack",
+  "pack_identity": "rumi:ecosystem/rumi_kanban_state_store_pack",
+  "provenance": {
+    "build_identity": "rumi-kanban-state-store-pack:1.0.0",
+    "content_hash": "sha256:ef59b4ba18f8711cb16c08524067c132459fbcb307f020f81e946fc0b1d532a7",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "host.authority.consume",
+    "kanban.state.manage",
+    "kanban.state.read"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

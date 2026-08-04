@@ -1,2 +1,61 @@
-{"pack_id":"rumi_connector_company_adapter_pack","pack_identity":"rumi:ecosystem/rumi_connector_company_adapter_pack","display_name":"Rumi Connector Company Adapter Pack","version":"1.0.0","description":"Explicit normalized connector-event projection into Company state and coordination contracts.","dependencies":{"rumi_company_state_store_pack":">=1.0.0,<2.0.0","rumi_company_coordinator_pack":">=1.0.0,<2.0.0","rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.company.v1","rumi.action.company.state.v1","rumi.action.company.coordinator.v1","rumi.service.host.authorize.v1"],"provides":["rumi.action.connector.route.v1"]},"required_secrets":[],"required_capabilities":["connector.route","company.state.read","company.state.manage","company.coordinate","host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:102fc346bfcc24fda4b0543acd26ab34407fb4dd6267d3d5a02fd0ea0a20bd5f","build_identity":"rumi-connector-company-adapter-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":false,"owner_surfaces":[]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.connector.route.v1"
+    ],
+    "requires": [
+      "rumi.action.company.coordinator.v1",
+      "rumi.action.company.state.v1",
+      "rumi.resource.company.v1",
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_company_coordinator_pack": ">=1.0.0,<2.0.0",
+    "rumi_company_state_store_pack": ">=1.0.0,<2.0.0",
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Explicit connector-event projection into Company contracts.",
+  "display_name": "Rumi Connector Company Adapter",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:0337e7ff9d35f8419e4cada5ca6ec3803147f58a350a94b0497ac7586366a0a8"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_connector_company_adapter_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_company_adapter_pack",
+  "provenance": {
+    "build_identity": "rumi-connector-company-adapter-pack:1.0.0",
+    "content_hash": "sha256:102fc346bfcc24fda4b0543acd26ab34407fb4dd6267d3d5a02fd0ea0a20bd5f",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "company.coordinate",
+    "company.state.manage",
+    "company.state.read",
+    "connector.route",
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

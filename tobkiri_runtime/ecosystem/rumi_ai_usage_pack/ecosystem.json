@@ -1,16 +1,61 @@
 {
+  "connectivity": {
+    "provides": [
+      "rumi.service.ai.tokenize.v1",
+      "rumi.service.ai.usage.cost.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Replaceable token estimation and usage-cost normalization.",
+  "display_name": "Rumi AI Usage",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:f4748c8114dd0f1416399b2316b4980bcd47b0a14aca100f45c373fa2a63983e"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "token_estimates",
+      "normalized_usage_cost"
+    ],
+    "read_only_projection": true,
+    "security": {
+      "network": false,
+      "provider_branches": false,
+      "unknown_cost_preserved": true
+    }
+  },
   "pack_id": "rumi_ai_usage_pack",
   "pack_identity": "rumi:ecosystem/rumi_ai_usage_pack",
-  "display_name": "Rumi AI Usage Pack",
-  "version": "1.0.0",
-  "description": "Provider-neutral token estimates, normalized usage, and cost calculation.",
-  "dependencies": {},
-  "connectivity": {"requires": [], "provides": ["rumi.service.ai.tokenize.v1", "rumi.service.ai.usage.cost.v1"]},
+  "provenance": {
+    "build_identity": "rumi-ai-usage-pack:1.0.0",
+    "content_hash": "sha256:69610cef7ab9b1e6abd0612393e537a3d3f1becf9abe18ecff6e30a75d444567",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "ai.tokenize",
+    "ai.usage.cost"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "required_secrets": [],
-  "required_capabilities": ["ai.tokenize", "ai.usage.cost"],
-  "required_network": {"allowed_domains": [], "allowed_ports": []},
-  "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:69610cef7ab9b1e6abd0612393e537a3d3f1becf9abe18ecff6e30a75d444567", "build_identity": "rumi-ai-usage-pack:1.0.0", "trust_class": "local", "signature": null},
-  "metadata": {"authoritative_owner": true, "owner_surfaces": ["token_estimates", "normalized_usage_cost"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"network": false, "provider_branches": false, "unknown_cost_preserved": true}}
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
 }

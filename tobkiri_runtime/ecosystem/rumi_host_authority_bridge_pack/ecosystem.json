@@ -1,1 +1,54 @@
-{"pack_id":"rumi_host_authority_bridge_pack","pack_identity":"rumi:ecosystem/rumi_host_authority_bridge_pack","display_name":"Rumi Host Authority Bridge Pack","version":"1.0.0","description":"Core-authority one-shot token and service receipt binding.","dependencies":{},"connectivity":{"requires":[],"provides":["rumi.service.host.authorize.v1"]},"required_secrets":[],"required_capabilities":["host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":true,"resources":[],"vocabulary":{"types":["host","authority","service"]},"provenance":{"content_hash":"sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955","build_identity":"rumi-host-authority-bridge-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authority_owner":"core_runtime.authority","self_approval":false,"receipt":{"ttl_seconds":30,"replay":"redeem_once"}}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.host.authorize.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Core-authority one-shot token and service receipt binding.",
+  "display_name": "Rumi Host Authority Bridge",
+  "host_execution": true,
+  "metadata": {
+    "authority_owner": "core_runtime.authority",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:a36f1611af5246fc35a88528625a6d236ec2a0cd334c8ba04b9b8c5f1c3725f7"
+    },
+    "manifest_authority": "v3-authoritative",
+    "read_only_projection": true,
+    "receipt": {
+      "replay": "redeem_once",
+      "ttl_seconds": 30
+    },
+    "self_approval": false
+  },
+  "pack_id": "rumi_host_authority_bridge_pack",
+  "pack_identity": "rumi:ecosystem/rumi_host_authority_bridge_pack",
+  "provenance": {
+    "build_identity": "rumi-host-authority-bridge-pack:1.0.0",
+    "content_hash": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "host",
+      "authority",
+      "service"
+    ]
+  }
+}

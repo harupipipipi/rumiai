@@ -1,2 +1,60 @@
-{"pack_id":"rumi_context_runtime_pack","pack_identity":"rumi:ecosystem/rumi_context_runtime_pack","display_name":"Rumi Context Runtime Pack","version":"1.0.0","description":"Deterministic non-authoritative context materialization.","dependencies":{"rumi_conversation_store_pack":">=1.0.0,<2.0.0","rumi_memory_store_pack":">=1.0.0,<2.0.0","rumi_knowledge_store_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.conversation.v1","rumi.resource.memory.v1","rumi.resource.knowledge.v1"],"provides":["rumi.service.context.v1"]},"required_secrets":[],"required_capabilities":["context.materialize"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":true,"resources":[],"provenance":{"content_hash":"sha256:0f4c8fa9e0d00f326675257548e279ddfbeb88bed69f0f4e81710cdbdcf0076b","build_identity":"rumi-context-runtime-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":false,"owner_surfaces":[],"security":{"persistent_storage":false,"first_found_fallback":false}}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.context.v1"
+    ],
+    "requires": [
+      "rumi.resource.conversation.v1",
+      "rumi.resource.knowledge.v1",
+      "rumi.resource.memory.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_conversation_store_pack": ">=1.0.0,<2.0.0",
+    "rumi_knowledge_store_pack": ">=1.0.0,<2.0.0",
+    "rumi_memory_store_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Deterministic non-authoritative context materialization.",
+  "display_name": "Rumi Context Runtime",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:a53f8b1aa3ab7cb88f5f9c359797f77aaada5468ab295e8920ab27d531be45cd"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [],
+    "read_only_projection": true,
+    "security": {
+      "first_found_fallback": false,
+      "persistent_storage": false
+    }
+  },
+  "pack_id": "rumi_context_runtime_pack",
+  "pack_identity": "rumi:ecosystem/rumi_context_runtime_pack",
+  "provenance": {
+    "build_identity": "rumi-context-runtime-pack:1.0.0",
+    "content_hash": "sha256:0f4c8fa9e0d00f326675257548e279ddfbeb88bed69f0f4e81710cdbdcf0076b",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "context.materialize"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

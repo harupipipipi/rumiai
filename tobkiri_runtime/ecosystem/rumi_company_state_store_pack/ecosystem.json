@@ -1,2 +1,65 @@
-{"pack_id":"rumi_company_state_store_pack","pack_identity":"rumi:ecosystem/rumi_company_state_store_pack","display_name":"Rumi Company State Store Pack","version":"1.0.0","description":"Authoritative Company organizations, roles, members, channels, tasks, routes, inbound, and messages.","dependencies":{"rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.service.host.authorize.v1"],"provides":["rumi.resource.company.v1","rumi.action.company.state.v1"]},"required_secrets":[],"required_capabilities":["company.state.read","company.state.manage","host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:a611c532f78c2c516be31c863c5f5e136af2301380f963b48a85c55b566ee5cd","build_identity":"rumi-company-state-store-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":true,"owner_surfaces":["companies","company_roles","company_members","company_channels","company_tasks","company_routes","company_inbound","company_messages","legacy_operations_migration"]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.company.state.v1",
+      "rumi.resource.company.v1"
+    ],
+    "requires": [
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Authoritative Company organization and operations state.",
+  "display_name": "Rumi Company State Store",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:73233ef506866c26c1c1975151117ad1c5cfd691533dff86fe3b4c6355bdf11f"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "companies",
+      "company_roles",
+      "company_members",
+      "company_channels",
+      "company_tasks",
+      "company_routes",
+      "company_inbound",
+      "company_messages",
+      "legacy_operations_migration"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_company_state_store_pack",
+  "pack_identity": "rumi:ecosystem/rumi_company_state_store_pack",
+  "provenance": {
+    "build_identity": "rumi-company-state-store-pack:1.0.0",
+    "content_hash": "sha256:a611c532f78c2c516be31c863c5f5e136af2301380f963b48a85c55b566ee5cd",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "company.state.manage",
+    "company.state.read",
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

@@ -1,33 +1,60 @@
 {
-  "pack_id": "rumi_frontend_design_pack",
-  "pack_identity": "rumi:ecosystem/rumi_frontend_design_pack",
-  "display_name": "Rumi Frontend Design Pack",
-  "version": "0.1.0",
-  "description": "Declarative frontend, UI design, responsive QA, and component acceptance workflow pack.",
-  "vocabulary": {
-    "types": [
-      "frontend_design",
-      "catalog",
-      "policy",
-      "profile",
-      "prompt",
-      "preset",
-      "example",
-      "schema",
-      "checklist",
-      "template"
-    ]
-  },
+  "components": {},
   "dependencies": {
     "defaultspack": ">=2.0.0"
   },
-  "components": {},
+  "description": "Declarative frontend, UI design, responsive QA, and component acceptance workflow pack.",
+  "display_name": "Rumi Frontend Design Pack",
   "load_order": [],
   "metadata": {
-    "required_secrets": [],
-    "network_policy": "none_by_default",
-    "executable_code": false,
+    "asset_index": {
+      "catalog": [
+        "catalog/frontend_workflows.yaml",
+        "catalog/design_system_fit_rubric.yaml",
+        "catalog/responsive_qa_matrix.yaml"
+      ],
+      "checklist": [
+        "checklists/component_acceptance.checklist.yaml"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "example": [
+        "examples/component_brief.example.yaml",
+        "examples/dashboard_review.example.yaml",
+        "examples/mobile_visual_qa.example.yaml"
+      ],
+      "manifest": [
+        "ecosystem.json"
+      ],
+      "policy": [
+        "policies/frontend_quality.policy.yaml"
+      ],
+      "preset": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "profile": [
+        "profiles/frontend_design_reviewer.profile.yaml"
+      ],
+      "prompt": [
+        "prompts/frontend_design_reviewer.system.md"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "schema": [
+        "schemas/component_acceptance.schema.yaml"
+      ],
+      "template": []
+    },
     "declarative_only": true,
+    "executable_code": false,
+    "network_policy": "none_by_default",
     "optional_integrations": [
       {
         "pack_id": "rumi_code_ide_pack",
@@ -56,50 +83,23 @@
       "component_acceptance_schema",
       "component_acceptance_checklist"
     ],
-    "asset_index": {
-      "manifest": [
-        "ecosystem.json"
-      ],
-      "readme": [
-        "README.md"
-      ],
-      "docs": [
-        "docs/README.md",
-        "docs/architecture.md",
-        "docs/interfaces.md",
-        "docs/operations.md"
-      ],
-      "catalog": [
-        "catalog/frontend_workflows.yaml",
-        "catalog/design_system_fit_rubric.yaml",
-        "catalog/responsive_qa_matrix.yaml"
-      ],
-      "policy": [
-        "policies/frontend_quality.policy.yaml"
-      ],
-      "profile": [
-        "profiles/frontend_design_reviewer.profile.yaml"
-      ],
-      "prompt": [
-        "prompts/frontend_design_reviewer.system.md"
-      ],
-      "preset": [
-        "presets/safe_default.preset.yaml",
-        "presets/handoff_review.preset.yaml",
-        "presets/quality_gate.preset.yaml"
-      ],
-      "example": [
-        "examples/component_brief.example.yaml",
-        "examples/dashboard_review.example.yaml",
-        "examples/mobile_visual_qa.example.yaml"
-      ],
-      "schema": [
-        "schemas/component_acceptance.schema.yaml"
-      ],
-      "checklist": [
-        "checklists/component_acceptance.checklist.yaml"
-      ],
-      "template": []
-    }
+    "required_secrets": []
+  },
+  "pack_id": "rumi_frontend_design_pack",
+  "pack_identity": "rumi:ecosystem/rumi_frontend_design_pack",
+  "version": "0.1.0",
+  "vocabulary": {
+    "types": [
+      "frontend_design",
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "schema",
+      "checklist",
+      "template"
+    ]
   }
 }

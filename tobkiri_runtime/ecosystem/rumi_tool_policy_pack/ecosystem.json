@@ -1,1 +1,58 @@
-{"pack_id": "rumi_tool_policy_pack", "pack_identity": "rumi:ecosystem/rumi_tool_policy_pack", "display_name": "Rumi Tool Policy Pack", "version": "1.0.0", "description": "Policy over declared authority operations.", "dependencies": {}, "connectivity": {"requires": [], "provides": ["rumi.service.tool.policy.evaluate.v1"]}, "required_secrets": [], "required_capabilities": ["tool.policy.evaluate"], "required_network": {"allowed_domains": [], "allowed_ports": []}, "host_execution": true, "resources": [], "provenance": {"content_hash": "sha256:15716967ab17f142a850849dd0d295533d480adc0570483bdf16edcef793fd40", "build_identity": "rumi-tool-policy-pack:1.0.0", "trust_class": "local", "signature": null}, "metadata": {"authoritative_owner": true, "owner_surfaces": ["tool_authority_policy"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"unknown_authority": "deny", "tool_id_branches": false, "service_mutate_approval_required": true}}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.tool.policy.evaluate.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Authority-operation policy independent from concrete tool IDs.",
+  "display_name": "Rumi Tool Policy",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:9ff5b33a5d7a47ef625ac343efbedb265e13ff84483ff8ed0209ceb27ec6f071"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "tool_authority_policy"
+    ],
+    "read_only_projection": true,
+    "security": {
+      "service_mutate_approval_required": true,
+      "tool_id_branches": false,
+      "unknown_authority": "deny"
+    }
+  },
+  "pack_id": "rumi_tool_policy_pack",
+  "pack_identity": "rumi:ecosystem/rumi_tool_policy_pack",
+  "provenance": {
+    "build_identity": "rumi-tool-policy-pack:1.0.0",
+    "content_hash": "sha256:15716967ab17f142a850849dd0d295533d480adc0570483bdf16edcef793fd40",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "tool.policy.evaluate"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

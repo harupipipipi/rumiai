@@ -1,27 +1,43 @@
 {
-  "pack_id": "defaults",
-  "pack_identity": "github:harupipipipi/rumiai-defaults",
-  "version": "1.0.0",
-  "vocabulary": {
-    "types": [
-      "chat",
-      "agent",
-      "coding",
-      "ai_client",
-      "tool",
-      "prompt",
-      "memory",
-      "knowledge",
-      "media",
-      "frontend",
-      "dev"
-    ]
-  },
   "components": {
+    "agent": {
+      "connectivity": {
+        "provides": [
+          "defaults.agent.execute",
+          "defaults.agent.approve",
+          "defaults.agent.reject",
+          "defaults.agent.cancel",
+          "defaults.agent.status",
+          "defaults.agent.plan",
+          "defaults.agent.add_instruction",
+          "defaults.agent.multi_execute",
+          "defaults.agent.multi_status",
+          "defaults.agent.multi_message"
+        ]
+      },
+      "id": "agent",
+      "path": "blocks/agent",
+      "type": "agent"
+    },
+    "ai_client": {
+      "connectivity": {
+        "provides": [
+          "defaults.ai.complete",
+          "defaults.ai.stream",
+          "defaults.ai.models",
+          "defaults.ai.providers",
+          "defaults.ai.embed",
+          "defaults.ai.image_gen",
+          "defaults.ai.image_analyze",
+          "defaults.ai.transcribe",
+          "defaults.ai.tts"
+        ]
+      },
+      "id": "ai_client",
+      "path": "blocks/ai",
+      "type": "ai_client"
+    },
     "chat": {
-      "type": "chat",
-      "id": "chat",
-      "path": "blocks/chat",
       "connectivity": {
         "provides": [
           "defaults.chat.create_conversation",
@@ -43,31 +59,12 @@
           "defaults.chat.summarize_and_trim",
           "defaults.chat.auto_trim"
         ]
-      }
-    },
-    "agent": {
-      "type": "agent",
-      "id": "agent",
-      "path": "blocks/agent",
-      "connectivity": {
-        "provides": [
-          "defaults.agent.execute",
-          "defaults.agent.approve",
-          "defaults.agent.reject",
-          "defaults.agent.cancel",
-          "defaults.agent.status",
-          "defaults.agent.plan",
-          "defaults.agent.add_instruction",
-          "defaults.agent.multi_execute",
-          "defaults.agent.multi_status",
-          "defaults.agent.multi_message"
-        ]
-      }
+      },
+      "id": "chat",
+      "path": "blocks/chat",
+      "type": "chat"
     },
     "coding": {
-      "type": "coding",
-      "id": "coding",
-      "path": "blocks/coding",
       "connectivity": {
         "provides": [
           "defaults.coding.file_read",
@@ -83,30 +80,97 @@
           "defaults.coding.git_commit",
           "defaults.coding.git_push"
         ]
-      }
+      },
+      "id": "coding",
+      "path": "blocks/coding",
+      "type": "coding"
     },
-    "ai_client": {
-      "type": "ai_client",
-      "id": "ai_client",
-      "path": "blocks/ai",
+    "dev": {
       "connectivity": {
         "provides": [
-          "defaults.ai.complete",
-          "defaults.ai.stream",
-          "defaults.ai.models",
-          "defaults.ai.providers",
-          "defaults.ai.embed",
-          "defaults.ai.image_gen",
-          "defaults.ai.image_analyze",
-          "defaults.ai.transcribe",
-          "defaults.ai.tts"
+          "defaults.dev.inspect",
+          "defaults.dev.prompt_history",
+          "defaults.dev.edit_prompt_live",
+          "defaults.dev.replay"
         ]
-      }
+      },
+      "id": "dev",
+      "path": "blocks/dev",
+      "type": "dev"
+    },
+    "frontend": {
+      "connectivity": {
+        "provides": [
+          "defaults.frontend.start",
+          "defaults.frontend.stop",
+          "defaults.frontend.emit"
+        ]
+      },
+      "id": "frontend",
+      "path": "blocks/frontend",
+      "type": "frontend"
+    },
+    "knowledge": {
+      "connectivity": {
+        "provides": [
+          "defaults.knowledge.create",
+          "defaults.knowledge.get",
+          "defaults.knowledge.list",
+          "defaults.knowledge.search",
+          "defaults.knowledge.update",
+          "defaults.knowledge.delete"
+        ]
+      },
+      "id": "knowledge",
+      "path": "blocks/knowledge",
+      "type": "knowledge"
+    },
+    "media": {
+      "connectivity": {
+        "provides": [
+          "defaults.media.image_read",
+          "defaults.media.image_transform",
+          "defaults.media.doc_parse",
+          "defaults.media.clipboard_read",
+          "defaults.media.clipboard_write",
+          "defaults.media.screenshot"
+        ]
+      },
+      "id": "media",
+      "path": "blocks/media",
+      "type": "media"
+    },
+    "memory": {
+      "connectivity": {
+        "provides": [
+          "defaults.memory.store",
+          "defaults.memory.recall",
+          "defaults.memory.project_context",
+          "defaults.memory.vector_store",
+          "defaults.memory.vector_query"
+        ]
+      },
+      "id": "memory",
+      "path": "blocks/memory",
+      "type": "memory"
+    },
+    "prompt": {
+      "connectivity": {
+        "provides": [
+          "defaults.prompt.render",
+          "defaults.prompt.list",
+          "defaults.prompt.create",
+          "defaults.prompt.system",
+          "defaults.prompt.update",
+          "defaults.prompt.delete",
+          "defaults.prompt.convert"
+        ]
+      },
+      "id": "prompt",
+      "path": "blocks/prompt",
+      "type": "prompt"
     },
     "tool": {
-      "type": "tool",
-      "id": "tool",
-      "path": "blocks/tool",
       "connectivity": {
         "provides": [
           "defaults.tool.invoke",
@@ -121,92 +185,10 @@
           "defaults.tool.consent_check",
           "defaults.tool.consent_confirm"
         ]
-      }
-    },
-    "prompt": {
-      "type": "prompt",
-      "id": "prompt",
-      "path": "blocks/prompt",
-      "connectivity": {
-        "provides": [
-          "defaults.prompt.render",
-          "defaults.prompt.list",
-          "defaults.prompt.create",
-          "defaults.prompt.system",
-          "defaults.prompt.update",
-          "defaults.prompt.delete",
-          "defaults.prompt.convert"
-        ]
-      }
-    },
-    "memory": {
-      "type": "memory",
-      "id": "memory",
-      "path": "blocks/memory",
-      "connectivity": {
-        "provides": [
-          "defaults.memory.store",
-          "defaults.memory.recall",
-          "defaults.memory.project_context",
-          "defaults.memory.vector_store",
-          "defaults.memory.vector_query"
-        ]
-      }
-    },
-    "knowledge": {
-      "type": "knowledge",
-      "id": "knowledge",
-      "path": "blocks/knowledge",
-      "connectivity": {
-        "provides": [
-          "defaults.knowledge.create",
-          "defaults.knowledge.get",
-          "defaults.knowledge.list",
-          "defaults.knowledge.search",
-          "defaults.knowledge.update",
-          "defaults.knowledge.delete"
-        ]
-      }
-    },
-    "media": {
-      "type": "media",
-      "id": "media",
-      "path": "blocks/media",
-      "connectivity": {
-        "provides": [
-          "defaults.media.image_read",
-          "defaults.media.image_transform",
-          "defaults.media.doc_parse",
-          "defaults.media.clipboard_read",
-          "defaults.media.clipboard_write",
-          "defaults.media.screenshot"
-        ]
-      }
-    },
-    "frontend": {
-      "type": "frontend",
-      "id": "frontend",
-      "path": "blocks/frontend",
-      "connectivity": {
-        "provides": [
-          "defaults.frontend.start",
-          "defaults.frontend.stop",
-          "defaults.frontend.emit"
-        ]
-      }
-    },
-    "dev": {
-      "type": "dev",
-      "id": "dev",
-      "path": "blocks/dev",
-      "connectivity": {
-        "provides": [
-          "defaults.dev.inspect",
-          "defaults.dev.prompt_history",
-          "defaults.dev.edit_prompt_live",
-          "defaults.dev.replay"
-        ]
-      }
+      },
+      "id": "tool",
+      "path": "blocks/tool",
+      "type": "tool"
     }
   },
   "load_order": [
@@ -223,8 +205,26 @@
     "frontend:frontend"
   ],
   "metadata": {
-    "description": "Default application pack for rumiai - provides chat, agent, coding, AI client, tools, prompts, memory, knowledge, media, and frontend capabilities",
     "author": "harupipipipi",
+    "description": "Default application pack for rumiai - provides chat, agent, coding, AI client, tools, prompts, memory, knowledge, media, and frontend capabilities",
     "license": "MIT"
+  },
+  "pack_id": "defaults",
+  "pack_identity": "github:harupipipipi/rumiai-defaults",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "chat",
+      "agent",
+      "coding",
+      "ai_client",
+      "tool",
+      "prompt",
+      "memory",
+      "knowledge",
+      "media",
+      "frontend",
+      "dev"
+    ]
   }
 }

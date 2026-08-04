@@ -1,57 +1,74 @@
 {
-  "pack_id": "rumi_subagent_placement_pack",
-  "pack_identity": "rumi:ecosystem/rumi_subagent_placement_pack",
-  "display_name": "Tobkiri Subagent Placement Pack",
-  "version": "1.0.0",
-  "description": "Compiles typed Subagent Placements, Team maps, revisions, and immutable runtime assignments.",
-  "dependencies": {
-    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
-  },
   "connectivity": {
+    "provides": [
+      "rumi.service.subagent.placement.compile.v1",
+      "rumi.service.subagent.placement.patch.v1",
+      "rumi.service.subagent.placement.stage.v1",
+      "rumi.service.subagent.protocol.v1",
+      "rumi.service.subagent.runtime.assignment.v1",
+      "rumi.service.subagent.topology.compile.v1"
+    ],
     "requires": [
       "rumi.resource.subagent.catalog.v1",
       "rumi.resource.subagent.placement.v1",
+      "rumi.service.host.authorize.v1",
       "rumi.service.subagent.placement.stage.v1",
-      "rumi.service.subagent.protocol.v1",
-      "rumi.service.host.authorize.v1"
-    ],
-    "provides": [
-      "rumi.service.subagent.placement.compile.v1",
-      "rumi.service.subagent.placement.stage.v1",
-      "rumi.service.subagent.protocol.v1",
-      "rumi.service.subagent.topology.compile.v1",
-      "rumi.service.subagent.placement.patch.v1",
-      "rumi.service.subagent.runtime.assignment.v1"
+      "rumi.service.subagent.protocol.v1"
     ]
   },
-  "required_secrets": [],
-  "required_capabilities": [
-    "subagent.catalog.read",
-    "subagent.placement.read",
-    "subagent.placement.compile",
-    "subagent.topology.compile",
-    "subagent.placement.patch",
-    "subagent.runtime.assign",
-    "host.authority.consume"
-  ],
-  "required_network": {"allowed_domains": [], "allowed_ports": []},
-  "host_execution": true,
-  "resources": [],
-  "provenance": {
-    "content_hash": "sha256:fab5267ad37180ce140fa4b486785f551902b055476f6d0adde3ecdc7d9119e0",
-    "build_identity": "rumi-subagent-placement-pack:1.0.0",
-    "trust_class": "local",
-    "signature": null
+  "dependencies": {
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
   },
+  "description": "Typed Subagent Placement and effective-plan compiler.",
+  "display_name": "Tobkiri Subagent Placement",
+  "host_execution": true,
   "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:5c8130bc4d3a5ea6031e1fd7b0a76852d2e6a84687be97b260b265575b3600c2"
+    },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
     },
-    "authoritative_owner": false,
+    "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
       "effective_subagent_plan_compilation",
       "placement_map_compilation",
       "runtime_assignment_pinning"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_subagent_placement_pack",
+  "pack_identity": "rumi:ecosystem/rumi_subagent_placement_pack",
+  "provenance": {
+    "build_identity": "rumi-subagent-placement-pack:1.0.0",
+    "content_hash": "sha256:fab5267ad37180ce140fa4b486785f551902b055476f6d0adde3ecdc7d9119e0",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "host.authority.consume",
+    "subagent.catalog.read",
+    "subagent.placement.compile",
+    "subagent.placement.patch",
+    "subagent.placement.read",
+    "subagent.runtime.assign",
+    "subagent.topology.compile"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
     ]
   }
 }

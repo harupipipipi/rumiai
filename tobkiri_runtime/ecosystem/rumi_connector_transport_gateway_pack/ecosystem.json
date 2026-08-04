@@ -1,2 +1,70 @@
-{"pack_id":"rumi_connector_transport_gateway_pack","pack_identity":"rumi:ecosystem/rumi_connector_transport_gateway_pack","display_name":"Rumi Connector Transport Gateway Pack","version":"1.0.0","description":"Contract-only connector ingress, egress, and redacted status facade.","dependencies":{"rumi_connector_registry_service_pack":">=1.0.0,<2.0.0","rumi_connector_inbound_broker_pack":">=1.0.0,<2.0.0","rumi_connector_outbound_broker_pack":">=1.0.0,<2.0.0","rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.connector.registry.v1","rumi.transport.connector.inbound.v1","rumi.resource.connector.outbound.v1","rumi.action.connector.outbound.v1","rumi.service.host.authorize.v1"],"provides":["rumi.transport.connector.gateway.v1","rumi.resource.connector.gateway.v1","rumi.action.connector.gateway.v1"]},"required_secrets":[],"required_capabilities":["connector.gateway.receive","connector.gateway.read","connector.gateway.control","connector.registry.read","connector.inbound.receive","connector.outbound.read","connector.outbound.control","host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95","build_identity":"rumi-connector-transport-gateway-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":false,"owner_surfaces":["connector_transport_facade"]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.connector.gateway.v1",
+      "rumi.resource.connector.gateway.v1",
+      "rumi.transport.connector.gateway.v1"
+    ],
+    "requires": [
+      "rumi.action.connector.outbound.v1",
+      "rumi.resource.connector.outbound.v1",
+      "rumi.resource.connector.registry.v1",
+      "rumi.service.host.authorize.v1",
+      "rumi.transport.connector.inbound.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_connector_inbound_broker_pack": ">=1.0.0,<2.0.0",
+    "rumi_connector_outbound_broker_pack": ">=1.0.0,<2.0.0",
+    "rumi_connector_registry_service_pack": ">=1.0.0,<2.0.0",
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Contract-only connector ingress, egress, and redacted status facade.",
+  "display_name": "Rumi Connector Transport Gateway",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:9af180647f66df803d3a8ea3f802de959afc571013bb799ac46c8eae5bd3531a"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "connector_transport_facade"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_connector_transport_gateway_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_transport_gateway_pack",
+  "provenance": {
+    "build_identity": "rumi-connector-transport-gateway-pack:1.0.0",
+    "content_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "connector.gateway.control",
+    "connector.gateway.read",
+    "connector.gateway.receive",
+    "connector.inbound.receive",
+    "connector.outbound.control",
+    "connector.outbound.read",
+    "connector.registry.read",
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

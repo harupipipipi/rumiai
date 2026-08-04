@@ -1,93 +1,78 @@
 {
-  "pack_id": "rumi_agent_services_pack",
-  "pack_identity": "rumi:ecosystem/rumi_agent_services_pack",
-  "version": "1.0.0",
-  "metadata": {
-    "name": "Rumi Agent Services Pack",
-    "description": "Declarative, local-first multi-agent service workflows inspired by modern agent products.",
-    "author": "Rumi AI Team",
-    "license": "MIT"
-  },
-  "runtime": {
-    "type": "declarative_pack"
-  },
-  "vocabulary": {
-    "types": ["agent_service", "profile", "prompt", "preset", "workflow_spec", "capability_catalog"]
-  },
   "components": {
     "capability_catalog": {
-      "type": "capability_catalog",
-      "id": "agent_services_capabilities",
-      "path": "catalog/capabilities.yaml",
       "connectivity": {
+        "provides": [
+          "rumi.agent_services.capability_catalog"
+        ],
         "requires": [
           "rumi.local_agent.profiles",
           "rumi.default_tools.catalog"
-        ],
-        "provides": [
-          "rumi.agent_services.capability_catalog"
         ]
-      }
+      },
+      "id": "agent_services_capabilities",
+      "path": "catalog/capabilities.yaml",
+      "type": "capability_catalog"
     },
     "coordination_specs": {
-      "type": "workflow_spec",
-      "id": "agent_service_coordination",
-      "path": "coordination",
       "connectivity": {
-        "requires": [
-          "rumi.defaultspack.agent_chat",
-          "rumi.default_tools.subagent",
-          "rumi.default_tools.todo"
-        ],
         "provides": [
           "rumi.agent_services.routing",
           "rumi.agent_services.handoffs",
           "rumi.agent_services.workflow_templates"
-        ]
-      }
-    },
-    "service_profiles": {
-      "type": "profile",
-      "id": "agent_service_profiles",
-      "path": "profiles",
-      "connectivity": {
-        "requires": [
-          "rumi.local_agent.profiles"
         ],
-        "provides": [
-          "rumi.agent_services.profiles"
+        "requires": [
+          "rumi.defaultspack.agent_chat",
+          "rumi.default_tools.subagent",
+          "rumi.default_tools.todo"
         ]
-      }
-    },
-    "service_prompts": {
-      "type": "prompt",
-      "id": "agent_service_prompts",
-      "path": "prompts",
-      "connectivity": {
-        "provides": [
-          "rumi.agent_services.prompts"
-        ]
-      }
-    },
-    "service_presets": {
-      "type": "preset",
-      "id": "agent_service_presets",
-      "path": "presets",
-      "connectivity": {
-        "provides": [
-          "rumi.agent_services.presets"
-        ]
-      }
+      },
+      "id": "agent_service_coordination",
+      "path": "coordination",
+      "type": "workflow_spec"
     },
     "service_examples": {
-      "type": "example",
-      "id": "agent_service_examples",
-      "path": "examples",
       "connectivity": {
         "provides": [
           "rumi.agent_services.examples"
         ]
-      }
+      },
+      "id": "agent_service_examples",
+      "path": "examples",
+      "type": "example"
+    },
+    "service_presets": {
+      "connectivity": {
+        "provides": [
+          "rumi.agent_services.presets"
+        ]
+      },
+      "id": "agent_service_presets",
+      "path": "presets",
+      "type": "preset"
+    },
+    "service_profiles": {
+      "connectivity": {
+        "provides": [
+          "rumi.agent_services.profiles"
+        ],
+        "requires": [
+          "rumi.local_agent.profiles"
+        ]
+      },
+      "id": "agent_service_profiles",
+      "path": "profiles",
+      "type": "profile"
+    },
+    "service_prompts": {
+      "connectivity": {
+        "provides": [
+          "rumi.agent_services.prompts"
+        ]
+      },
+      "id": "agent_service_prompts",
+      "path": "prompts",
+      "type": "prompt"
     }
   },
   "load_order": [
@@ -97,5 +82,27 @@
     "workflow_spec:agent_service_coordination",
     "preset:agent_service_presets",
     "example:agent_service_examples"
-  ]
+  ],
+  "metadata": {
+    "author": "Rumi AI Team",
+    "description": "Declarative, local-first multi-agent service workflows inspired by modern agent products.",
+    "license": "MIT",
+    "name": "Rumi Agent Services Pack"
+  },
+  "pack_id": "rumi_agent_services_pack",
+  "pack_identity": "rumi:ecosystem/rumi_agent_services_pack",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "agent_service",
+      "profile",
+      "prompt",
+      "preset",
+      "workflow_spec",
+      "capability_catalog"
+    ]
+  }
 }

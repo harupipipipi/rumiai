@@ -1,2 +1,60 @@
-{"pack_id":"rumi_connector_turn_adapter_pack","pack_identity":"rumi:ecosystem/rumi_connector_turn_adapter_pack","display_name":"Rumi Connector Turn Adapter Pack","version":"1.0.0","description":"Finite connector event projection into conversation, message, and global agent job contracts.","dependencies":{"rumi_conversation_store_pack":">=1.0.0,<2.0.0","rumi_job_action_broker_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.conversation.v1","rumi.action.conversation.manage.v1","rumi.action.message.manage.v1","rumi.action.job.v1"],"provides":["rumi.action.connector.route.v1"]},"required_secrets":[],"required_capabilities":["connector.route","conversation.read","conversation.manage","message.manage","job.dispatch"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:0b497d51b3fc2cf04d718fea79c928ff1f714caf111261955330cb8ebade9436","build_identity":"rumi-connector-turn-adapter-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":false,"owner_surfaces":[]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.connector.route.v1"
+    ],
+    "requires": [
+      "rumi.action.conversation.manage.v1",
+      "rumi.action.job.v1",
+      "rumi.action.message.manage.v1",
+      "rumi.resource.conversation.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_conversation_store_pack": ">=1.0.0,<2.0.0",
+    "rumi_job_action_broker_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Connector event projection into conversation and agent job contracts.",
+  "display_name": "Rumi Connector Turn Adapter",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:48b88e06defa4e339171f14f45f28c40ae00de7c70e9d92fd656dda4c00429a6"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_connector_turn_adapter_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_turn_adapter_pack",
+  "provenance": {
+    "build_identity": "rumi-connector-turn-adapter-pack:1.0.0",
+    "content_hash": "sha256:0b497d51b3fc2cf04d718fea79c928ff1f714caf111261955330cb8ebade9436",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "connector.route",
+    "conversation.manage",
+    "conversation.read",
+    "job.dispatch",
+    "message.manage"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

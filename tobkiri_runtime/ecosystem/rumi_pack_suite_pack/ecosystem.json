@@ -1,20 +1,13 @@
 {
-  "pack_id": "rumi_pack_suite_pack",
-  "pack_identity": "rumi:ecosystem/rumi_pack_suite_pack",
-  "display_name": "Rumi Pack Suite Pack",
-  "version": "0.1.0",
-  "runtime": {
-    "type": "declarative_pack"
+  "components": {},
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
   },
+  "display_name": "Rumi Pack Suite Pack",
+  "load_order": [],
   "metadata": {
-    "required_secrets": [],
-    "network_policy": "none_by_default",
     "executable_code": false,
-    "owner_surfaces": [
-      "pack_bundle_catalog",
-      "defaultspack_promotion_matrix",
-      "overlap_resolution_matrix"
-    ],
+    "network_policy": "none_by_default",
     "optional_integrations": [
       {
         "pack_id": "rumi_default_tools_pack",
@@ -36,8 +29,20 @@
         "pack_id": "rumi_reference_ui_pack",
         "reason": "Adds visible sidebar and panel references for bundle navigation."
       }
-    ]
+    ],
+    "owner_surfaces": [
+      "pack_bundle_catalog",
+      "defaultspack_promotion_matrix",
+      "overlap_resolution_matrix"
+    ],
+    "required_secrets": []
   },
+  "pack_id": "rumi_pack_suite_pack",
+  "pack_identity": "rumi:ecosystem/rumi_pack_suite_pack",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "version": "0.1.0",
   "vocabulary": {
     "types": [
       "catalog",
@@ -48,10 +53,5 @@
       "example",
       "documentation"
     ]
-  },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
-  "components": {},
-  "load_order": []
+  }
 }

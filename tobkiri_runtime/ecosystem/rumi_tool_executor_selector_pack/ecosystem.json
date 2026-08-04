@@ -1,1 +1,57 @@
-{"pack_id": "rumi_tool_executor_selector_pack", "pack_identity": "rumi:ecosystem/rumi_tool_executor_selector_pack", "display_name": "Rumi Tool Executor Selector Pack", "version": "1.0.0", "description": "Manifest-driven executor selection.", "dependencies": {}, "connectivity": {"requires": [], "provides": ["rumi.service.tool.executor.select.v1"]}, "required_secrets": [], "required_capabilities": ["tool.executor.select"], "required_network": {"allowed_domains": [], "allowed_ports": []}, "host_execution": true, "resources": [], "provenance": {"content_hash": "sha256:0c86922df38a44367222fcacb8c6cce59baad455241001bdc2b87af31d1fe2c0", "build_identity": "rumi-tool-executor-selector-pack:1.0.0", "trust_class": "local", "signature": null}, "metadata": {"authoritative_owner": true, "owner_surfaces": ["tool_executor_selection"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"tool_id_branches": false, "execution": false}}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.tool.executor.select.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Manifest-driven executor selection by declared execution kind.",
+  "display_name": "Rumi Tool Executor Selector",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:231ab28f2cb2644696de4e938aefc45f483c60328f99f03d88db60c441ada62d"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "tool_executor_selection"
+    ],
+    "read_only_projection": true,
+    "security": {
+      "execution": false,
+      "tool_id_branches": false
+    }
+  },
+  "pack_id": "rumi_tool_executor_selector_pack",
+  "pack_identity": "rumi:ecosystem/rumi_tool_executor_selector_pack",
+  "provenance": {
+    "build_identity": "rumi-tool-executor-selector-pack:1.0.0",
+    "content_hash": "sha256:0c86922df38a44367222fcacb8c6cce59baad455241001bdc2b87af31d1fe2c0",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "tool.executor.select"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

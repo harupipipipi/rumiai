@@ -1,1 +1,60 @@
-{"pack_id": "rumi_tool_remote_executor_pack", "pack_identity": "rumi:ecosystem/rumi_tool_remote_executor_pack", "display_name": "Rumi Tool Remote Executor Pack", "version": "1.0.0", "description": "Generic selected remote service adapter executor.", "dependencies": {}, "connectivity": {"requires": ["rumi.service.tool.remote.operation.v1"], "provides": ["rumi.service.tool.execute.v1"]}, "required_secrets": [], "required_capabilities": ["tool.execute"], "required_network": {"allowed_domains": [], "allowed_ports": []}, "host_execution": true, "resources": [], "provenance": {"content_hash": "sha256:9b37d82ca6442330fb108ad7611ff61132212250a7a43c8c9306cacbfefcf50a", "build_identity": "rumi-tool-remote-executor-pack:1.0.0", "trust_class": "local", "signature": null}, "metadata": {"authoritative_owner": true, "owner_surfaces": ["remote_tool_execution"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"credential_owner": false, "network_policy_owner": false, "exact_provider": true}}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.tool.execute.v1"
+    ],
+    "requires": [
+      "rumi.service.tool.remote.operation.v1"
+    ]
+  },
+  "dependencies": {},
+  "description": "Generic selected remote-service adapter executor.",
+  "display_name": "Rumi Tool Remote Executor",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:8bfe6fac5ccc2354a7a084d33a2da23bc287a67aa59f28a0482bdf551457fa30"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "remote_tool_execution"
+    ],
+    "read_only_projection": true,
+    "security": {
+      "credential_owner": false,
+      "exact_provider": true,
+      "network_policy_owner": false
+    }
+  },
+  "pack_id": "rumi_tool_remote_executor_pack",
+  "pack_identity": "rumi:ecosystem/rumi_tool_remote_executor_pack",
+  "provenance": {
+    "build_identity": "rumi-tool-remote-executor-pack:1.0.0",
+    "content_hash": "sha256:9b37d82ca6442330fb108ad7611ff61132212250a7a43c8c9306cacbfefcf50a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "tool.execute"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

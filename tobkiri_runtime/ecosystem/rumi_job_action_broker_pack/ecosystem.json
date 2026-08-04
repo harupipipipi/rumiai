@@ -1,2 +1,53 @@
-{"pack_id":"rumi_job_action_broker_pack","pack_identity":"rumi:ecosystem/rumi_job_action_broker_pack","display_name":"Rumi Job Action Broker Pack","version":"1.0.0","description":"Deterministic global job adapter routing and idempotency ledger.","dependencies":{},"connectivity":{"requires":["rumi.action.job.adapter.v1"],"provides":["rumi.action.job.v1"]},"required_secrets":[],"required_capabilities":["job.dispatch","job.adapter.invoke"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:af2449859b11637b4bf4062b83fed69decf5a663f72ad77e81c05aab7265a51a","build_identity":"rumi-job-action-broker-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":true,"owner_surfaces":["job_dispatch_idempotency_ledger"]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.job.v1"
+    ],
+    "requires": [
+      "rumi.action.job.adapter.v1"
+    ]
+  },
+  "dependencies": {},
+  "description": "Deterministic global job adapter routing and replay protection.",
+  "display_name": "Rumi Job Action Broker",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:46194dbf756ce281023c0fedbafd11cb0e82a173bc788625b5a6fdff46c58dca"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "job_dispatch_idempotency_ledger"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_job_action_broker_pack",
+  "pack_identity": "rumi:ecosystem/rumi_job_action_broker_pack",
+  "provenance": {
+    "build_identity": "rumi-job-action-broker-pack:1.0.0",
+    "content_hash": "sha256:af2449859b11637b4bf4062b83fed69decf5a663f72ad77e81c05aab7265a51a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "job.adapter.invoke",
+    "job.dispatch"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

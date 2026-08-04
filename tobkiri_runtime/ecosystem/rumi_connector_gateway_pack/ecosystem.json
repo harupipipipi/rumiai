@@ -1,27 +1,32 @@
 {
-  "pack_id": "rumi_connector_gateway_pack",
-  "pack_identity": "rumi:ecosystem/rumi_connector_gateway_pack",
-  "display_name": "Rumi Connector Gateway Pack",
-  "version": "0.1.0",
-  "runtime": {
-    "type": "declarative_pack"
+  "components": {},
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
   },
+  "display_name": "Rumi Connector Gateway Pack",
+  "load_order": [],
   "metadata": {
-    "required_secrets": [],
-    "network_policy": "none_by_default",
     "executable_code": false,
-    "owner_surfaces": [
-      "connector_namespace_policy",
-      "channel_handoff_contracts",
-      "scope_review_cards"
-    ],
+    "network_policy": "none_by_default",
     "optional_integrations": [
       {
         "pack_id": "rumi_local_agent_pack",
         "reason": "Route normalized connector handoffs into reusable local agent presets."
       }
-    ]
+    ],
+    "owner_surfaces": [
+      "connector_namespace_policy",
+      "channel_handoff_contracts",
+      "scope_review_cards"
+    ],
+    "required_secrets": []
   },
+  "pack_id": "rumi_connector_gateway_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_gateway_pack",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "version": "0.1.0",
   "vocabulary": {
     "types": [
       "catalog",
@@ -32,10 +37,5 @@
       "example",
       "documentation"
     ]
-  },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
-  "components": {},
-  "load_order": []
+  }
 }

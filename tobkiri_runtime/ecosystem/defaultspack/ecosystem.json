@@ -1,46 +1,799 @@
 {
-  "pack_id": "defaultspack",
-  "pack_identity": "rumi:ecosystem/defaultspack",
-  "version": "2.0.0",
-  "dependencies": {
-    "rumi_conversation_store_pack": ">=1.0.0,<2.0.0"
-  },
-  "vocabulary": {
-    "types": [
-      "chat",
-      "agent",
-      "coding",
-      "ai_client",
-      "tool",
-      "prompt",
-      "memory",
-      "knowledge",
-      "media",
-      "recording",
-      "ambient",
-      "vision",
-      "frontend",
-      "dev",
-      "capability",
-      "artifact",
-      "research",
-      "project",
-      "kanban",
-      "change_request",
-      "compact",
-      "context",
-      "scheduler",
-      "gateway",
-      "profile",
-      "permissions",
-      "audit"
-    ]
+  "api_routes": [
+    {
+      "function_id": "adaptive_onboarding_status",
+      "method": "GET",
+      "path": "/api/onboarding/status"
+    },
+    {
+      "function_id": "adaptive_onboarding_schema",
+      "method": "GET",
+      "path": "/api/onboarding/schema"
+    },
+    {
+      "function_id": "adaptive_onboarding_normalize",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/answers/normalize"
+    },
+    {
+      "function_id": "adaptive_onboarding_compile",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/compile"
+    },
+    {
+      "function_id": "adaptive_onboarding_simulate",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/simulate"
+    },
+    {
+      "function_id": "adaptive_onboarding_apply",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/apply",
+      "sensitive": true
+    },
+    {
+      "function_id": "adaptive_onboarding_undo",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/undo"
+    },
+    {
+      "function_id": "adaptive_onboarding_history",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/onboarding/history"
+    },
+    {
+      "function_id": "adaptive_onboarding_rediagnose",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/onboarding/rediagnose"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_list",
+      "method": "GET",
+      "path": "/api/operating-profiles"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_get",
+      "method": "GET",
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/operating-profiles/{id}"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_create",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/operating-profiles"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_update",
+      "method": "PUT",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/operating-profiles/{id}"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_preview",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/operating-profiles/{id}/preview"
+    },
+    {
+      "function_id": "adaptive_operating_profiles_activate",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/operating-profiles/{id}/activate"
+    },
+    {
+      "function_id": "adaptive_pack_recommendations_list",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/packs/onboarding-recommendations"
+    },
+    {
+      "function_id": "adaptive_pack_recommendations_preview",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/packs/onboarding-recommendations/preview"
+    },
+    {
+      "function_id": "adaptive_activity_snapshot",
+      "method": "GET",
+      "path": "/api/activity-center"
+    },
+    {
+      "function_id": "adaptive_freeze_set",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/activity-center/freeze"
+    },
+    {
+      "function_id": "adaptive_automation_update",
+      "method": "PUT",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "automation_id"
+      },
+      "path_pattern": "/api/automations/{id}"
+    },
+    {
+      "function_id": "adaptive_context_file_read",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/context/file-read"
+    },
+    {
+      "function_id": "adaptive_context_code_search",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/context/code-search"
+    },
+    {
+      "function_id": "adaptive_context_repository_map",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/context/repository-map"
+    },
+    {
+      "function_id": "adaptive_context_evidence",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/context/evidence"
+    },
+    {
+      "function_id": "adaptive_prepared_action_prepare",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/prepared-actions/prepare"
+    },
+    {
+      "function_id": "adaptive_prepared_action_commit",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/prepared-actions/{id}/commit"
+    },
+    {
+      "function_id": "adaptive_prepared_action_revoke",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/prepared-actions/{id}/revoke"
+    },
+    {
+      "function_id": "adaptive_event_append",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/events"
+    },
+    {
+      "function_id": "adaptive_event_list",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/events"
+    },
+    {
+      "function_id": "adaptive_event_ack",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "event_id"
+      },
+      "path_pattern": "/api/events/{id}/ack"
+    },
+    {
+      "function_id": "adaptive_event_retry",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "event_id"
+      },
+      "path_pattern": "/api/events/{id}/retry"
+    },
+    {
+      "function_id": "adaptive_event_dlq",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "event_id"
+      },
+      "path_pattern": "/api/events/{id}/dlq"
+    },
+    {
+      "function_id": "adaptive_event_outbox",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/events/outbox"
+    },
+    {
+      "function_id": "adaptive_event_replay",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/events/replay"
+    },
+    {
+      "function_id": "adaptive_event_subscribe",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/events/subscriptions"
+    },
+    {
+      "function_id": "adaptive_event_subscription_list",
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/events/subscriptions"
+    },
+    {
+      "function_id": "adaptive_continuation_resume",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/continuations/resume"
+    },
+    {
+      "function_id": "adaptive_skill_candidates_list",
+      "method": "GET",
+      "path": "/api/skills/candidates"
+    },
+    {
+      "function_id": "adaptive_skill_candidate_promote",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/skills/candidates/{id}/promote"
+    },
+    {
+      "function_id": "adaptive_skill_candidate_rollback",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/skills/candidates/{id}/rollback"
+    },
+    {
+      "function_id": "adaptive_memory_conflicts_list",
+      "method": "GET",
+      "path": "/api/memory/conflicts"
+    },
+    {
+      "function_id": "adaptive_memory_conflict_resolve",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/memory/conflicts/{id}/resolve"
+    },
+    {
+      "function_id": "adaptive_lease_acquire",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/orchestration/leases/acquire"
+    },
+    {
+      "function_id": "adaptive_lease_release",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/orchestration/leases/{id}/release"
+    },
+    {
+      "function_id": "management_list_modules",
+      "method": "GET",
+      "path": "/api/defaultspack/modules"
+    },
+    {
+      "function_id": "management_get_module",
+      "method": "GET",
+      "path_param_map": {
+        "module_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/modules/{id}"
+    },
+    {
+      "args": {
+        "state": "enabled"
+      },
+      "function_id": "management_set_module_state",
+      "method": "POST",
+      "path_param_map": {
+        "module_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/modules/{id}/enable"
+    },
+    {
+      "args": {
+        "state": "disabled"
+      },
+      "function_id": "management_set_module_state",
+      "method": "POST",
+      "path_param_map": {
+        "module_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/modules/{id}/disable"
+    },
+    {
+      "args": {
+        "reason": "manual_reload",
+        "state": "enabled"
+      },
+      "function_id": "management_set_module_state",
+      "method": "POST",
+      "path_param_map": {
+        "module_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/modules/{id}/reload"
+    },
+    {
+      "args": {
+        "reason": "manual_rollback",
+        "state": "disabled"
+      },
+      "function_id": "management_set_module_state",
+      "method": "POST",
+      "path_param_map": {
+        "module_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/modules/{id}/rollback"
+    },
+    {
+      "function_id": "management_get_migration_status",
+      "method": "GET",
+      "path": "/api/defaultspack/migration/status"
+    },
+    {
+      "function_id": "pack_request_list",
+      "method": "GET",
+      "path": "/api/defaultspack/pack-requests"
+    },
+    {
+      "function_id": "pack_request_get",
+      "method": "GET",
+      "path_param_map": {
+        "request_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/pack-requests/{id}"
+    },
+    {
+      "function_id": "pack_request_request_extension",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/defaultspack/pack-requests/request-extension"
+    },
+    {
+      "function_id": "pack_request_forced_patch",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/defaultspack/pack-requests/forced-patch"
+    },
+    {
+      "args": {
+        "decision": "approve"
+      },
+      "function_id": "pack_request_review",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "request_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/approve"
+    },
+    {
+      "args": {
+        "decision": "reject"
+      },
+      "function_id": "pack_request_review",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "request_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/reject"
+    },
+    {
+      "function_id": "pack_request_rollback",
+      "method": "POST",
+      "path_param_map": {
+        "request_id": "id"
+      },
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/rollback"
+    },
+    {
+      "function_id": "tool_mcp_list",
+      "method": "GET",
+      "path": "/api/tools/mcp"
+    },
+    {
+      "function_id": "tool_mcp_connect",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/tools/mcp/connect"
+    },
+    {
+      "audit_category": "chat.channel.read",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": false,
+      "function_id": "chat_channel_list",
+      "legacy_until": null,
+      "method": "GET",
+      "pass_query": true,
+      "path": "/api/chat/channels",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.write",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": true,
+      "function_id": "chat_channel_create",
+      "legacy_until": null,
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/chat/channels",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.read",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": false,
+      "function_id": "chat_channel_get",
+      "legacy_until": null,
+      "method": "GET",
+      "pass_query": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/chat/channels/{id}",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.write",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": true,
+      "function_id": "chat_channel_join",
+      "legacy_until": null,
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/chat/channels/{id}/join",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.write",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": true,
+      "function_id": "chat_channel_leave",
+      "legacy_until": null,
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/chat/channels/{id}/leave",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.message",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": true,
+      "function_id": "chat_channel_send_message",
+      "legacy_until": null,
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/chat/channels/{id}/messages",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.read",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": false,
+      "function_id": "chat_channel_get_messages",
+      "legacy_until": null,
+      "method": "GET",
+      "pass_query": true,
+      "path_param_map": {
+        "id": "id"
+      },
+      "path_pattern": "/api/chat/channels/{id}/messages",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "audit_category": "chat.channel.message",
+      "auth_mode": "panel_or_bearer",
+      "csrf_origin_required": true,
+      "function_id": "chat_channel_reply",
+      "legacy_until": null,
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "id": "id",
+        "msg_id": "msg_id"
+      },
+      "path_pattern": "/api/chat/channels/{id}/messages/{msg_id}/reply",
+      "principal": "authenticated",
+      "rate_limit": "default_per_path",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "remote_task_create",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/remote/tasks",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "remote_task_get",
+      "method": "GET",
+      "path_param_map": {
+        "task_id": "task_id"
+      },
+      "path_pattern": "/api/remote/tasks/{task_id}",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "remote_task_events",
+      "method": "GET",
+      "pass_query": true,
+      "path_param_map": {
+        "task_id": "task_id"
+      },
+      "path_pattern": "/api/remote/tasks/{task_id}/events",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "remote_task_cancel",
+      "method": "POST",
+      "pass_body": true,
+      "path_param_map": {
+        "task_id": "task_id"
+      },
+      "path_pattern": "/api/remote/tasks/{task_id}/cancel",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "remote_host_status",
+      "method": "GET",
+      "path": "/api/remote/host/status",
+      "response_mode": "result"
+    },
+    {
+      "function_id": "ambient_status",
+      "method": "GET",
+      "path": "/api/ambient/status"
+    },
+    {
+      "function_id": "ambient_monitor_start",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/monitor/start"
+    },
+    {
+      "function_id": "ambient_monitor_stop",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/monitor/stop"
+    },
+    {
+      "function_id": "ambient_configure",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/config"
+    },
+    {
+      "function_id": "ambient_event_submit",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/events"
+    },
+    {
+      "function_id": "ambient_permission_grant",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/permissions/grant"
+    },
+    {
+      "function_id": "ambient_permission_revoke",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/permissions/revoke"
+    },
+    {
+      "function_id": "ambient_permission_check",
+      "method": "POST",
+      "pass_body": true,
+      "path": "/api/ambient/permissions/check"
+    }
+  ],
+  "capabilities": [
+    "desktop_app.execute"
+  ],
+  "capability_bindings": {
+    "register": "ecosystem.defaultspack.capability_bindings.register_defaultspack_binding_handlers"
   },
   "components": {
+    "agent": {
+      "connectivity": {
+        "provides": [
+          "defaults.agent.execute",
+          "defaultspack.agent.execute",
+          "defaults.agent.approve",
+          "defaultspack.agent.approve",
+          "defaults.agent.reject",
+          "defaultspack.agent.reject",
+          "defaults.agent.cancel",
+          "defaultspack.agent.cancel",
+          "defaults.agent.status",
+          "defaultspack.agent.status",
+          "defaults.agent.plan",
+          "defaultspack.agent.plan",
+          "defaults.agent.add_instruction",
+          "defaultspack.agent.add_instruction",
+          "defaults.agent.multi_execute",
+          "defaultspack.agent.multi_execute",
+          "defaults.agent.multi_status",
+          "defaultspack.agent.multi_status",
+          "defaults.agent.multi_message",
+          "defaultspack.agent.multi_message",
+          "defaults.agent.run_subagent",
+          "defaultspack.agent.run_subagent"
+        ]
+      },
+      "id": "agent",
+      "path": "blocks/agent",
+      "type": "agent"
+    },
+    "ai_client": {
+      "connectivity": {
+        "provides": [
+          "defaults.ai.complete",
+          "defaultspack.ai.complete",
+          "defaults.ai.stream",
+          "defaultspack.ai.stream",
+          "defaults.ai.models",
+          "defaultspack.ai.models",
+          "defaults.ai.search_models",
+          "defaultspack.ai.search_models",
+          "defaults.ai.get_model_capabilities",
+          "defaultspack.ai.get_model_capabilities",
+          "defaults.ai.recommend_model",
+          "defaultspack.ai.recommend_model",
+          "defaults.ai.route_model",
+          "defaultspack.ai.route_model",
+          "defaults.ai.explain_model_choice",
+          "defaultspack.ai.explain_model_choice",
+          "defaults.ai.build_request",
+          "defaultspack.ai.build_request",
+          "defaults.ai.providers",
+          "defaultspack.ai.providers",
+          "defaults.ai.embed",
+          "defaultspack.ai.embed",
+          "defaults.ai.image_gen",
+          "defaultspack.ai.image_gen",
+          "defaults.ai.image_analyze",
+          "defaultspack.ai.image_analyze",
+          "defaults.ai.transcribe",
+          "defaultspack.ai.transcribe",
+          "defaults.ai.tts",
+          "defaultspack.ai.tts"
+        ]
+      },
+      "id": "ai_client",
+      "path": "blocks/ai",
+      "type": "ai_client"
+    },
+    "ambient": {
+      "connectivity": {
+        "provides": [
+          "defaults.ambient.status",
+          "defaultspack.ambient.status",
+          "defaults.ambient.monitor_start",
+          "defaultspack.ambient.monitor_start",
+          "defaults.ambient.monitor_stop",
+          "defaultspack.ambient.monitor_stop",
+          "defaults.ambient.configure",
+          "defaultspack.ambient.configure",
+          "defaults.ambient.event_submit",
+          "defaultspack.ambient.event_submit",
+          "defaults.ambient.permission_grant",
+          "defaultspack.ambient.permission_grant",
+          "defaults.ambient.permission_revoke",
+          "defaultspack.ambient.permission_revoke",
+          "defaults.console.input"
+        ]
+      },
+      "id": "ambient",
+      "path": "blocks/ambient",
+      "type": "ambient"
+    },
+    "artifact": {
+      "connectivity": {
+        "provides": [
+          "defaults.artifact.list",
+          "defaultspack.artifact.list",
+          "defaults.artifact.create",
+          "defaultspack.artifact.create",
+          "defaults.artifact.get",
+          "defaultspack.artifact.get"
+        ]
+      },
+      "id": "artifact",
+      "path": "blocks/artifact",
+      "type": "artifact"
+    },
+    "audit": {
+      "connectivity": {
+        "provides": [
+          "defaults.audit.record_event",
+          "defaultspack.audit.record_event"
+        ]
+      },
+      "id": "audit",
+      "path": "blocks/audit",
+      "type": "audit"
+    },
+    "change_request": {
+      "connectivity": {
+        "provides": [
+          "defaults.change_request.list",
+          "defaultspack.change_request.list",
+          "defaults.change_request.create",
+          "defaultspack.change_request.create",
+          "defaults.change_request.get",
+          "defaultspack.change_request.get",
+          "defaults.change_request.update",
+          "defaultspack.change_request.update",
+          "defaults.change_request.refresh",
+          "defaultspack.change_request.refresh",
+          "defaults.change_request.export_patch",
+          "defaultspack.change_request.export_patch"
+        ]
+      },
+      "id": "change_request",
+      "path": "blocks/change_request",
+      "type": "change_request"
+    },
     "chat": {
-      "type": "chat",
-      "id": "chat",
-      "path": "blocks/chat",
       "connectivity": {
         "provides": [
           "defaults.chat.create_conversation",
@@ -84,43 +837,12 @@
           "defaults.chat.persist_turn",
           "defaultspack.chat.persist_turn"
         ]
-      }
-    },
-    "agent": {
-      "type": "agent",
-      "id": "agent",
-      "path": "blocks/agent",
-      "connectivity": {
-        "provides": [
-          "defaults.agent.execute",
-          "defaultspack.agent.execute",
-          "defaults.agent.approve",
-          "defaultspack.agent.approve",
-          "defaults.agent.reject",
-          "defaultspack.agent.reject",
-          "defaults.agent.cancel",
-          "defaultspack.agent.cancel",
-          "defaults.agent.status",
-          "defaultspack.agent.status",
-          "defaults.agent.plan",
-          "defaultspack.agent.plan",
-          "defaults.agent.add_instruction",
-          "defaultspack.agent.add_instruction",
-          "defaults.agent.multi_execute",
-          "defaultspack.agent.multi_execute",
-          "defaults.agent.multi_status",
-          "defaultspack.agent.multi_status",
-          "defaults.agent.multi_message",
-          "defaultspack.agent.multi_message",
-          "defaults.agent.run_subagent",
-          "defaultspack.agent.run_subagent"
-        ]
-      }
+      },
+      "id": "chat",
+      "path": "blocks/chat",
+      "type": "chat"
     },
     "coding": {
-      "type": "coding",
-      "id": "coding",
-      "path": "blocks/coding",
       "connectivity": {
         "provides": [
           "defaults.coding.file_read",
@@ -148,148 +870,12 @@
           "defaults.coding.git_push",
           "defaultspack.coding.git_push"
         ]
-      }
-    },
-    "ai_client": {
-      "type": "ai_client",
-      "id": "ai_client",
-      "path": "blocks/ai",
-      "connectivity": {
-        "provides": [
-          "defaults.ai.complete",
-          "defaultspack.ai.complete",
-          "defaults.ai.stream",
-          "defaultspack.ai.stream",
-          "defaults.ai.models",
-          "defaultspack.ai.models",
-          "defaults.ai.search_models",
-          "defaultspack.ai.search_models",
-          "defaults.ai.get_model_capabilities",
-          "defaultspack.ai.get_model_capabilities",
-          "defaults.ai.recommend_model",
-          "defaultspack.ai.recommend_model",
-          "defaults.ai.route_model",
-          "defaultspack.ai.route_model",
-          "defaults.ai.explain_model_choice",
-          "defaultspack.ai.explain_model_choice",
-          "defaults.ai.build_request",
-          "defaultspack.ai.build_request",
-          "defaults.ai.providers",
-          "defaultspack.ai.providers",
-          "defaults.ai.embed",
-          "defaultspack.ai.embed",
-          "defaults.ai.image_gen",
-          "defaultspack.ai.image_gen",
-          "defaults.ai.image_analyze",
-          "defaultspack.ai.image_analyze",
-          "defaults.ai.transcribe",
-          "defaultspack.ai.transcribe",
-          "defaults.ai.tts",
-          "defaultspack.ai.tts"
-        ]
-      }
-    },
-    "tool": {
-      "type": "tool",
-      "id": "tool",
-      "path": "blocks/tool",
-      "connectivity": {
-        "provides": [
-          "defaults.tool.invoke",
-          "defaultspack.tool.invoke",
-          "defaults.tool.list",
-          "defaultspack.tool.list",
-          "defaults.tool.names",
-          "defaultspack.tool.names",
-          "defaults.tool.schema",
-          "defaultspack.tool.schema",
-          "defaults.tool.mcp_connect",
-          "defaultspack.tool.mcp_connect",
-          "defaults.tool.mcp_list",
-          "defaultspack.tool.mcp_list",
-          "defaults.tool.create",
-          "defaultspack.tool.create",
-          "defaults.tool.update",
-          "defaultspack.tool.update",
-          "defaults.tool.delete",
-          "defaultspack.tool.delete",
-          "defaults.tool.export",
-          "defaultspack.tool.export",
-          "defaults.tool.consent_check",
-          "defaultspack.tool.consent_check",
-          "defaults.tool.consent_confirm",
-          "defaultspack.tool.consent_confirm",
-          "defaults.tools.select_relevant",
-          "defaultspack.tools.select_relevant"
-        ]
-      }
-    },
-    "prompt": {
-      "type": "prompt",
-      "id": "prompt",
-      "path": "blocks/prompt",
-      "connectivity": {
-        "provides": [
-          "defaults.prompt.render",
-          "defaultspack.prompt.render",
-          "defaults.prompt.list",
-          "defaultspack.prompt.list",
-          "defaults.prompt.create",
-          "defaultspack.prompt.create",
-          "defaults.prompt.system",
-          "defaultspack.prompt.system",
-          "defaults.prompt.update",
-          "defaultspack.prompt.update",
-          "defaults.prompt.delete",
-          "defaultspack.prompt.delete",
-          "defaults.prompt.convert",
-          "defaultspack.prompt.convert",
-          "defaults.prompt.lint_prompt",
-          "defaultspack.prompt.lint_prompt",
-          "defaults.prompt.compact_prompt",
-          "defaultspack.prompt.compact_prompt",
-          "defaults.prompt.load_effective",
-          "defaultspack.prompt.load_effective"
-        ]
-      }
-    },
-    "memory": {
-      "type": "memory",
-      "id": "memory",
-      "path": "blocks/memory",
-      "connectivity": {
-        "provides": [
-          "defaults.memory.store",
-          "defaultspack.memory.store",
-          "defaults.memory.recall",
-          "defaultspack.memory.recall",
-          "defaults.memory.project_context",
-          "defaultspack.memory.project_context",
-          "defaults.memory.vector_store",
-          "defaultspack.memory.vector_store",
-          "defaults.memory.vector_query",
-          "defaultspack.memory.vector_query",
-          "defaults.memory.add",
-          "defaultspack.memory.add",
-          "defaults.memory.search",
-          "defaultspack.memory.search",
-          "defaults.memory.get",
-          "defaultspack.memory.get",
-          "defaults.memory.update",
-          "defaultspack.memory.update",
-          "defaults.memory.delete",
-          "defaultspack.memory.delete",
-          "defaults.memory.flush",
-          "defaultspack.memory.flush",
-          "defaults.memory.status",
-          "defaultspack.memory.status"
-        ]
-      }
+      },
+      "id": "coding",
+      "path": "blocks/coding",
+      "type": "coding"
     },
     "context": {
-      "type": "context",
-      "id": "context",
-      "path": "blocks/context",
       "connectivity": {
         "provides": [
           "defaults.context.compact",
@@ -303,48 +889,63 @@
           "defaults.context.conversation",
           "defaultspack.context.conversation"
         ]
-      }
+      },
+      "id": "context",
+      "path": "blocks/context",
+      "type": "context"
     },
-    "knowledge": {
-      "type": "knowledge",
-      "id": "knowledge",
-      "path": "blocks/knowledge",
+    "dev": {
       "connectivity": {
         "provides": [
-          "defaults.knowledge.create",
-          "defaultspack.knowledge.create",
-          "defaults.knowledge.get",
-          "defaultspack.knowledge.get",
-          "defaults.knowledge.list",
-          "defaultspack.knowledge.list",
-          "defaults.knowledge.search",
-          "defaultspack.knowledge.search",
-          "defaults.knowledge.update",
-          "defaultspack.knowledge.update",
-          "defaults.knowledge.delete",
-          "defaultspack.knowledge.delete"
+          "defaults.dev.inspect",
+          "defaultspack.dev.inspect",
+          "defaults.dev.prompt_history",
+          "defaultspack.dev.prompt_history",
+          "defaults.dev.edit_prompt_live",
+          "defaultspack.dev.edit_prompt_live",
+          "defaults.dev.replay",
+          "defaultspack.dev.replay"
         ]
-      }
+      },
+      "id": "dev",
+      "path": "blocks/dev",
+      "type": "dev"
     },
-    "artifact": {
-      "type": "artifact",
-      "id": "artifact",
-      "path": "blocks/artifact",
+    "frontend": {
       "connectivity": {
         "provides": [
-          "defaults.artifact.list",
-          "defaultspack.artifact.list",
-          "defaults.artifact.create",
-          "defaultspack.artifact.create",
-          "defaults.artifact.get",
-          "defaultspack.artifact.get"
+          "defaults.frontend.start",
+          "defaultspack.frontend.start",
+          "defaults.frontend.stop",
+          "defaultspack.frontend.stop",
+          "defaults.frontend.emit",
+          "defaultspack.frontend.emit"
         ]
-      }
+      },
+      "id": "frontend",
+      "path": "blocks/frontend",
+      "type": "frontend"
+    },
+    "gateway": {
+      "connectivity": {
+        "provides": [
+          "defaults.gateway.start",
+          "defaultspack.gateway.start",
+          "defaults.gateway.stop",
+          "defaultspack.gateway.stop",
+          "defaults.gateway.status",
+          "defaultspack.gateway.status",
+          "defaults.gateway.send",
+          "defaultspack.gateway.send",
+          "defaults.gateway.pairing",
+          "defaultspack.gateway.pairing"
+        ]
+      },
+      "id": "gateway",
+      "path": "blocks/gateway",
+      "type": "frontend"
     },
     "kanban": {
-      "type": "kanban",
-      "id": "kanban",
-      "path": "blocks/kanban",
       "connectivity": {
         "provides": [
           "defaults.kanban.list_boards",
@@ -384,67 +985,33 @@
           "defaults.kanban.agent_dismiss",
           "defaultspack.kanban.agent_dismiss"
         ]
-      }
+      },
+      "id": "kanban",
+      "path": "blocks/kanban",
+      "type": "kanban"
     },
-    "change_request": {
-      "type": "change_request",
-      "id": "change_request",
-      "path": "blocks/change_request",
+    "knowledge": {
       "connectivity": {
         "provides": [
-          "defaults.change_request.list",
-          "defaultspack.change_request.list",
-          "defaults.change_request.create",
-          "defaultspack.change_request.create",
-          "defaults.change_request.get",
-          "defaultspack.change_request.get",
-          "defaults.change_request.update",
-          "defaultspack.change_request.update",
-          "defaults.change_request.refresh",
-          "defaultspack.change_request.refresh",
-          "defaults.change_request.export_patch",
-          "defaultspack.change_request.export_patch"
+          "defaults.knowledge.create",
+          "defaultspack.knowledge.create",
+          "defaults.knowledge.get",
+          "defaultspack.knowledge.get",
+          "defaults.knowledge.list",
+          "defaultspack.knowledge.list",
+          "defaults.knowledge.search",
+          "defaultspack.knowledge.search",
+          "defaults.knowledge.update",
+          "defaultspack.knowledge.update",
+          "defaults.knowledge.delete",
+          "defaultspack.knowledge.delete"
         ]
-      }
-    },
-    "research": {
-      "type": "research",
-      "id": "research",
-      "path": "blocks/research",
-      "connectivity": {
-        "provides": [
-          "defaults.research.local_search",
-          "defaultspack.research.local_search",
-          "defaults.research.web_search",
-          "defaultspack.research.web_search",
-          "defaults.research.reddit_search",
-          "defaultspack.research.reddit_search",
-          "defaults.research.report",
-          "defaultspack.research.report"
-        ]
-      }
-    },
-    "share": {
-      "type": "artifact",
-      "id": "share",
-      "path": "blocks/share",
-      "connectivity": {
-        "provides": [
-          "defaults.share.list",
-          "defaultspack.share.list",
-          "defaults.share.create",
-          "defaultspack.share.create",
-          "defaults.share.get",
-          "defaultspack.share.get",
-          "defaults.share.revoke",
-          "defaultspack.share.revoke"
-        ]
-      }
+      },
+      "id": "knowledge",
+      "path": "blocks/knowledge",
+      "type": "knowledge"
     },
     "media": {
-      "type": "media",
-      "id": "media",
-      "path": "blocks/media",
       "connectivity": {
         "provides": [
           "defaults.media.image_read",
@@ -460,58 +1027,56 @@
           "defaults.media.screenshot",
           "defaultspack.media.screenshot"
         ]
-      }
+      },
+      "id": "media",
+      "path": "blocks/media",
+      "type": "media"
     },
-    "recording": {
-      "type": "recording",
-      "id": "recording",
-      "path": "blocks/recording",
+    "memory": {
       "connectivity": {
         "provides": [
-          "defaults.recording.capture",
-          "defaultspack.recording.capture"
+          "defaults.memory.store",
+          "defaultspack.memory.store",
+          "defaults.memory.recall",
+          "defaultspack.memory.recall",
+          "defaults.memory.project_context",
+          "defaultspack.memory.project_context",
+          "defaults.memory.vector_store",
+          "defaultspack.memory.vector_store",
+          "defaults.memory.vector_query",
+          "defaultspack.memory.vector_query",
+          "defaults.memory.add",
+          "defaultspack.memory.add",
+          "defaults.memory.search",
+          "defaultspack.memory.search",
+          "defaults.memory.get",
+          "defaultspack.memory.get",
+          "defaults.memory.update",
+          "defaultspack.memory.update",
+          "defaults.memory.delete",
+          "defaultspack.memory.delete",
+          "defaults.memory.flush",
+          "defaultspack.memory.flush",
+          "defaults.memory.status",
+          "defaultspack.memory.status"
         ]
-      }
+      },
+      "id": "memory",
+      "path": "blocks/memory",
+      "type": "memory"
     },
-    "ambient": {
-      "type": "ambient",
-      "id": "ambient",
-      "path": "blocks/ambient",
+    "permissions": {
       "connectivity": {
         "provides": [
-          "defaults.ambient.status",
-          "defaultspack.ambient.status",
-          "defaults.ambient.monitor_start",
-          "defaultspack.ambient.monitor_start",
-          "defaults.ambient.monitor_stop",
-          "defaultspack.ambient.monitor_stop",
-          "defaults.ambient.configure",
-          "defaultspack.ambient.configure",
-          "defaults.ambient.event_submit",
-          "defaultspack.ambient.event_submit",
-          "defaults.ambient.permission_grant",
-          "defaultspack.ambient.permission_grant",
-          "defaults.ambient.permission_revoke",
-          "defaultspack.ambient.permission_revoke",
-          "defaults.console.input"
+          "defaults.permissions.filter_tools",
+          "defaultspack.permissions.filter_tools"
         ]
-      }
-    },
-    "vision": {
-      "type": "vision",
-      "id": "vision",
-      "path": "blocks/vision",
-      "connectivity": {
-        "provides": [
-          "defaults.vision.describe_images",
-          "defaultspack.vision.describe_images"
-        ]
-      }
+      },
+      "id": "permissions",
+      "path": "blocks/permissions",
+      "type": "permissions"
     },
     "profile": {
-      "type": "profile",
-      "id": "profile",
-      "path": "blocks/profile",
       "connectivity": {
         "provides": [
           "defaults.profile.load_active",
@@ -519,66 +1084,69 @@
           "defaults.profile.workspace",
           "defaultspack.profile.workspace"
         ]
-      }
+      },
+      "id": "profile",
+      "path": "blocks/profile",
+      "type": "profile"
     },
-    "permissions": {
-      "type": "permissions",
-      "id": "permissions",
-      "path": "blocks/permissions",
+    "prompt": {
       "connectivity": {
         "provides": [
-          "defaults.permissions.filter_tools",
-          "defaultspack.permissions.filter_tools"
+          "defaults.prompt.render",
+          "defaultspack.prompt.render",
+          "defaults.prompt.list",
+          "defaultspack.prompt.list",
+          "defaults.prompt.create",
+          "defaultspack.prompt.create",
+          "defaults.prompt.system",
+          "defaultspack.prompt.system",
+          "defaults.prompt.update",
+          "defaultspack.prompt.update",
+          "defaults.prompt.delete",
+          "defaultspack.prompt.delete",
+          "defaults.prompt.convert",
+          "defaultspack.prompt.convert",
+          "defaults.prompt.lint_prompt",
+          "defaultspack.prompt.lint_prompt",
+          "defaults.prompt.compact_prompt",
+          "defaultspack.prompt.compact_prompt",
+          "defaults.prompt.load_effective",
+          "defaultspack.prompt.load_effective"
         ]
-      }
+      },
+      "id": "prompt",
+      "path": "blocks/prompt",
+      "type": "prompt"
     },
-    "audit": {
-      "type": "audit",
-      "id": "audit",
-      "path": "blocks/audit",
+    "recording": {
       "connectivity": {
         "provides": [
-          "defaults.audit.record_event",
-          "defaultspack.audit.record_event"
+          "defaults.recording.capture",
+          "defaultspack.recording.capture"
         ]
-      }
+      },
+      "id": "recording",
+      "path": "blocks/recording",
+      "type": "recording"
     },
-    "frontend": {
-      "type": "frontend",
-      "id": "frontend",
-      "path": "blocks/frontend",
+    "research": {
       "connectivity": {
         "provides": [
-          "defaults.frontend.start",
-          "defaultspack.frontend.start",
-          "defaults.frontend.stop",
-          "defaultspack.frontend.stop",
-          "defaults.frontend.emit",
-          "defaultspack.frontend.emit"
+          "defaults.research.local_search",
+          "defaultspack.research.local_search",
+          "defaults.research.web_search",
+          "defaultspack.research.web_search",
+          "defaults.research.reddit_search",
+          "defaultspack.research.reddit_search",
+          "defaults.research.report",
+          "defaultspack.research.report"
         ]
-      }
-    },
-    "dev": {
-      "type": "dev",
-      "id": "dev",
-      "path": "blocks/dev",
-      "connectivity": {
-        "provides": [
-          "defaults.dev.inspect",
-          "defaultspack.dev.inspect",
-          "defaults.dev.prompt_history",
-          "defaultspack.dev.prompt_history",
-          "defaults.dev.edit_prompt_live",
-          "defaultspack.dev.edit_prompt_live",
-          "defaults.dev.replay",
-          "defaultspack.dev.replay"
-        ]
-      }
+      },
+      "id": "research",
+      "path": "blocks/research",
+      "type": "research"
     },
     "scheduler": {
-      "type": "agent",
-      "id": "scheduler",
-      "path": "blocks/scheduler",
       "connectivity": {
         "provides": [
           "defaults.scheduler.create",
@@ -600,27 +1168,100 @@
           "defaults.scheduler.status",
           "defaultspack.scheduler.status"
         ]
-      }
+      },
+      "id": "scheduler",
+      "path": "blocks/scheduler",
+      "type": "agent"
     },
-    "gateway": {
-      "type": "frontend",
-      "id": "gateway",
-      "path": "blocks/gateway",
+    "share": {
       "connectivity": {
         "provides": [
-          "defaults.gateway.start",
-          "defaultspack.gateway.start",
-          "defaults.gateway.stop",
-          "defaultspack.gateway.stop",
-          "defaults.gateway.status",
-          "defaultspack.gateway.status",
-          "defaults.gateway.send",
-          "defaultspack.gateway.send",
-          "defaults.gateway.pairing",
-          "defaultspack.gateway.pairing"
+          "defaults.share.list",
+          "defaultspack.share.list",
+          "defaults.share.create",
+          "defaultspack.share.create",
+          "defaults.share.get",
+          "defaultspack.share.get",
+          "defaults.share.revoke",
+          "defaultspack.share.revoke"
         ]
-      }
+      },
+      "id": "share",
+      "path": "blocks/share",
+      "type": "artifact"
+    },
+    "tool": {
+      "connectivity": {
+        "provides": [
+          "defaults.tool.invoke",
+          "defaultspack.tool.invoke",
+          "defaults.tool.list",
+          "defaultspack.tool.list",
+          "defaults.tool.names",
+          "defaultspack.tool.names",
+          "defaults.tool.schema",
+          "defaultspack.tool.schema",
+          "defaults.tool.mcp_connect",
+          "defaultspack.tool.mcp_connect",
+          "defaults.tool.mcp_list",
+          "defaultspack.tool.mcp_list",
+          "defaults.tool.create",
+          "defaultspack.tool.create",
+          "defaults.tool.update",
+          "defaultspack.tool.update",
+          "defaults.tool.delete",
+          "defaultspack.tool.delete",
+          "defaults.tool.export",
+          "defaultspack.tool.export",
+          "defaults.tool.consent_check",
+          "defaultspack.tool.consent_check",
+          "defaults.tool.consent_confirm",
+          "defaultspack.tool.consent_confirm",
+          "defaults.tools.select_relevant",
+          "defaultspack.tools.select_relevant"
+        ]
+      },
+      "id": "tool",
+      "path": "blocks/tool",
+      "type": "tool"
+    },
+    "vision": {
+      "connectivity": {
+        "provides": [
+          "defaults.vision.describe_images",
+          "defaultspack.vision.describe_images"
+        ]
+      },
+      "id": "vision",
+      "path": "blocks/vision",
+      "type": "vision"
     }
+  },
+  "dependencies": {
+    "rumi_conversation_store_pack": ">=1.0.0,<2.0.0"
+  },
+  "desktop_app": {
+    "capabilities": [
+      "desktop_app.execute"
+    ],
+    "command": "python defaultspack/desktop_app.py",
+    "env": {
+      "DEFAULTS_HTTP_PORT": "8766",
+      "RUMI_DEFAULTSPACK_PORT": "8766",
+      "RUMI_DEFAULTSPACK_SURFACE": "webview"
+    },
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "window": {
+      "height": 800,
+      "icon": "assets/icons/defaultspack-icon.png",
+      "title": "Tobkiri",
+      "width": 1280
+    },
+    "working_dir": ""
   },
   "load_order": [
     "memory:memory",
@@ -646,40 +1287,13 @@
     "frontend:frontend"
   ],
   "metadata": {
-    "name": "Tobkiri",
-    "description": "Primary v2 pack cloned from defaults and extended with canonical defaultspack management APIs.",
     "author": "Tobkiri Team",
-    "license": "MIT"
+    "description": "Primary v2 pack cloned from defaults and extended with canonical defaultspack management APIs.",
+    "license": "MIT",
+    "name": "Tobkiri"
   },
-  "capability_bindings": {
-    "register": "ecosystem.defaultspack.capability_bindings.register_defaultspack_binding_handlers"
-  },
-  "capabilities": [
-    "desktop_app.execute"
-  ],
-  "desktop_app": {
-    "command": "python defaultspack/desktop_app.py",
-    "working_dir": "",
-    "env": {
-      "DEFAULTS_HTTP_PORT": "8766",
-      "RUMI_DEFAULTSPACK_PORT": "8766",
-      "RUMI_DEFAULTSPACK_SURFACE": "webview"
-    },
-    "capabilities": [
-      "desktop_app.execute"
-    ],
-    "window": {
-      "title": "Tobkiri",
-      "width": 1280,
-      "height": 800,
-      "icon": "assets/icons/defaultspack-icon.png"
-    },
-    "platforms": [
-      "darwin",
-      "win32",
-      "linux"
-    ]
-  },
+  "pack_id": "defaultspack",
+  "pack_identity": "rumi:ecosystem/defaultspack",
   "pre_auth_routes": [
     {
       "method": "POST",
@@ -706,650 +1320,36 @@
       "path_prefix": "/api/webhooks/inbound"
     }
   ],
-  "api_routes": [
-    {
-      "method": "GET",
-      "path": "/api/onboarding/status",
-      "function_id": "adaptive_onboarding_status"
-    },
-    {
-      "method": "GET",
-      "path": "/api/onboarding/schema",
-      "function_id": "adaptive_onboarding_schema"
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/answers/normalize",
-      "function_id": "adaptive_onboarding_normalize",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/compile",
-      "function_id": "adaptive_onboarding_compile",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/simulate",
-      "function_id": "adaptive_onboarding_simulate",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/apply",
-      "function_id": "adaptive_onboarding_apply",
-      "pass_body": true,
-      "sensitive": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/undo",
-      "function_id": "adaptive_onboarding_undo",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/onboarding/history",
-      "function_id": "adaptive_onboarding_history",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/onboarding/rediagnose",
-      "function_id": "adaptive_onboarding_rediagnose",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/operating-profiles",
-      "function_id": "adaptive_operating_profiles_list"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/operating-profiles/{id}",
-      "function_id": "adaptive_operating_profiles_get",
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/operating-profiles",
-      "function_id": "adaptive_operating_profiles_create",
-      "pass_body": true
-    },
-    {
-      "method": "PUT",
-      "path_pattern": "/api/operating-profiles/{id}",
-      "function_id": "adaptive_operating_profiles_update",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/operating-profiles/{id}/preview",
-      "function_id": "adaptive_operating_profiles_preview",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/operating-profiles/{id}/activate",
-      "function_id": "adaptive_operating_profiles_activate",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/packs/onboarding-recommendations",
-      "function_id": "adaptive_pack_recommendations_list",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/packs/onboarding-recommendations/preview",
-      "function_id": "adaptive_pack_recommendations_preview",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/activity-center",
-      "function_id": "adaptive_activity_snapshot"
-    },
-    {
-      "method": "POST",
-      "path": "/api/activity-center/freeze",
-      "function_id": "adaptive_freeze_set",
-      "pass_body": true
-    },
-    {
-      "method": "PUT",
-      "path_pattern": "/api/automations/{id}",
-      "function_id": "adaptive_automation_update",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "automation_id"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/context/file-read",
-      "function_id": "adaptive_context_file_read",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/context/code-search",
-      "function_id": "adaptive_context_code_search",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/context/repository-map",
-      "function_id": "adaptive_context_repository_map",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/context/evidence",
-      "function_id": "adaptive_context_evidence",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/prepared-actions/prepare",
-      "function_id": "adaptive_prepared_action_prepare",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/prepared-actions/{id}/commit",
-      "function_id": "adaptive_prepared_action_commit",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/prepared-actions/{id}/revoke",
-      "function_id": "adaptive_prepared_action_revoke",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/events",
-      "function_id": "adaptive_event_append",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/events",
-      "function_id": "adaptive_event_list",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/events/{id}/ack",
-      "function_id": "adaptive_event_ack",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "event_id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/events/{id}/retry",
-      "function_id": "adaptive_event_retry",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "event_id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/events/{id}/dlq",
-      "function_id": "adaptive_event_dlq",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "event_id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/events/outbox",
-      "function_id": "adaptive_event_outbox",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/events/replay",
-      "function_id": "adaptive_event_replay",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/events/subscriptions",
-      "function_id": "adaptive_event_subscribe",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/events/subscriptions",
-      "function_id": "adaptive_event_subscription_list",
-      "pass_query": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/continuations/resume",
-      "function_id": "adaptive_continuation_resume",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/skills/candidates",
-      "function_id": "adaptive_skill_candidates_list"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/skills/candidates/{id}/promote",
-      "function_id": "adaptive_skill_candidate_promote",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/skills/candidates/{id}/rollback",
-      "function_id": "adaptive_skill_candidate_rollback",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/memory/conflicts",
-      "function_id": "adaptive_memory_conflicts_list"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/memory/conflicts/{id}/resolve",
-      "function_id": "adaptive_memory_conflict_resolve",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/orchestration/leases/acquire",
-      "function_id": "adaptive_lease_acquire",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/orchestration/leases/{id}/release",
-      "function_id": "adaptive_lease_release",
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/defaultspack/modules",
-      "function_id": "management_list_modules"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/defaultspack/modules/{id}",
-      "function_id": "management_get_module",
-      "path_param_map": {
-        "module_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/modules/{id}/enable",
-      "function_id": "management_set_module_state",
-      "args": {
-        "state": "enabled"
-      },
-      "path_param_map": {
-        "module_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/modules/{id}/disable",
-      "function_id": "management_set_module_state",
-      "args": {
-        "state": "disabled"
-      },
-      "path_param_map": {
-        "module_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/modules/{id}/reload",
-      "function_id": "management_set_module_state",
-      "args": {
-        "state": "enabled",
-        "reason": "manual_reload"
-      },
-      "path_param_map": {
-        "module_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/modules/{id}/rollback",
-      "function_id": "management_set_module_state",
-      "args": {
-        "state": "disabled",
-        "reason": "manual_rollback"
-      },
-      "path_param_map": {
-        "module_id": "id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/defaultspack/migration/status",
-      "function_id": "management_get_migration_status"
-    },
-    {
-      "method": "GET",
-      "path": "/api/defaultspack/pack-requests",
-      "function_id": "pack_request_list"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/defaultspack/pack-requests/{id}",
-      "function_id": "pack_request_get",
-      "path_param_map": {
-        "request_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/defaultspack/pack-requests/request-extension",
-      "function_id": "pack_request_request_extension",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/defaultspack/pack-requests/forced-patch",
-      "function_id": "pack_request_forced_patch",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/pack-requests/{id}/approve",
-      "function_id": "pack_request_review",
-      "pass_body": true,
-      "args": {
-        "decision": "approve"
-      },
-      "path_param_map": {
-        "request_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/pack-requests/{id}/reject",
-      "function_id": "pack_request_review",
-      "pass_body": true,
-      "args": {
-        "decision": "reject"
-      },
-      "path_param_map": {
-        "request_id": "id"
-      }
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/pack-requests/{id}/rollback",
-      "function_id": "pack_request_rollback",
-      "path_param_map": {
-        "request_id": "id"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/tools/mcp",
-      "function_id": "tool_mcp_list"
-    },
-    {
-      "method": "POST",
-      "path": "/api/tools/mcp/connect",
-      "function_id": "tool_mcp_connect",
-      "pass_body": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/chat/channels",
-      "function_id": "chat_channel_list",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": false,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.read",
-      "legacy_until": null,
-      "pass_query": true,
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path": "/api/chat/channels",
-      "function_id": "chat_channel_create",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": true,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.write",
-      "legacy_until": null,
-      "pass_body": true,
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/chat/channels/{id}",
-      "function_id": "chat_channel_get",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": false,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.read",
-      "legacy_until": null,
-      "pass_query": true,
-      "path_param_map": {
-        "id": "id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/chat/channels/{id}/join",
-      "function_id": "chat_channel_join",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": true,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.write",
-      "legacy_until": null,
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/chat/channels/{id}/leave",
-      "function_id": "chat_channel_leave",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": true,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.write",
-      "legacy_until": null,
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/chat/channels/{id}/messages",
-      "function_id": "chat_channel_send_message",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": true,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.message",
-      "legacy_until": null,
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/chat/channels/{id}/messages",
-      "function_id": "chat_channel_get_messages",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": false,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.read",
-      "legacy_until": null,
-      "pass_query": true,
-      "path_param_map": {
-        "id": "id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/chat/channels/{id}/messages/{msg_id}/reply",
-      "function_id": "chat_channel_reply",
-      "auth_mode": "panel_or_bearer",
-      "principal": "authenticated",
-      "csrf_origin_required": true,
-      "rate_limit": "default_per_path",
-      "audit_category": "chat.channel.message",
-      "legacy_until": null,
-      "pass_body": true,
-      "path_param_map": {
-        "id": "id",
-        "msg_id": "msg_id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path": "/api/remote/tasks",
-      "function_id": "remote_task_create",
-      "pass_body": true,
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/remote/tasks/{task_id}",
-      "function_id": "remote_task_get",
-      "path_param_map": {
-        "task_id": "task_id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path_pattern": "/api/remote/tasks/{task_id}/events",
-      "function_id": "remote_task_events",
-      "pass_query": true,
-      "path_param_map": {
-        "task_id": "task_id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/remote/tasks/{task_id}/cancel",
-      "function_id": "remote_task_cancel",
-      "pass_body": true,
-      "path_param_map": {
-        "task_id": "task_id"
-      },
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path": "/api/remote/host/status",
-      "function_id": "remote_host_status",
-      "response_mode": "result"
-    },
-    {
-      "method": "GET",
-      "path": "/api/ambient/status",
-      "function_id": "ambient_status"
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/monitor/start",
-      "function_id": "ambient_monitor_start",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/monitor/stop",
-      "function_id": "ambient_monitor_stop",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/config",
-      "function_id": "ambient_configure",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/events",
-      "function_id": "ambient_event_submit",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/permissions/grant",
-      "function_id": "ambient_permission_grant",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/permissions/revoke",
-      "function_id": "ambient_permission_revoke",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/ambient/permissions/check",
-      "function_id": "ambient_permission_check",
-      "pass_body": true
-    }
-  ]
+  "version": "2.0.0",
+  "vocabulary": {
+    "types": [
+      "chat",
+      "agent",
+      "coding",
+      "ai_client",
+      "tool",
+      "prompt",
+      "memory",
+      "knowledge",
+      "media",
+      "recording",
+      "ambient",
+      "vision",
+      "frontend",
+      "dev",
+      "capability",
+      "artifact",
+      "research",
+      "project",
+      "kanban",
+      "change_request",
+      "compact",
+      "context",
+      "scheduler",
+      "gateway",
+      "profile",
+      "permissions",
+      "audit"
+    ]
+  }
 }

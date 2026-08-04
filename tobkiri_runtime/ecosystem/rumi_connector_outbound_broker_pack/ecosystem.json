@@ -1,2 +1,62 @@
-{"pack_id":"rumi_connector_outbound_broker_pack","pack_identity":"rumi:ecosystem/rumi_connector_outbound_broker_pack","display_name":"Rumi Connector Outbound Broker Pack","version":"1.0.0","description":"Receipt-gated connector delivery, dedupe, retry, and cancellation state.","dependencies":{"rumi_connector_registry_service_pack":">=1.0.0,<2.0.0","rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.resource.connector.registry.v1","rumi.service.connector.adapter.v1","rumi.service.host.authorize.v1"],"provides":["rumi.resource.connector.outbound.v1","rumi.action.connector.outbound.v1"]},"required_secrets":[],"required_capabilities":["connector.outbound.read","connector.outbound.control","connector.registry.read","connector.adapter.deliver","host.authority.consume"],"required_network":{"allowed_domains":[],"allowed_ports":[]},"host_execution":false,"resources":[],"provenance":{"content_hash":"sha256:cd1d89cfafa4c968b9c4793cf50a99fe55586989d256f5633c29263dad32568a","build_identity":"rumi-connector-outbound-broker-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":true,"owner_surfaces":["connector_outbound_delivery_ledger"]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.action.connector.outbound.v1",
+      "rumi.resource.connector.outbound.v1"
+    ],
+    "requires": [
+      "rumi.resource.connector.registry.v1",
+      "rumi.service.connector.adapter.v1",
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_connector_registry_service_pack": ">=1.0.0,<2.0.0",
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Receipt-gated delivery lifecycle and exact vendor handoff.",
+  "display_name": "Rumi Connector Outbound Broker",
+  "host_execution": false,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:6c10b4480561f135d13e60738ffa5e2276d573c19e000cbf1a7c09c21222a115"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "connector_outbound_delivery_ledger"
+    ],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_connector_outbound_broker_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_outbound_broker_pack",
+  "provenance": {
+    "build_identity": "rumi-connector-outbound-broker-pack:1.0.0",
+    "content_hash": "sha256:cd1d89cfafa4c968b9c4793cf50a99fe55586989d256f5633c29263dad32568a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "connector.adapter.deliver",
+    "connector.outbound.control",
+    "connector.outbound.read",
+    "connector.registry.read",
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

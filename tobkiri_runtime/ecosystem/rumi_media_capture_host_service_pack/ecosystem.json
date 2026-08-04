@@ -1,17 +1,61 @@
 {
+  "connectivity": {
+    "provides": [
+      "rumi.action.media.capture.v1",
+      "rumi.action.media.output.v1"
+    ],
+    "requires": [
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Bounded private-media capture and audio output requests.",
+  "display_name": "Rumi Media Capture Host Service",
+  "host_execution": false,
+  "metadata": {
+    "authority_split": [
+      "capture",
+      "output"
+    ],
+    "executor_owner": "rumi_viewer_host_broker",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:9a06a7a605cc86c00b25f72ca1b4253184d37b6cf97920de405f0ec37dec9f23"
+    },
+    "manifest_authority": "v3-authoritative",
+    "network_send": false,
+    "raw_media_persistence": false,
+    "read_only_projection": true,
+    "tool_or_ui_registry_imports": false
+  },
   "pack_id": "rumi_media_capture_host_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_media_capture_host_service_pack",
-  "display_name": "Rumi Media Capture Host Service Pack",
-  "version": "1.0.0",
-  "description": "Independent private-media capture/output boundary for the Viewer host broker.",
-  "dependencies": {"rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"},
-  "connectivity": {"requires": ["rumi.service.host.authorize.v1"], "provides": ["rumi.action.media.capture.v1", "rumi.action.media.output.v1"]},
+  "provenance": {
+    "build_identity": "rumi-media-capture-host-service-pack:1.0.0",
+    "content_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "host.authority.consume",
+    "media.capture",
+    "media.output"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "required_secrets": [],
-  "required_capabilities": ["media.capture", "media.output", "host.authority.consume"],
-  "required_network": {"allowed_domains": [], "allowed_ports": []},
-  "host_execution": false,
   "resources": [],
-  "provenance": {"content_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b", "build_identity": "rumi-media-capture-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
-  "metadata": {"authority_split": ["capture", "output"], "executor_owner": "rumi_viewer_host_broker", "raw_media_persistence": false, "network_send": false, "tool_or_ui_registry_imports": false}
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
 }
-

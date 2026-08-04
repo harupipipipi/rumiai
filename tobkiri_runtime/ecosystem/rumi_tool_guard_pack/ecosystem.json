@@ -1,1 +1,57 @@
-{"pack_id": "rumi_tool_guard_pack", "pack_identity": "rumi:ecosystem/rumi_tool_guard_pack", "display_name": "Rumi Tool Guard Pack", "version": "1.0.0", "description": "Ordered generic pre-authorization guards.", "dependencies": {}, "connectivity": {"requires": [], "provides": ["rumi.service.tool.guard.evaluate.v1"]}, "required_secrets": [], "required_capabilities": ["tool.guard.evaluate"], "required_network": {"allowed_domains": [], "allowed_ports": []}, "host_execution": true, "resources": [], "provenance": {"content_hash": "sha256:32ad798918f6d5f0b2118cf5f2da973ef82cf7176cae90ab1b94d26826f9c51a", "build_identity": "rumi-tool-guard-pack:1.0.0", "trust_class": "local", "signature": null}, "metadata": {"authoritative_owner": true, "owner_surfaces": ["tool_guard_chain"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"fail_closed": true, "authority": false}}}
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.tool.guard.evaluate.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Ordered fail-closed pre-authorization tool guards.",
+  "display_name": "Rumi Tool Guard",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:9981cb4d19ea519c28666da072f4746cb8a2d72b5b48510ed502fc924dc45606"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [
+      "tool_guard_chain"
+    ],
+    "read_only_projection": true,
+    "security": {
+      "authority": false,
+      "fail_closed": true
+    }
+  },
+  "pack_id": "rumi_tool_guard_pack",
+  "pack_identity": "rumi:ecosystem/rumi_tool_guard_pack",
+  "provenance": {
+    "build_identity": "rumi-tool-guard-pack:1.0.0",
+    "content_hash": "sha256:32ad798918f6d5f0b2118cf5f2da973ef82cf7176cae90ab1b94d26826f9c51a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "tool.guard.evaluate"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

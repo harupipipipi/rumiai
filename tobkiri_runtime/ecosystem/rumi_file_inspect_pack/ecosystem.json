@@ -17,10 +17,11 @@
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v1",
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:44248f0646a13adbd0137172879005e2ac13edfd54c7e74404faba9e94209948"
+      "source_content_hash": "sha256:af3b05699c5d26357739f984a4a00cb5218779716a71add0b3d40cc7c183c4bf"
     },
+    "manifest_authority": "v3-authoritative",
     "read_only_projection": true
   },
   "pack_id": "rumi_file_inspect_pack",
@@ -41,5 +42,10 @@
   },
   "required_secrets": [],
   "resources": [],
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
 }

@@ -1,28 +1,7 @@
 {
-  "pack_id": "rumi_default_tools_pack",
-  "pack_identity": "rumi:ecosystem/rumi_default_tools_pack",
-  "version": "1.0.0",
-  "metadata": {
-    "name": "Rumi Default Tools Pack",
-    "description": "Concrete AI-facing default tools separated from defaultspack core.",
-    "author": "Rumi AI Team",
-    "license": "MIT",
-    "security_boundary": {
-      "host_execution": false,
-      "self_approval": false,
-      "client_approval_material": "discard",
-      "role": "finite_tool_compatibility_adapter"
-    }
-  },
-  "runtime": {
-    "type": "python_host"
-  },
-  "dependencies": {
-    "rumi_browser_host_service_pack": ">=1.0.0,<2.0.0",
-    "rumi_desktop_host_service_pack": ">=1.0.0,<2.0.0",
-    "rumi_clipboard_host_service_pack": ">=1.0.0,<2.0.0"
-  },
+  "components": {},
   "connectivity": {
+    "provides": [],
     "requires": [
       "rumi.resource.browser.host.v1",
       "rumi.action.browser.host.v1",
@@ -30,12 +9,35 @@
       "rumi.action.desktop.host.v1",
       "rumi.resource.clipboard.v1",
       "rumi.action.clipboard.v1"
-    ],
-    "provides": []
+    ]
   },
+  "dependencies": {
+    "rumi_browser_host_service_pack": ">=1.0.0,<2.0.0",
+    "rumi_clipboard_host_service_pack": ">=1.0.0,<2.0.0",
+    "rumi_desktop_host_service_pack": ">=1.0.0,<2.0.0"
+  },
+  "load_order": [],
+  "metadata": {
+    "author": "Rumi AI Team",
+    "description": "Concrete AI-facing default tools separated from defaultspack core.",
+    "license": "MIT",
+    "name": "Rumi Default Tools Pack",
+    "security_boundary": {
+      "client_approval_material": "discard",
+      "host_execution": false,
+      "role": "finite_tool_compatibility_adapter",
+      "self_approval": false
+    }
+  },
+  "pack_id": "rumi_default_tools_pack",
+  "pack_identity": "rumi:ecosystem/rumi_default_tools_pack",
+  "runtime": {
+    "type": "python_host"
+  },
+  "version": "1.0.0",
   "vocabulary": {
-    "types": ["tool"]
-  },
-  "components": {},
-  "load_order": []
+    "types": [
+      "tool"
+    ]
+  }
 }

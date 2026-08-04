@@ -1,20 +1,13 @@
 {
-  "pack_id": "rumi_multimodal_media_pack",
-  "pack_identity": "rumi:ecosystem/rumi_multimodal_media_pack",
-  "display_name": "Rumi Multimodal Media Pack",
-  "version": "0.1.0",
-  "runtime": {
-    "type": "declarative_pack"
+  "components": {},
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
   },
+  "display_name": "Rumi Multimodal Media Pack",
+  "load_order": [],
   "metadata": {
-    "required_secrets": [],
-    "network_policy": "none_by_default",
     "executable_code": false,
-    "owner_surfaces": [
-      "media_asset_ledger",
-      "visual_qa_checklists",
-      "ocr_review_contracts"
-    ],
+    "network_policy": "none_by_default",
     "optional_integrations": [
       {
         "pack_id": "rumi_workspace_pack",
@@ -28,8 +21,20 @@
         "pack_id": "rumi_agent_services_pack",
         "reason": "Expose media review roles to service workflows."
       }
-    ]
+    ],
+    "owner_surfaces": [
+      "media_asset_ledger",
+      "visual_qa_checklists",
+      "ocr_review_contracts"
+    ],
+    "required_secrets": []
   },
+  "pack_id": "rumi_multimodal_media_pack",
+  "pack_identity": "rumi:ecosystem/rumi_multimodal_media_pack",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "version": "0.1.0",
   "vocabulary": {
     "types": [
       "catalog",
@@ -40,10 +45,5 @@
       "example",
       "documentation"
     ]
-  },
-  "dependencies": {
-    "defaultspack": ">=2.0.0"
-  },
-  "components": {},
-  "load_order": []
+  }
 }

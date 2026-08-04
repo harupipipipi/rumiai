@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from .global_contracts.canonical import content_identity
 
 LEGACY_ECOSYSTEM_FORMAT = "rumi.ecosystem.v1"
-PROJECTION_GENERATOR = "tobkiri.core_runtime.manifest_projection/v1"
+PROJECTION_GENERATOR = "tobkiri.core_runtime.manifest_projection/v2"
 
 
 class ManifestProjectionError(ValueError):
@@ -24,6 +24,7 @@ def source_manifest_identity(manifest: Mapping[str, Any]) -> str:
     rewritten by a compatibility generator.
     """
     payload = json.loads(json.dumps(manifest, ensure_ascii=False))
+    payload.pop("content_identity", None)
     provenance = payload.get("provenance")
     if isinstance(provenance, dict):
         provenance.pop("content_hash", None)
@@ -63,6 +64,17 @@ def project_legacy_ecosystem(manifest: Mapping[str, Any]) -> dict[str, Any]:
             "extensions.rumi.legacy_projection.host_execution must be a boolean"
         )
 
+    compatibility_manifest = legacy_options.get("manifest", {})
+    if not isinstance(compatibility_manifest, Mapping):
+        raise ManifestProjectionError(
+            "extensions.rumi.legacy_projection.manifest must be an object"
+        )
+    projection = json.loads(
+        json.dumps(dict(compatibility_manifest), ensure_ascii=False)
+    )
+    if not isinstance(projection, dict):
+        raise ManifestProjectionError("legacy compatibility manifest must be an object")
+
     provides = _contract_ids(contracts.get("provides"))
     requires = _contract_ids(contracts.get("requires"))
     capabilities = sorted(
@@ -80,7 +92,20 @@ def project_legacy_ecosystem(manifest: Mapping[str, Any]) -> dict[str, Any]:
         }
     )
     source_identity = source_manifest_identity(manifest)
-    return {
+    metadata = projection.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    metadata.update({
+        "manifest_authority": "v3-authoritative",
+        "format": LEGACY_ECOSYSTEM_FORMAT,
+        "generated": True,
+        "read_only_projection": True,
+        "generated_from": {
+            "source": "rumi.pack.v3.json",
+            "source_content_hash": source_identity,
+            "generator": PROJECTION_GENERATOR,
+        },
+    })
+    projection.update({
         "pack_id": pack_id,
         "pack_identity": f"rumi:ecosystem/{pack_id}",
         "display_name": str(pack["display_name"]),
@@ -101,17 +126,10 @@ def project_legacy_ecosystem(manifest: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(resource.get("id"), str) and resource["id"].strip()
         ],
         "provenance": dict(provenance),
-        "metadata": {
-            "format": LEGACY_ECOSYSTEM_FORMAT,
-            "generated": True,
-            "read_only_projection": True,
-            "generated_from": {
-                "source": "rumi.pack.v3.json",
-                "source_content_hash": source_identity,
-                "generator": PROJECTION_GENERATOR,
-            },
-        },
-    }
+        "metadata": metadata,
+    })
+    projection.setdefault("vocabulary", {"types": ["service"]})
+    return projection
 
 
 def render_legacy_ecosystem(manifest: Mapping[str, Any]) -> str:

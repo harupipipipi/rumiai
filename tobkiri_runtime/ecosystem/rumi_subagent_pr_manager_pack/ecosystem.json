@@ -1,33 +1,60 @@
 {
-  "pack_id": "rumi_subagent_pr_manager_pack",
-  "pack_identity": "rumi:ecosystem/rumi_subagent_pr_manager_pack",
-  "display_name": "Rumi Subagent PR Manager Pack",
-  "version": "0.1.0",
-  "description": "Declarative PM, subagent assignment, branch ledger, and one-pack-one-PR governance pack.",
-  "vocabulary": {
-    "types": [
-      "governance",
-      "catalog",
-      "policy",
-      "profile",
-      "prompt",
-      "preset",
-      "example",
-      "checklist",
-      "ledger",
-      "template"
-    ]
-  },
+  "components": {},
   "dependencies": {
     "defaultspack": ">=2.0.0"
   },
-  "components": {},
+  "description": "Declarative PM, subagent assignment, branch ledger, and one-pack-one-PR governance pack.",
+  "display_name": "Rumi Subagent PR Manager Pack",
   "load_order": [],
   "metadata": {
-    "required_secrets": [],
-    "network_policy": "none_by_default",
-    "executable_code": false,
+    "asset_index": {
+      "catalog": [
+        "catalog/subagent_pr_workflows.yaml",
+        "catalog/subagent_routing_matrix.yaml",
+        "catalog/pr_acceptance_rubric.yaml"
+      ],
+      "checklist": [
+        "checklists/reviewer_handoff.checklist.yaml"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "example": [
+        "examples/one_pr_per_subagent.example.yaml",
+        "examples/merge_readiness_board.example.yaml",
+        "examples/review_handoff.example.yaml"
+      ],
+      "ledger": [
+        "ledgers/pr_evidence_ledger.schema.yaml"
+      ],
+      "policy": [
+        "policies/subagent_pr_governance.policy.yaml"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "profiles": [
+        "profiles/subagent_pr_manager.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/subagent_pr_manager.system.md"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "spec": [],
+      "template": [
+        "templates/subagent_assignment_brief.template.yaml"
+      ]
+    },
     "declarative_only": true,
+    "executable_code": false,
+    "network_policy": "none_by_default",
     "optional_integrations": [
       {
         "pack_id": "rumi_agent_services_pack",
@@ -57,50 +84,23 @@
       "handoff_checklist",
       "assignment_brief_template"
     ],
-    "asset_index": {
-      "catalog": [
-        "catalog/subagent_pr_workflows.yaml",
-        "catalog/subagent_routing_matrix.yaml",
-        "catalog/pr_acceptance_rubric.yaml"
-      ],
-      "policy": [
-        "policies/subagent_pr_governance.policy.yaml"
-      ],
-      "spec": [],
-      "checklist": [
-        "checklists/reviewer_handoff.checklist.yaml"
-      ],
-      "ledger": [
-        "ledgers/pr_evidence_ledger.schema.yaml"
-      ],
-      "template": [
-        "templates/subagent_assignment_brief.template.yaml"
-      ],
-      "example": [
-        "examples/one_pr_per_subagent.example.yaml",
-        "examples/merge_readiness_board.example.yaml",
-        "examples/review_handoff.example.yaml"
-      ],
-      "readme": [
-        "README.md"
-      ],
-      "docs": [
-        "docs/README.md",
-        "docs/architecture.md",
-        "docs/interfaces.md",
-        "docs/operations.md"
-      ],
-      "presets": [
-        "presets/safe_default.preset.yaml",
-        "presets/handoff_review.preset.yaml",
-        "presets/quality_gate.preset.yaml"
-      ],
-      "profiles": [
-        "profiles/subagent_pr_manager.profile.yaml"
-      ],
-      "prompts": [
-        "prompts/subagent_pr_manager.system.md"
-      ]
-    }
+    "required_secrets": []
+  },
+  "pack_id": "rumi_subagent_pr_manager_pack",
+  "pack_identity": "rumi:ecosystem/rumi_subagent_pr_manager_pack",
+  "version": "0.1.0",
+  "vocabulary": {
+    "types": [
+      "governance",
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "checklist",
+      "ledger",
+      "template"
+    ]
   }
 }

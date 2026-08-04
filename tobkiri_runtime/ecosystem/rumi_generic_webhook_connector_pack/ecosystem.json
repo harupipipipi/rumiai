@@ -1,2 +1,57 @@
-{"pack_id":"rumi_generic_webhook_connector_pack","pack_identity":"rumi:ecosystem/rumi_generic_webhook_connector_pack","display_name":"Rumi Generic Webhook Connector Pack","version":"1.0.0","description":"Signed generic webhook verification and receipt-gated HTTPS delivery.","dependencies":{"rumi_credential_broker_pack":">=1.0.0,<2.0.0","rumi_host_authority_bridge_pack":">=1.0.0,<2.0.0"},"connectivity":{"requires":["rumi.service.credential.resolve.v1","rumi.service.host.authorize.v1"],"provides":["rumi.service.connector.adapter.v1"]},"required_secrets":[],"required_capabilities":["connector.adapter.verify","connector.delivery.execute","credential.resolve","host.authority.consume"],"required_network":{"allowed_domains":["connector-configured-https-host"],"allowed_ports":[443]},"host_execution":true,"resources":[],"provenance":{"content_hash":"sha256:32daaf74379e1748c22410911c2992f19801d4816f0a758aa7c8c039e3582ac2","build_identity":"rumi-generic-webhook-connector-pack:1.0.0","trust_class":"local","signature":null},"metadata":{"authoritative_owner":false,"owner_surfaces":[]}}
-
+{
+  "connectivity": {
+    "provides": [
+      "rumi.service.connector.adapter.v1"
+    ],
+    "requires": [
+      "rumi.service.credential.resolve.v1",
+      "rumi.service.host.authorize.v1"
+    ]
+  },
+  "dependencies": {
+    "rumi_credential_broker_pack": ">=1.0.0,<2.0.0",
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Signed generic webhook normalization and HTTPS delivery.",
+  "display_name": "Rumi Generic Webhook Connector",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.core_runtime.manifest_projection/v2",
+      "source": "rumi.pack.v3.json",
+      "source_content_hash": "sha256:973e6ab58967b1fe62b9809934f42655549fea7715085b2c4909ca3516951af9"
+    },
+    "manifest_authority": "v3-authoritative",
+    "owner_surfaces": [],
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_generic_webhook_connector_pack",
+  "pack_identity": "rumi:ecosystem/rumi_generic_webhook_connector_pack",
+  "provenance": {
+    "build_identity": "rumi-generic-webhook-connector-pack:1.0.0",
+    "content_hash": "sha256:32daaf74379e1748c22410911c2992f19801d4816f0a758aa7c8c039e3582ac2",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "connector.adapter.verify",
+    "connector.delivery.execute",
+    "credential.resolve",
+    "host.authority.consume"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}
