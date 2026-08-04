@@ -8,6 +8,7 @@ from domain.coding.contract_adapter import (
     authorize_legacy_coding_operation,
     git_snapshot,
     invoke_coding_contract,
+    preflight_legacy_coding_operation,
     service_payload,
     workspace_id,
 )
@@ -43,12 +44,29 @@ def run(input_data, context=None):
     record_attempt(operation, "high", {"message": message, "paths": paths, "all_tracked": all_tracked})
     try:
         selected_workspace_id = workspace_id(input_data)
-        arguments = {
+        base_arguments = {
             "message": str(message),
             "paths": [str(item) for item in (paths or [])],
             "all_tracked": all_tracked,
-            **git_snapshot(selected_workspace_id),
         }
+        preflight = preflight_legacy_coding_operation(
+            legacy_operation=operation,
+            input_data=input_data,
+            context=context,
+            selected_workspace_id=selected_workspace_id,
+            mutation_guard=canonical_mutation_guard,
+        )
+        if not preflight.get("authorized"):
+            if preflight.get("reason") == "approval_required":
+                return ok(approval_required(operation, "high", args=input_data, message=message))
+            denied = error(
+                str(preflight.get("message") or preflight.get("reason")),
+                code=str(preflight.get("code") or "APPROVAL_INVALID"),
+                details=preflight.get("details"),
+            )
+            denied["_http_status"] = 409 if preflight.get("code") == "ADAPTIVE_LEASE_HELD" else 403
+            return denied
+        arguments = {**base_arguments, **git_snapshot(selected_workspace_id)}
         for key in (
             "expected_head",
             "expected_tree",

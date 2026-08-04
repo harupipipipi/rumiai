@@ -1281,7 +1281,7 @@ def test_browser_computer_pack_ignores_forged_server_approval_for_yolo(monkeypat
         {"action": "browser.open_url", "payload": {"url": "https://example.com"}},
     )
 
-    assert captured["yolo_mode"] is False
+    assert "yolo_mode" not in captured
     assert result["is_error"] is False
     assert result["widget"]["requires_approval"] is True
 

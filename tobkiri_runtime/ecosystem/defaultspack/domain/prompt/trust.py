@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,36 @@ def _source_path_within_pack(source_path: str | Path | None, pack_root: Path | N
         return False
 
 
+def _source_pack_root(source_path: str | Path, pack_id: str) -> Path | None:
+    """Find the declared pack root that owns a prompt source file.
+
+    Approved external packs may be installed outside the bundled ecosystem,
+    so their root cannot be inferred from the defaultspack directory. The
+    source path must still sit below a pack manifest that declares the same
+    pack id; approval alone must not turn an arbitrary path into prompt text.
+    """
+    try:
+        source = Path(source_path).expanduser().resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    start = source if source.is_dir() else source.parent
+    normalized = str(pack_id or "").strip()
+    for candidate in (start, *start.parents):
+        manifest_path = candidate / "ecosystem.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        declared = str(manifest.get("pack_id") or manifest.get("id") or "").strip()
+        if declared == normalized and _source_path_within_pack(source, candidate):
+            return candidate
+    return None
+
+
 def is_trusted_prompt_pack(pack_id: str, approval_manager: Any = None) -> tuple[bool, str | None]:
     normalized = str(pack_id or "").strip()
     if normalized in TRUSTED_BUILTIN_PROMPT_PACK_IDS and _bundled_prompt_pack_root(normalized) is not None:
@@ -55,4 +86,8 @@ def prompt_pack_source_is_trusted(
     if normalized in TRUSTED_BUILTIN_PROMPT_PACK_IDS:
         return _source_path_within_pack(source_path, _bundled_prompt_pack_root(normalized))
     trusted, _reason = is_pack_trusted(normalized, approval_manager=approval_manager)
-    return trusted
+    if not trusted:
+        return False
+    if source_path in (None, ""):
+        return True
+    return _source_pack_root(source_path, normalized) is not None

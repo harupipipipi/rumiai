@@ -53,6 +53,15 @@ def run(input_data: dict, context: dict) -> dict:
     """Translate a legacy route into one implementation-neutral invocation."""
     data = dict(input_data) if isinstance(input_data, dict) else {}
     operation = str(data.pop("_contract_operation", "")).strip()
+    if not operation:
+        operation = str(data.pop("action", "")).strip().lower()
+    operation = {
+        "load": "editor.load",
+        "editor": "editor.load",
+        "create_override": "save",
+        "version_list": "versions",
+        "test_input": "test",
+    }.get(operation, operation)
     if operation == "override":
         operation = "save"
     if data.get("edge_id"):

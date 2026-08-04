@@ -43,13 +43,13 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             bundles: dmg
-            signing_args: "--no-sign"
+            signing_args: ""
             artifact_suffix: macos-arm64
           - label: macOS Intel
             os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: dmg
-            signing_args: "--no-sign"
+            signing_args: ""
             artifact_suffix: macos-x64
           - label: Windows x64
             os: windows-latest

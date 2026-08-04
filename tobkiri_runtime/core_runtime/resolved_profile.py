@@ -1128,15 +1128,74 @@ def _pack_content_hash(pack_root: Path, manifest_hash: str) -> str:
             if not isinstance(component, Mapping):
                 continue
             declared = str(component.get("path") or "").strip()
-            if declared and ".." not in Path(declared).parts:
+            declared_path = Path(declared)
+            if (
+                declared
+                and not declared_path.is_absolute()
+                and ".." not in declared_path.parts
+            ):
                 declared_directories.add(declared)
     for directory in sorted(declared_directories):
         root = pack_root / directory
-        if not root.is_dir():
-            continue
-        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        for path in _bounded_pack_files(root):
             resources.append((path.relative_to(pack_root).as_posix(), _sha256(path)))
     return content_identity(resources)
+
+
+def _bounded_pack_files(
+    root: Path,
+    *,
+    max_depth: int = 8,
+    max_entries: int = 8192,
+) -> tuple[Path, ...]:
+    """List regular pack files with finite, symlink-safe traversal.
+
+    Projection roots are manifest-controlled and may point at unexpectedly
+    broad trees.  Resolution must therefore never use an unbounded recursive
+    glob.  Exceeding either budget fails closed instead of producing a partial
+    integrity identity.
+    """
+
+    if max_depth < 0 or max_entries < 1:
+        raise RuntimeError("pack content scan budget is invalid")
+    try:
+        if root.is_symlink() or not root.is_dir():
+            return ()
+    except OSError:
+        return ()
+
+    files: list[Path] = []
+    visited_entries = 0
+
+    def walk(directory: Path, depth: int) -> None:
+        nonlocal visited_entries
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda item: item.name)
+        except OSError:
+            return
+        for entry in entries:
+            visited_entries += 1
+            if visited_entries > max_entries:
+                raise RuntimeError(
+                    f"pack content scan exceeded {max_entries} entries: {root}"
+                )
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_file(follow_symlinks=False):
+                    files.append(Path(entry.path))
+                elif entry.is_dir(follow_symlinks=False):
+                    if depth >= max_depth:
+                        raise RuntimeError(
+                            f"pack content scan exceeded depth {max_depth}: {root}"
+                        )
+                    walk(Path(entry.path), depth + 1)
+            except OSError:
+                continue
+
+    walk(root, 0)
+    return tuple(files)
 
 
 def _with_diagnostics(

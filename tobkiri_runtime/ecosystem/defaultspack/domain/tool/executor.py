@@ -1721,6 +1721,27 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+        elif tool_name == "subagent":
+            from ecosystem.rumi_default_tools_pack.domain.tool.subagent import (
+                SubagentController,
+            )
+
+            delegated = SubagentController().run(
+                arguments if isinstance(arguments, dict) else {},
+                context if isinstance(context, dict) else {},
+            )
+            failed = bool(
+                delegated.get("is_error")
+                or delegated.get("status") == "error"
+            )
+            return {
+                "result": str(
+                    delegated.get("summary")
+                    or ("Subagent failed" if failed else "Subagent completed")
+                ),
+                "is_error": failed,
+                "widget": {"type": "subagent", **delegated},
+            }
         elif tool_name == "file_reader":
             from blocks.coding.file_read import run as file_read_run
 

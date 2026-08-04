@@ -79,7 +79,11 @@ def _fake_enrich_messages(standard_messages, system_prompt, conversation_id, use
     }
 
 
-def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path: Path) -> None:
+def test_ai_input_trace_is_applied_to_chat_runtime_context(
+    monkeypatch,
+    tmp_path: Path,
+    defaultspack_conversation_owner,
+) -> None:
     user_data_root = tmp_path / "user_data"
     chat_store_path = tmp_path / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data_root))
@@ -118,10 +122,6 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
         },
     )
     monkeypatch.setattr(
-        "domain.chat.run_request.RuntimeSkillTriggerService",
-        lambda: type("SkillTrigger", (), {"evaluate": lambda self, **kwargs: {"matched": [], "instructions": ""}})(),
-    )
-    monkeypatch.setattr(
         "domain.chat.run_request._resolve_selected_tools",
         lambda raw_tools, **kwargs: (
             [
@@ -155,7 +155,9 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
 
 
 def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
-    monkeypatch, tmp_path: Path
+    monkeypatch,
+    tmp_path: Path,
+    defaultspack_conversation_owner,
 ) -> None:
     user_data_root = tmp_path / "user_data"
     chat_store_path = tmp_path / "chat" / "conversations.json"
@@ -175,23 +177,23 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
             "supports_thinking": True,
         },
     )
+    computer_tool = {
+        "tool_id": "computer_use",
+        "name": "computer_use",
+        "schema": {"parameters": {"type": "object"}},
+        "requires_runtime_capabilities": ["runtime.user_requested_computer_use"],
+    }
+    from domain.chat import run_request as run_request_module
+
     monkeypatch.setattr(
-        "domain.chat.run_request.RuntimeSkillTriggerService",
-        lambda: type("SkillTrigger", (), {"evaluate": lambda self, **kwargs: {"matched": [], "instructions": ""}})(),
+        run_request_module.ToolRegistry,
+        "list_tools",
+        lambda self: [computer_tool],
     )
     monkeypatch.setattr(
-        "domain.chat.run_request._resolve_selected_tools",
-        lambda raw_tools, **kwargs: (
-            [
-                {
-                    "tool_id": "computer_use",
-                    "name": "computer_use",
-                    "schema": {"parameters": {"type": "object"}},
-                    "requires_runtime_capabilities": ["runtime.user_requested_computer_use"],
-                },
-            ],
-            [],
-        ),
+        run_request_module.ToolRegistry,
+        "get",
+        lambda self, tool_name: computer_tool if tool_name == "computer_use" else None,
     )
 
     prepared = prepare_chat_run(
@@ -216,7 +218,7 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
                 },
             },
         },
-        {"profile_id": "default-profile"},
+        {"profile_id": "default-profile", "developer_mode": True},
     )
 
     assert prepared.request_context["profile_id"] == "defaultspack.operations_company"
@@ -230,7 +232,18 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
     ChatStore._instance = None
 
 
-def test_requested_profile_replaces_existing_runtime_profile_for_connected_tools() -> None:
+def test_requested_profile_replaces_existing_runtime_profile_for_connected_tools(
+    monkeypatch,
+) -> None:
+    from domain.capability import catalog as capability_catalog
+    from domain.chat import run_request as run_request_module
+
+    monkeypatch.setattr(
+        capability_catalog,
+        "effective_pack_ids",
+        lambda: frozenset({"defaultspack", "rumi_operations_company_pack"}),
+    )
+    run_request_module._profile_snapshot.cache_clear()
     stale_runtime_profile = {
         "profile_id": "default-profile",
         "defaultspack": {
@@ -253,3 +266,4 @@ def test_requested_profile_replaces_existing_runtime_profile_for_connected_tools
     assert runtime_profile["profile_id"] == "defaultspack.operations_company"
     assert agent_id == "client_manager"
     assert "computer_use" in runtime_profile["defaultspack"]["agents"]["client_manager"]["tools"]
+    run_request_module._profile_snapshot.cache_clear()

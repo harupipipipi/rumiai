@@ -241,7 +241,9 @@ def test_adaptive_freeze_blocks_real_tool_and_public_function_dispatch(
 
 
 def test_active_operating_profile_denies_tool_and_public_function_dispatch(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    defaultspack_capability_plan_context,
 ) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
     from core_runtime.operating_profile import OperatingProfilePlanStore, compile_operating_profile
@@ -267,10 +269,18 @@ def test_active_operating_profile_denies_tool_and_public_function_dispatch(
     executor = ToolExecutor()
     executor._registry = Registry()
     monkeypatch.setattr(executor, "_execute_local", must_not_run)
+    capability_context = defaultspack_capability_plan_context(
+        "coding_terminal_exec",
+        _tool_definitions={"coding_terminal_exec": {"schema": {}}},
+    )
     tool_result = executor.execute(
         "coding_terminal_exec",
         {"command": "echo denied"},
-        {"profile_id": "coding", "_tool_server_approved": True},
+        {
+            **capability_context,
+            "profile_id": "coding",
+            "_tool_server_approved": True,
+        },
     )
     assert tool_result["is_error"] is True
     assert tool_result["adaptive_policy"]["code"] == "ADAPTIVE_PROFILE_DENIED"

@@ -47,7 +47,10 @@ def test_vercel_ai_gateway_compiler_preserves_gateway_params():
     assert "reasoning_effort" not in compiled.body
 
 
-def test_vercel_ai_gateway_provider_catalog_and_credentials(monkeypatch):
+def test_vercel_ai_gateway_provider_catalog_and_credentials(
+    monkeypatch,
+    provider_model_catalog_selected,
+):
     from domain.ai_client.api_key_store import provider_secret_keys
     from domain.ai_client.capabilities.registry import ProviderCapabilityRegistry
     from domain.ai_client.providers import detect_available_providers, get_all_known_models, get_provider_catalog_map

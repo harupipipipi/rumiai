@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
-from core_runtime.resolved_profile_scope import active_resolved_profile
+from core_runtime.resolved_profile_scope import persisted_resolved_profile
 from domain.safety import approval
 from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
@@ -229,7 +229,7 @@ def _invoke(contract: str, operation: str, payload: Mapping[str, Any]) -> Any:
 
 
 def _profile_id() -> str:
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if plan is None:
         raise KanbanFacadeError("KANBAN_OWNER_UNAVAILABLE", "resolved profile is unavailable", 503)
     return plan.profile_id

@@ -2360,6 +2360,11 @@ def _runtime_profile_with_policy_connected_tools(
                     ),
                 },
             }
+        # The request-selected profile is authoritative even when its saved
+        # snapshot is temporarily unavailable.  Keeping the prior graph's ID
+        # here makes downstream tool-policy evaluation run under the wrong
+        # profile while retaining stale graph connections.
+        base_profile["profile_id"] = snapshot_profile_id
     if not isinstance(base_profile, dict) or not base_profile:
         return runtime_profile, str(agent_id or "").strip()
 
@@ -2399,7 +2404,7 @@ def _runtime_profile_with_policy_connected_tools(
     defaultspack["agents"] = agents
     patched["defaultspack"] = defaultspack
     if snapshot_profile_id:
-        patched.setdefault("profile_id", snapshot_profile_id)
+        patched["profile_id"] = snapshot_profile_id
     return patched, resolved_agent_id
 
 

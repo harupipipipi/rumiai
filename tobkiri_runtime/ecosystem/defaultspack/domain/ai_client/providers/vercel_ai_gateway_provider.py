@@ -69,7 +69,19 @@ class VercelAIGatewayProvider(OpenAICompatibleProvider):
 
     @classmethod
     def _catalog_models(cls) -> List[Dict[str, Any]]:
-        path = Path(__file__).resolve().parents[2] / "providers" / cls.provider_name / "models.json"
+        # Keep this compatibility catalog read anchored to the repository's
+        # canonical model-catalog pack. Runtime invocation still receives an
+        # explicit empty inventory and discovers the gateway's live /models
+        # response; this path is only for callers that request the public
+        # Vercel catalog directly.
+        path = (
+            Path(__file__).resolve().parents[4]
+            / "rumi_model_catalog_pack"
+            / "catalog"
+            / "providers"
+            / cls.provider_name
+            / "models.json"
+        )
         try:
             payload = load_strict_metadata_json(path)
             validate_model_catalog_source(payload, path=path)

@@ -757,6 +757,22 @@ def _reset_singletons(request):
     except Exception:
         pass
 
+    # Startup capability compilation intentionally leaves the resolved
+    # profile active for the process lifetime.  A test that exercises that
+    # startup path must not lend its authority scope to the next test.
+    for module_name in (
+        "core_runtime.resolved_profile_scope",
+        "tobkiri_runtime.core_runtime.resolved_profile_scope",
+    ):
+        profile_scope = sys.modules.get(module_name)
+        if profile_scope is None:
+            continue
+        try:
+            profile_scope._ACTIVE_PROFILE.set(None)
+            profile_scope._PERSISTED_PROFILE_CACHE = None
+        except (AttributeError, LookupError):
+            pass
+
     # ================================================================
     # Legacy global variables (cleared for safety, not yet removed)
     # ================================================================
@@ -933,6 +949,8 @@ _WAVE7_OWNER_TEST_FILES = frozenset(
         "test_defaultspack_external_submit.py",
         "test_defaultspack_artifact_file.py",
         "test_defaultspack_provider_trace.py",
+        "test_defaultspack_kanban_conversation_import.py",
+        "test_defaultspack_skill_feedback.py",
     }
 )
 _CHAT_OWNER_TEST_FILES = frozenset()
@@ -956,6 +974,7 @@ _COMPANY_OWNER_MIGRATION_TEST_FILES = frozenset(
     {
         "test_defaultspack_operations_company.py",
         "test_company_workspace.py",
+        "test_subagent_team_workspace.py",
     }
 )
 
@@ -1127,39 +1146,45 @@ def defaultspack_capability_plan_context():
     from core_runtime.capability_plan import canonical_capability_plan_digest
     from domain.tool.registry import ToolRegistry
 
-    def build(tool_id, **context):
+    def build(*tool_ids, **context):
         registry = ToolRegistry()
-        tool = registry.get(tool_id)
-        if not isinstance(tool, dict):
-            raise AssertionError(f"missing selected tool definition: {tool_id}")
-        schema = tool.get("schema")
-        if not isinstance(schema, dict):
-            contract = tool.get("contract")
-            schema = (
-                contract.get("input_schema")
-                if isinstance(contract, dict)
-                and isinstance(contract.get("input_schema"), dict)
-                else {}
-            )
+        tool_overrides = context.pop("_tool_definitions", {})
+        tool_overrides = tool_overrides if isinstance(tool_overrides, dict) else {}
+        selected_ids = [str(tool_id).strip() for tool_id in tool_ids if str(tool_id).strip()]
+        if not selected_ids:
+            raise AssertionError("at least one selected tool definition is required")
+        schema_hashes = {}
+        for tool_id in selected_ids:
+            tool = tool_overrides.get(tool_id) or registry.get(tool_id)
+            if not isinstance(tool, dict):
+                raise AssertionError(f"missing selected tool definition: {tool_id}")
+            schema = tool.get("schema")
+            if not isinstance(schema, dict):
+                contract = tool.get("contract")
+                schema = (
+                    contract.get("input_schema")
+                    if isinstance(contract, dict)
+                    and isinstance(contract.get("input_schema"), dict)
+                    else {}
+                )
+            schema_hashes[tool_id] = hashlib.sha256(
+                json.dumps(
+                    schema,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()
         plan = {
             "schema_version": "tobkiri.capability-plan/v1",
-            "plan_id": f"plan_test_{tool_id}",
+            "plan_id": "plan_test_" + "_".join(selected_ids),
             "registry_revision": "registry_test",
             "effective_capabilities": [],
             "provider_selections": {},
             "tools": {
-                "attached": [tool_id],
-                "schema_hashes": {
-                    tool_id: hashlib.sha256(
-                        json.dumps(
-                            schema,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                            default=str,
-                        ).encode("utf-8")
-                    ).hexdigest()
-                },
+                "attached": selected_ids,
+                "schema_hashes": schema_hashes,
             },
         }
         plan["digest"] = canonical_capability_plan_digest(plan)

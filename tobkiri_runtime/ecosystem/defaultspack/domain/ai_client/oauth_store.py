@@ -181,11 +181,10 @@ def _connection_manifest_signature(
             if tree_unchanged:
                 return manifest_signature
 
-        directories: list[Path] = [root]
-        try:
-            directories.extend(path for path in root.rglob("*") if path.is_dir())
-        except OSError:
-            directories = [root]
+        from core_runtime.connections.registry import discover_connection_manifests
+
+        manifest_paths = discover_connection_manifests(root)
+        directories = sorted({root, *(path.parent for path in manifest_paths)})
         tree_entries: list[tuple[str, int, int]] = []
         for directory in directories:
             try:
@@ -196,18 +195,14 @@ def _connection_manifest_signature(
             tree_entries.append((relative_path, stat.st_mtime_ns, stat.st_size))
 
         manifest_entries: list[tuple[str, int, int]] = []
-        try:
-            manifest_paths = root.rglob("*.connection.json")
-            for path in manifest_paths:
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                manifest_entries.append(
-                    (str(path.relative_to(root)), stat.st_mtime_ns, stat.st_size)
-                )
-        except OSError:
-            pass
+        for path in manifest_paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            manifest_entries.append(
+                (str(path.relative_to(root)), stat.st_mtime_ns, stat.st_size)
+            )
 
         tree_signature = tuple(sorted(set(tree_entries)))
         manifest_signature = tuple(sorted(manifest_entries))
@@ -264,19 +259,21 @@ def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:
     seen: set[Path] = set()
     ordered: list[Path] = []
     for candidate in candidates:
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            resolved = candidate
-        if resolved in seen:
+        # Do not resolve filesystem links merely to deduplicate a fixed list
+        # of dotenv candidates.  ``resolve()`` can traverse a symlinked or
+        # unavailable mount and block provider discovery for every model.
+        lexical_path = candidate.expanduser().absolute()
+        if lexical_path in seen:
             continue
-        seen.add(resolved)
+        seen.add(lexical_path)
         ordered.append(candidate)
     return ordered
 
 
 def _parse_dotenv_file(path: Path) -> dict[str, str]:
     try:
+        if path.is_symlink() or not path.is_file():
+            return {}
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return {}

@@ -67,7 +67,9 @@ def test_policy_filters_tool_allowlist_and_denylist() -> None:
     assert [tool["function"]["name"] for tool in filtered] == ["rumi_api"]
 
 
-def test_tool_executor_rejects_policy_blocked_tool() -> None:
+def test_tool_executor_rejects_policy_blocked_tool(
+    defaultspack_capability_plan_context,
+) -> None:
     ToolRegistry._instance = None
     registry = ToolRegistry()
     registry.register(
@@ -78,11 +80,12 @@ def test_tool_executor_rejects_policy_blocked_tool() -> None:
             "execution": {"type": "local", "action_type": "file_write"},
         }
     )
+    plan_context = defaultspack_capability_plan_context("write_file")
 
     result = ToolExecutor().execute(
         "write_file",
         {},
-        {"profile_policy": {"allow_file_write": False}},
+        {**plan_context, "profile_policy": {"allow_file_write": False}},
     )
 
     assert result["is_error"] is True

@@ -729,8 +729,10 @@ def test_defaultspack_startup_graph_compiles_with_memory_and_prompt_nodes() -> N
 
 def test_defaultspack_startup_graph_override_writes_frontend_launch_target(tmp_path, monkeypatch) -> None:
     from core_runtime.startup_capability_bridge import compile_startup_capabilities
+    from core_runtime.pack_artifact_integrity import write_host_install_record
 
     monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+    monkeypatch.setenv("RUMI_PACK_DEVELOPER_MODE", "true")
     repo_root = Path(__file__).resolve().parents[1]
     ecosystem_root = tmp_path / "ecosystem"
     shutil.copytree(repo_root / "ecosystem" / "defaultspack", ecosystem_root / "defaultspack")
@@ -789,6 +791,26 @@ def test_defaultspack_startup_graph_override_writes_frontend_launch_target(tmp_p
         ),
         encoding="utf-8",
     )
+    trust_store_path = tmp_path / "host_policy" / "publisher_trust.json"
+    for pack_id, version in (
+        ("defaultspack", str(copied_manifest.get("version") or "2.0.0")),
+        ("frontendpack", "1.0.0"),
+    ):
+        write_host_install_record(
+            trust_store_path,
+            pack_id=pack_id,
+            record={
+                "signature_required": False,
+                "publisher_id": "",
+                "key_id": "",
+                "installed_version": version,
+                "signed_manifest_path": "",
+                "contract_versions": {},
+                "requested_capabilities": [],
+                "developer_mode": True,
+            },
+        )
+    monkeypatch.setenv("RUMI_PACK_PUBLISHER_TRUST_STORE", str(trust_store_path))
 
     result = compile_startup_capabilities(
         {

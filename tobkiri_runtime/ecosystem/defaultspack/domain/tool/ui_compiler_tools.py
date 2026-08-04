@@ -120,7 +120,7 @@ def _authorized(context: dict[str, Any] | None) -> bool:
 def _trusted_workspace(context: dict[str, Any] | None) -> str | None:
     if not isinstance(context, dict):
         return None
-    raw = context.get("workspace_root") or context.get("workspaceRoot") or context.get("conversation_workspace_dir") or context.get("workspace_dir")
+    raw = context.get("workspace_root") or context.get("conversation_workspace_dir")
     return str(raw) if raw else None
 
 

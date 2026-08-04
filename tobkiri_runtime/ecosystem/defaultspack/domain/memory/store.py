@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
-from core_runtime.resolved_profile_scope import active_resolved_profile
+from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
 RESOURCE = "rumi.resource.memory.v1"
 MANAGE = "rumi.action.memory.manage.v1"
@@ -187,7 +187,7 @@ class MemoryStore:
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
     registry = get_container().get_or_none("interface_registry")
-    plan = active_resolved_profile()
+    plan = persisted_resolved_profile()
     if registry is None or plan is None:
         raise RuntimeError("global memory owner is unavailable")
     return invoke_global_contract(

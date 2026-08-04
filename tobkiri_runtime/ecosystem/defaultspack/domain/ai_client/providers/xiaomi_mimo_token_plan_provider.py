@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from copy import deepcopy
 from typing import Any, Dict, List
 
 from .component_metadata import model_manifests_from_provider_components
@@ -156,6 +158,16 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         region: str,
     ) -> None:
         catalog_models = model_manifests_from_provider_components(provider_id)
+        explicit_token_plan_opt_in = any(
+            str(os.environ.get(env_name, "") or "").strip()
+            for env_name in api_key_env
+        )
+        if not catalog_models and explicit_token_plan_opt_in:
+            # This provider owns a fixed token-plan allowlist. A selected
+            # model catalog may refine it, but an unselected external catalog
+            # must not erase the provider's usable plan models once the user
+            # has explicitly configured that token-plan connection.
+            catalog_models = deepcopy(_TOKEN_PLAN_MODELS)
         for model in catalog_models:
             routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
             default_for = routing.get("default_for", [])
@@ -171,6 +183,11 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
             known_models=catalog_models,
             remote_model_discovery=True,
         )
+        # Keep the generic provider-program scanner's KNOWN_MODELS contract
+        # empty. Token-plan models are a credential-scoped provider contract,
+        # not a generic checked-in program inventory.
+        self._token_plan_models = self._normalize_known_models(catalog_models)
+        self.KNOWN_MODELS = []
         self.region = region
 
     def _headers(self, content_type="application/json"):
@@ -190,9 +207,15 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         model_id = model_ref[len(prefix):] if model_ref.startswith(prefix) else model_ref
         allowed = {
             str(item.get("model_id") or "").strip()
-            for item in self.KNOWN_MODELS
+            for item in self._token_plan_models
             if isinstance(item, dict)
         }
+        # A profile may intentionally omit the optional model-catalog pack.
+        # In that case the provider cannot make a catalog-backed support claim;
+        # preserve the provider's remote-discovery contract instead of turning
+        # catalog absence into a false unsupported-model rejection.
+        if not allowed:
+            return
         if model_id not in allowed:
             raise RuntimeError(
                 f"unsupported model for {self.provider_id}: {model}; "
@@ -204,7 +227,7 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         extra_body = dict(
             translated.get("extra_body") if isinstance(translated.get("extra_body"), dict) else {}
         )
-        model_entry = self._known_model_entry(model)
+        model_entry = self._token_plan_model_entry(model)
         supports_thinking = bool(model_entry.get("supports_thinking"))
 
         raw_level = (
@@ -229,8 +252,24 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
                 translated["extra_body"] = extra_body
         return translated
 
+    def _token_plan_model_entry(self, model: str) -> Dict[str, Any]:
+        """Return the credential-scoped metadata for one token-plan model."""
+        model_ref = str(model or "").strip()
+        prefix = f"{self.provider_id}/"
+        model_id = model_ref[len(prefix):] if model_ref.startswith(prefix) else model_ref
+        qualified = f"{self.provider_id}/{model_id}" if model_id else model_ref
+        for item in self._token_plan_models:
+            if not isinstance(item, dict):
+                continue
+            if model_ref in {
+                str(item.get("id") or "").strip(),
+                str(item.get("model_id") or "").strip(),
+            } or qualified == str(item.get("id") or "").strip():
+                return item
+        return {}
+
     def list_models(self) -> List[Dict[str, Any]]:
-        models = self._merge_remote_models(self.KNOWN_MODELS)
+        models = self._merge_remote_models(self._token_plan_models)
         for model in models:
             metadata = dict(model.get("metadata") or {})
             metadata.update({"region": self.region, "token_plan_region_scoped": True})

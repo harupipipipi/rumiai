@@ -10,6 +10,7 @@ import pytest
 from core_runtime.global_contracts.models import ContractStatus
 from core_runtime.resolved_profile import (
     ResolutionInput,
+    _pack_content_hash,
     apply_legacy_selection_migration,
     create_lockfile,
     plan_legacy_selection_migration,
@@ -95,6 +96,32 @@ def test_persisted_scope_reads_the_configured_user_data_root(
         "rumi_browser_automation_pack",
     ]
     assert observed["config_path"] == str(tmp_path / "active_ecosystem.json")
+
+
+def test_pack_content_hash_does_not_follow_projection_symlinks(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    tools_root = pack_root / "tools"
+    external_root = tmp_path / "external"
+    tools_root.mkdir(parents=True)
+    external_root.mkdir()
+    (external_root / "outside.py").write_text("OUTSIDE = 1\n", encoding="utf-8")
+    (pack_root / "ecosystem.json").write_text(
+        json.dumps(
+            {
+                "components": {
+                    "external": {"path": str(external_root)},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tools_root / "local.py").write_text("LOCAL = 1\n", encoding="utf-8")
+    (tools_root / "linked").symlink_to(external_root, target_is_directory=True)
+
+    first = _pack_content_hash(pack_root, "manifest")
+    (external_root / "outside.py").write_text("OUTSIDE = 2\n", encoding="utf-8")
+
+    assert _pack_content_hash(pack_root, "manifest") == first
 
 
 def test_startup_profile_input_accepts_only_host_supplied_verified_trust() -> None:

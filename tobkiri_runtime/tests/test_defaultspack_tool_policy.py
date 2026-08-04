@@ -237,18 +237,19 @@ def test_tool_orchestrator_preserves_trusted_profile_policy_yolo(monkeypatch):
         def list_tools(self):
             return []
 
-    def fake_invoke(input_data, context):
-        seen["input_data"] = input_data
+    def fake_execute(_executor, tool_name, arguments, context):
+        seen["tool_name"] = tool_name
+        seen["arguments"] = arguments
         seen["context"] = context
-        return {"status": "ok", "data": {"result": "ran"}}
+        return {"result": "ran", "is_error": False, "widget": None}
 
-    monkeypatch.setattr("blocks.tool.invoke.run", fake_invoke)
+    monkeypatch.setattr("domain.tool.executor.ToolExecutor.execute", fake_execute)
 
     context = mark_trusted_profile_policy_context({"profile_policy": {"yolo_mode": True}})
     result = ToolOrchestrator(registry=Registry()).run("danger", {}, context)
 
     assert result["status"] == "ok"
-    assert seen["input_data"]["tool_name"] == "danger"
+    assert seen["tool_name"] == "danger"
 
 
 def test_tool_orchestrator_ignores_untrusted_runtime_profile_policy_yolo(monkeypatch):

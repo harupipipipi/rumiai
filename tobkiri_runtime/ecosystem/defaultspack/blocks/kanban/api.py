@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Mapping
 
 from blocks._common import error, ok
@@ -15,6 +16,9 @@ def run(input_data: Any, context: Any = None) -> dict[str, Any]:
         return _invalid("input_data must be a dict")
     payload = dict(input_data)
     try:
+        compatibility = _explicit_adapter_result(payload)
+        if compatibility is not None:
+            return ok(compatibility)
         return ok(KanbanContractFacade(payload, _context(context)).run(_action(payload)))
     except KanbanFacadeError as exc:
         response = error(str(exc), exc.code)
@@ -48,6 +52,67 @@ def _action(payload: Mapping[str, Any]) -> str:
 
 def _context(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _explicit_adapter_result(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Use the canonical owner adapter only for an explicit local path.
+
+    The normal HTTP route remains the approval-aware global contract facade.
+    Older local callers select this bounded adapter by setting the documented
+    compatibility path; without that setting there is no hidden Kanban store.
+    """
+
+    if not os.environ.get("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", "").strip():
+        return None
+    from domain.kanban.service import KanbanService
+
+    service = KanbanService()
+    action = _action(payload)
+    if action in {"list_boards", "boards"}:
+        return service.list_boards(dict(payload))
+    if action in {"bootstrap_board", "bootstrap"}:
+        return service.bootstrap_board(dict(payload))
+    if action == "get_board":
+        return service.get_board(str(payload.get("board_id") or ""))
+    if action == "update_board":
+        return service.update_board(str(payload.get("board_id") or ""), dict(payload))
+    if action == "create_card":
+        return service.create_card(str(payload.get("board_id") or ""), dict(payload))
+    if action == "update_card":
+        return service.update_card(str(payload.get("card_id") or ""), dict(payload))
+    if action == "delete_card":
+        return service.delete_card(str(payload.get("card_id") or ""))
+    if action == "move_card":
+        return service.move_card(str(payload.get("card_id") or ""), dict(payload))
+    if action == "import_conversation":
+        return service.import_conversation(str(payload.get("board_id") or ""), dict(payload))
+    if action == "sync_conversation":
+        from domain.kanban.chat_sync import sync_conversation_kanban
+
+        result = sync_conversation_kanban(
+            str(payload.get("conversation_id") or payload.get("source_id") or ""),
+            reason=str(payload.get("reason") or "kanban_api"),
+        )
+        return result or {}
+    if action in {"sync_runs", "sync"}:
+        return service.sync_runs(str(payload.get("board_id") or ""), dict(payload))
+    if action == "agent_status":
+        return service.agent_status(str(payload.get("card_id") or ""))
+    if action == "agent_start":
+        return service.agent_start(str(payload.get("card_id") or ""), dict(payload))
+    if action == "agent_ready":
+        return service.agent_ready(str(payload.get("card_id") or ""), dict(payload))
+    if action == "agent_apply":
+        return service.agent_apply(str(payload.get("card_id") or ""), dict(payload))
+    if action == "agent_dismiss":
+        return service.agent_dismiss(str(payload.get("card_id") or ""), dict(payload))
+    if action == "create_column":
+        return service.create_column(str(payload.get("board_id") or ""), dict(payload))
+    if action == "update_column":
+        return service.update_column(str(payload.get("column_id") or ""), dict(payload))
+    if action == "delete_column":
+        return service.delete_column(str(payload.get("column_id") or ""))
+    return None
 
 
 def _invalid(message: str) -> dict[str, Any]:

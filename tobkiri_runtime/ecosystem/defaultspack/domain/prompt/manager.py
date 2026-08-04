@@ -59,6 +59,26 @@ def _read_pack_id(pack_root: Path) -> str:
     return pack_root.name
 
 
+def _safe_extension_prompt_path(
+    extensions_root: Path,
+    prompt_id: str,
+    template_file: str,
+) -> Path | None:
+    """Resolve an extension prompt body below its prompt directory only."""
+    if not prompt_id or not _PROMPT_ID_SAFE_RE.fullmatch(prompt_id):
+        return None
+    relative_file = Path(str(template_file or "prompt.md").strip() or "prompt.md")
+    if relative_file.is_absolute():
+        return None
+    try:
+        prompt_dir = (extensions_root / "prompts" / prompt_id).resolve()
+        candidate = (prompt_dir / relative_file).resolve()
+        candidate.relative_to(prompt_dir)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
 # ---------------------------------------------------------------------------
 # PromptManager
 # ---------------------------------------------------------------------------
@@ -135,11 +155,18 @@ class PromptManager:
                 template_file = str(
                     (manifest.get("config", {}) or {}).get("template_file", "prompt.md")
                 ).strip() or "prompt.md"
-                prompt_path = extensions_root / "prompts" / prompt_id / template_file
+                prompt_path = _safe_extension_prompt_path(
+                    extensions_root,
+                    prompt_id,
+                    template_file,
+                )
                 body = ""
                 source = "extension"
-                if prompt_path.is_file():
-                    body = prompt_path.read_text(encoding="utf-8").strip()
+                if prompt_path is not None and prompt_path.is_file():
+                    try:
+                        body = prompt_path.read_text(encoding="utf-8").strip()
+                    except (OSError, UnicodeDecodeError):
+                        body = ""
                 if not body:
                     canonical = self._canonical_prompt_path(prompt_id)
                     if canonical is not None:

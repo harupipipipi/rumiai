@@ -187,6 +187,17 @@ class CapabilityOrchestrator:
         plan.selected_tools = selected_tools
         plan.hydrated_tools = list(selected_tools)
         plan.attached_tools = list(selected_tools)
+        plan.tool_schema_hashes = {
+            tool_id: stable_revision(_tool_schema(tool_by_id[tool_id]))
+            for tool_id in selected_tools
+            if tool_id in tool_by_id
+        }
+        plan.tool_capability_grants = {
+            tool_id: _tool_capability_grants(tool_by_id[tool_id])
+            for tool_id in selected_tools
+            if tool_id in tool_by_id
+        }
+        plan.provider_selections = _provider_selections(context)
 
         explicit_skills = [
             target.id for target in explicit_targets if target.kind == "skill"

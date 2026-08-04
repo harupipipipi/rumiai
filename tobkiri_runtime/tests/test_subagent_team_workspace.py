@@ -45,18 +45,28 @@ def _configure_temp_runtime(tmp_path, monkeypatch) -> None:
 
 
 def _create_workspace(*, settings: dict[str, Any] | None = None) -> tuple[Any, Any, dict[str, Any]]:
+    from domain.company.contract_facade import CompanyContractFacade
     from domain.company.runtime_store import CompanyRuntimeStore
     from domain.company.store import CompanyStore
 
     store = CompanyStore()
     runtime_store = CompanyRuntimeStore()
-    company = store.create_company(
+    store.create_company(
         company_id="tw_short",
         name="Subagent Team",
         settings=settings,
         metadata={"surface": "subagent_team_workspace"},
     )
-    return store, runtime_store, company
+    canonical_company = CompanyContractFacade(
+        {
+            "company_id": "tw_short",
+            "name": "Subagent Team",
+            "settings": settings or {},
+            "metadata": {"surface": "subagent_team_workspace"},
+        },
+        {},
+    ).run("create")
+    return store, runtime_store, canonical_company
 
 
 def _trusted_coding_workspace(workspace: Path, workspace_id: str = "trusted-team-workspace") -> str:
@@ -1151,7 +1161,7 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
     ui_bootstrap = company_status.run({"conversation_id": "chat-main-guard", "bootstrap": True}, {})
     assert ui_bootstrap["status"] == "ok"
     ui_company_id = ui_bootstrap["data"]["company_id"]
-    assert ui_bootstrap["data"]["company"]["metadata"]["surface"] == "main_chat"
+    assert ui_bootstrap["data"]["company"]["metadata"]["source"] == "chat"
     ui_message_write = company_messages.run(
         {"company_id": ui_company_id, "action": "create", "channel_id": "ops-company", "content": "@coding_engineer bypass"},
         {},
@@ -1162,6 +1172,23 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
         {},
     )
     assert ui_task_write["status"] == "ok"
+
+    from domain.company.contract_facade import _conversation_company_id
+
+    marker_company_id = _conversation_company_id("subagent-chat-guard")
+    marker_created = company_create.run(
+        {
+            "id": marker_company_id,
+            "name": "Subagent Marker",
+            "metadata": {
+                "conversation_id": "subagent-chat-guard",
+                "surface": "subagent_team_workspace",
+                "subagent_team": True,
+            },
+        },
+        {},
+    )
+    assert marker_created["status"] == "ok", marker_created
 
     marker_bootstrap = company_bootstrap.run(
         {
@@ -1175,7 +1202,7 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
         },
         {},
     )
-    assert marker_bootstrap["status"] == "ok"
+    assert marker_bootstrap["status"] == "ok", marker_bootstrap
     marker_company_id = marker_bootstrap["data"]["company"]["id"]
     marker_message_write = company_messages.run(
         {"company_id": marker_company_id, "action": "create", "channel_id": "ops-company", "content": "@coding_engineer bypass"},

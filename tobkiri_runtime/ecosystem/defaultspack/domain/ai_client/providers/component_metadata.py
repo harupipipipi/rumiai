@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -13,17 +14,20 @@ _MODEL_CATALOG_PACK_ID = "rumi_model_catalog_pack"
 
 
 def _model_catalog_root() -> Path:
-    return Path(__file__).resolve().parents[4] / _MODEL_CATALOG_PACK_ID / "catalog"
+    return Path(__file__).absolute().parents[4] / _MODEL_CATALOG_PACK_ID / "catalog"
 
 
 def _safe_catalog_file(path: Path, *, root: Path | None = None) -> Path | None:
     """Return a regular file inside the fixed bundled catalog root."""
 
-    boundary = root or _model_catalog_root().parent
-    candidate = Path(path)
+    boundary = Path(
+        os.path.normpath((root or _model_catalog_root().parent).absolute())
+    )
+    candidate = Path(os.path.normpath(Path(path).absolute()))
     try:
         if boundary.is_symlink():
             return None
+        candidate.relative_to(boundary)
         cursor = candidate
         while cursor != boundary and cursor != cursor.parent:
             if cursor.is_symlink():
@@ -31,11 +35,9 @@ def _safe_catalog_file(path: Path, *, root: Path | None = None) -> Path | None:
             cursor = cursor.parent
         if cursor != boundary:
             return None
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(boundary.resolve())
-        if not resolved.is_file():
+        if not candidate.is_file():
             return None
-        return resolved
+        return candidate
     except (OSError, RuntimeError, ValueError):
         return None
 
@@ -53,10 +55,17 @@ def _model_catalog_selected() -> bool:
 
 def _is_under(path: Path, root: Path) -> bool:
     try:
-        path.resolve().relative_to(root.resolve())
-    except (OSError, ValueError):
+        boundary = Path(os.path.normpath(root.absolute()))
+        candidate = Path(os.path.normpath(path.absolute()))
+        candidate.relative_to(boundary)
+        cursor = candidate
+        while cursor != boundary and cursor != cursor.parent:
+            if cursor.is_symlink():
+                return False
+            cursor = cursor.parent
+        return cursor == boundary and not boundary.is_symlink()
+    except (OSError, RuntimeError, ValueError):
         return False
-    return True
 
 
 def _provider_id(component_manifest: dict[str, Any]) -> str:

@@ -121,6 +121,14 @@ def _select_existing_file(candidates: list[Path]) -> Path | None:
     return None
 
 
+def _read_prompt_file(path: Path) -> str | None:
+    """Read a prompt source without allowing a broken source to abort fallback."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _catalog_profile(profile_id: Any) -> dict[str, Any]:
     candidate = str(profile_id or "").strip()
     if not candidate:
@@ -218,18 +226,26 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
     )
     profile_candidate = _select_existing_file(profile_candidates)
     if profile_candidate is not None:
-        source_chain.append(
-            _chain_entry(
-                source_type="profile_override",
-                layer="workspace_prompt_file",
-                selected=True,
-                source=str(profile_candidate),
-                candidates=profile_candidates,
-                prompt_id=prompt_ids[0],
+        content = _read_prompt_file(profile_candidate)
+        if content is not None:
+            source_chain.append(
+                _chain_entry(
+                    source_type="profile_override",
+                    layer="workspace_prompt_file",
+                    selected=True,
+                    source=str(profile_candidate),
+                    candidates=profile_candidates,
+                    prompt_id=prompt_ids[0],
+                )
             )
-        )
-        content = profile_candidate.read_text(encoding="utf-8")
-        return _effective_payload(data, prompt_ids[0], "profile_override", str(profile_candidate), content, source_chain)
+            return _effective_payload(
+                data,
+                prompt_ids[0],
+                "profile_override",
+                str(profile_candidate),
+                content,
+                source_chain,
+            )
     source_chain.append(
         _chain_entry(
             source_type="profile_override",
@@ -243,45 +259,67 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
     snapshot_candidates = _snapshot_prompt_candidates(snapshots_dir, base_pack, prompt_ids)
     snapshot_candidate = _select_existing_file(snapshot_candidates)
     if snapshot_candidate is not None:
+        trusted, trust_reason = is_trusted_prompt_pack(base_pack)
+        content = _read_prompt_file(snapshot_candidate)
+        if trusted and content is not None:
+            source_chain.append(
+                _chain_entry(
+                    source_type="profile_snapshot",
+                    layer="profile_snapshot",
+                    selected=True,
+                    source=str(snapshot_candidate),
+                    candidates=snapshot_candidates,
+                    prompt_id=prompt_ids[0],
+                )
+            )
+            return _effective_payload(
+                data,
+                prompt_ids[0],
+                "profile_snapshot",
+                str(snapshot_candidate),
+                content,
+                source_chain,
+                source_pack_id=base_pack,
+                source_pack_trusted=True,
+                source_pack_trust_reason=trust_reason,
+            )
         source_chain.append(
             _chain_entry(
                 source_type="profile_snapshot",
                 layer="profile_snapshot",
-                selected=True,
+                selected=False,
                 source=str(snapshot_candidate),
                 candidates=snapshot_candidates,
                 prompt_id=prompt_ids[0],
             )
         )
-        content = snapshot_candidate.read_text(encoding="utf-8")
-        trusted, trust_reason = is_trusted_prompt_pack(base_pack)
-        return _effective_payload(
-            data,
-            prompt_ids[0],
-            "profile_snapshot",
-            str(snapshot_candidate),
-            content if trusted else "",
-            source_chain,
-            source_pack_id=base_pack,
-            source_pack_trusted=trusted,
-            source_pack_trust_reason=trust_reason,
+    else:
+        source_chain.append(
+            _chain_entry(
+                source_type="profile_snapshot",
+                layer="profile_snapshot",
+                selected=False,
+                candidates=snapshot_candidates,
+                prompt_id=prompt_ids[0],
+            )
         )
-    source_chain.append(
-        _chain_entry(
-            source_type="profile_snapshot",
-            layer="profile_snapshot",
-            selected=False,
-            candidates=snapshot_candidates,
-            prompt_id=prompt_ids[0],
-        )
-    )
 
     resolver = PromptResolver()
+    requested_sources: list[str | None] = [source_pack_id or None]
+    if source_pack_id:
+        requested_sources.append(None)
     for prompt_id in prompt_ids:
-        content, resolved_pack_id = resolver.resolve_prompt(prompt_id, source_pack_id=source_pack_id or None)
-        if content is not None:
-            prompt_source_pack_id = resolved_pack_id or source_pack_id or base_pack
+        for requested_source in requested_sources:
+            content, resolved_pack_id = resolver.resolve_prompt(
+                prompt_id,
+                source_pack_id=requested_source,
+            )
+            if content is None:
+                continue
+            prompt_source_pack_id = resolved_pack_id or requested_source or base_pack
             trusted, trust_reason = is_trusted_prompt_pack(prompt_source_pack_id)
+            if not trusted:
+                continue
             source = f"{prompt_source_pack_id}.{prompt_id}"
             source_chain.append(
                 _chain_entry(
@@ -297,11 +335,11 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
                 prompt_id,
                 "pack_default",
                 source,
-                content if trusted else "",
+                content,
                 source_chain,
                 metadata=_prompt_manifest_metadata(resolver.get_manifest(prompt_id)),
                 source_pack_id=prompt_source_pack_id,
-                source_pack_trusted=trusted,
+                source_pack_trusted=True,
                 source_pack_trust_reason=trust_reason,
             )
 

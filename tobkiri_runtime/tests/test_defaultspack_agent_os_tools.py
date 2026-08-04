@@ -77,12 +77,24 @@ def test_requested_agent_os_tool_manifests_are_registered():
             assert tool["requires_approval"] is True or tool["risk"] != "high"
 
 
-def test_artifact_tool_lifecycle_and_preview_export(tmp_path):
+def test_artifact_tool_lifecycle_and_preview_export(
+    tmp_path, defaultspack_capability_plan_context
+):
     from domain.tool.executor import ToolExecutor
 
     _reset_registry()
     executor = ToolExecutor()
-    context = {"artifact_root": str(tmp_path), "profile_policy": {"yolo_mode": True}}
+    context = {
+        **defaultspack_capability_plan_context(
+            "artifact_file_write",
+            "artifact_file_patch",
+            "html_preview",
+            "artifact_export",
+            "artifact_file_list",
+        ),
+        "artifact_root": str(tmp_path),
+        "profile_policy": {"yolo_mode": True},
+    }
 
     write = executor.execute(
         "artifact_file_write",
@@ -113,12 +125,29 @@ def test_artifact_tool_lifecycle_and_preview_export(tmp_path):
     assert "index.html" in paths
 
 
-def test_document_sheet_slides_job_and_workflow_tools(tmp_path):
+def test_document_sheet_slides_job_and_workflow_tools(
+    tmp_path, defaultspack_capability_plan_context
+):
     from domain.tool.executor import ToolExecutor
 
     _reset_registry()
     executor = ToolExecutor()
-    context = {"artifact_root": str(tmp_path), "profile_policy": {"yolo_mode": True}}
+    plan_context = defaultspack_capability_plan_context(
+        "doc_create",
+        "sheet_create",
+        "sheet_analyze",
+        "slides_create",
+        "job_create",
+        "job_status",
+        "workflow_define",
+        "workflow_run",
+        "artifact_file_list",
+    )
+    context = {
+        **plan_context,
+        "artifact_root": str(tmp_path),
+        "profile_policy": {"yolo_mode": True},
+    }
 
     doc = executor.execute("doc_create", {"title": "Plan", "content": "Body", "output_path": "docs/plan.docx"}, context)
     assert doc["is_error"] is False
@@ -132,6 +161,7 @@ def test_document_sheet_slides_job_and_workflow_tools(tmp_path):
     assert analyzed["widget"]["data"]["row_count"] == 2
 
     conversation_context = {
+        **plan_context,
         "conversation_workspace_dir": str(tmp_path / "conversation"),
         "profile_policy": {"yolo_mode": True},
     }
@@ -170,7 +200,9 @@ def test_document_sheet_slides_job_and_workflow_tools(tmp_path):
     assert run["widget"]["data"]["status"] == "completed"
 
 
-def test_workflow_run_does_not_trust_client_supplied_approval(tmp_path):
+def test_workflow_run_does_not_trust_client_supplied_approval(
+    tmp_path, defaultspack_capability_plan_context
+):
     from domain.tool.workflow_tools import workflow_run
 
     _reset_registry()
@@ -185,7 +217,10 @@ def test_workflow_run_does_not_trust_client_supplied_approval(tmp_path):
             ],
             "approved": True,
         },
-        {"artifact_root": str(tmp_path)},
+        {
+            **defaultspack_capability_plan_context("webapp_build", "workflow_run"),
+            "artifact_root": str(tmp_path),
+        },
     )
 
     assert result["is_error"] is False
@@ -227,9 +262,12 @@ def test_xiaomi_token_plan_accepts_all_requested_agent_os_tools(monkeypatch):
         assert tool["function"]["parameters"]["type"] == "object"
 
 
-def test_artifact_file_read_blocks_payload_context_root_and_secret_paths(tmp_path):
+def test_artifact_file_read_blocks_payload_context_root_and_secret_paths(
+    tmp_path, defaultspack_capability_plan_context
+):
     from blocks.tool.invoke import run as invoke_tool
     from domain.tool.artifact_tools import artifact_file_read
+    from domain.tool.executor import ToolExecutor
 
     victim_root = tmp_path / "victim"
     secret_dir = victim_root / ".ssh"
@@ -251,43 +289,39 @@ def test_artifact_file_read_blocks_payload_context_root_and_secret_paths(tmp_pat
         {},
     )
     assert forged_policy["status"] == "error"
-    assert forged_policy["error"]["code"] == "PERMISSION_DENIED"
-    assert forged_policy["error"]["details"]["matched_by"] != "yolo_mode"
+    assert forged_policy["error"]["code"] == "CAPABILITY_PLAN_REQUIRED"
 
-    invoked = invoke_tool(
+    plan_context = defaultspack_capability_plan_context("artifact_file_read")
+    executor = ToolExecutor()
+
+    invoked = executor.execute(
+        "artifact_file_read",
+        {"path": ".ssh/id_rsa"},
         {
-            "tool_name": "artifact_file_read",
-            "arguments": {"path": ".ssh/id_rsa"},
-            "context": {
-                "artifact_root": str(victim_root),
-                "profile_policy": {"yolo_mode": True},
-            },
+            **plan_context,
+            "artifact_root": str(victim_root),
+            "profile_policy": {"yolo_mode": True},
         },
-        {"profile_policy": {"yolo_mode": True}},
     )
 
-    assert invoked["status"] == "ok"
-    widget = invoked["data"]["widget"]
+    assert invoked["is_error"] is True
+    widget = invoked["widget"]
     assert widget["status"] == "error"
-    assert "FAKE-PRIVATE-KEY" not in invoked["data"]["result"]
-    assert invoked["data"]["permission"]["matched_by"] == "yolo_mode"
+    assert "FAKE-PRIVATE-KEY" not in invoked["result"]
 
     spoof_workspace = tmp_path / "spoofed-workspace"
     spoof_artifact = spoof_workspace / ".rumi" / "artifacts" / "leak.txt"
     spoof_artifact.parent.mkdir(parents=True)
     spoof_artifact.write_text("WORKSPACE-ROOT-LEAK", encoding="utf-8")
 
-    spoofed_workspace = invoke_tool(
+    spoofed_workspace = executor.execute(
+        "artifact_file_read",
+        {"path": "leak.txt"},
         {
-            "tool_name": "artifact_file_read",
-            "arguments": {"path": "leak.txt"},
-            "context": {
-                "workspace_root": str(spoof_workspace),
-                "profile_policy": {"yolo_mode": True},
-            },
+            **plan_context,
+            "workspace_root": str(spoof_workspace),
+            "profile_policy": {"yolo_mode": True},
         },
-        {"profile_policy": {"yolo_mode": True}},
     )
 
-    assert spoofed_workspace["status"] == "ok"
-    assert "WORKSPACE-ROOT-LEAK" not in spoofed_workspace["data"]["result"]
+    assert "WORKSPACE-ROOT-LEAK" not in spoofed_workspace["result"]

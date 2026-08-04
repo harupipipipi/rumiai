@@ -35,6 +35,55 @@ MutationGuard = Callable[
 ]
 
 
+def preflight_legacy_coding_operation(
+    *,
+    legacy_operation: str,
+    input_data: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+    selected_workspace_id: str,
+    mutation_guard: MutationGuard,
+    allow_without_approval: bool = False,
+) -> dict[str, Any]:
+    """Check approval and the adaptive lease without minting a receipt.
+
+    Coding adapters use this before reading a repository snapshot.  It keeps
+    approval and lease denials deterministic even when the workspace provider
+    or repository is unavailable, while leaving one-shot token consumption and
+    host receipt issuance to ``authorize_legacy_coding_operation``.
+    """
+
+    request = dict(input_data)
+    internal = tool_server_approval_context_is_internal(
+        dict(context) if isinstance(context, Mapping) else None
+    )
+    if not internal and not allow_without_approval:
+        token = _approval_token(request)
+        if not token:
+            return {"authorized": False, "reason": "approval_required"}
+        verification = approval.verify_execution_token(
+            token,
+            legacy_operation,
+            approval.hash_arguments(request),
+            consume=False,
+        )
+        if not verification.valid:
+            return {
+                "authorized": False,
+                "reason": "approval_invalid",
+                "code": verification.code or "APPROVAL_INVALID",
+                "message": verification.message or "approval token is invalid",
+            }
+    guard_denial = mutation_guard(
+        selected_workspace_id,
+        request,
+        context,
+        legacy_operation,
+    )
+    if guard_denial is not None:
+        return {"authorized": False, **dict(guard_denial)}
+    return {"authorized": True}
+
+
 def invoke_coding_contract(
     contract_id: str,
     operation: str,

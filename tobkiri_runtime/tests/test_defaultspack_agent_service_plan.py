@@ -2092,6 +2092,7 @@ def test_coding_context_and_branch_blocks(tmp_path, monkeypatch):
 
     from blocks.coding.context import run as context_run
     from blocks.coding.git_branch import run as branch_run
+    from domain.coding import contract_adapter
     from domain.safety.approval import reset_approval_state_for_tests
     from domain.coding.workspace_store import WorkspaceStore
 
@@ -2099,6 +2100,37 @@ def test_coding_context_and_branch_blocks(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH",
         str(tmp_path / "coding_workspaces.json"),
+    )
+    # This is the negative half of the canonical contract boundary.  Earlier
+    # tests may leave a persisted Defaults Profile available in the worker;
+    # make the provider absence explicit so this assertion remains isolated
+    # without reviving the legacy workspace-path fallback.
+    provider_unavailable = lambda: None
+    adapter_source = Path(contract_adapter.__file__).resolve()
+    for module in tuple(sys.modules.values()):
+        module_path = getattr(module, "__file__", None)
+        if not module_path:
+            continue
+        try:
+            same_adapter = Path(module_path).resolve() == adapter_source
+        except OSError:
+            same_adapter = False
+        if same_adapter and hasattr(module, "persisted_resolved_profile"):
+            monkeypatch.setattr(module, "persisted_resolved_profile", provider_unavailable)
+
+    def invoke_without_provider(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("global coding provider is unavailable")
+
+    monkeypatch.setitem(
+        context_run.__globals__,
+        "invoke_coding_contract",
+        invoke_without_provider,
+    )
+    monkeypatch.setitem(
+        branch_run.__globals__,
+        "invoke_coding_contract",
+        invoke_without_provider,
     )
     WorkspaceStore().create(tmp_path, workspace_id="ws1", trusted=True)
 

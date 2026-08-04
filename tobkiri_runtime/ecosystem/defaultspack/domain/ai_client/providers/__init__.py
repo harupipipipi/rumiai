@@ -1437,7 +1437,8 @@ def _subscription_plans(manifest: Dict[str, Any], curated: Dict[str, Any]) -> Li
         if plans:
             return plans
 
-    token_plan = str(config.get("token_plan") or curated.get("token_plan") or "").strip()
+    token_plan_value = config.get("token_plan") or curated.get("token_plan")
+    token_plan = token_plan_value.strip() if isinstance(token_plan_value, str) else ""
     if not token_plan:
         return []
 

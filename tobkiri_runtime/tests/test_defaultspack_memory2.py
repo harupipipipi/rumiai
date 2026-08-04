@@ -76,7 +76,9 @@ def test_memory_sqlite_store_supports_parallel_thread_access(tmp_path, monkeypat
     assert store.search("secret-value", limit=5) == []
 
 
-def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch):
+def test_memory2_memo_folders_notes_and_first_party_tools(
+    tmp_path, monkeypatch, defaultspack_capability_plan_context
+):
     from domain.tool.permission_checker import PermissionChecker
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
@@ -102,11 +104,14 @@ def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch)
     assert "memo_create_note" in tools
     assert "memo_search_notes" in tools
     assert PermissionChecker().decide("memo_list_notes", tool_def=tools["memo_list_notes"])["allowed"] is True
+    plan_context = defaultspack_capability_plan_context(
+        "memo_create_note", "memo_note_upsert"
+    )
 
     executed = ToolExecutor().execute(
         "memo_create_note",
         {"title": "Tone", "content": "Use concise, warm replies."},
-        {"profile_policy": {"yolo_mode": True}},
+        {**plan_context, "profile_policy": {"yolo_mode": True}},
     )
     assert executed["is_error"] is False
     assert memos.search_notes("warm replies")
@@ -114,7 +119,7 @@ def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch)
     upserted = ToolExecutor().execute(
         "memo_note_upsert",
         {"title": "Current work", "content": "PR97 live memo write should not dead-end on approval."},
-        {},
+        plan_context,
     )
     assert upserted["is_error"] is False
     assert not (isinstance(upserted.get("widget"), dict) and upserted["widget"].get("type") == "approval_request")
@@ -123,7 +128,7 @@ def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch)
     path_upserted = ToolExecutor().execute(
         "memo_note_upsert",
         {"folder_id": "personalization/current_work_2026-05-20", "content": "Path-like memo target works."},
-        {},
+        plan_context,
     )
     assert path_upserted["is_error"] is False
     assert memos.search_notes("Path-like memo target")[0]["title"] == "current_work_2026-05-20"

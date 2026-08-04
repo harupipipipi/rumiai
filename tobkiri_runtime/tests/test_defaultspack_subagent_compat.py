@@ -684,8 +684,11 @@ def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
     assert result["data"]["widget"]["type"] == "subagent"
 
 
-def test_subagent_rumi_function_executes_local_controller(monkeypatch):
+def test_subagent_rumi_function_executes_local_controller(
+    monkeypatch, defaultspack_capability_plan_context
+):
     from domain.tool.registry import ToolRegistry
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
 
     ToolRegistry._instance = None
     tool_def = ToolRegistry().get("subagent")
@@ -712,15 +715,19 @@ def test_subagent_rumi_function_executes_local_controller(monkeypatch):
         fake_run,
     )
 
-    result = ToolExecutor()._execute_rumi_function(
-        tool_def,
-        {"task": "hello from child"},
+    tool_context = mark_tool_server_approval_context(
         {
+            **defaultspack_capability_plan_context("subagent"),
+            "profile_policy": {"yolo_mode": True},
             "conversation_id": "parent-1",
             "principal_id": "rumi_default_tools_pack",
-            "_tool_server_approved": True,
             "capability_executor": FakeCapabilityExecutor(),
-        },
+        }
+    )
+    result = ToolExecutor().execute(
+        "subagent",
+        {"task": "hello from child"},
+        tool_context,
     )
 
     assert result["is_error"] is False
@@ -1236,7 +1243,9 @@ def test_tool_subagent_persists_nested_delegate_assistant_text(monkeypatch, tmp_
     assert assistant["metadata"]["error_code"] == "SUBAGENT_RESPONSE_REPAIRED"
 
 
-def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_out(monkeypatch, tmp_path):
+def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_out(
+    monkeypatch, tmp_path, defaultspack_capability_plan_context
+):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None
     parent = ChatStore().create_conversation(
@@ -1262,7 +1271,10 @@ def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_
     result = run_defaultspack_function(
         "tool_subagent",
         {"task": "simple json probe"},
-        {"conversation_id": parent["id"]},
+        {
+            **defaultspack_capability_plan_context("subagent"),
+            "conversation_id": parent["id"],
+        },
     )
 
     assert result["status"] == "ok"
@@ -1551,11 +1563,16 @@ def test_multi_agent_boundary_documented_and_not_broken():
     assert "multi-agent" in source
 
 
-def test_subagent_alias_does_not_bypass_tool_policy_or_approval():
+def test_subagent_alias_does_not_bypass_tool_policy_or_approval(
+    defaultspack_capability_plan_context,
+):
     result = ToolExecutor().execute(
         "subagent",
         {"task": "hello"},
-        {"profile_policy": {"disabled_tools": ["subagent"]}},
+        {
+            **defaultspack_capability_plan_context("subagent"),
+            "profile_policy": {"disabled_tools": ["subagent"]},
+        },
     )
 
     assert result["is_error"] is True

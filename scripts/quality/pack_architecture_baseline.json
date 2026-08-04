@@ -2178,21 +2178,6 @@
       "violation_category": "unscoped_pack_discovery"
     },
     {
-      "identity": "unscoped_pack_discovery|tobkiri_runtime/core_runtime/resolved_profile.py|text-v1:f7c09a596d40e4bd9088|kernel|all-installed-packs",
-      "rule": "unscoped_pack_discovery",
-      "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
-      "line": 1126,
-      "fingerprint": "text-v1:f7c09a596d40e4bd9088",
-      "source": "kernel",
-      "target": "all-installed-packs",
-      "owner": "pack-architecture",
-      "reason": "Pre-existing canonical runtime discovery edge; migrate to the resolved profile in Wave 2.",
-      "introduced_at": "2026-07-24",
-      "fix_by_wave": 2,
-      "sunset_at": "2027-07-24",
-      "violation_category": "unscoped_pack_discovery"
-    },
-    {
       "identity": "unscoped_pack_discovery|tobkiri_runtime/core_runtime/setup_pack.py|text-v1:c1f9d7dc2acf680e9fc4|kernel|all-installed-packs",
       "rule": "unscoped_pack_discovery",
       "path": "tobkiri_runtime/core_runtime/setup_pack.py",

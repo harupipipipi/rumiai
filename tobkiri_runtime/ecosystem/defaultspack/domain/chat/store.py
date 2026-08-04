@@ -16,9 +16,9 @@ from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
 from core_runtime.paths import USER_DATA_DIR
 from core_runtime.resolved_profile_scope import persisted_resolved_profile
+from domain.ai_client.model_runtime_settings import DEFAULT_MODEL as DEFAULT_CHAT_MODEL
 from domain.chat.attachments.store import upsert_attachment_records
 from domain.chat.icon_matcher import match_icon
-from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationConflict
 
 CONVERSATION = "rumi.resource.conversation.v1"
 CONVERSATION_MANAGE = "rumi.action.conversation.manage.v1"
@@ -243,7 +243,7 @@ class ChatStore:
         self, conversation_id: str, message_dict: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         """Append one message in the owner transaction."""
-        last_conflict: ConversationConflict | None = None
+        last_conflict: Exception | None = None
         for _ in range(MAX_APPEND_RETRIES):
             conversation = self.get_conversation(conversation_id)
             if conversation is None or _read_only(conversation):
@@ -261,7 +261,9 @@ class ChatStore:
                         ],
                     },
                 )
-            except ConversationConflict as exc:
+            except Exception as exc:
+                if type(exc).__name__ != "ConversationConflict":
+                    raise
                 last_conflict = exc
                 continue
             return _legacy_message(result["message"], conversation_id)

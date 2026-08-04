@@ -260,6 +260,92 @@ def component_route_diagnostics() -> list[dict[str, str]]:
     return diagnostics
 
 
+# The prompt workspace template was retired, but its public routes remain a
+# finite compatibility surface. Project the old function identities through
+# the current contract adapter without restoring the retired local writers.
+_PROMPT_COMPATIBILITY_TEMPLATE_ROUTES = (
+    ("GET", "/api/prompts", "prompt_editor_load", "load", {}),
+    ("GET", "/api/prompts/active", "prompt_active", "active", {}),
+    ("GET", "/api/prompts/traces", "prompt_trace_list", "traces", {}),
+    (
+        "GET",
+        "/api/prompts/traces/{trace_id}",
+        "prompt_trace_get",
+        "traces",
+        {"trace_id": "trace_id"},
+    ),
+    ("POST", "/api/prompts/toggle", "prompt_toggle", "toggle", {}),
+    (
+        "POST",
+        "/api/prompts/preview-toggle",
+        "prompt_preview_toggle",
+        "preview_toggle",
+        {},
+    ),
+    ("GET", "/api/prompts/editor", "prompt_editor_load", "load", {}),
+    ("POST", "/api/prompts/editor/save", "prompt_editor_save", "save", {}),
+    (
+        "POST",
+        "/api/prompts/override",
+        "prompt_create_override",
+        "override",
+        {},
+    ),
+    ("POST", "/api/prompts/diff", "prompt_diff", "diff", {}),
+    ("POST", "/api/prompts/test", "prompt_test", "test", {}),
+    (
+        "GET",
+        "/api/prompts/{name}/versions",
+        "prompt_versions",
+        "versions",
+        {"name": "name"},
+    ),
+    (
+        "POST",
+        "/api/prompts/{name}/rollback",
+        "prompt_rollback",
+        "rollback",
+        {"name": "name"},
+    ),
+    ("POST", "/api/prompts/lint", "prompt_lint_prompt", "lint", {}),
+)
+
+_PROMPT_COMPATIBILITY_BLOCK_MODULES = {
+    "prompt_active": "blocks.prompt.active",
+    "prompt_trace_list": "blocks.prompt.trace",
+    "prompt_trace_get": "blocks.prompt.trace",
+    "prompt_toggle": "blocks.prompt.toggle",
+    "prompt_preview_toggle": "blocks.prompt.preview_toggle",
+}
+
+
+def _prompt_compatibility_template_route_specs() -> list[HttpRouteSpec]:
+    if not prompt_contract_routes_enabled():
+        return []
+    specs: list[HttpRouteSpec] = []
+    for method, pattern, function_id, action, path_inject in (
+        _PROMPT_COMPATIBILITY_TEMPLATE_ROUTES
+    ):
+        spec = HttpRouteSpec(
+            method,
+            pattern,
+            block_module=_PROMPT_COMPATIBILITY_BLOCK_MODULES.get(
+                function_id,
+                "blocks.prompt.contract_adapter",
+            ),
+            defaults={"action": action},
+            path_inject=dict(path_inject),
+            sensitive=True,
+            local_only=True,
+        )
+        # Keep the historical name for clients and diagnostics, but do not
+        # present it as a live function-registry entry. The adapter remains
+        # the sole executable target and owns the approval boundary.
+        object.__setattr__(spec, "function_name", f"defaultspack:{function_id}")
+        specs.append(spec)
+    return specs
+
+
 def template_http_route_specs(defaultspack_root: str | Path | None = None) -> List[HttpRouteSpec]:
     try:
         from domain.function_runtime.template_specs import template_route_items
@@ -302,6 +388,12 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 core_only=bool(item.get("core_only", False)),
             )
         )
+    existing = {(spec.method, spec.pattern) for spec in specs}
+    specs.extend(
+        spec
+        for spec in _prompt_compatibility_template_route_specs()
+        if (spec.method, spec.pattern) not in existing
+    )
     return specs
 
 
