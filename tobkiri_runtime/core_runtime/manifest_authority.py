@@ -91,4 +91,3 @@ def validate_repository_manifest_authority(ecosystem_dir: Path) -> None:
         raise ManifestAuthorityError(
             f"manifest authority catalog mismatch: missing={missing}, stale={stale}"
         )
-
