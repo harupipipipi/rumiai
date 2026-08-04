@@ -10,11 +10,14 @@ frontend never gets to select an arbitrary URL or handler.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
 
 
+DEFAULT_CONTRACT_PACK_ID = "defaultspack"
 CONTRACT_ROUTE_PREFIX = "/api/contracts/defaultspack/"
+_PACK_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 
 
 class ContractRouteError(ValueError):
@@ -91,18 +94,28 @@ def is_contract_route_path(path: str) -> bool:
     return str(path or "").startswith(CONTRACT_ROUTE_PREFIX)
 
 
-def _family_allowed(path: str) -> bool:
+def contract_route_prefix(pack_id: str = DEFAULT_CONTRACT_PACK_ID) -> str:
+    """Return the canonical endpoint prefix for one verified frontend pack."""
+
+    normalized = str(pack_id or "").strip()
+    if not _PACK_ID_RE.fullmatch(normalized):
+        raise ContractRouteError("CONTRACT_PACK_INVALID", "Invalid contract pack", 400)
+    return f"/api/contracts/{normalized}/"
+
+
+def _family_allowed(path: str, families: tuple[str, ...] | None = None) -> bool:
     normalized = str(path or "")
+    allowed_families = _FRONTEND_ROUTE_FAMILIES if families is None else families
     return any(
         normalized == prefix or normalized.startswith(prefix + "/")
-        for prefix in _FRONTEND_ROUTE_FAMILIES
+        for prefix in allowed_families
     )
 
 
 def _safe_target_path(path: str) -> bool:
     if not path.startswith("/api/"):
         return False
-    if path.startswith(CONTRACT_ROUTE_PREFIX) or "\x00" in path:
+    if path.startswith("/api/contracts/") or "\x00" in path:
         return False
     if "//" in path:
         return False
@@ -117,8 +130,36 @@ def _safe_target_path(path: str) -> bool:
     return True
 
 
-def _registered_target(server: Any, method: str, path: str) -> bool:
+def _registered_target(
+    server: Any,
+    method: str,
+    path: str,
+    *,
+    families: tuple[str, ...] | None = None,
+) -> bool:
     """Check the live Host route tables without invoking a handler."""
+
+    contract_routes = getattr(server, "_contract_routes", None)
+    if isinstance(contract_routes, Mapping):
+        route_key = (method, path)
+        if route_key in contract_routes:
+            metadata = contract_routes[route_key]
+            requires_approval = isinstance(metadata, Mapping) and bool(
+                metadata.get("approval_required")
+            )
+            if requires_approval:
+                approval_check = getattr(server, "_contract_approval_check", None)
+                approved = bool(approval_check(method, path)) if callable(approval_check) else False
+                if not approved:
+                    raise ContractRouteError(
+                        "CONTRACT_APPROVAL_REQUIRED",
+                        "Contract operation requires Host approval",
+                        403,
+                    )
+            return True
+        # A pack-provided contract map is authoritative.  Do not fall back to
+        # another pack's route registry or the coarse defaultspack families.
+        return False
 
     exact = getattr(server, "_api_route_exact", {})
     if isinstance(exact, Mapping) and (method, path) in exact:
@@ -151,13 +192,16 @@ def _registered_target(server: Any, method: str, path: str) -> bool:
         # The static family map below remains the admission boundary when a
         # cold/test runtime has not installed the route registry yet.
         pass
-    return _family_allowed(path)
+    return _family_allowed(path, families)
 
 
 def resolve_contract_route(
     server: Any,
     method: str,
     request_path: str,
+    *,
+    pack_id: str = DEFAULT_CONTRACT_PACK_ID,
+    route_families: tuple[str, ...] | None = None,
 ) -> ResolvedContractRoute | None:
     """Decode and validate a canonical operation token.
 
@@ -167,9 +211,10 @@ def resolve_contract_route(
     route.
     """
 
-    if not is_contract_route_path(request_path):
+    prefix = contract_route_prefix(pack_id)
+    if not str(request_path or "").startswith(prefix):
         return None
-    token = str(request_path)[len(CONTRACT_ROUTE_PREFIX) :]
+    token = str(request_path)[len(prefix) :]
     if not token or "/" in token:
         raise ContractRouteError("CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400)
     try:
@@ -187,10 +232,17 @@ def resolve_contract_route(
         raise ContractRouteError("CONTRACT_METHOD_UNSUPPORTED", "Unsupported contract operation method", 405)
 
     parsed = urlsplit(encoded_target)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise ContractRouteError("CONTRACT_PATH_INVALID", "Invalid contract target path", 400)
     target_path = parsed.path
     if not _safe_target_path(target_path):
         raise ContractRouteError("CONTRACT_PATH_INVALID", "Invalid contract target path", 400)
-    if not _registered_target(server, operation_method, target_path):
+    if not _registered_target(
+        server,
+        operation_method,
+        target_path,
+        families=route_families,
+    ):
         raise ContractRouteError("CONTRACT_OPERATION_UNKNOWN", "Unknown frontend contract operation", 404)
     query = {
         key: values[-1]
