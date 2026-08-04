@@ -47,6 +47,9 @@ PROJECTION_TYPES = (
     "scheduler",
 )
 
+_PACK_CONTENT_IGNORED_DIRECTORY_NAMES = frozenset({"__pycache__"})
+_PACK_CONTENT_IGNORED_SUFFIXES = frozenset({".pyc", ".pyo"})
+
 _PACK_CONTENT_HASH_CACHE_LOCK = threading.RLock()
 _PACK_CONTENT_HASH_CACHE: dict[
     tuple[str, str],
@@ -1242,8 +1245,12 @@ def _bounded_pack_files(
                 if entry.is_symlink():
                     continue
                 if entry.is_file(follow_symlinks=False):
-                    files.append(Path(entry.path))
+                    path = Path(entry.path)
+                    if path.suffix not in _PACK_CONTENT_IGNORED_SUFFIXES:
+                        files.append(path)
                 elif entry.is_dir(follow_symlinks=False):
+                    if entry.name in _PACK_CONTENT_IGNORED_DIRECTORY_NAMES:
+                        continue
                     if depth >= max_depth:
                         raise RuntimeError(
                             f"pack content scan exceeded depth {max_depth}: {root}"

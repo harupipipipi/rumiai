@@ -163,6 +163,43 @@ def test_pack_content_hash_cache_reuses_only_unchanged_projection(
     assert calls == 2
 
 
+def test_pack_content_hash_ignores_runtime_bytecode_but_tracks_source(
+    tmp_path: Path,
+) -> None:
+    """Interpreter caches must not change an installed pack's identity."""
+    pack_root = tmp_path / "pack"
+    component_root = pack_root / "blocks" / "chat"
+    component_root.mkdir(parents=True)
+    (pack_root / "ecosystem.json").write_text(
+        json.dumps(
+            {
+                "components": {
+                    "chat": {"path": "blocks/chat"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_path = component_root / "create_conversation.py"
+    source_path.write_text("VALUE = 1\n", encoding="utf-8")
+
+    original = _pack_content_hash(pack_root, "manifest")
+    cache_root = component_root / "__pycache__"
+    cache_root.mkdir()
+    (cache_root / "create_conversation.cpython-313.pyc").write_bytes(
+        b"runtime bytecode"
+    )
+    (component_root / "create_conversation.pyc").write_bytes(
+        b"legacy runtime bytecode"
+    )
+
+    assert _pack_content_hash(pack_root, "manifest") == original
+
+    source_path.write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert _pack_content_hash(pack_root, "manifest") != original
+
+
 def test_startup_profile_input_accepts_only_host_supplied_verified_trust() -> None:
     resolution_input = resolution_input_from_startup_profile(
         {
