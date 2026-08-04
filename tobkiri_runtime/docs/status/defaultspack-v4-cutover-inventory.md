@@ -20,6 +20,11 @@ The cutover is governed by:
 - `tobkiri_protocol/schemas/activation_record_v1.schema.json`
 - `docs/runtime-authority-v4.md`
 - `docs/ADR-016_BASE_SHELL_APPLICATION_MODEL.txt`
+- `ecosystem/defaultspack/pack.v4.json`
+- `ecosystem/defaultspack/contracts.v4.json`
+- `ecosystem/defaultspack/artifact-index.v4.json`
+- `ecosystem/defaultspack/executables.v4.json`
+- `ecosystem/defaultspack/v4/bundle.lock.json` and the documents named by it
 
 Only schema-valid, digest-pinned documents selected by an explicit Profile are
 runtime inputs. A legacy document can be read only by an offline migration tool.
@@ -30,7 +35,7 @@ workspace, provider, or permission authority.
 
 | Area | Baseline state | Required cutover |
 | --- | --- | --- |
-| Pack manifest | `ecosystem/defaultspack/ecosystem.json` is runtime-authoritative and uses ecosystem-specific keys. | A schema-valid `io.tobkiri.pack.v4` manifest is the only bundled defaultspack manifest. |
+| Pack manifest | The retired legacy Defaultspack manifest was runtime-authoritative and used ecosystem-specific keys. | A schema-valid `io.tobkiri.pack.v4` manifest is the only bundled defaultspack manifest. |
 | Duplicate pack | `ecosystem/defaults/` contains 408 tracked files duplicating the default implementation. | Remove the duplicate Pack; retain no runtime import or clone path. |
 | Profiles | `profiles/startup.profile.yaml` is legacy; the three `defaults-modern` files claim v4 while using a private, incompatible shape. | Use canonical Profile v4 plus explicit Base and Shell definitions. |
 | Base/Shell | Private assets under `domain/pack_architecture/assets` define a second `io.tobkiri.pack.v4` dialect. | Validate against the Protocol schemas and pin exact Base/Shell artifacts. |
@@ -48,9 +53,9 @@ The following are runtime compatibility surfaces scheduled for deletion, not
 extension:
 
 1. `ecosystem/defaults/` (408 tracked files at baseline).
-2. `ecosystem/defaultspack/ecosystem.json` as runtime authority.
+2. The retired legacy Defaultspack manifest as runtime authority.
 3. `ecosystem/defaultspack/routes.json`.
-4. `ecosystem/defaultspack/compat_aliases.yaml`.
+4. The retired Defaultspack compatibility-alias allowlist.
 5. `ecosystem/defaultspack/docs/legacy_http_routes.yaml`.
 6. `ecosystem/defaultspack/profiles/startup.profile.yaml`.
 7. Private pseudo-v4 schemas and manifests below

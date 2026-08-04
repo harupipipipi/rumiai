@@ -6,14 +6,14 @@ Last updated: 2026-07-10
 
 - Canonical prefix: `defaultspack.`
 - Compatibility prefix: `defaults.`
-- Compatibility aliases are tracked in `ecosystem/defaultspack/compat_aliases.yaml`.
-- Canonical replacements and the inventory/warning/enforcement/removal process are documented in `docs/compat-alias-migration.md`.
+- Protocol v4 Pack and executable catalogs are the only runtime function authority.
+- Legacy alias vocabulary and its migration history are documented in `docs/compat-alias-migration.md`.
 
 Status:
 - Canonical naming exists across generated function manifests.
-- Actual `defaults.*` resolution emits privacy-safe local audit telemetry, with structured warnings for non-internal callers.
-- Generation and integrity checks require the explicit allowlist and a migration note; new functions do not receive `defaults.*` aliases automatically.
-- The verified-unused `defaults.model_runtime.*` group has been removed while canonical `defaultspack.*` aliases remain.
+- Legacy `defaults.*` resolution is outside the v4 runtime boundary.
+- v4 generation and integrity checks use canonical Function identities and real implementation hashes.
+- The verified-unused `defaults.model_runtime.*` group is not a v4 Function identity.
 
 ## Handwritten API -> `api_routes`
 
@@ -28,11 +28,10 @@ Status:
 
 ## HTTP block route -> function route
 
-- defaultspack transport route specs now expose canonical `function_id` / `legacy_block_module` metadata.
-- Legacy HTTP fallbacks are tracked in `ecosystem/defaultspack/docs/legacy_http_routes.yaml`.
-- Integrity scanning now checks function artifacts and legacy fallback allowlisting together.
-- Allowlist metadata now resolves auth mode, principal, CSRF/origin, rate-limit, audit category, replacement `function_id`, and `legacy_until`; the security CI job rejects missing metadata.
-- The chat-channel family has moved from compatibility block fallback to manifest-declared direct function dispatch.
+- The v4 executable catalog exposes canonical Function identities and operation bindings.
+- Legacy HTTP route metadata is an offline migration surface, not a v4 authority.
+- Strict integrity scanning checks the v4 Pack, contracts, artifact index, executable catalog, bundle lock, and implementation hashes.
+- The chat-channel compatibility family is not a v4 executable identity.
 
 Status:
 - Many block-backed routes can now resolve through a function boundary first.
