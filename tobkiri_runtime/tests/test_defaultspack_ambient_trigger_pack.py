@@ -1641,14 +1641,24 @@ def test_ambient_permission_function_rejects_wrong_operator_request(monkeypatch,
 
     from blocks.ambient import permissions
     from core_runtime.authority.ui_operator import sign_ui_operator
+    from core_runtime.host_contract import bind_host_contract
 
-    result = permissions.run(
+    with bind_host_contract(
         {
-            "action": "grant",
-            "permission_id": MIC_PERMISSION,
-            "ui_operator": sign_ui_operator("different-request", nonce="ambient-wrong"),
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"panel_bootstrap_secret": "test-ambient-secret"},
         }
-    )
+    ):
+        result = permissions.run(
+            {
+                "action": "grant",
+                "permission_id": MIC_PERMISSION,
+                "ui_operator": sign_ui_operator(
+                    "different-request", nonce="ambient-wrong"
+                ),
+            }
+        )
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"

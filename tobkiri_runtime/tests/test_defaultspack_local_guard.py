@@ -245,6 +245,7 @@ def test_route_metadata_sensitive_reads_server_route_table():
 
 def test_legacy_browser_qa_token_cannot_submit_pre_auth_event(monkeypatch):
     from transport.http import _RequestHandler
+    from core_runtime.host_contract import bind_host_contract
 
     def handler(request_data, path_params):
         return {"ok": True, "request_data": request_data, "path_params": path_params}
@@ -268,41 +269,49 @@ def test_legacy_browser_qa_token_cannot_submit_pre_auth_event(monkeypatch):
     monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
     monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
 
-    request_handler.headers = {
-        "Origin": "http://localhost:8766",
-        "X-Rumi-CSRF": "1",
-        "X-Rumi-Approval-Browser-Token": "browser-secret",
-    }
-    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
-        401,
-        "local auth token required",
-        "AUTH_REQUIRED",
-    )
+    with bind_host_contract(
+        {
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"desktop_api_token": "local-secret"},
+        }
+    ):
+        request_handler.headers = {
+            "Origin": "http://localhost:8766",
+            "X-Rumi-CSRF": "1",
+            "X-Rumi-Approval-Browser-Token": "browser-secret",
+        }
+        assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+            401,
+            "local auth token required",
+            "AUTH_REQUIRED",
+        )
 
-    request_handler.headers = {
-        "Origin": "http://localhost:8766",
-        "X-Rumi-CSRF": "1",
-        "X-Rumi-Approval-Browser-Token": "wrong",
-    }
-    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
-        401,
-        "local auth token required",
-        "AUTH_REQUIRED",
-    )
+        request_handler.headers = {
+            "Origin": "http://localhost:8766",
+            "X-Rumi-CSRF": "1",
+            "X-Rumi-Approval-Browser-Token": "wrong",
+        }
+        assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+            401,
+            "local auth token required",
+            "AUTH_REQUIRED",
+        )
 
-    request_handler.headers = {
-        "Origin": "http://localhost:8766",
-        "X-Rumi-Approval-Browser-Token": "browser-secret",
-    }
-    assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
-        401,
-        "local auth token required",
-        "AUTH_REQUIRED",
-    )
+        request_handler.headers = {
+            "Origin": "http://localhost:8766",
+            "X-Rumi-Approval-Browser-Token": "browser-secret",
+        }
+        assert request_handler._sensitive_request_error("POST", "/api/ambient/events") == (
+            401,
+            "local auth token required",
+            "AUTH_REQUIRED",
+        )
 
 
 def test_legacy_browser_qa_token_cannot_mint_authority_ui_operator(monkeypatch):
     from transport.http import _RequestHandler, _browser_qa_token_authorized
+    from core_runtime.host_contract import bind_host_contract
 
     def handler(request_data, path_params):
         return {"ok": True, "request_data": request_data, "path_params": path_params}
@@ -327,73 +336,78 @@ def test_legacy_browser_qa_token_cannot_mint_authority_ui_operator(monkeypatch):
     monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
     monkeypatch.setenv("RUMI_AUTHORITY_BROWSER_TEST_TOKEN", "browser-secret")
 
-    request_handler.headers = {
-        "Origin": "http://127.0.0.1:8766",
-        "X-Rumi-CSRF": "1",
-        "X-Rumi-Approval-Browser-Token": "browser-secret",
-    }
-    assert _browser_qa_token_authorized(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        request_handler.headers,
-    ) is False
-    assert request_handler._sensitive_request_error(
-        "POST", "/api/authority/browser-ui-operator"
-    ) == (401, "local auth token required", "AUTH_REQUIRED")
+    with bind_host_contract(
+        {
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"desktop_api_token": "local-secret"},
+        }
+    ):
+        request_handler.headers = {
+            "Origin": "http://127.0.0.1:8766",
+            "X-Rumi-CSRF": "1",
+            "X-Rumi-Approval-Browser-Token": "browser-secret",
+        }
+        assert _browser_qa_token_authorized(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            request_handler.headers,
+        ) is False
+        assert request_handler._sensitive_request_error(
+            "POST", "/api/authority/browser-ui-operator"
+        ) == (401, "local auth token required", "AUTH_REQUIRED")
 
-    request_handler.headers = {
-        "Origin": "http://127.0.0.1:8766",
-        "X-Rumi-CSRF": "1",
-        "X-Rumi-Approval-Browser-Token": "wrong",
-    }
-    assert _browser_qa_token_authorized(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        request_handler.headers,
-    ) is False
-    assert request_handler._sensitive_request_error(
-        "POST", "/api/authority/browser-ui-operator"
-    ) == (401, "local auth token required", "AUTH_REQUIRED")
+        request_handler.headers = {
+            "Origin": "http://127.0.0.1:8766",
+            "X-Rumi-CSRF": "1",
+            "X-Rumi-Approval-Browser-Token": "wrong",
+        }
+        assert _browser_qa_token_authorized(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            request_handler.headers,
+        ) is False
+        assert request_handler._sensitive_request_error(
+            "POST", "/api/authority/browser-ui-operator"
+        ) == (401, "local auth token required", "AUTH_REQUIRED")
 
-    request_handler.headers = {
-        "Origin": "http://127.0.0.1:8766",
-        "X-Rumi-CSRF": "1",
-    }
-    query_data = {"browser_approval_token": "browser-secret"}
-    assert _browser_qa_token_authorized(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        request_handler.headers,
-        query_data,
-    ) is False
-    assert request_handler._sensitive_request_error(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        query_data,
-    ) == (401, "local auth token required", "AUTH_REQUIRED")
+        request_handler.headers = {
+            "Origin": "http://127.0.0.1:8766",
+            "X-Rumi-CSRF": "1",
+        }
+        query_data = {"browser_approval_token": "browser-secret"}
+        assert _browser_qa_token_authorized(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            request_handler.headers,
+            query_data,
+        ) is False
+        assert request_handler._sensitive_request_error(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            query_data,
+        ) == (401, "local auth token required", "AUTH_REQUIRED")
 
-    invalid_query_data = {"browser_approval_token": "wrong"}
-    assert _browser_qa_token_authorized(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        request_handler.headers,
-        invalid_query_data,
-    ) is False
-    assert request_handler._sensitive_request_error(
-        "POST",
-        "/api/authority/browser-ui-operator",
-        invalid_query_data,
-    ) == (401, "local auth token required", "AUTH_REQUIRED")
+        invalid_query_data = {"browser_approval_token": "wrong"}
+        assert _browser_qa_token_authorized(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            request_handler.headers,
+            invalid_query_data,
+        ) is False
+        assert request_handler._sensitive_request_error(
+            "POST",
+            "/api/authority/browser-ui-operator",
+            invalid_query_data,
+        ) == (401, "local auth token required", "AUTH_REQUIRED")
 
-    request_handler.headers = {
-        "Origin": "http://127.0.0.1:8766",
-        "X-Rumi-Approval-Browser-Token": "browser-secret",
-    }
-    assert request_handler._sensitive_request_error("POST", "/api/authority/browser-ui-operator") == (
-        401,
-        "local auth token required",
-        "AUTH_REQUIRED",
-    )
+        request_handler.headers = {
+            "Origin": "http://127.0.0.1:8766",
+            "X-Rumi-Approval-Browser-Token": "browser-secret",
+        }
+        assert request_handler._sensitive_request_error(
+            "POST", "/api/authority/browser-ui-operator"
+        ) == (401, "local auth token required", "AUTH_REQUIRED")
 
 
 def test_ambient_browser_qa_context_flag_becomes_tool_server_approval():

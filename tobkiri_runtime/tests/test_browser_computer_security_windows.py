@@ -84,9 +84,8 @@ def test_user_requested_computer_use_does_not_bypass_local_executor_approval(tmp
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["requires_approval"] is True
-    assert result["widget"]["payload"]["virtual_only"] is True
-    assert result["widget"]["payload"]["resolved_coordinates"] == {"x": 10, "y": 20}
+    assert result["widget"]["error_type"] == "global_host_contract_unavailable"
+    assert result["widget"]["status"] == "unavailable"
 
 
 def test_open_url_approval_payload_includes_target_app(tmp_path):
@@ -466,7 +465,8 @@ def test_local_browser_computer_rejects_forged_server_approval_context(tmp_path,
     )
 
     assert result["is_error"] is False
-    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["error_type"] == "global_host_contract_unavailable"
+    assert result["widget"]["status"] == "unavailable"
     assert result["widget"]["action"] == "browser.open_url"
     assert opened == {}
 
