@@ -24,14 +24,14 @@ def _catalog() -> dict[str, object]:
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
-def test_all_non_default_packs_have_valid_deterministic_v4_artifacts() -> None:
-    """All 139 owned Packs must match a second byte-identical generation."""
+def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
+    """All 141 owned Packs must match a second byte-identical generation."""
     result = generate(check=True)
     assert result == {
-        "packs": 139,
-        "valid": 139,
-        "contracts": 158,
-        "operations": 197,
+        "packs": 141,
+        "valid": 141,
+        "contracts": 159,
+        "operations": 198,
     }
     payload = _catalog()
     assert payload["excluded_packs"] == sorted(EXCLUDED_PACKS)
@@ -54,7 +54,7 @@ def test_normal_generation_has_no_v3_or_legacy_authority_reads(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", guarded_read)
-    assert generate(check=True)["valid"] == 139
+    assert generate(check=True)["valid"] == 141
 
 
 @pytest.mark.parametrize("failure", ["duplicate", "missing", "unknown", "malformed"])
@@ -117,5 +117,5 @@ def test_global_catalog_has_no_duplicate_provider_or_operation() -> None:
         for operation in manifest["operation_catalog"]:
             assert operation["operation_id"] not in operations
             operations.add(operation["operation_id"])
-    assert len(providers) == 158
-    assert len(operations) == 197
+    assert len(providers) == 159
+    assert len(operations) == 198

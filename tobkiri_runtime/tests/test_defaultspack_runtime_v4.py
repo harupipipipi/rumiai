@@ -84,7 +84,12 @@ def test_duplicate_pack_and_legacy_route_authorities_are_absent() -> None:
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     defaultspack_root = ROOT / "ecosystem" / "defaultspack"
-    assert not (ROOT / "ecosystem" / "defaults").exists()
+    defaults_root = ROOT / "ecosystem" / "defaults"
+    assert {path.name for path in defaults_root.iterdir()} == {
+        "artifact-index.v4.json",
+        "contracts.v4.json",
+        "pack.v4.json",
+    }
     assert not (defaultspack_root / "ecosystem.json").exists()
     assert not (defaultspack_root / "permissions.json").exists()
     assert not (defaultspack_root / "routes.json").exists()

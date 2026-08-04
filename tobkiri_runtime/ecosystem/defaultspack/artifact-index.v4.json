@@ -1,0 +1,22 @@
+{
+  "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "artifacts": [
+    {
+      "digest": "sha256:9b50dd3e28721c0b4343d21903bb96dc9262a47e491c01c013143c5d1d350a85",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:6d04ad1905389a9252d4737c3a2493680aab1562344546ac6791095e576a95e7",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:8059f99a459f8c8d7ffe989d60248b08b328c48a21e48fb1f99766b6f11e4d5a"
+  },
+  "pack_id": "defaultspack",
+  "source_identity": "sha256:435a7431c4083daff66ea69fdeaff382fb306329a63787dbf83a27806a1836ce"
+}

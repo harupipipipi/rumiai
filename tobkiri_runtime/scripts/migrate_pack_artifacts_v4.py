@@ -27,7 +27,7 @@ from tobkiri_protocol.validation import validate_document  # noqa: E402
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 AUTHORITY = ROOT / "schemas" / "manifest_authority.v1.json"
-EXCLUDED_PACKS = frozenset({"defaults", "defaultspack"})
+EXCLUDED_PACKS: frozenset[str] = frozenset()
 GENERATOR = "tobkiri.scripts.migrate_pack_artifacts_v4"
 GENERATOR_VERSION = "1.0.0"
 START_COMMIT = "1329f300cd2a8e15170edb1accce8d7c3167882b"
@@ -329,6 +329,83 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
     return record
 
 
+def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
+    """Import the two finite Defaults v4 sources without legacy authority."""
+    source_name = (
+        "defaults-basepack.pack.v4.json"
+        if pack_id == "defaults"
+        else "defaultspack.pack.v4.json"
+    )
+    source_path = ECOSYSTEM / "defaultspack" / "v4" / "packs" / source_name
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    pack = source["pack"]
+    provided: list[dict[str, Any]] = []
+    if pack_id == "defaultspack":
+        function = source["functions"][0]
+        contract = source["contracts"][0]
+        provided.append(
+            {
+                "contract_id": contract["contract_id"],
+                "version": "1.0.0",
+                "provider_id": function["id"],
+                "operations": [
+                    {
+                        "id": operation_id,
+                        "entrypoint_id": operation_id,
+                        "implementation_digest": function[
+                            "implementation_digest"
+                        ],
+                    }
+                    for operation_id in function["operations"]
+                ],
+                "schemas": {},
+                "cardinality": "one",
+                "security": "restricted",
+                "failure": "fail_closed",
+                "isolation": "sandbox",
+                "required_capabilities": [],
+                "lifecycle": {
+                    "introduced": "4.0.0",
+                    "deprecated": False,
+                },
+            }
+        )
+    return {
+        "pack_id": pack_id,
+        "version": pack["version"],
+        "kind": "base" if pack_id == "defaults" else pack["kind"],
+        "display_name": pack["display_name"],
+        "description": "Canonical Defaults v4 composition artifact.",
+        "migrated_from": authority,
+        "dependencies": {},
+        "required_contracts": [],
+        "capabilities": [],
+        "network": {"allowed_domains": [], "allowed_ports": []},
+        "secrets": [],
+        "execution_boundary": (
+            "declarative_only" if pack_id == "defaults" else "sandbox"
+        ),
+        "approval_policy": "none",
+        "workspace_boundary": "pack_local",
+        "provided_contracts": provided,
+        "legacy_operations": [],
+        "runtime_artifacts": [],
+        "legacy_ids": [],
+        "migration": {
+            "compatibility": "none",
+            "removal_wave": 0,
+            "sunset_at": "2026-08-05",
+        },
+        "source_evidence": [
+            {
+                "path": source_path.relative_to(ROOT).as_posix(),
+                "rule_id": "canonical-bundled-v4-source",
+                "digest": _file_digest(source_path),
+            }
+        ],
+    }
+
+
 def _assign_contract_owners(records: list[dict[str, Any]]) -> None:
     """Record one deterministic owner for every multiply-provided contract."""
     providers: dict[str, list[str]] = {}
@@ -345,7 +422,14 @@ def import_legacy(*, check: bool) -> None:
     authority_payload = json.loads(AUTHORITY.read_text(encoding="utf-8"))
     authorities = authority_payload["packs"]
     pack_names = sorted(set(authorities) - EXCLUDED_PACKS)
-    records = [_import_record(ECOSYSTEM / name, authorities[name]) for name in pack_names]
+    records = [
+        (
+            _import_bundled_record(name, authorities[name])
+            if name in {"defaults", "defaultspack"}
+            else _import_record(ECOSYSTEM / name, authorities[name])
+        )
+        for name in pack_names
+    ]
     _assign_contract_owners(records)
     payload = {
         "catalog_api_version": "io.tobkiri.pack-source-catalog.v1",
@@ -572,7 +656,9 @@ def _manifest_document(
         },
         "provenance": _provenance(record, source_identity),
         "migration": {
-            "compatibility": "read_only",
+            "compatibility": record["migration"].get(
+                "compatibility", "read_only"
+            ),
             "legacy_ids": record["legacy_ids"],
             "removal_wave": record["migration"]["removal_wave"],
             "sunset_at": record["migration"]["sunset_at"],
@@ -703,8 +789,8 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         raise PackV4MigrationError("canonical catalog contains duplicate Pack IDs")
     if pack_ids != sorted(pack_ids) or record_ids != pack_ids:
         raise PackV4MigrationError("canonical catalog has missing or unknown Pack IDs")
-    if len(records) != 139:
-        raise PackV4MigrationError("canonical catalog must contain exactly 139 Packs")
+    if len(records) != 141:
+        raise PackV4MigrationError("canonical catalog must contain exactly 141 Packs")
     required = {
         "version",
         "kind",
@@ -767,6 +853,8 @@ def generate(*, check: bool) -> dict[str, int]:
     _verify_global_uniqueness(rendered)
     for pack_id, files in rendered.items():
         pack_root = ECOSYSTEM / pack_id
+        if not check:
+            pack_root.mkdir(parents=True, exist_ok=True)
         for name, text in files.items():
             path = pack_root / name
             if check:
