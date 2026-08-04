@@ -13,17 +13,17 @@ DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "default
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from backend_core.ecosystem.registry import (  # noqa: E402
-    LegacyRegistryUnavailable,
-    Registry,
-    get_registry,
+from ecosystem.defaultspack.domain.runtime_v4 import (  # noqa: E402
+    BundledCatalog,
+    ProfileResolutionDenied,
+    resolve_default_profile,
 )
 from core_runtime.api.route_handlers import RouteHandlersMixin  # noqa: E402
 from core_runtime.di_container import DIContainer  # noqa: E402
 from ecosystem.defaultspack.domain.ai_client.gateway import LLMGateway  # noqa: E402
 
 
-LEGACY_DI_SERVICES = {
+REMOVED_EXECUTION_SERVICES = {
     "authority_service",
     "capability_executor",
     "component_lifecycle",
@@ -33,24 +33,35 @@ LEGACY_DI_SERVICES = {
 }
 
 
-def test_default_container_does_not_publish_legacy_execution_authorities() -> None:
+def test_v4_container_rejects_removed_execution_authorities() -> None:
     container = DIContainer()
     from core_runtime.di_container import _register_defaults
 
     _register_defaults(container)
-    assert LEGACY_DI_SERVICES.isdisjoint(container.registered_names())
-    for name in LEGACY_DI_SERVICES:
+    assert REMOVED_EXECUTION_SERVICES.isdisjoint(container.registered_names())
+    for name in REMOVED_EXECUTION_SERVICES:
         assert container.get_or_none(name) is None
 
 
-def test_legacy_registry_cannot_discover_or_reload_runtime_packs() -> None:
-    with pytest.raises(LegacyRegistryUnavailable, match="ResolvedPlan"):
-        Registry().load_all_packs()
-    with pytest.raises(LegacyRegistryUnavailable, match="process-global"):
-        get_registry()
+def test_v4_profile_rejects_missing_authority_binding() -> None:
+    """A v4 profile cannot resolve without its Host-captured authority edge."""
+    catalog = BundledCatalog.load(DEFAULTSPACK_ROOT / "v4")
+    approved = {
+        str(manifest["pack"]["artifact_digest"])
+        for manifest in catalog.packs.values()
+    }
+    with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference is missing"):
+        resolve_default_profile(
+            catalog,
+            "defaults",
+            approved_artifact_digests=approved,
+            authority_snapshot_digest="sha256:" + "9" * 64,
+            authority_bindings={},
+            security_epoch=1,
+        )
 
 
-def test_legacy_pack_routes_never_enter_http_dispatch() -> None:
+def test_v4_routes_reject_removed_pack_route_dispatch() -> None:
     class Routes(RouteHandlersMixin):
         pass
 

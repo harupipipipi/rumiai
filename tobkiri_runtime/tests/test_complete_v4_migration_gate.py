@@ -102,6 +102,9 @@ FALLBACK_NAMES = frozenset(
     }
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
+VALID_MANIFEST_AUTHORITIES = frozenset(
+    {"legacy-authoritative", "v3-authoritative", "modern-only"}
+)
 
 AUTHORITY_ENV_NAMES = frozenset(
     {
@@ -294,42 +297,186 @@ def _v4_profile_findings() -> list[dict[str, Any]]:
     return findings
 
 
+def _authority_source_sets() -> dict[str, set[str]]:
+    """Load canonical manifest and v4 catalog source sets without discovery."""
+    manifest_catalog = _load_json(
+        RUNTIME / "schemas" / "manifest_authority.v1.json"
+    )
+    v4_catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
+    manifest_ids = (
+        set(manifest_catalog.get("packs", {}))
+        if isinstance(manifest_catalog, Mapping)
+        and isinstance(manifest_catalog.get("packs"), Mapping)
+        else set()
+    )
+    v4_ids = (
+        set(v4_catalog.get("pack_ids", ()))
+        if isinstance(v4_catalog, Mapping)
+        and isinstance(v4_catalog.get("pack_ids"), list)
+        else set()
+    )
+    direct_ids = {path.name for path in _production_pack_dirs()}
+    manifest_source_ids = {
+        path.name
+        for path in _production_pack_dirs()
+        if (path / "ecosystem.json").is_file()
+    }
+    return {
+        "direct_ids": direct_ids,
+        "manifest_ids": manifest_ids,
+        "manifest_source_ids": manifest_source_ids,
+        "v4_ids": v4_ids,
+        "v4_only_ids": v4_ids - manifest_ids,
+    }
+
+
+def _source_set_delta(expected: set[str], observed: set[str]) -> dict[str, list[str]] | None:
+    """Return explicit missing/extra diagnostics for one canonical source set."""
+    if expected == observed:
+        return None
+    return {
+        "missing": sorted(expected - observed),
+        "extra": sorted(observed - expected),
+    }
+
+
 def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
-    """Return direct-Pack authority ownership without discovering installed Packs."""
+    """Return canonical authority classes, including derived v4-only Packs."""
     catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
     classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
-    records = [
-        {
-            "pack_id": path.name,
-            "classified_as": classified.get(path.name),
-            "v4_artifacts": all((path / name).is_file() for name in PACK_ARTIFACTS),
-        }
-        for path in _production_pack_dirs()
-    ]
+    v4_only_ids = _authority_source_sets()["v4_only_ids"]
+    records = []
+    for path in _production_pack_dirs():
+        pack_id = path.name
+        authority = classified.get(pack_id)
+        records.append(
+            {
+                "pack_id": pack_id,
+                "classified_as": authority or ("v4-only" if pack_id in v4_only_ids else None),
+                "manifest_authority": authority,
+                "v4_only": pack_id in v4_only_ids,
+                "v4_artifacts": all((path / name).is_file() for name in PACK_ARTIFACTS),
+            }
+        )
     return Counter(str(record["classified_as"]) for record in records), records
 
 
 def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     """Require exact Authority ownership and the narrow ResolvedPlan scope."""
     findings: list[dict[str, Any]] = []
-    _, records = _manifest_authority_counts()
-    catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
-    classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
-    direct_ids = {record["pack_id"] for record in records}
-    if set(classified) != direct_ids or any(
-        value not in {"legacy-authoritative", "modern-only", "v3-authoritative"}
-        for value in classified.values()
+    manifest_path = RUNTIME / "schemas" / "manifest_authority.v1.json"
+    v4_catalog_path = RUNTIME / "schemas" / "pack_v4_catalog.v1.json"
+    manifest_catalog = _load_json(manifest_path)
+    v4_catalog = _load_json(v4_catalog_path)
+    classified = manifest_catalog.get("packs", {}) if isinstance(manifest_catalog, Mapping) else {}
+    v4_entries = v4_catalog.get("packs", ()) if isinstance(v4_catalog, Mapping) else ()
+    raw_v4_pack_id_list = (
+        v4_catalog.get("pack_ids") if isinstance(v4_catalog, Mapping) else None
+    )
+    v4_pack_id_list = (
+        raw_v4_pack_id_list if isinstance(raw_v4_pack_id_list, list) else []
+    )
+    sources = _authority_source_sets()
+    direct_ids = sources["direct_ids"]
+    manifest_ids = sources["manifest_ids"]
+    manifest_source_ids = sources["manifest_source_ids"]
+    v4_ids = sources["v4_ids"]
+    v4_only_ids = sources["v4_only_ids"]
+    entry_ids = {
+        item.get("pack_id")
+        for item in v4_entries
+        if isinstance(item, Mapping)
+    }
+    entry_id_list = [
+        item.get("pack_id") for item in v4_entries if isinstance(item, Mapping)
+    ]
+
+    def add_scope_finding(path: Path, rule: str, symbol: str, **details: Any) -> None:
+        findings.append(_finding(path, 1, rule, symbol=symbol, **details))
+
+    if not isinstance(classified, Mapping) or any(
+        value not in VALID_MANIFEST_AUTHORITIES for value in classified.values()
     ):
-        findings.append(
-            {
-                "path": "tobkiri_runtime/schemas/manifest_authority.v1.json",
-                "line": 1,
-                "symbol": "manifest_authority",
-                "rule": "authority_scope_mismatch",
-                "classified": dict(sorted(classified.items())),
-                "direct_pack_count": len(direct_ids),
-            }
+        add_scope_finding(
+            manifest_path,
+            "authority_catalog_value_invalid",
+            "manifest_authority",
+            classified=dict(sorted(classified.items())) if isinstance(classified, Mapping) else classified,
         )
+    manifest_delta = _source_set_delta(manifest_ids, manifest_source_ids)
+    if manifest_delta is not None:
+        add_scope_finding(
+            manifest_path,
+            "manifest_canonical_source_set_mismatch",
+            "manifest_authority",
+            **manifest_delta,
+        )
+    v4_entry_delta = _source_set_delta(v4_ids, entry_ids)
+    if (
+        v4_entry_delta is not None
+        or len(v4_pack_id_list) != len(v4_ids)
+        or len(entry_id_list) != len(entry_ids)
+    ):
+        add_scope_finding(
+            v4_catalog_path,
+            "v4_catalog_entry_set_mismatch",
+            "pack_v4_catalog",
+            **(v4_entry_delta or {"missing": [], "extra": []}),
+            duplicate_pack_ids=sorted(
+                {
+                    pack_id
+                    for pack_id in list(v4_pack_id_list) + entry_id_list
+                    if list(v4_pack_id_list).count(pack_id) > 1
+                    or entry_id_list.count(pack_id) > 1
+                }
+            ),
+        )
+    v4_direct_delta = _source_set_delta(v4_ids, direct_ids)
+    if v4_direct_delta is not None:
+        add_scope_finding(
+            v4_catalog_path,
+            "v4_catalog_direct_scope_mismatch",
+            "pack_v4_catalog",
+            **v4_direct_delta,
+        )
+    canonical_ids = manifest_ids | v4_only_ids
+    canonical_delta = _source_set_delta(canonical_ids, direct_ids)
+    v4_only_delta = _source_set_delta(direct_ids - manifest_ids, v4_only_ids)
+    if canonical_delta is not None or v4_only_delta is not None:
+        add_scope_finding(
+            v4_catalog_path,
+            "canonical_pack_source_set_mismatch",
+            "canonical_pack_source_set",
+            **(canonical_delta or {"missing": [], "extra": []}),
+            v4_only_missing=(v4_only_delta or {}).get("missing", []),
+            v4_only_extra=(v4_only_delta or {}).get("extra", []),
+            v4_only=sorted(v4_only_ids),
+        )
+
+    for pack_id in sorted(direct_ids & manifest_ids):
+        pack_dir = ECOSYSTEM / pack_id
+        authority = classified.get(pack_id) if isinstance(classified, Mapping) else None
+        has_v3_manifest = (pack_dir / "rumi.pack.v3.json").is_file()
+        if authority == "v3-authoritative" and not has_v3_manifest:
+            add_scope_finding(
+                pack_dir / "rumi.pack.v3.json",
+                "v3_manifest_missing_for_authority",
+                pack_id,
+            )
+        if authority != "v3-authoritative" and has_v3_manifest:
+            add_scope_finding(
+                pack_dir / "rumi.pack.v3.json",
+                "unexpected_v3_manifest_for_authority",
+                pack_id,
+            )
+    for pack_id in sorted(v4_only_ids & direct_ids):
+        pack_dir = ECOSYSTEM / pack_id
+        if (pack_dir / "ecosystem.json").exists() or (pack_dir / "rumi.pack.v3.json").exists():
+            add_scope_finding(
+                pack_dir / "pack.v4.json",
+                "v4_only_pack_has_legacy_source",
+                pack_id,
+            )
     plan_schema = load_schema("resolved_plan")
     required_plan = frozenset(plan_schema.get("required", ()))
     properties_plan = frozenset(plan_schema.get("properties", ()))
@@ -809,30 +956,81 @@ def _rust_is_shell_root(function: str) -> bool:
     )
 
 
+def _rust_function_body(source: str, function: str) -> str | None:
+    """Return one Rust function body using balanced production braces."""
+    source_without_comments = _strip_rust_comments(source)
+    match = re.search(
+        rf"\bfn\s+{re.escape(function)}\s*\([^{{;]*\)\s*(?:->[^{{]+)?\{{",
+        source_without_comments,
+    )
+    if match is None:
+        return None
+    opening = source_without_comments.find("{", match.start(), match.end())
+    end = _rust_item_end(source_without_comments, opening)
+    if end <= opening + 1:
+        return None
+    return source_without_comments[opening + 1 : end - 1]
+
+
+def _rust_verified_launch_contract(source: str) -> bool:
+    """Recognize the signed-catalog/pinned-artifact launch contract."""
+    spec = _rust_function_body(source, "verified_launch_spec")
+    launcher = _rust_function_body(source, "launch_verified_artifact")
+    if spec is None or launcher is None:
+        return False
+    required_spec_calls = (
+        re.search(r"artifact_path\s*\.\s*is_absolute\s*\(\s*\)", spec),
+        re.search(r"PathBuf::from\s*\(\s*\"/usr/bin/open\"\s*\)", spec),
+        re.search(r"artifact_path\s*\.\s*as_os_str\s*\(\s*\)", spec),
+        re.search(r"program\s*:\s*artifact_path\s*\.\s*to_path_buf", spec),
+    )
+    required_launcher_calls = (
+        re.search(r"verified_launch_spec\s*\(", launcher),
+        re.search(r"Command::new\s*\(\s*&spec\.program\s*\)", launcher),
+        re.search(r"\.args\s*\(\s*&spec\.args\s*\)", launcher),
+        re.search(r"\.spawn\s*\(\s*\)", launcher),
+    )
+    return all(required_spec_calls) and all(required_launcher_calls)
+
+
 def _rust_call_findings_for_source(path: Path, source: str) -> list[dict[str, Any]]:
-    """Inspect only authority env and direct process calls in Shell roots."""
+    """Inspect only authority env and semantically unverified Shell calls."""
     findings: list[dict[str, Any]] = []
     production_source = _strip_rust_test_items(source)
     stripped = _strip_rust_comments_and_strings(production_source)
     env_pattern = re.compile(r"\b(?:std::)?env::var(?:_os)?\s*\(")
+    command_env_pattern = re.compile(r"\.(?:env|envs)\s*\(")
     command_pattern = re.compile(r"\b(?:std::process::)?Command::new\s*\(")
     for match in env_pattern.finditer(stripped):
         function = _rust_function_at(stripped, match.start())
         literal = _rust_literal_argument(production_source, match.start())
         authority_env = literal in AUTHORITY_ENV_NAMES
-        path_env = literal == "PATH" and _rust_is_shell_root(function)
-        if not authority_env and not path_env:
+        shell_env = _rust_is_shell_root(function)
+        if not authority_env and not shell_env:
             continue
         if _rust_context_is_safe(function):
             continue
         line = stripped.count("\n", 0, match.start()) + 1
         findings.append(_finding(path, line, "launcher_env", symbol=literal or function, function=function))
+    for match in command_env_pattern.finditer(stripped):
+        function = _rust_function_at(stripped, match.start())
+        if not _rust_is_shell_root(function):
+            continue
+        line = stripped.count("\n", 0, match.start()) + 1
+        findings.append(
+            _finding(path, line, "launcher_env", symbol="Command.env", function=function)
+        )
     for match in command_pattern.finditer(stripped):
         function = _rust_function_at(stripped, match.start())
         if not _rust_is_shell_root(function):
             continue
         literal = _rust_literal_argument(production_source, match.start())
-        if literal in {"/usr/bin/codesign", "lsregister", "sw_vers", "/bin/ps"}:
+        argument = _rust_call_argument(production_source, match.start()).strip()
+        if (
+            function == "launch_verified_artifact"
+            and argument == "&spec.program"
+            and _rust_verified_launch_contract(production_source)
+        ):
             continue
         line = stripped.count("\n", 0, match.start()) + 1
         findings.append(
@@ -1009,6 +1207,7 @@ def _audit_snapshot() -> dict[str, Any]:
     head_sha = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
     ).strip()
+    source_sets = _authority_source_sets()
     gates = {
         "artifact_contracts": artifact_findings,
         "authority_resolved_plan_scope": authority_findings,
@@ -1035,6 +1234,12 @@ def _audit_snapshot() -> dict[str, Any]:
             "v4_profile_artifacts": [_relative(path) for path in _v4_profile_artifacts()],
             "authority_counts": dict(sorted(_manifest_authority_counts()[0].items())),
             "authority_records": _manifest_authority_counts()[1],
+            "authority_source_sets": {
+                name: sorted(values) for name, values in source_sets.items()
+            },
+            "canonical_source_ids": sorted(
+                source_sets["manifest_ids"] | source_sets["v4_only_ids"]
+            ),
         },
         "findings": gates,
     }
@@ -1055,6 +1260,14 @@ def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
 
 def test_authority_and_resolved_plan_scope_is_exact() -> None:
     """Authority ownership and ResolvedPlan fields remain exact and finite."""
+    assert _source_set_delta({"manifest.pack"}, set()) == {
+        "missing": ["manifest.pack"],
+        "extra": [],
+    }
+    assert _source_set_delta(set(), {"injected.pack"}) == {
+        "missing": [],
+        "extra": ["injected.pack"],
+    }
     _assert_zero("Authority/ResolvedPlan scope", _authority_resolved_plan_findings())
 
 
@@ -1098,7 +1311,7 @@ fn test_fallback() {
 }
 
 fn launch_shell() {
-    std::process::Command::new("sh").spawn();
+    std::process::Command::new("sh").env("PATH", "/tmp").spawn();
     std::env::var("PATH");
 }
 
@@ -1130,7 +1343,22 @@ fn launchservices() {
     assert [item["function"] for item in fixture_findings] == [
         "launch_shell",
         "launch_shell",
+        "launch_shell",
     ]
+    presentation_path = ROOT / "tobkiri_launcher" / "src-tauri" / "src" / "presentation.rs"
+    presentation_findings = _rust_call_findings_for_source(
+        presentation_path, presentation_path.read_text(encoding="utf-8")
+    )
+    assert not [
+        item
+        for item in presentation_findings
+        if item["function"] == "launch_verified_artifact"
+    ]
+    bad_launch = _rust_call_findings_for_source(
+        Path("bad_launch_fixture.rs"),
+        'fn launch_verified_artifact() { std::process::Command::new("sh").spawn(); }',
+    )
+    assert [item["rule"] for item in bad_launch] == ["launcher_direct_command"]
     _assert_zero("Launcher env/PATH/direct/unverified fallback", _launcher_safety_findings())
 
 

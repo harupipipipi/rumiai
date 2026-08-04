@@ -61,6 +61,7 @@ def _nodeids() -> list[str]:
 def _counts(report: dict[str, Any]) -> dict[str, Any]:
     """Flatten evidence lists into handoff-friendly deterministic counts."""
     findings = report["findings"]
+    source_sets = report["pack_inventory"]["authority_source_sets"]
     return {
         "production_pack_directories": report["pack_inventory"][
             "production_pack_directories"
@@ -73,6 +74,9 @@ def _counts(report: dict[str, Any]) -> dict[str, Any]:
         "v4_pack_artifacts": len(report["pack_inventory"]["v4_pack_artifacts"]),
         "v4_profile_artifacts": len(report["pack_inventory"]["v4_profile_artifacts"]),
         "authority_classification": report["pack_inventory"]["authority_counts"],
+        "manifest_authority_source_packs": len(source_sets["manifest_ids"]),
+        "v4_only_packs": len(source_sets["v4_only_ids"]),
+        "canonical_source_packs": len(report["pack_inventory"]["canonical_source_ids"]),
         "gates": {
             key: len(value)
             for key, value in findings.items()
