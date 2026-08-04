@@ -348,8 +348,6 @@ def scaffold_pack(
         )
     except PackTemplateError as exc:
         raise PackSdkError(str(exc)) from exc
-    from core_runtime.manifest_projection import generate_legacy_ecosystem_projection
-
     manifest = {
         "pack_api_version": "rumi.pack.v3",
         "pack": {
@@ -394,10 +392,6 @@ def scaffold_pack(
         path = target / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-    generate_legacy_ecosystem_projection(
-        manifest_path,
-        target / "ecosystem.json",
-    )
     return manifest_path
 
 

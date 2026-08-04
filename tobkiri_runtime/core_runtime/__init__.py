@@ -19,20 +19,14 @@ _LegacyExportTarget = Union[_ExportTarget, _ModuleExportTarget]
 
 
 _PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
-    "Kernel": (".kernel", "Kernel"),
-    "KernelConfig": (".kernel", "KernelConfig"),
     "Diagnostics": (".diagnostics", "Diagnostics"),
     "DIContainer": (".di_container", "DIContainer"),
     "get_container": (".di_container", "get_container"),
     "reset_container": (".di_container", "reset_container"),
     "ApprovalManager": (".approval_manager", "ApprovalManager"),
     "get_approval_manager": (".approval_manager", "get_approval_manager"),
-    "PermissionManager": (".permission_manager", "PermissionManager"),
-    "get_permission_manager": (".permission_manager", "get_permission_manager"),
     "AuditLogger": (".audit_logger", "AuditLogger"),
     "get_audit_logger": (".audit_logger", "get_audit_logger"),
-    "PackAPIServer": (".pack_api_server", "PackAPIServer"),
-    "get_pack_api_server": (".pack_api_server", "get_pack_api_server"),
     "L": (".lang", "L"),
 }
 
@@ -40,12 +34,9 @@ _PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
 _LEGACY_EXPORTS: Dict[str, _LegacyExportTarget] = {
     "pip_installer": ".pip_installer",
     "ds_container": ".ds_container",
-    "capability_proxy": ".capability_proxy",
     "InstallJournal": (".install_journal", "InstallJournal"),
     "InstallJournalConfig": (".install_journal", "InstallJournalConfig"),
-    "InterfaceRegistry": (".interface_registry", "InterfaceRegistry"),
     "EventBus": (".event_bus", "EventBus"),
-    "ComponentLifecycleExecutor": (".component_lifecycle", "ComponentLifecycleExecutor"),
     "FunctionAliasRegistry": (".function_alias", "FunctionAliasRegistry"),
     "get_function_alias_registry": (".function_alias", "get_function_alias_registry"),
     "FlowComposer": (".flow_composer", "FlowComposer"),
@@ -63,8 +54,6 @@ _LEGACY_EXPORTS: Dict[str, _LegacyExportTarget] = {
     "PrivilegeResult": (".host_privilege_manager", "PrivilegeResult"),
     "get_host_privilege_manager": (".host_privilege_manager", "get_host_privilege_manager"),
     "initialize_host_privilege_manager": (".host_privilege_manager", "initialize_host_privilege_manager"),
-    "initialize_pack_api_server": (".pack_api_server", "initialize_pack_api_server"),
-    "shutdown_pack_api_server": (".pack_api_server", "shutdown_pack_api_server"),
     "DockerRunBuilder": (".docker_run_builder", "DockerRunBuilder"),
     "SecureExecutor": (".secure_executor", "SecureExecutor"),
     "ExecutionResult": (".secure_executor", "ExecutionResult"),

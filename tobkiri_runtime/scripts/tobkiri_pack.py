@@ -21,7 +21,7 @@ from core_runtime.pack_sdk import (  # noqa: E402
     scaffold_pack,
     validate_pack_manifest,
 )
-from core_runtime.manifest_projection import (  # noqa: E402
+from scripts.offline_legacy_projection import (  # noqa: E402
     generate_legacy_ecosystem_projection,
 )
 from core_runtime.pack_templates import (  # noqa: E402

@@ -1,5 +1,7 @@
 {
   "packs": {
+    "defaults": "modern-only",
+    "defaultspack": "modern-only",
     "rumi_agent_continuity_pack": "legacy-authoritative",
     "rumi_agent_runtime_service_pack": "v3-authoritative",
     "rumi_agent_services_pack": "legacy-authoritative",

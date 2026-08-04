@@ -13,9 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
-from core_runtime.global_contracts.manifest import load_manifest
-from core_runtime.manifest_projection import render_legacy_ecosystem
+from backend_core.ecosystem.spec.schema.validator import (  # noqa: E402
+    validate_ecosystem,
+)
+from core_runtime.global_contracts.manifest import load_manifest  # noqa: E402
+from scripts.offline_legacy_projection import (  # noqa: E402
+    render_legacy_ecosystem,
+)
 
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "manifest_authority.v1.json"
@@ -192,14 +196,19 @@ def _normalize_legacy(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def migrate(*, check: bool) -> None:
-    pack_roots = sorted(path.parent for path in ECOSYSTEM.glob("*/ecosystem.json"))
+    pack_roots = sorted(path for path in ECOSYSTEM.iterdir() if path.is_dir())
     authorities = {
         root.name: (
             "v3-authoritative"
             if (root / "rumi.pack.v3.json").is_file()
-            else "legacy-authoritative"
+            else (
+                "legacy-authoritative"
+                if (root / "ecosystem.json").is_file()
+                else "modern-only"
+            )
         )
         for root in pack_roots
+        if root.name != "setup_pack" and not root.name.startswith(".")
     }
     catalog_text = json.dumps(
         {"version": 1, "packs": authorities},
@@ -215,6 +224,8 @@ def migrate(*, check: bool) -> None:
 
     for root in pack_roots:
         ecosystem_path = root / "ecosystem.json"
+        if not ecosystem_path.is_file():
+            continue
         ecosystem = _normalize_legacy(
             json.loads(ecosystem_path.read_text(encoding="utf-8"))
         )

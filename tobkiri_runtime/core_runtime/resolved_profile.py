@@ -32,7 +32,6 @@ from .global_contracts.registry import ContractRegistry
 from .paths import PackLocation, resolve_pack_locations
 from .pack_artifact_integrity import verify_declared_artifacts
 from .manifest_authority import load_manifest_authority_catalog
-from .manifest_projection import generate_legacy_ecosystem_projection
 
 RESOLVED_PROFILE_VERSION = "rumi.resolved-profile.v1"
 LOCKFILE_VERSION = "rumi.profile-lock.v1"
@@ -733,23 +732,6 @@ def _read_manifests(
         if v3_path.is_file():
             loaded = load_manifest(v3_path)
             if loaded.ok and isinstance(loaded.value, dict):
-                if authority == "v3-authoritative":
-                    try:
-                        generate_legacy_ecosystem_projection(
-                            v3_path,
-                            location.ecosystem_json_path,
-                            check=True,
-                        )
-                    except ValueError as exc:
-                        diagnostics.append(
-                            _diagnostic(
-                                "invalid_manifest",
-                                "error",
-                                str(exc),
-                                location.pack_id,
-                            )
-                        )
-                        continue
                 manifest["_v3_manifest"] = loaded.value
             else:
                 diagnostics.append(

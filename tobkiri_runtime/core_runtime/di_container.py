@@ -307,12 +307,6 @@ def _register_defaults(container: DIContainer) -> None:
         from .flow_modifier import FlowModifierApplier
         return FlowModifierApplier()
 
-    # --- Wave 5: executors / proxy / API server ---
-    def _pack_api_server_factory() -> None:
-        # PackAPIServer requires explicit initialization with args.
-        # Returns None; real instance set via initialize_pack_api_server().
-        return None
-
     def _egress_proxy_manager_factory() -> "UDSEgressProxyManager":  # noqa: F821
         from .egress_proxy import UDSEgressProxyManager
         c = get_container()
@@ -370,11 +364,6 @@ def _register_defaults(container: DIContainer) -> None:
 
 
 
-    # --- Wave V2: Viewer capability ---
-    def _viewer_capability_handler_factory() -> "ViewerCapabilityHandler":  # noqa: F821
-        from .viewer_capability import ViewerCapabilityHandler
-        return ViewerCapabilityHandler()
-
     # --- Wave V-4: Desktop app capability ---
     def _desktop_capability_handler_factory() -> "DesktopCapabilityHandler":  # noqa: F821
         from .desktop_capability import DesktopCapabilityHandler
@@ -403,7 +392,6 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("secrets_grant_manager", _secrets_grant_manager_factory)
     container.register("modifier_loader", _modifier_loader_factory)
     container.register("modifier_applier", _modifier_applier_factory)
-    container.register("pack_api_server", _pack_api_server_factory)
     container.register("egress_proxy_manager", _egress_proxy_manager_factory)
     container.register("python_file_executor", _python_file_executor_factory)
     container.register("secure_executor", _secure_executor_factory)
@@ -416,6 +404,5 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
     container.register("docker_capability_handler", _docker_capability_handler_factory)
-    container.register("viewer_capability_handler", _viewer_capability_handler_factory)
     container.register("desktop_capability_handler", _desktop_capability_handler_factory)
     container.register("managed_sandbox_supervisor", _managed_sandbox_supervisor_factory)
