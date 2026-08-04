@@ -314,6 +314,7 @@ def test_valid_model_evals_manifest_binds_all_declared_providers(
     """A canonical model-evals manifest must be usable by the binding loader."""
     import core_runtime.capability_binding_registration as binding_module
 
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     monkeypatch.setattr(
         binding_module,
         "verify_declared_artifacts",
