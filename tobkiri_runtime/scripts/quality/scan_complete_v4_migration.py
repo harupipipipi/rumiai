@@ -89,7 +89,6 @@ def build_evidence() -> dict[str, Any]:
         "schema": "io.tobkiri.quality.complete-v4-migration-evidence.v1",
         "source": {
             "test_file": TEST_PATH.relative_to(ROOT).as_posix(),
-            "start_sha": report["start_sha"],
             "observed_head_sha": report["head_sha"],
         },
         "nodeids": _nodeids(),

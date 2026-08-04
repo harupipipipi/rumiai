@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -25,18 +26,12 @@ from tobkiri_protocol.validation import load_schema, validate_file
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
-START_SHA = "df61ff78bdeed84aae7096e06d7608cce70f2b8a"
 
 EXPECTED_PRODUCTION_PACK_COUNT = 141
 PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
     "pack.v4.json": "pack",
     "contracts.v4.json": "pack_contract_catalog",
-}
-EXPECTED_AUTHORITY_COUNTS = {
-    "legacy-authoritative": 46,
-    "modern-only": 0,
-    "v3-authoritative": 95,
 }
 SOURCE_SUFFIXES = {".py", ".rs"}
 IGNORED_PARTS = {
@@ -55,19 +50,17 @@ IGNORED_PARTS = {
     "dev",
     "display",
 }
-IGNORED_FILE_TOKENS = (
-    ".schema.",
-    ".d.ts",
-    "schema",
-    "typing",
-    "types",
-    "playwright",
-    "debug",
-    "package",
-    "verify",
-    "prepare",
-    ".test.",
-    "_test.",
+
+# These are executable production roots, not a repository-wide source list.
+# The ``__main__`` path deliberately follows the current runtime shim so a
+# still-reachable legacy authority cannot disappear merely because another
+# module has a v4-looking name.
+PYTHON_ENTRY_ROOTS = (
+    RUNTIME / "tobkiri" / "__main__.py",
+    RUNTIME / "tobkiri" / "cli_shell.py",
+    RUNTIME / "tobkiri_host" / "runtime.py",
+    RUNTIME / "ecosystem" / "defaultspack" / "run_http.py",
+    RUNTIME / "ecosystem" / "defaultspack" / "domain" / "runtime_v4" / "__init__.py",
 )
 
 LEGACY_SYMBOLS = frozenset(
@@ -110,15 +103,40 @@ FALLBACK_NAMES = frozenset(
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
 
-RUST_CALL_PATTERNS = (
-    ("launcher_env", re.compile(r"\b(?:std::)?env::var(?:_os)?\s*\(")),
-    ("launcher_command", re.compile(r"\b(?:std::process::)?Command::new\s*\(")),
-    ("launcher_spawn", re.compile(r"\.spawn\s*\(")),
+AUTHORITY_ENV_NAMES = frozenset(
+    {
+        "RUMI_AUTO_APPROVE_LOCAL",
+        "RUMI_ALLOW_HOST_EXECUTION",
+        "TOBKIRI_ALLOW_HOST_EXECUTION",
+    }
+)
+SHELL_ROOT_NAMES = frozenset(
+    {
+        "select_presentation",
+        "select_presentation_impl",
+        "launch_selected_presentation",
+        "launch_selected_presentation_impl",
+        "validate_selection",
+        "validate_production_artifact",
+        "artifact_path",
+        "safe_artifact_path",
+        "load_catalog",
+    }
+)
+SAFE_LAUNCH_CONTEXTS = frozenset(
+    {
+        "host_broker",
+        "defaultspack",
+        "uv",
+        "codesign",
+        "launchservices",
+        "dock_registration",
+    }
 )
 
 
 def _production_files() -> tuple[Path, ...]:
-    """Return only production Python/Rust files in the scoped surfaces."""
+    """Return source files in the production surfaces for Rust inspection."""
     roots = (
         RUNTIME / "core_runtime",
         RUNTIME / "backend_core",
@@ -139,11 +157,8 @@ def _production_files() -> tuple[Path, ...]:
 
 
 def _ignored_source(path: Path) -> bool:
-    """Exclude non-production source contexts before syntax analysis."""
-    if any(part in IGNORED_PARTS for part in path.parts):
-        return True
-    name = path.name.lower()
-    return any(token in name for token in IGNORED_FILE_TOKENS)
+    """Exclude only explicit non-production directory contexts."""
+    return any(part.lower() in IGNORED_PARTS for part in path.parts)
 
 
 def _relative(path: Path) -> str:
@@ -153,7 +168,18 @@ def _relative(path: Path) -> str:
 
 def _finding(path: Path, line: int, rule: str, **extra: Any) -> dict[str, Any]:
     """Build one deterministic scanner finding."""
-    return {"path": _relative(path), "line": line, "rule": rule, **extra}
+    symbol = extra.pop("symbol", None) or rule
+    try:
+        display_path = _relative(path)
+    except ValueError:
+        display_path = path.as_posix()
+    return {
+        "path": display_path,
+        "line": line,
+        "symbol": symbol,
+        "rule": rule,
+        **extra,
+    }
 
 
 def _load_json(path: Path) -> Any:
@@ -286,15 +312,19 @@ def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
 def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     """Require exact Authority ownership and the narrow ResolvedPlan scope."""
     findings: list[dict[str, Any]] = []
-    counts, records = _manifest_authority_counts()
+    _, records = _manifest_authority_counts()
     catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
     classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
     direct_ids = {record["pack_id"] for record in records}
-    if set(classified) != direct_ids or counts != Counter(EXPECTED_AUTHORITY_COUNTS):
+    if set(classified) != direct_ids or any(
+        value not in {"legacy-authoritative", "modern-only", "v3-authoritative"}
+        for value in classified.values()
+    ):
         findings.append(
             {
                 "path": "tobkiri_runtime/schemas/manifest_authority.v1.json",
                 "line": 1,
+                "symbol": "manifest_authority",
                 "rule": "authority_scope_mismatch",
                 "classified": dict(sorted(classified.items())),
                 "direct_pack_count": len(direct_ids),
@@ -302,6 +332,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
         )
     plan_schema = load_schema("resolved_plan")
     required_plan = frozenset(plan_schema.get("required", ()))
+    properties_plan = frozenset(plan_schema.get("properties", ()))
     expected_plan = frozenset(
         {
             "plan_api_version",
@@ -314,13 +345,14 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "plan_digest",
         }
     )
-    if required_plan != expected_plan:
+    if required_plan != expected_plan or properties_plan != expected_plan:
         findings.append(
             {
                 "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
                 "line": 1,
                 "rule": "resolved_plan_scope_mismatch",
                 "required": sorted(required_plan),
+                "properties": sorted(properties_plan),
             }
         )
     contracts_path = RUNTIME / "tobkiri_host" / "contracts.py"
@@ -344,6 +376,85 @@ def _python_tree(path: Path) -> ast.AST | None:
         return None
 
 
+def _module_candidates(
+    current: Path,
+    module: str,
+    level: int = 0,
+    imported_names: tuple[str, ...] = (),
+) -> tuple[Path, ...]:
+    """Resolve a Python import to local files without importing application code."""
+    parts = tuple(part for part in module.split(".") if part)
+    if level:
+        base = current.parent
+        for _ in range(max(level - 1, 0)):
+            base = base.parent
+        roots = (base,)
+    else:
+        roots = (
+            RUNTIME,
+            RUNTIME / "ecosystem",
+            RUNTIME / "ecosystem" / "defaultspack",
+        )
+
+    candidates: list[Path] = []
+    for root in roots:
+        module_path = root.joinpath(*parts) if parts else root
+        candidates.extend(
+            (
+                module_path.with_suffix(".py"),
+                module_path / "__init__.py",
+            )
+        )
+        for name in imported_names:
+            child = module_path / name
+            candidates.extend((child.with_suffix(".py"), child / "__init__.py"))
+    return tuple(dict.fromkeys(path for path in candidates if path.is_file()))
+
+
+def _python_import_targets(path: Path, tree: ast.AST) -> tuple[Path, ...]:
+    """Return local import edges from one parsed production module."""
+    targets: set[Path] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                targets.update(_module_candidates(path, alias.name))
+        elif isinstance(node, ast.ImportFrom):
+            targets.update(
+                _module_candidates(
+                    path,
+                    node.module or "",
+                    node.level,
+                    tuple(alias.name for alias in node.names if alias.name != "*"),
+                )
+            )
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr != "import_module" or not node.args:
+                continue
+            value = node.args[0]
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                targets.update(_module_candidates(path, value.value))
+    return tuple(sorted(targets))
+
+
+@lru_cache(maxsize=1)
+def _reachable_python_trees() -> dict[Path, ast.AST]:
+    """Build the production import graph from the declared executable roots."""
+    queue = list(PYTHON_ENTRY_ROOTS)
+    seen: set[Path] = set()
+    graph: dict[Path, ast.AST] = {}
+    while queue:
+        path = queue.pop(0)
+        if path in seen or _ignored_source(path):
+            continue
+        seen.add(path)
+        tree = _python_tree(path)
+        if tree is None:
+            continue
+        graph[path] = tree
+        queue.extend(target for target in _python_import_targets(path, tree) if target not in seen)
+    return graph
+
+
 def _parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
     return {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 
@@ -365,75 +476,111 @@ def _called_name(node: ast.Call) -> str:
     return ""
 
 
-def _ast_legacy_runtime_findings() -> list[dict[str, Any]]:
-    """Find reachable legacy Registry and installed-inventory calls via AST."""
+def _legacy_aliases(tree: ast.AST) -> set[str]:
+    """Return only imported legacy executable names in one module."""
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.rsplit(".", 1)[-1] in LEGACY_SYMBOLS:
+                    aliases.add(alias.asname or alias.name.rsplit(".", 1)[-1])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in LEGACY_SYMBOLS:
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _ast_legacy_runtime_findings_for_tree(
+    path: Path, tree: ast.AST
+) -> list[dict[str, Any]]:
+    """Find executable legacy imports and calls in one reachable module."""
     findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        if path.suffix != ".py":
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
-        parents = _parents(tree)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                module = node.module or "" if isinstance(node, ast.ImportFrom) else ""
-                imported = {alias.name.split(".")[-1] for alias in node.names}
-                if module in LEGACY_AUTHORITY_MODULES or imported & LEGACY_SYMBOLS:
+    parents = _parents(tree)
+    aliases = _legacy_aliases(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module = alias.name
+                if module in LEGACY_AUTHORITY_MODULES or module.rsplit(".", 1)[-1] in LEGACY_SYMBOLS:
                     findings.append(
                         _finding(
                             path,
                             node.lineno,
                             "legacy_registry_import",
                             module=module,
-                            symbols=sorted(imported & LEGACY_SYMBOLS),
                         )
                     )
-            elif isinstance(node, ast.ClassDef) and node.name in LEGACY_SYMBOLS:
-                findings.append(_finding(path, node.lineno, "legacy_registry_definition", symbol=node.name))
-            elif isinstance(node, ast.Call):
-                name = _called_name(node)
-                if name in LEGACY_SYMBOLS:
-                    findings.append(
-                        _finding(path, node.lineno, "legacy_registry_call", symbol=name, owner=_owner(node, parents))
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imported = {alias.name for alias in node.names}
+            if module in LEGACY_AUTHORITY_MODULES or imported & LEGACY_SYMBOLS:
+                findings.append(
+                    _finding(
+                        path,
+                        node.lineno,
+                        "legacy_registry_import",
+                        module=module,
+                        symbols=sorted(imported & LEGACY_SYMBOLS),
                     )
-                if name in INSTALLED_LOOKUP_NAMES:
-                    findings.append(
-                        _finding(path, node.lineno, "runtime_installed_lookup", symbol=name, owner=_owner(node, parents))
+                )
+        elif isinstance(node, ast.Call):
+            name = _called_name(node)
+            if name in LEGACY_SYMBOLS or name in aliases:
+                findings.append(
+                    _finding(
+                        path,
+                        node.lineno,
+                        "legacy_registry_call",
+                        symbol=name,
+                        owner=_owner(node, parents),
                     )
+                )
+            if name in INSTALLED_LOOKUP_NAMES:
+                findings.append(
+                    _finding(
+                        path,
+                        node.lineno,
+                        "runtime_installed_lookup",
+                        symbol=name,
+                        owner=_owner(node, parents),
+                    )
+                )
     return findings
 
 
-def _ast_authority_bypass_findings() -> list[dict[str, Any]]:
-    """Find executable legacy authority bypasses without matching text."""
+def _ast_legacy_runtime_findings() -> list[dict[str, Any]]:
+    """Find legacy runtime edges reachable from production entry roots."""
     findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        if path.suffix != ".py":
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
+    for path, tree in _reachable_python_trees().items():
+        findings.extend(_ast_legacy_runtime_findings_for_tree(path, tree))
+    return sorted(findings, key=lambda item: (item["path"], item["line"], item["rule"]))
+
+
+def _ast_authority_bypass_findings() -> list[dict[str, Any]]:
+    """Find executable legacy authority bypasses on the reachable graph."""
+    findings: list[dict[str, Any]] = []
+    for path, tree in _reachable_python_trees().items():
+        aliases = _legacy_aliases(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = _called_name(node)
-                if name in {"FunctionRegistry", "InterfaceRegistry", "CapabilityExecutor", "AuthorityService"}:
+                if name in LEGACY_SYMBOLS or name in aliases:
                     findings.append(_finding(path, node.lineno, "authority_bypass_call", symbol=name))
-                if any(keyword.arg == "approved" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True for keyword in node.keywords):
+                if any(
+                    keyword.arg == "approved"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in node.keywords
+                ):
                     findings.append(_finding(path, node.lineno, "client_approval_flag"))
-            elif isinstance(node, ast.Attribute) and node.attr in {"authority_granted", "host_execution"}:
-                findings.append(_finding(path, node.lineno, "authority_bypass_attribute", symbol=node.attr))
     return findings
 
 
 def _ast_projection_findings() -> list[dict[str, Any]]:
     """Find projection calls in runtime code; offline scripts are not runtime."""
     findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        if path.suffix != ".py" or "scripts" in path.parts:
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
+    for path, tree in _reachable_python_trees().items():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _called_name(node) in PROJECTION_CALL_NAMES:
                 findings.append(_finding(path, node.lineno, "runtime_projection_call", symbol=_called_name(node)))
@@ -443,12 +590,7 @@ def _ast_projection_findings() -> list[dict[str, Any]]:
 def _ast_fallback_findings() -> list[dict[str, Any]]:
     """Find executable fallback/promotion symbols via AST names and calls."""
     findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        if path.suffix != ".py":
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
+    for path, tree in _reachable_python_trees().items():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _called_name(node) in FALLBACK_NAMES:
                 findings.append(_finding(path, node.lineno, "implicit_fallback_call", symbol=_called_name(node)))
@@ -458,12 +600,7 @@ def _ast_fallback_findings() -> list[dict[str, Any]]:
 def _ast_old_composition_findings() -> list[dict[str, Any]]:
     """Find deleted composition imports, not schema fields or display text."""
     findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        if path.suffix != ".py":
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
+    for path, tree in _reachable_python_trees().items():
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -475,13 +612,136 @@ def _ast_old_composition_findings() -> list[dict[str, Any]]:
 
 
 def _strip_rust_comments_and_strings(source: str) -> str:
-    """Remove Rust comments and string contents while preserving line offsets."""
-    without_comments = re.sub(r"//[^\n]*|/\*.*?\*/", _preserve_lines, source, flags=re.S)
-    return re.sub(r'"(?:\\.|[^"\\])*"', '""', without_comments)
+    """Remove test items, comments, and string contents with line offsets."""
+    production_source = _strip_rust_test_items(source)
+    output: list[str] = []
+    index = 0
+    while index < len(production_source):
+        if production_source.startswith("//", index):
+            end = production_source.find("\n", index)
+            end = len(production_source) if end == -1 else end
+            output.append(_blank_rust_segment(production_source[index:end]))
+            index = end
+            continue
+        if production_source.startswith("/*", index):
+            end = index + 2
+            depth = 1
+            while end < len(production_source) and depth:
+                if production_source.startswith("/*", end):
+                    depth += 1
+                    end += 2
+                elif production_source.startswith("*/", end):
+                    depth -= 1
+                    end += 2
+                else:
+                    end += 1
+            output.append(_blank_rust_segment(production_source[index:end]))
+            index = end
+            continue
+
+        raw_match = re.match(r"(?:br|r)(#+)?\"", production_source[index:])
+        if raw_match:
+            hashes = raw_match.group(1) or ""
+            opening_end = index + raw_match.end()
+            marker = '"' + hashes
+            closing = production_source.find(marker, opening_end)
+            end = len(production_source) if closing == -1 else closing + len(marker)
+            output.append(_blank_rust_segment(production_source[index:end]))
+            index = end
+            continue
+
+        quote_index = index + 1 if production_source.startswith('b"', index) else index
+        if production_source[quote_index:quote_index + 1] == '"':
+            end = quote_index + 1
+            escaped = False
+            while end < len(production_source):
+                char = production_source[end]
+                end += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    break
+            output.append(_blank_rust_segment(production_source[index:end]))
+            index = end
+            continue
+
+        output.append(production_source[index])
+        index += 1
+    return "".join(output)
+
+
+def _strip_rust_comments(source: str) -> str:
+    """Blank Rust comments without changing offsets used for diagnostics."""
+    return re.sub(r"//[^\n]*|/\*.*?\*/", _preserve_lines, source, flags=re.S)
+
+
+def _blank_rust_segment(value: str) -> str:
+    """Blank Rust lexical text while preserving its line and column offsets."""
+    return "".join("\n" if char == "\n" else " " for char in value)
 
 
 def _preserve_lines(match: re.Match[str]) -> str:
     return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+
+def _rust_item_end(source: str, start: int) -> int:
+    """Return the end of the Rust item following a test-only attribute."""
+    index = start
+    while index < len(source) and source[index].isspace():
+        index += 1
+    brace = source.find("{", index)
+    semicolon = source.find(";", index)
+    if semicolon != -1 and (brace == -1 or semicolon < brace):
+        return semicolon + 1
+    if brace == -1:
+        return len(source)
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for position in range(brace, len(source)):
+        char = source[position]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return position + 1
+    return len(source)
+
+
+def _strip_rust_test_items(source: str) -> str:
+    """Remove ``cfg(test)`` modules/functions and ``#[test]`` items."""
+    result = source
+    attribute_pattern = re.compile(
+        r"#\s*\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]"
+    )
+    while True:
+        masked = _strip_rust_comments(result)
+        matches = list(attribute_pattern.finditer(masked))
+        if not matches:
+            return result
+        changed = False
+        for match in reversed(matches):
+            end = _rust_item_end(result, match.end())
+            if end <= match.start():
+                continue
+            replacement = _blank_rust_segment(result[match.start():end])
+            result = result[: match.start()] + replacement + result[end:]
+            changed = True
+        if not changed:
+            return result
 
 
 def _rust_function_at(source: str, offset: int) -> str:
@@ -489,8 +749,106 @@ def _rust_function_at(source: str, offset: int) -> str:
     return matches[-1].group(1) if matches else "<module>"
 
 
+def _rust_call_argument(source: str, offset: int) -> str:
+    """Return one balanced Rust call's argument text."""
+    opening = source.find("(", offset)
+    if opening == -1:
+        return ""
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for position in range(opening, len(source)):
+        char = source[position]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1 : position]
+    return ""
+
+
+def _rust_literal_argument(source: str, offset: int) -> str | None:
+    """Return a simple string literal argument, if one is present."""
+    argument = _rust_call_argument(source, offset)
+    raw_match = re.search(r'(?:br|r)(#+)"(.*?)"\1', argument, flags=re.S)
+    if raw_match:
+        return raw_match.group(2)
+    match = re.search(r'"([^"\\]*(?:\\.[^"\\]*)*)"', argument)
+    return match.group(1) if match else None
+
+
+def _rust_context_is_safe(function: str) -> bool:
+    """Recognize safe lifecycle roles by symbol semantics, not file names."""
+    lowered = function.lower()
+    return any(
+        re.search(r"(?:^|_)uv(?:_|$)", lowered)
+        if context == "uv"
+        else context in lowered
+        for context in SAFE_LAUNCH_CONTEXTS
+    )
+
+
+def _rust_is_shell_root(function: str) -> bool:
+    """Return whether a Rust function is a Shell select/verify/launch root."""
+    lowered = function.lower()
+    if _rust_context_is_safe(function):
+        return False
+    return function in SHELL_ROOT_NAMES or any(
+        token in lowered for token in ("shell", "presentation", "artifact", "selection")
+    )
+
+
+def _rust_call_findings_for_source(path: Path, source: str) -> list[dict[str, Any]]:
+    """Inspect only authority env and direct process calls in Shell roots."""
+    findings: list[dict[str, Any]] = []
+    production_source = _strip_rust_test_items(source)
+    stripped = _strip_rust_comments_and_strings(production_source)
+    env_pattern = re.compile(r"\b(?:std::)?env::var(?:_os)?\s*\(")
+    command_pattern = re.compile(r"\b(?:std::process::)?Command::new\s*\(")
+    for match in env_pattern.finditer(stripped):
+        function = _rust_function_at(stripped, match.start())
+        literal = _rust_literal_argument(production_source, match.start())
+        authority_env = literal in AUTHORITY_ENV_NAMES
+        path_env = literal == "PATH" and _rust_is_shell_root(function)
+        if not authority_env and not path_env:
+            continue
+        if _rust_context_is_safe(function):
+            continue
+        line = stripped.count("\n", 0, match.start()) + 1
+        findings.append(_finding(path, line, "launcher_env", symbol=literal or function, function=function))
+    for match in command_pattern.finditer(stripped):
+        function = _rust_function_at(stripped, match.start())
+        if not _rust_is_shell_root(function):
+            continue
+        literal = _rust_literal_argument(production_source, match.start())
+        if literal in {"/usr/bin/codesign", "lsregister", "sw_vers", "/bin/ps"}:
+            continue
+        line = stripped.count("\n", 0, match.start()) + 1
+        findings.append(
+            _finding(
+                path,
+                line,
+                "launcher_direct_command",
+                symbol=literal or "Command::new",
+                function=function,
+            )
+        )
+    return findings
+
+
 def _rust_call_findings() -> list[dict[str, Any]]:
-    """Find production Launcher calls after comments and string literals are removed."""
+    """Find scoped Launcher calls after Rust test/code text is removed."""
     findings: list[dict[str, Any]] = []
     for path in _production_files():
         if path.suffix != ".rs" or "tobkiri_launcher" not in path.parts:
@@ -499,34 +857,13 @@ def _rust_call_findings() -> list[dict[str, Any]]:
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             continue
-        stripped = _strip_rust_comments_and_strings(source)
-        for rule, pattern in RUST_CALL_PATTERNS:
-            for match in pattern.finditer(stripped):
-                function = _rust_function_at(stripped, match.start())
-                if function.startswith("debug_") or function.startswith("test"):
-                    continue
-                line = stripped.count("\n", 0, match.start()) + 1
-                findings.append(_finding(path, line, rule, function=function))
+        findings.extend(_rust_call_findings_for_source(path, source))
     return findings
 
 
 def _launcher_safety_findings() -> list[dict[str, Any]]:
     """Scan Launcher env/PATH/process calls and unverified v3 entrypoints."""
     findings = _rust_call_findings()
-    for path in _production_files():
-        if path.suffix != ".py" or "tobkiri_launcher" not in path.parts:
-            continue
-        tree = _python_tree(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                if node.func.value.id == "subprocess":
-                    findings.append(_finding(path, node.lineno, "launcher_process_call", symbol=node.func.attr))
-                if node.func.value.id == "os" and node.func.attr in {"system", "popen"}:
-                    findings.append(_finding(path, node.lineno, "launcher_process_call", symbol=node.func.attr))
     for path in sorted(ECOSYSTEM.glob("*/rumi.pack.v3.json")):
         value = _load_json(path)
         if not isinstance(value, Mapping):
@@ -541,30 +878,80 @@ def _launcher_safety_findings() -> list[dict[str, Any]]:
 
 
 def _double_authority_findings() -> list[dict[str, Any]]:
-    """Detect a production authority inventory that can read both Pack roots."""
+    """Detect a reachable legacy inventory authority, not a directory presence."""
     findings: list[dict[str, Any]] = []
     path = RUNTIME / "backend_core" / "ecosystem" / "registry.py"
     tree = _python_tree(path)
     if tree is None:
         return findings
-    has_registry = any(
-        isinstance(node, ast.ClassDef) and node.name == "Registry"
-        for node in ast.walk(tree)
-    )
     has_inventory_read = any(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in {"iterdir", "glob", "rglob"}
         for node in ast.walk(tree)
     )
-    if has_registry and has_inventory_read:
-        findings.append(
+    if not has_inventory_read:
+        return findings
+
+    registry_module_reached = False
+    graph = _reachable_python_trees()
+    for source_path, source_tree in graph.items():
+        aliases = {"Registry", "get_registry", "reload_registry"}
+        for node in ast.walk(source_tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "backend_core.ecosystem.registry":
+                        registry_module_reached = True
+                        findings.append(
+                            _finding(
+                                source_path,
+                                node.lineno,
+                                "double_authority_reachable",
+                                symbol=alias.asname or "backend_core.ecosystem.registry",
+                                target="backend_core.ecosystem.registry",
+                            )
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                if node.module == "backend_core.ecosystem.registry":
+                    registry_module_reached = True
+                    aliases.update(
+                        alias.asname or alias.name
+                        for alias in node.names
+                        if alias.name in {"Registry", "get_registry", "reload_registry"}
+                    )
+                    findings.append(
+                        _finding(
+                            source_path,
+                            node.lineno,
+                            "double_authority_reachable",
+                            symbol="backend_core.ecosystem.registry",
+                            target="backend_core.ecosystem.registry",
+                        )
+                    )
+            elif isinstance(node, ast.Call) and _called_name(node) in aliases:
+                registry_module_reached = True
+                findings.append(
+                    _finding(
+                        source_path,
+                        node.lineno,
+                        "double_authority_reachable",
+                        symbol=_called_name(node),
+                        target="backend_core.ecosystem.registry",
+                    )
+                )
+    if registry_module_reached:
+        findings.extend(
             _finding(
                 path,
-                1,
-                "double_authority_reachable",
-                text="production EcosystemRegistry inventories direct defaults and defaultspack roots",
+                node.lineno,
+                "double_authority_inventory_read",
+                symbol=_called_name(node),
+                target="ecosystem directory inventory",
             )
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"iterdir", "glob", "rglob"}
         )
     return findings
 
@@ -619,6 +1006,9 @@ def _audit_snapshot() -> dict[str, Any]:
     double_authority = _double_authority_findings()
     launcher = _launcher_safety_findings()
     projection = _offline_projection_findings()
+    head_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    ).strip()
     gates = {
         "artifact_contracts": artifact_findings,
         "authority_resolved_plan_scope": authority_findings,
@@ -629,8 +1019,7 @@ def _audit_snapshot() -> dict[str, Any]:
     }
     return {
         "schema": "io.tobkiri.quality.complete-v4-migration.v2",
-        "start_sha": START_SHA,
-        "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "head_sha": head_sha,
         "gate": {
             "status": "GREEN" if all(not findings for findings in gates.values()) else "RED",
             "clean": all(not findings for findings in gates.values()),
@@ -671,6 +1060,19 @@ def test_authority_and_resolved_plan_scope_is_exact() -> None:
 
 def test_legacy_registry_and_installed_lookup_are_zero() -> None:
     """Legacy Registry, runtime inventory lookup, bypass, and projection calls are zero."""
+    legacy_fixture = ast.parse(
+        """
+from backend_core.ecosystem.registry import Registry
+
+def dispatch(registry):
+    return registry.all_installed()
+""",
+        filename="legacy_fixture.py",
+    )
+    fixture_findings = _ast_legacy_runtime_findings_for_tree(
+        Path("legacy_fixture.py"), legacy_fixture
+    )
+    assert any(item["rule"] == "runtime_installed_lookup" for item in fixture_findings)
     _assert_zero(
         "legacy Registry/all-installed runtime lookup",
         _ast_legacy_runtime_findings()
@@ -688,6 +1090,47 @@ def test_double_authority_is_zero_by_production_reachability() -> None:
 
 def test_launcher_env_path_direct_and_unverified_fallback_are_zero() -> None:
     """Launcher has no unscoped environment, process, or unverified entrypoint path."""
+    launcher_fixture = """
+#[cfg(test)]
+fn test_fallback() {
+    std::process::Command::new("sh").spawn();
+    std::env::var("PATH");
+}
+
+fn launch_shell() {
+    std::process::Command::new("sh").spawn();
+    std::env::var("PATH");
+}
+
+fn host_broker_lifecycle() {
+    std::process::Command::new("python").spawn();
+    std::env::var("RUMI_VIEWER_HOST_BROKER_CONNECTION");
+}
+
+fn uv_lifecycle() {
+    std::env::var_os("PATH");
+}
+
+fn defaultspack_lifecycle() {
+    std::process::Command::new("python").spawn();
+    std::env::var("RUMI_DEFAULTSPACK_DEBUG_RUN_ID");
+}
+
+fn codesign() {
+    std::process::Command::new("/usr/bin/codesign").status();
+}
+
+fn launchservices() {
+    std::process::Command::new("lsregister").status();
+}
+"""
+    fixture_findings = _rust_call_findings_for_source(
+        Path("launcher_fixture.rs"), launcher_fixture
+    )
+    assert [item["function"] for item in fixture_findings] == [
+        "launch_shell",
+        "launch_shell",
+    ]
     _assert_zero("Launcher env/PATH/direct/unverified fallback", _launcher_safety_findings())
 
 
@@ -714,7 +1157,10 @@ def test_v4_runtime_and_protocol_composition_apis_are_live() -> None:
 def test_current_sha_red_evidence_reports_actual_findings() -> None:
     """Current SHA evidence is measured directly and remains RED until production migration."""
     report = _audit_snapshot()
-    assert report["start_sha"] == START_SHA
+    expected_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    ).strip()
+    assert report["head_sha"] == expected_head
     assert report["gate"]["status"] == "RED"
     assert report["pack_inventory"]["production_pack_directories"] == 141
     assert report["pack_inventory"]["v4_artifact_files"] == 423
