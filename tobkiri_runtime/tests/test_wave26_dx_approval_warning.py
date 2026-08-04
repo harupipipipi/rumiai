@@ -97,8 +97,8 @@ class TestApprovalScanWarning:
         assert "[Rumi] WARNING" not in captured.err
 
     @patch("core_runtime.approval_manager.get_approval_manager")
-    def test_dev_auto_approved_pack_is_not_left_pending(self, mock_get_am, capsys):
-        """approval scan 時点で dev auto-approve が効けば pending 警告を出さない"""
+    def test_pending_pack_cannot_be_auto_approved_during_scan(self, mock_get_am, capsys):
+        """Approval scan leaves unsigned pending state fail closed."""
         from core_runtime.approval_manager import PackStatus
 
         k = self._make_kernel()
@@ -107,17 +107,19 @@ class TestApprovalScanWarning:
             {"defaultspack": PackStatus.INSTALLED},
             {"defaultspack": True},
         )
-        am.auto_approve_if_dev.return_value = True
-        am.get_status.side_effect = [PackStatus.INSTALLED, PackStatus.APPROVED]
+        am.auto_approve_if_dev.side_effect = AssertionError(
+            "approval scan must not invoke environment auto approval"
+        )
         mock_get_am.return_value = am
 
         ctx = {}
         k._h_approval_scan({"check_hash": True}, ctx)
 
         captured = capsys.readouterr()
-        assert "awaiting approval" not in captured.err.lower()
-        assert ctx["_packs_approved"] == ["defaultspack"]
-        assert ctx["_packs_pending"] == []
+        assert "awaiting approval" in captured.err.lower()
+        assert ctx["_packs_approved"] == []
+        assert ctx["_packs_pending"] == ["defaultspack"]
+        am.auto_approve_if_dev.assert_not_called()
 
 
 # =====================================================================

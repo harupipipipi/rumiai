@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -729,52 +729,43 @@ def test_tool_executor_pack_not_approved_does_not_consume_approval_token(monkeyp
     assert verification.valid is True
 
 
-def test_tool_executor_dev_auto_approve_retries_before_consuming_approval_token(monkeypatch):
-    from domain.safety import approval
+def test_authority_environment_cannot_replace_saved_pack_approval(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
     monkeypatch.setenv("RUMI_AUTO_APPROVE_LOCAL", "true")
-    approval.reset_approval_state_for_tests()
-    args = {"path": "index.html", "old": "<body>old</body>", "new": "<body>new</body>"}
-    first = ToolExecutor()._execute_rumi_function(
-        _coding_write_tool_def("coding_file_patch"),
-        args,
-        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    manager = MagicMock()
+    manager.is_pack_approved_and_verified.return_value = (
+        False,
+        "signed_grant_missing",
     )
-    decision = approval.approve(first["widget"]["approval_request_id"])
-    assert decision["approved"] is True
+    capability_executor = SimpleNamespace(_approval_manager=manager)
 
-    capability_executor = _success_executor()
-    statuses = iter([(False, "not_approved"), (True, None)])
-    monkeypatch.setattr(
-        ToolExecutor,
-        "_function_call_pack_approval_status",
-        staticmethod(lambda capability_executor, pack_id: next(statuses)),
-    )
-    monkeypatch.setattr(
-        ToolExecutor,
-        "_dev_auto_approve_pack",
-        lambda self, pack_id, capability_executor=None: True,
+    approved, reason = ToolExecutor._function_call_pack_approval_status(
+        capability_executor,
+        "defaultspack",
     )
 
-    result = ToolExecutor()._execute_rumi_function(
-        _coding_write_tool_def("coding_file_patch"),
-        {**args, "approval_token": decision["token"]},
-        {"principal_id": "defaultspack", "capability_executor": capability_executor},
-    )
+    assert approved is False
+    assert reason == "signed_grant_missing"
+    manager.is_pack_approved_and_verified.assert_called_once_with("defaultspack")
+    manager.approve.assert_not_called()
 
-    assert result["result"] == "done"
-    capability_executor.execute.assert_called_once()
-    verification = approval.verify_execution_token(
-        decision["token"],
-        "tool.coding_file_patch",
-        approval.hash_arguments(args),
-        consume=False,
-        pack_id="defaultspack",
-    )
-    assert verification.valid is False
-    assert verification.code == "APPROVAL_TOKEN_USED"
+
+def test_missing_server_approval_state_fails_closed():
+    from domain.tool.executor import ToolExecutor
+
+    with patch(
+        "core_runtime.approval_manager.get_approval_manager",
+        side_effect=RuntimeError("approval state unavailable"),
+    ):
+        approved, reason = ToolExecutor._function_call_pack_approval_status(
+            SimpleNamespace(_approval_manager=None),
+            "defaultspack",
+        )
+
+    assert approved is False
+    assert reason == "approval_manager_unavailable"
 
 
 def test_tool_executor_mimo_company_marks_safe_rumi_api_calls_server_approved():

@@ -426,18 +426,17 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         mock_exec.assert_called_once()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
-    def test_function_call_dev_auto_reapproves_stale_pack(self, mock_audit_module):
+    def test_function_call_env_cannot_reapprove_stale_pack(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("defaultspack")
         function_registry = MagicMock()
         function_registry.get.return_value = entry
 
         approval_manager = MagicMock()
-        approval_manager.is_pack_approved_and_verified.side_effect = [
-            (False, "hash_mismatch"),
-            (True, None),
-        ]
-        approval_manager.approve.return_value = SimpleNamespace(success=True)
+        approval_manager.is_pack_approved_and_verified.return_value = (
+            False,
+            "hash_mismatch",
+        )
         approval_manager._is_trusted_builtin_pack.return_value = False
 
         permission_manager = MagicMock()
@@ -449,21 +448,23 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
             permission_manager=permission_manager,
         )
 
-        success_response = CapabilityResponse(success=True, output={"ok": True})
         with (
             patch.dict("os.environ", {"RUMI_ENVIRONMENT": "development", "RUMI_AUTO_APPROVE_LOCAL": "true"}),
-            patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec,
+            patch.object(executor, "_execute_user_function") as mock_exec,
         ):
             resp = executor.execute(
                 "principal_a",
                 {"type": "function.call", "qualified_name": "defaultspack:test_func"},
             )
 
-        self.assertTrue(resp.success)
-        approval_manager.scan_packs.assert_called_once()
-        approval_manager.approve.assert_called_once_with("defaultspack")
-        self.assertEqual(approval_manager.is_pack_approved_and_verified.call_count, 2)
-        mock_exec.assert_called_once()
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "pack_not_approved")
+        approval_manager.scan_packs.assert_not_called()
+        approval_manager.approve.assert_not_called()
+        approval_manager.is_pack_approved_and_verified.assert_called_once_with(
+            "defaultspack"
+        )
+        mock_exec.assert_not_called()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_nonbundled_defaultspack_checks_caller_permission(self, mock_audit_module):

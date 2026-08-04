@@ -23,13 +23,13 @@ class _ApprovalManager:
         return _Status("modified")
 
     def auto_approve_if_dev(self, pack_id):
-        return True
+        raise AssertionError("approval scan must not invoke environment auto approval")
 
     def verify_hash(self, pack_id):
-        raise AssertionError("verify_hash should not run after dev auto approval")
+        raise AssertionError("verify_hash should not run for a modified pack")
 
     def mark_modified(self, pack_id):
-        raise AssertionError("mark_modified should not run after dev auto approval")
+        raise AssertionError("already-modified pack must not be marked again")
 
 
 class _Kernel(KernelSystemHandlersMixin):
@@ -37,7 +37,7 @@ class _Kernel(KernelSystemHandlersMixin):
         self.diagnostics = _Diagnostics()
 
 
-def test_approval_scan_treats_dev_auto_approved_packs_as_approved(monkeypatch):
+def test_approval_scan_never_auto_approves_modified_packs(monkeypatch):
     import core_runtime.kernel_handlers_system as mod
 
     monkeypatch.setattr(mod, "get_approval_manager", lambda: _ApprovalManager())
@@ -48,6 +48,6 @@ def test_approval_scan_treats_dev_auto_approved_packs_as_approved(monkeypatch):
     result = kernel._h_approval_scan({}, ctx)
 
     assert result["_kernel_step_status"] == "success"
-    assert ctx["_packs_approved"] == ["defaultspack"]
-    assert ctx["_packs_modified"] == []
+    assert ctx["_packs_approved"] == []
+    assert ctx["_packs_modified"] == ["defaultspack"]
     assert ctx["_packs_pending"] == []

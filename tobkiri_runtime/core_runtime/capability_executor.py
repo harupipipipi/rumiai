@@ -1047,24 +1047,6 @@ class CapabilityExecutor:
                 )
         return False
 
-    def _dev_auto_reapprove_pack(self, pack_id: str) -> bool:
-        if str(os.environ.get("RUMI_ENVIRONMENT", "")).lower() not in {"development", "dev"}:
-            return False
-        if str(os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "")).lower() != "true":
-            return False
-        approval_manager = getattr(self, "_approval_manager", None)
-        if approval_manager is None:
-            return False
-        try:
-            scan_packs = getattr(approval_manager, "scan_packs", None)
-            if callable(scan_packs):
-                scan_packs()
-            result = approval_manager.approve(pack_id)
-            return bool(getattr(result, "success", False))
-        except Exception:
-            logger.debug("dev auto reapprove failed for pack '%s'", pack_id, exc_info=True)
-            return False
-
     def _has_permission_via_runtime_or_grant(self, principal_id: str, permission_id: str) -> bool:
         permission_manager = getattr(self, "_permission_manager", None)
         if permission_manager is not None:
@@ -1200,13 +1182,6 @@ class CapabilityExecutor:
                 else:
                     is_approved = bool(approved_result)
                     reason = None
-                if not is_approved and self._dev_auto_reapprove_pack(pack_id):
-                    approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
-                    if isinstance(approved_result, tuple):
-                        is_approved, reason = approved_result
-                    else:
-                        is_approved = bool(approved_result)
-                        reason = None
                 if not is_approved:
                     resp = CapabilityResponse(
                         success=False,
@@ -1271,6 +1246,23 @@ class CapabilityExecutor:
                                           latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
                             trusted=False, detail_reason=trust_error)
+                return resp
+            if self._approval_manager is None:
+                resp = CapabilityResponse(
+                    success=False,
+                    error=f"Pack not approved: {pack_id}",
+                    error_type="pack_not_approved",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    effective_permission_id,
+                    handler_id,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason="signed approval state is unavailable",
+                )
                 return resp
 
         # 3. Function manifest requirement checks
@@ -1672,13 +1664,6 @@ class CapabilityExecutor:
                 else:
                     is_approved = bool(approved_result)
                     reason = None
-                if not is_approved and self._dev_auto_reapprove_pack(pack_id):
-                    approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
-                    if isinstance(approved_result, tuple):
-                        is_approved, reason = approved_result
-                    else:
-                        is_approved = bool(approved_result)
-                        reason = None
                 if not is_approved:
                     resp = CapabilityResponse(success=False, error=f"Pack not approved: {pack_id}",
                                               error_type="pack_not_approved", latency_ms=(time.time() - start_time) * 1000)
@@ -1712,6 +1697,23 @@ class CapabilityExecutor:
                     args,
                     request_id,
                     detail_reason=f"Function trust denied for '{qualified_name}': {trust_error}",
+                )
+                return resp
+            if self._approval_manager is None:
+                resp = CapabilityResponse(
+                    success=False,
+                    error=f"Pack not approved: {pack_id}",
+                    error_type="pack_not_approved",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    "function.call",
+                    None,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason="signed approval state is unavailable",
                 )
                 return resp
         if not (is_core_builtin or is_trusted_builtin) and entry.requires:

@@ -296,41 +296,24 @@ class ComponentLifecycleExecutor:
             if am._initialized:
                 status = am.get_status(pack_id)
                 if status != PackStatus.APPROVED:
-                    # Wave 1-2: 開発モード自動承認を試行
-                    if (
-                        callable(getattr(am, "auto_approve_if_dev", None))
-                        and am.auto_approve_if_dev(pack_id) is True
-                    ):
-                        self.diagnostics.record_step(
-                            phase=phase,
-                            step_id=f"{phase}.{comp_id}.dev_auto_approved",
-                            handler=f"component_phase:{phase}",
-                            status="success",
-                            target={"kind": "component", "id": comp_id},
-                            meta={
-                                "reason": "dev_auto_approved",
-                                "pack_id": pack_id,
-                            }
-                        )
-                    else:
-                        logger.warning(
-                            "Component '%s' skipped: pack '%s' status is '%s'. "
-                            "Approve the pack to enable execution.",
-                            comp_id, pack_id, status.value if status else "unknown",
-                        )
-                        self.diagnostics.record_step(
-                            phase=phase,
-                            step_id=f"{phase}.{comp_id}.not_approved",
-                            handler=f"component_phase:{phase}",
-                            status="skipped",
-                            target={"kind": "component", "id": comp_id},
-                            meta={
-                                "reason": "pack_not_approved",
-                                "pack_id": pack_id,
-                                "pack_status": status.value if status else "unknown"
-                            }
-                        )
-                        return
+                    logger.warning(
+                        "Component '%s' skipped: pack '%s' status is '%s'. "
+                        "Approve the pack to enable execution.",
+                        comp_id, pack_id, status.value if status else "unknown",
+                    )
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{phase}.{comp_id}.not_approved",
+                        handler=f"component_phase:{phase}",
+                        status="skipped",
+                        target={"kind": "component", "id": comp_id},
+                        meta={
+                            "reason": "pack_not_approved",
+                            "pack_id": pack_id,
+                            "pack_status": status.value if status else "unknown"
+                        }
+                    )
+                    return
                 
                 # Wave 2: ハッシュ粒度緩和 — verify_hash_detailed を使用
                 detailed_checker = getattr(am, "verify_hash_detailed", None)

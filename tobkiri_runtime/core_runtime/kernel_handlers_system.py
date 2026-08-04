@@ -901,28 +901,8 @@ class KernelSystemHandlersMixin:
                 if status is None:
                     pending.append(pack_id)
                     continue
-                if (
-                    callable(getattr(am, "auto_approve_if_dev", None))
-                    and am.auto_approve_if_dev(pack_id) is True
-                ):
-                    approved.append(pack_id)
-                    continue
                 if status:
                     status_str = status.value if hasattr(status, 'value') else str(status)
-                    if status_str in ("installed", "pending"):
-                        try:
-                            if (
-                                callable(getattr(am, "auto_approve_if_dev", None))
-                                and am.auto_approve_if_dev(pack_id) is True
-                            ):
-                                status = am.get_status(pack_id)
-                                status_str = status.value if hasattr(status, 'value') else str(status)
-                        except Exception:
-                            _logger.debug(
-                                "DEV auto-approve failed during approval scan",
-                                exc_info=True,
-                                pack_id=pack_id,
-                            )
                     if status_str == "approved":
                         if check_hash and not am.verify_hash(pack_id):
                             am.mark_modified(pack_id)

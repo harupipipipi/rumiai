@@ -1079,16 +1079,6 @@ class ToolExecutor:
                     str((context or {}).get("approval_id") or "") if isinstance(context, dict) else "",
                     sorted(str(key) for key in (context or {}).keys())[:40] if isinstance(context, dict) else [],
                 )
-            if (
-                isinstance(context, dict)
-                and tool_server_approval_context_is_internal(context)
-                and getattr(response, "error_type", "") == "pack_not_approved"
-                and str(request.get("type") or "").strip() == "function.call"
-            ):
-                qualified_name = str(request.get("qualified_name") or "").strip()
-                pack_id, _, _ = qualified_name.partition(":")
-                if pack_id and self._dev_auto_approve_pack(pack_id):
-                    response = executor.execute(principal_id, request)
         except Exception as exc:
             return {
                 "result": "Capability execution failed: {}".format(exc),
@@ -1113,34 +1103,11 @@ class ToolExecutor:
             except Exception:
                 manager = None
         if manager is None:
-            return True, None
+            return False, "approval_manager_unavailable"
         approved = manager.is_pack_approved_and_verified(pack_id)
         if isinstance(approved, tuple):
             return bool(approved[0]), approved[1]
         return bool(approved), None
-
-    def _dev_auto_approve_pack(self, pack_id, capability_executor=None):
-        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
-        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
-        if rumi_env not in {"development", "dev"} or auto_approve != "true":
-            return False
-        manager = getattr(capability_executor, "_approval_manager", None)
-        if manager is None:
-            try:
-                from core_runtime.approval_manager import get_approval_manager
-
-                manager = get_approval_manager()
-            except Exception:
-                manager = None
-        if manager is None:
-            return False
-        try:
-            if hasattr(manager, "scan_packs"):
-                manager.scan_packs()
-            result = manager.approve(pack_id)
-            return bool(getattr(result, "success", False))
-        except Exception:
-            return False
 
     def _consume_deferred_tool_approval(self, context):
         if not isinstance(context, dict):
@@ -1187,9 +1154,9 @@ class ToolExecutor:
                 if is_trusted_pack_id(pack_id) and not _requires_approval(tool_def):
                     context["_tool_server_approved"] = True
                     return None
-                approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
-                if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
-                    approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
+                approved, reason = self._function_call_pack_approval_status(
+                    capability_executor, pack_id
+                )
                 if not approved:
                     return {
                         "result": "Pack not approved: {}".format(pack_id),
