@@ -29,6 +29,10 @@ import { motion } from 'motion/react';
 import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import tobkiriIconUrl from '../../../assets/app-icon/tobkiri-launcher-icon.png';
 
+const TRUSTED_ASSET_ORIGIN = 'https://tobkiri.invalid';
+const TRUSTED_ASSET_PREFIXES = ['/assets/', '/panel/assets/'];
+const TRUSTED_LAUNCHER_ICON = /(?:^|\/)tobkiri-launcher-icon(?:-[a-z0-9_-]+)?\.png$/i;
+
 function presentationErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -37,6 +41,65 @@ function presentationErrorMessage(error: unknown, fallback: string): string {
     return error;
   }
   return fallback;
+}
+
+type TrustedImageProps = {
+  readonly src: string;
+  readonly alt: string;
+  readonly 'data-asset-trust': 'bundled';
+};
+
+function trustedBundledImageProps(source: unknown, alt: string): TrustedImageProps | null {
+  const value = typeof source === 'string' ? source.trim() : '';
+  if (
+    !value
+    || value.length > 2048
+    || /[\u0000-\u001f\u007f]/.test(value)
+    || value.startsWith('//')
+    || /^[a-z][a-z\d+.-]*:/i.test(value)
+    || value.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value, TRUSTED_ASSET_ORIGIN);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.origin !== TRUSTED_ASSET_ORIGIN
+    || parsed.search
+    || parsed.hash
+    || !TRUSTED_ASSET_PREFIXES.some((prefix) => parsed.pathname.startsWith(prefix))
+    || !TRUSTED_LAUNCHER_ICON.test(parsed.pathname)
+  ) {
+    return null;
+  }
+  return {src: value, alt, 'data-asset-trust': 'bundled'};
+}
+
+const trustedLauncherIcon = trustedBundledImageProps(tobkiriIconUrl, 'Tobkiri');
+
+function LauncherBrandMark() {
+  if (!trustedLauncherIcon) {
+    return (
+      <span
+        role="img"
+        aria-label="Tobkiri"
+        className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-bg-card text-text-main"
+      >
+        T
+      </span>
+    );
+  }
+  return (
+    <img
+      {...trustedLauncherIcon}
+      className="h-9 w-9 rounded-lg border border-border bg-bg-card object-cover"
+    />
+  );
 }
 
 export function Setup() {
@@ -101,9 +164,19 @@ export function Setup() {
       .then((selected) => {
         if (!alive || !selected) return;
         setSetupPackReady(true);
-        void loadPresentation().catch(() => undefined);
+        void loadPresentation().catch((error: unknown) => {
+          if (!alive) return;
+          setPresentationError(
+            presentationErrorMessage(error, 'Presentation catalog could not be loaded.'),
+          );
+        });
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (!alive) return;
+        setSetupPackError(
+          presentationErrorMessage(error, 'Setup pack status could not be checked.'),
+        );
+      });
     return () => {
       alive = false;
     };
@@ -146,7 +219,7 @@ export function Setup() {
         })
         .catch((setupError) => {
           if (!alive) return;
-          setSetupPackError(setupError instanceof Error ? setupError.message : 'Setup pack selection failed');
+          setSetupPackError(presentationErrorMessage(setupError, 'Setup pack selection failed'));
           setLoading(false);
         });
       return () => {
@@ -178,7 +251,7 @@ export function Setup() {
       })
       .catch((setupError) => {
         if (!alive) return;
-        setSetupPackError(setupError instanceof Error ? setupError.message : 'Setup pack selection failed');
+        setSetupPackError(presentationErrorMessage(setupError, 'Setup pack selection failed'));
         setLoading(false);
       });
 
@@ -274,7 +347,7 @@ export function Setup() {
       <div className="flex min-h-screen items-center justify-center bg-bg-main p-6">
         <motion.div initial={{opacity: 0, scale: .96}} animate={{opacity: 1, scale: 1}} className="relative flex w-full max-w-sm flex-col items-center gap-6 text-center">
           <motion.div initial={{scale: .8}} animate={{scale: 1}} transition={{type: 'spring', stiffness: 260, damping: 22}} className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-bg-card">
-            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+            <CheckCircle2 className="h-9 w-9 text-emerald-500" />
           </motion.div>
           <div>
             <h1 className="text-xl font-semibold text-text-main">{t('setup.linked_title') || 'Account Linked!'}</h1>
@@ -291,11 +364,7 @@ export function Setup() {
       <div className="min-h-screen bg-bg-main px-6 py-10">
         <div className="mx-auto w-full max-w-4xl">
           <div className="mb-8 flex items-center gap-3 text-sm font-semibold text-text-main">
-            <img
-              src={tobkiriIconUrl}
-              alt="Tobkiri"
-              className="h-9 w-9 rounded-lg border border-border bg-bg-card object-cover"
-            />
+            <LauncherBrandMark />
             {LAUNCHER_DISPLAY_NAME}
           </div>
           {presentationLoading && !presentationState ? (
@@ -333,11 +402,7 @@ export function Setup() {
       <div className="mx-auto grid w-full max-w-4xl items-center gap-10 px-6 py-10 lg:grid-cols-[1fr_400px]">
         <motion.section initial={{opacity: 0, x: -18}} animate={{opacity: 1, x: 0}} transition={{duration: .45}} className="max-w-xl">
           <div className="mb-10 flex items-center gap-3 text-sm font-semibold text-text-main">
-            <img
-              src={tobkiriIconUrl}
-              alt="Tobkiri"
-              className="h-9 w-9 rounded-lg border border-border bg-bg-card object-cover"
-            />
+            <LauncherBrandMark />
             {LAUNCHER_DISPLAY_NAME}
           </div>
           <div>
@@ -366,7 +431,7 @@ export function Setup() {
             <Button variant="outline" size="lg" className="w-full" onClick={handleSkip} disabled={loading}>{t('setup.choose_packs')}</Button>
           </div>
           {setupPackError && <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-500">{setupPackError}</p>}
-          <p className="mt-6 border-t border-border pt-4 text-[11px] leading-5 text-text-muted">Base PackはHost authorityを付与しません。ShellのProvider trust、authority mode、production artifactを次の画面で確認します。</p>
+          <p className="mt-6 border-t border-border pt-4 text-xs leading-5 text-text-muted">Base PackはHost authorityを付与しません。ShellのProvider trust、authority mode、production artifactを次の画面で確認します。</p>
         </motion.section>
       </div>
     </div>
