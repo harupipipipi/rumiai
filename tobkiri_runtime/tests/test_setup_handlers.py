@@ -120,11 +120,18 @@ class TestSetupHandlers(unittest.TestCase):
             preview = SetupHandlersMixin._recommended_default_profile_preview()
 
         self.assertEqual(preview["base_pack"], "defaultspack")
-        self.assertEqual(preview["pack_ids"], ["defaultspack", "tools"])
+        self.assertEqual(
+            preview["pack_ids"],
+            ["defaultspack", "rumi_conversation_store_pack", "tools"],
+        )
         self.assertEqual(
             preview["packs"],
             [
                 {"pack_id": "defaultspack", "display_name": "Tobkiri"},
+                {
+                    "pack_id": "rumi_conversation_store_pack",
+                    "display_name": "rumi_conversation_store_pack",
+                },
                 {"pack_id": "tools", "display_name": "Tools"},
             ],
         )

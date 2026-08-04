@@ -2,6 +2,9 @@
   "pack_id": "defaultspack",
   "pack_identity": "rumi:ecosystem/defaultspack",
   "version": "2.0.0",
+  "dependencies": {
+    "rumi_conversation_store_pack": ">=1.0.0,<2.0.0"
+  },
   "vocabulary": {
     "types": [
       "chat",
