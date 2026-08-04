@@ -9,7 +9,7 @@
     {
       "path": "packs/defaultspack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:b95a320e6b128c6c911b7dd96a05ba062cc5fa5d4452f0516a4b0910f2af31db"
+      "digest": "sha256:bf8fceb85f9d162099959a9964dea3296791b57f5a48028a1537d02240eca908"
     },
     {
       "path": "packs/rumi-file-inspect.pack.v4.json",

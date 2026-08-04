@@ -941,7 +941,7 @@ class CommandProtocolRegistry:
                     "message": "high-risk command executor policy is not registered",
                 },
             }
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
         owner_key = self._owner_key({}, context)
         principal_id, _, profile_id = owner_key.partition(":")
@@ -958,7 +958,7 @@ class CommandProtocolRegistry:
             },
         }
         try:
-            decision = get_authority_service().check(
+            decision = removed_authority_service().check(
                 principal_id=principal_id,
                 permission_id="host.process.exec_guarded",
                 resource=resource,

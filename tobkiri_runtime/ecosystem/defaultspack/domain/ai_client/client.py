@@ -507,6 +507,7 @@ class AIClient:
     def _strip_authority_params(params):
         clean = dict(params or {})
         clean.pop("_authority_context", None)
+        clean.pop("_v4_authority_kernel_admitted", None)
         return clean
 
     def _authority_batch_consume_item(self, params, permission_id, decision):
@@ -587,9 +588,9 @@ class AIClient:
             stream=stream,
         )
 
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
-        service = get_authority_service()
+        service = removed_authority_service()
         request_id, approval_token = self._authority_token_for_permission(context, permission_id)
         effective_request_id = request_id or str(context.get("request_id") or "").strip()
         if (
@@ -744,6 +745,11 @@ class AIClient:
         provider=None,
         stream=False,
     ):
+        if (
+            isinstance(params, dict)
+            and params.get("_v4_authority_kernel_admitted") is True
+        ):
+            return
         authority_context = params.get("_authority_context") if isinstance(params, dict) else None
         provider_call_key = f"{provider_id}:{api_id}:{model_id}:{bool(stream)}"
         if isinstance(authority_context, dict):
@@ -802,9 +808,9 @@ class AIClient:
         for check in rechecks:
             check(consume_approval_token=True)
         if token_consumes:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
-            decision = get_authority_service().consume_one_shot_approvals_atomically(token_consumes)
+            decision = removed_authority_service().consume_one_shot_approvals_atomically(token_consumes)
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
             if isinstance(authority_context, dict):
@@ -1523,6 +1529,7 @@ class AIClient:
             "rumi_base_model_override",
             "rumi_require_intended_base_model",
             "_authority_context",
+            "_v4_authority_kernel_admitted",
         ):
             provider_params.pop(key, None)
         return provider_params

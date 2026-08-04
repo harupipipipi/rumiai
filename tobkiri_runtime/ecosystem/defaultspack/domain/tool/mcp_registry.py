@@ -162,7 +162,7 @@ class McpRegistry:
         *,
         status: str = "connected",
         tools: list[Any] | None = None,
-        approved: bool | None = True,
+        approved: bool | None = None,
     ) -> dict[str, Any] | None:
         if status not in _MCP_LIFECYCLE_STATES:
             raise ValueError("unsupported MCP lifecycle status: {}".format(status))

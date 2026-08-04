@@ -259,10 +259,6 @@ def _register_defaults(container: DIContainer) -> None:
         instance.initialize()
         return instance
 
-    def _permission_manager_factory() -> "PermissionManager":  # noqa: F821
-        from .permission_manager import PermissionManager
-        return PermissionManager()
-
     def _capability_trust_store_factory() -> "CapabilityTrustStore":  # noqa: F821
         from .capability_trust_store import CapabilityTrustStore
         return CapabilityTrustStore()
@@ -341,22 +337,6 @@ def _register_defaults(container: DIContainer) -> None:
         from .unit_executor import UnitExecutor
         return UnitExecutor()
 
-    def _capability_executor_factory() -> "CapabilityExecutor":  # noqa: F821
-        from .capability_executor import CapabilityExecutor
-        instance = CapabilityExecutor()
-        instance.initialize()
-        return instance
-
-    def _authority_service_factory() -> "AuthorityService":  # noqa: F821
-        from .authority.service import AuthorityService
-        return AuthorityService(
-            capability_grant_manager=container.get("capability_grant_manager"),
-            secrets_grant_manager=container.get("secrets_grant_manager"),
-            network_grant_manager=container.get("network_grant_manager"),
-            host_privilege_manager=container.get("host_privilege_manager"),
-            hmac_key_manager=container.get("hmac_key_manager"),
-        )
-
     # --- Wave 8: Kernel core services ---
     def _diagnostics_factory() -> "Diagnostics":  # noqa: F821
         from .diagnostics import Diagnostics
@@ -366,21 +346,9 @@ def _register_defaults(container: DIContainer) -> None:
         from .install_journal import InstallJournal
         return InstallJournal()
 
-    def _interface_registry_factory() -> "InterfaceRegistry":  # noqa: F821
-        from .interface_registry import InterfaceRegistry
-        return InterfaceRegistry()
-
     def _event_bus_factory() -> "EventBus":  # noqa: F821
         from .event_bus import EventBus
         return EventBus()
-
-    def _component_lifecycle_factory() -> "ComponentLifecycleExecutor":  # noqa: F821
-        from .component_lifecycle import ComponentLifecycleExecutor
-        c = get_container()
-        return ComponentLifecycleExecutor(
-            diagnostics=c.get("diagnostics"),
-            install_journal=c.get("install_journal"),
-        )
 
     # --- Wave 15: Foundation services ---
     def _health_checker_factory() -> "HealthChecker":  # noqa: F821
@@ -412,13 +380,6 @@ def _register_defaults(container: DIContainer) -> None:
         from .desktop_capability import DesktopCapabilityHandler
         return DesktopCapabilityHandler()
 
-    # --- Wave 24: FunctionRegistry ---
-    def _function_registry_factory() -> "FunctionRegistry":  # noqa: F821
-        from .function_registry import FunctionRegistry
-        c = get_container()
-        vr = c.get_or_none("vocab_registry")
-        return FunctionRegistry(vocab_registry=vr)
-
     # --- Managed sandbox boundary ---
     def _managed_sandbox_supervisor_factory() -> Any:
         from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
@@ -432,7 +393,6 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("network_grant_manager", _network_grant_manager_factory)
     container.register("store_registry", _store_registry_factory)
     container.register("approval_manager", _approval_manager_factory)
-    container.register("permission_manager", _permission_manager_factory)
     container.register("capability_trust_store", _capability_trust_store_factory)
     container.register("capability_grant_manager", _capability_grant_manager_factory)
     container.register("container_orchestrator", _container_orchestrator_factory)
@@ -449,23 +409,13 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("secure_executor", _secure_executor_factory)
     container.register("lib_executor", _lib_executor_factory)
     container.register("unit_executor", _unit_executor_factory)
-    container.register("capability_executor", _capability_executor_factory)
-    container.register("authority_service", _authority_service_factory)
     container.register("diagnostics", _diagnostics_factory)
     container.register("install_journal", _install_journal_factory)
-    container.register("interface_registry", _interface_registry_factory)
     container.register("event_bus", _event_bus_factory)
-    container.register("component_lifecycle", _component_lifecycle_factory)
     container.register("health_checker", _health_checker_factory)
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
     container.register("docker_capability_handler", _docker_capability_handler_factory)
     container.register("viewer_capability_handler", _viewer_capability_handler_factory)
     container.register("desktop_capability_handler", _desktop_capability_handler_factory)
-    container.register("function_registry", _function_registry_factory)
     container.register("managed_sandbox_supervisor", _managed_sandbox_supervisor_factory)
-
-
-def get_authority_service():
-    """Return the process-wide AuthorityService."""
-    return get_container().get("authority_service")

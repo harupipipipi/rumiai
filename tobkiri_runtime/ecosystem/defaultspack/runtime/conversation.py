@@ -18,7 +18,7 @@ def invoke(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     from ecosystem.defaultspack.domain.ai_client.gateway import LLMGateway
 
-    result = LLMGateway().complete(dict(payload))
+    result = LLMGateway(v4_authority_admitted=True).complete(dict(payload))
     if not isinstance(result, Mapping):
         raise RuntimeError("conversation Provider returned a non-object result")
     return dict(result)

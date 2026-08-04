@@ -3864,7 +3864,7 @@ class ChatRunEngine:
 
         if not provider_requires_authority(provider_id, provider=provider, api_id="legacy"):
             return
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
         authority_context = (
             prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
@@ -3877,7 +3877,7 @@ class ChatRunEngine:
         allow_consumed_one_shot_tokens_for_run = bool(
             context.get("allow_consumed_one_shot_tokens_for_run")
         )
-        service = get_authority_service()
+        service = removed_authority_service()
 
         def mark_provider_call_verified() -> None:
             if not isinstance(authority_context, dict):

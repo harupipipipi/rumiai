@@ -2681,9 +2681,9 @@ def _authority_followup_was_issued(
     if not permission_id or not authority_request_id or not token:
         return False
     try:
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
-        service = get_authority_service()
+        service = removed_authority_service()
         issued = getattr(service, "one_shot_approval_issued", None)
         if not callable(issued):
             return False

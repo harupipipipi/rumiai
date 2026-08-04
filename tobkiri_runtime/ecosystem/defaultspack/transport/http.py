@@ -130,7 +130,10 @@ def _platform_release():
 
 class DefaultsHttpServer:
     def __init__(self, facade):
-        self.facade = facade
+        # Legacy kernel facades expose live InterfaceRegistry state.  The v4
+        # server accepts only the activation snapshot installed in DI.
+        del facade
+        self.facade = None
         self.host = os.environ.get("DEFAULTS_HTTP_HOST", "127.0.0.1")
         self.port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
         self._server = None
@@ -511,6 +514,47 @@ class DefaultsHttpServer:
         _apply_authenticated_principal_context(context, payload)
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
+        if module_name == "blocks.chat.send":
+            from core_runtime.di_container import get_container
+            from core_runtime.global_contract_dispatch import invoke_global_contract
+
+            session = get_container().get_or_none("v4_dispatch_session")
+            if session is None:
+                return error(
+                    "Captured Pack v4 session is unavailable",
+                    "V4_SESSION_UNAVAILABLE",
+                )
+            request = {
+                key: payload[key]
+                for key in (
+                    "model",
+                    "messages",
+                    "tools",
+                    "params",
+                    "context",
+                    "runtime_context",
+                    "timezone",
+                )
+                if key in payload
+            }
+            if not isinstance(request.get("messages"), list):
+                content = str(payload.get("content") or payload.get("message") or "")
+                if content:
+                    request["messages"] = [{"role": "user", "content": content}]
+            try:
+                return invoke_global_contract(
+                    session,
+                    "conversation.turn.v1",
+                    "complete",
+                    request,
+                )
+            except Exception as exc:
+                return error(str(exc), "V4_CONVERSATION_FAILED")
+        if module_name.startswith("blocks.chat."):
+            return error(
+                "Chat operation is absent from the captured Pack v4 catalog",
+                "V4_OPERATION_UNAVAILABLE",
+            )
         if module_name in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
             context["_defaultspack_http_route_adapter"] = True
             return invoke_block(module_name, payload, context)
@@ -528,61 +572,10 @@ class DefaultsHttpServer:
         # discover runtime services that do not exist. Call the block directly.
         if hasattr(self, "facade") and self.facade is None:
             return invoke_block(module_name, payload, context)
-        if module_name == "blocks.chat.stream":
-            return invoke_block(module_name, payload, context)
-        try:
-            from domain.function_runtime.bridge import invoke_function
-            from domain.function_runtime.registry import function_id_for_block_module
-
-            function_id = function_id_for_block_module(module_name)
-            if function_id:
-                context["_defaultspack_http_route_adapter"] = True
-                qualified_name = f"defaultspack:{function_id}"
-                timeout_seconds = self._fallback_function_timeout_seconds(module_name, payload)
-                payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
-                result = invoke_function(
-                    qualified_name,
-                    payload,
-                    context,
-                    principal_id=_function_principal_from_context(context, "defaultspack"),
-                    timeout_seconds=timeout_seconds,
-                )
-                result = self._retry_after_dev_auto_approve(
-                    qualified_name,
-                    payload,
-                    context,
-                    result,
-                    invoke_function,
-                    timeout_seconds=timeout_seconds,
-                )
-                error_info = result.get("error", {}) if isinstance(result, dict) else {}
-                error_code = str(error_info.get("code") or "")
-                if error_code == "PACK_NOT_APPROVED":
-                    if self._safe_get_fallback_allowed(module_name, payload):
-                        pass
-                    else:
-                        return result
-                elif error_code == "PERMISSION_DENIED":
-                    if self._function_call_permission_fallback_allowed(
-                        module_name, payload, error_info
-                    ):
-                        pass
-                    else:
-                        return result
-                elif error_code == "TIMEOUT" and module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
-                    pass
-                elif error_code == "GRANT_DENIED" and module_name in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS:
-                    pass
-                elif error_code not in {
-                    "FUNCTION_REGISTRY_UNAVAILABLE",
-                    "FUNCTION_NOT_FOUND",
-                    "CAPABILITY_RUNTIME_UNAVAILABLE",
-                    "CAPABILITY_EXECUTION_FAILED",
-                }:
-                    return result
-        except Exception:
-            pass
-        return invoke_block(module_name, payload, context)
+        return error(
+            "Operation is absent from the captured Pack v4 catalog",
+            "V4_OPERATION_UNAVAILABLE",
+        )
 
     def _invoke_flow_route(
         self,
@@ -599,10 +592,13 @@ class DefaultsHttpServer:
         # declarative flow available to non-HTTP callers, while the HTTP
         # adapter uses the compatibility block that preserves incremental
         # tool-selection, tool-call, and assistant events.
-        if (
-            flow_id == "defaultspack.chat_stream_turn"
-            and fallback_block_module == "blocks.chat.stream"
-        ):
+        if flow_id in {
+            "defaultspack.chat_turn",
+            "defaultspack.chat_stream_turn",
+        } and fallback_block_module in {
+            "blocks.chat.send",
+            "blocks.chat.stream",
+        }:
             return self._invoke_fallback_block(
                 fallback_block_module,
                 request_data,
@@ -679,61 +675,9 @@ class DefaultsHttpServer:
             return invoke_block(fallback_block_module, payload, context)
         if fallback_block_module and self._safe_get_fallback_allowed(fallback_block_module, payload):
             return self._invoke_safe_get_fallback_block(fallback_block_module, payload, context)
-        try:
-            from domain.function_runtime.bridge import invoke_function
-
-            timeout_seconds = self._fallback_function_timeout_seconds(
-                fallback_block_module,
-                payload,
-            )
-            payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
-            result = invoke_function(
-                function_name,
-                payload,
-                context,
-                principal_id=_function_principal_from_context(context, "defaultspack"),
-                timeout_seconds=timeout_seconds,
-            )
-            result = self._retry_after_dev_auto_approve(
-                function_name,
-                payload,
-                context,
-                result,
-                invoke_function,
-                timeout_seconds=timeout_seconds,
-            )
-            if isinstance(result, dict) and result.get("status") != "error":
-                return result
-            if not fallback_block_module:
-                return result
-            error_info = result.get("error", {}) if isinstance(result, dict) else {}
-            error_code = str(error_info.get("code") or "")
-            if error_code not in {
-                "FUNCTION_REGISTRY_UNAVAILABLE",
-                "FUNCTION_NOT_FOUND",
-                "CAPABILITY_RUNTIME_UNAVAILABLE",
-                "CAPABILITY_EXECUTION_FAILED",
-            }:
-                if (
-                    error_code == "TIMEOUT"
-                    and fallback_block_module in _LONG_RUNNING_FALLBACK_BLOCKS
-                ):
-                    return invoke_block(fallback_block_module, payload, context)
-                elif (
-                    error_code == "GRANT_DENIED"
-                    and fallback_block_module in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS
-                ):
-                    return invoke_block(fallback_block_module, payload, context)
-                else:
-                    return result
-        except Exception as exc:
-            if not fallback_block_module:
-                return error(str(exc), "FUNCTION_ROUTE_FAILED")
-        return self._invoke_fallback_block(
-            fallback_block_module,
-            request_data,
-            path_params,
-            inject,
+        return error(
+            f"Operation {function_name!r} is absent from the captured v4 catalog",
+            "V4_OPERATION_UNAVAILABLE",
         )
 
     @staticmethod
@@ -742,30 +686,6 @@ class DefaultsHttpServer:
             flow_id,
             output,
             fallback_block_module=fallback_block_module,
-        )
-
-    def _retry_after_dev_auto_approve(
-        self,
-        qualified_name,
-        payload,
-        context,
-        result,
-        invoke_function,
-        *,
-        timeout_seconds=None,
-    ):
-        error_info = result.get("error", {}) if isinstance(result, dict) else {}
-        if str(error_info.get("code") or "") != "PACK_NOT_APPROVED":
-            return result
-        pack_id, _, _ = qualified_name.partition(":")
-        if not pack_id or not self._dev_auto_approve_pack(pack_id):
-            return result
-        return invoke_function(
-            qualified_name,
-            payload,
-            context,
-            principal_id=_function_principal_from_context(context, pack_id),
-            timeout_seconds=timeout_seconds,
         )
 
     @staticmethod
@@ -840,28 +760,9 @@ class DefaultsHttpServer:
             return error(str(result), "BOOTSTRAP_API_FAILED")
         return result
 
-    def _dev_auto_approve_pack(self, pack_id):
-        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
-        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
-        if rumi_env not in {"development", "dev"} or auto_approve != "true":
-            return False
-        try:
-            from core_runtime.approval_manager import get_approval_manager
-
-            manager = get_approval_manager()
-            manager.scan_packs()
-            result = manager.approve(pack_id)
-            return bool(getattr(result, "success", False))
-        except Exception:
-            return False
-
     def _safe_get_fallback_allowed(self, module_name, payload):
         actual_method = str(payload.get("_actual_method") or "").upper()
         return actual_method == "GET" and module_name in _SAFE_GET_FALLBACK_BLOCKS
-
-    def _function_call_permission_fallback_allowed(self, module_name, payload, error_info):
-        message = str((error_info or {}).get("message") or "")
-        return self._safe_get_fallback_allowed(module_name, payload) and "function.call" in message
 
     # ---- Chat Handlers (fallback) ----
 
@@ -1215,7 +1116,7 @@ class DefaultsHttpServer:
     def _handle_authority_requests(self, request_data, path_params):
         del path_params
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
             debug_binding = None
             if request_data.get("debug_session_id"):
@@ -1231,7 +1132,7 @@ class DefaultsHttpServer:
                     )
                 }
             return ok(
-                get_authority_service().list_requests(
+                removed_authority_service().list_requests(
                     str(request_data.get("status") or "all"),
                     actor_principal=request_data.get("_authenticated_principal"),
                     **({"debug_binding": debug_binding} if debug_binding else {}),
@@ -1243,7 +1144,7 @@ class DefaultsHttpServer:
     def _handle_authority_request(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
             debug_binding = None
             if request_data.get("debug_session_id"):
@@ -1258,7 +1159,7 @@ class DefaultsHttpServer:
                         "profile_id",
                     )
                 }
-            result = get_authority_service().get_request(
+            result = removed_authority_service().get_request(
                 request_id,
                 actor_principal=request_data.get("_authenticated_principal"),
                 **({"debug_binding": debug_binding} if debug_binding else {}),
@@ -1324,9 +1225,9 @@ class DefaultsHttpServer:
         conversation_id = str(request_data.get("conversation_id") or "").strip() or None
         reason = str(request_data.get("reason") or "Authority approval window smoke test").strip()
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
-            decision = get_authority_service().check(
+            decision = removed_authority_service().check(
                 principal_id="",
                 permission_id="model.invoke",
                 resource=resource,
@@ -1403,9 +1304,9 @@ class DefaultsHttpServer:
         if related_permissions:
             approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
-            result = get_authority_service().approve_request(
+            result = removed_authority_service().approve_request(
                 request_id,
                 actor_principal=request_data.get("_authenticated_principal"),
                 **approval_kwargs,
@@ -1419,9 +1320,9 @@ class DefaultsHttpServer:
     def _handle_authority_challenge(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
-            result = get_authority_service().create_approval_challenge(
+            result = removed_authority_service().create_approval_challenge(
                 request_id,
                 decision=str(request_data.get("decision") or "approve"),
                 scope=str(request_data.get("scope") or "once"),
@@ -1442,9 +1343,9 @@ class DefaultsHttpServer:
             else None
         )
         try:
-            from core_runtime.authority import get_authority_service
+            from core_runtime.legacy_runtime_removed import removed_authority_service
 
-            result = get_authority_service().deny_request(
+            result = removed_authority_service().deny_request(
                 request_id,
                 reason=str(request_data.get("reason") or ""),
                 persist=bool(request_data.get("persist") or request_data.get("remember")),

@@ -216,7 +216,7 @@
             {
               "entrypoint_id": "complete",
               "id": "complete",
-              "implementation_digest": "sha256:785ca39d7e2094252e5440dc93a835578569fbd4492d339fa4151a6cd1b4b317"
+              "implementation_digest": "sha256:9b4e36e8b39ce680ada7d93071651058c3f920c98560ebd48ecfd4434c5e602d"
             }
           ],
           "owner": "defaultspack",
@@ -287,7 +287,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:785ca39d7e2094252e5440dc93a835578569fbd4492d339fa4151a6cd1b4b317",
+          "digest": "sha256:9b4e36e8b39ce680ada7d93071651058c3f920c98560ebd48ecfd4434c5e602d",
           "kind": "executable",
           "path": "runtime/conversation.py"
         }

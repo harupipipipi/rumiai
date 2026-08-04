@@ -722,12 +722,12 @@ def _approve_authority_schedule_pending_approval(
     if not request_id or permission_id not in _AUTHORITY_PERMISSION_IDS:
         return None
     try:
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
         from core_runtime.authority.ui_operator import sign_ui_operator
     except Exception:
         return None
 
-    service = get_authority_service()
+    service = removed_authority_service()
     request_result = service.get_request(request_id, profile_id=_MIMO_CODING_COMPANY_PROFILE_ID)
     if not isinstance(request_result, dict) or not request_result.get("success"):
         return None

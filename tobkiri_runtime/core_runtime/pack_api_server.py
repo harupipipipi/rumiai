@@ -2552,62 +2552,10 @@ class PackAPIServer:
         PackAPIHandler.kernel = self.kernel
         PackAPIHandler.app_lifecycle_manager = self.app_lifecycle_manager
 
-        # BUG-20260306-02 fix: Pack ルートの読み込みを system.ready イベント後に遅延実行する。
-        # API サーバー自体は security phase で初期化し、Pack ルートは
-        # component setup 完了後にロードされる。
-        # event_bus が利用可能ならイベント駆動、なければ即時ロード。
+        # Pack v4 routes are captured by OperationCatalog before this server
+        # starts.  Never reconstruct executable routes from installed Packs.
         self._routes_loaded = False
-        try:
-            from backend_core.ecosystem.registry import get_registry
-
-            reg = get_registry()
-            PackAPIHandler.load_web_mounts(reg, pack_ids={"core_control_panel"})
-            PackAPIHandler.load_pre_auth_routes(reg, pack_ids={"core_control_panel"})
-            PackAPIHandler.load_api_routes(
-                reg,
-                pack_ids={"core_control_panel"},
-                include_builtin_core_control_panel=True,
-            )
-            logger.info("Preloaded control panel shell and API routes before runtime-ready")
-        except Exception as e:
-            logger.warning("Failed to preload control panel shell routes: %s", e)
-        try:
-            if self.kernel and hasattr(self.kernel, 'event_bus') and self.kernel.event_bus:
-                def _deferred_load_routes(event_data=None):
-                    with self._routes_load_lock:
-                        if not self._routes_loaded:
-                            self._routes_loaded = True
-                            try:
-                                from backend_core.ecosystem.registry import get_registry
-                                reg = get_registry()
-                                PackAPIHandler.load_pack_routes(reg)
-                                PackAPIHandler.load_web_mounts(reg)
-                                PackAPIHandler.load_pre_auth_routes(reg)
-                                PackAPIHandler.load_api_routes(
-                                    reg,
-                                    include_builtin_core_control_panel=True,
-                                )
-                                logger.info("Pack routes loaded (deferred after system.ready)")
-                            except Exception as e:
-                                logger.warning("Failed to load pack routes (deferred): %s", e)
-                self.kernel.event_bus.subscribe("system.ready", _deferred_load_routes)
-            else:
-                # Fallback: event_bus なしの場合は即時ロード
-                try:
-                    from backend_core.ecosystem.registry import get_registry
-                    reg = get_registry()
-                    PackAPIHandler.load_pack_routes(reg)
-                    PackAPIHandler.load_web_mounts(reg)
-                    PackAPIHandler.load_pre_auth_routes(reg)
-                    PackAPIHandler.load_api_routes(
-                        reg,
-                        include_builtin_core_control_panel=True,
-                    )
-                    self._routes_loaded = True
-                except Exception as e:
-                    logger.warning("Failed to load pack routes: %s", e)
-        except Exception as e:
-            logger.warning("Failed to set up deferred route loading: %s", e)
+        PackAPIHandler.load_pack_routes(None)
         
         self.server = _PackThreadingHTTPServer((self.host, self.port), PackAPIHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

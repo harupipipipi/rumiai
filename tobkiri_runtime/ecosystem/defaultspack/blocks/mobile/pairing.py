@@ -62,9 +62,9 @@ def _register_authority_device_key(*, profile_id: str, device_id: str, public_ke
     if not str(public_key or "").strip():
         return {"registered": False, "reason": "missing_public_key"}
     try:
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
-        result = get_authority_service().register_device_key(
+        result = removed_authority_service().register_device_key(
             profile_id=profile_id,
             device_id=device_id,
             public_key=public_key,
