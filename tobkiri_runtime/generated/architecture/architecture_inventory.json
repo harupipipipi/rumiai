@@ -7265,7 +7265,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:60c21fa5da8d3240c4d26e28f31960d7c05c3623e16ed106402b0e2a5747d334",
+        "digest": "sha256:e11c2b952a439e3b812147c731516fae13537633918f10a2940c3a6911252f61",
         "identity": "defaultspack",
         "kind": "manifest",
         "legacy": true,
@@ -15097,7 +15097,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:60c21fa5da8d3240c4d26e28f31960d7c05c3623e16ed106402b0e2a5747d334",
+        "manifest_digest": "sha256:e11c2b952a439e3b812147c731516fae13537633918f10a2940c3a6911252f61",
         "pack_id": "defaultspack",
         "path": "tobkiri_runtime/ecosystem/defaultspack/ecosystem.json",
         "version": "2.0.0"
@@ -16907,8 +16907,8 @@
     ]
   },
   "repository": {
-    "commit": "c58adf11a88b54ad407f71dc3c3b544a984513ab",
-    "tree_digest": "783ace1185d1e30a493c765feba44488f1404d332fe189dea11dc20468f03b3e"
+    "commit": "3eb091bf23b7a1f30d321c8c76b97a094a05571f",
+    "tree_digest": "992a7c940858dfc0f6c9049dec936fadd561dbd5d225613971647bc5272e8fc9"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"
