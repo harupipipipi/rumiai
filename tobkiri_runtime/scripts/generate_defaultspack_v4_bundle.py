@@ -20,6 +20,18 @@ from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 PACKS = BUNDLE / "packs"
+CANONICAL_PACK_FILES = {
+    "defaultspack.pack.v4.json": ROOT / "ecosystem" / "defaultspack" / "pack.v4.json",
+    "rumi-file-inspect.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_file_inspect_pack" / "pack.v4.json"
+    ),
+    "rumi-host-authority-bridge.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_host_authority_bridge_pack" / "pack.v4.json"
+    ),
+    "rumi-workspace-mount.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_workspace_mount_pack" / "pack.v4.json"
+    ),
+}
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -190,9 +202,19 @@ def _normalize_profile(document: dict[str, Any]) -> dict[str, Any]:
 
 def _render() -> dict[Path, bytes]:
     rendered: dict[Path, bytes] = {}
-    for path in sorted(PACKS.glob("*.pack.v4.json")):
-        document = json.loads(path.read_text(encoding="utf-8"))
-        rendered[path] = _pretty(_normalize_pack(document))
+    pack_paths = set(PACKS.glob("*.pack.v4.json")) | {
+        PACKS / name for name in CANONICAL_PACK_FILES
+    }
+    for path in sorted(pack_paths):
+        canonical = CANONICAL_PACK_FILES.get(path.name)
+        document = json.loads(
+            (canonical or path).read_text(encoding="utf-8")
+        )
+        rendered[path] = _pretty(
+            validate_document(document, "pack")
+            if canonical is not None
+            else _normalize_pack(document)
+        )
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
     shell_path = BUNDLE / "shell.cli.default.shell.v1.json"
@@ -200,6 +222,20 @@ def _render() -> dict[Path, bytes]:
     base = _normalize_base(json.loads(base_path.read_text(encoding="utf-8")))
     shell = _normalize_shell(json.loads(shell_path.read_text(encoding="utf-8")))
     profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
+    for pack in profile["packs"]:
+        if pack["pack_id"] == "rumi-file-inspect":
+            pack["pack_id"] = "rumi_file_inspect_pack"
+    for edge in profile["requested_edges"]:
+        if edge["target_provider_id"] == "defaultspack.file.inspect":
+            edge.update(
+                {
+                    "target_provider_id": (
+                        "rumi_file_inspect_pack.file-inspect.service"
+                    ),
+                    "contract_id": "tobkiri.service.file.inspect.v1",
+                    "operation_id": "rumi_file_inspect_pack.file-inspect",
+                }
+            )
     rendered[base_path] = _pretty(base)
     rendered[shell_path] = _pretty(shell)
     rendered[profile_path] = _pretty(profile)
@@ -208,7 +244,7 @@ def _render() -> dict[Path, bytes]:
     kinds = {"packs": "pack", "base.v1": "base", "shell.v1": "shell", "profile.v4": "profile"}
     paths = [*sorted(path for path in rendered if path.parent == PACKS), base_path, shell_path, profile_path]
     for path in paths:
-        raw = rendered.get(path, path.read_bytes())
+        raw = rendered[path] if path in rendered else path.read_bytes()
         relative = path.relative_to(BUNDLE).as_posix()
         kind = next(value for marker, value in kinds.items() if marker in relative)
         entries.append(

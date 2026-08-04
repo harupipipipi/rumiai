@@ -17,7 +17,7 @@
     },
     {
       "artifact_digest": null,
-      "pack_id": "rumi-file-inspect",
+      "pack_id": "rumi_file_inspect_pack",
       "role": "provider"
     }
   ],
@@ -46,12 +46,12 @@
     },
     {
       "caller_function_id": "defaultspack.conversation",
-      "contract_id": "workspace.file.inspect.v1",
-      "operation_id": "inspect",
+      "contract_id": "tobkiri.service.file.inspect.v1",
+      "operation_id": "rumi_file_inspect_pack.file-inspect",
       "requested_scope_template": {
         "resource_namespace": "workspace"
       },
-      "target_provider_id": "defaultspack.file.inspect"
+      "target_provider_id": "rumi_file_inspect_pack.file-inspect.service"
     }
   ],
   "shell": {

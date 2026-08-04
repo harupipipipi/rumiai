@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
 from tobkiri_protocol.validation import validate_document
@@ -263,6 +266,37 @@ def resolve_default_profile(
 
     requested_pack_ids = [item["pack_id"] for item in source["packs"]]
     selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
+    pending = list(selected_ids)
+    while pending:
+        current_id = pending.pop(0)
+        current = catalog.packs.get(current_id)
+        if current is None:
+            raise ProfileResolutionDenied(
+                f"Pack is not in the exact inventory: {current_id}"
+            )
+        for dependency_id, version_range in current["requirements"][
+            "pack_dependencies"
+        ].items():
+            dependency = catalog.packs.get(dependency_id)
+            if dependency is None:
+                raise ProfileResolutionDenied(
+                    f"required Pack dependency is unavailable: {dependency_id}"
+                )
+            try:
+                compatible = Version(dependency["pack"]["version"]) in SpecifierSet(
+                    version_range.replace(" ", ",")
+                )
+            except (InvalidSpecifier, InvalidVersion) as exc:
+                raise ProfileResolutionDenied(
+                    f"invalid Pack dependency constraint: {dependency_id}"
+                ) from exc
+            if not compatible:
+                raise ProfileResolutionDenied(
+                    f"Pack dependency version is incompatible: {dependency_id}"
+                )
+            if dependency_id not in selected_ids:
+                selected_ids.append(dependency_id)
+                pending.append(dependency_id)
     if len(selected_ids) != len(set(selected_ids)):
         raise ProfileResolutionDenied("Profile composition contains a duplicate Pack")
     selected: list[Mapping[str, Any]] = []
@@ -274,6 +308,19 @@ def resolve_default_profile(
         if artifact_digest not in approved_artifact_digests:
             raise ProfileResolutionDenied(f"Pack artifact is not approved: {pack_id}")
         selected.append(manifest)
+
+    provided_contracts = {
+        contract["contract_id"]
+        for manifest in selected
+        for contract in manifest["contracts"]
+    }
+    for manifest in selected:
+        for dependency in manifest["requirements"]["contract_dependencies"]:
+            if not dependency["optional"] and dependency["contract_id"] not in provided_contracts:
+                raise ProfileResolutionDenied(
+                    "required Contract dependency is unavailable: "
+                    f"{dependency['contract_id']}"
+                )
 
     foundational = _provider_candidates(selected, _FOUNDATIONAL_CONTRACT, "complete")
     if len(foundational) != 1:

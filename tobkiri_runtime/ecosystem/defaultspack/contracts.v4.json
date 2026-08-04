@@ -21,7 +21,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded",
+            "digest": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -32,7 +32,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded",
+        "source_digest": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/defaultspack"
       },
@@ -112,5 +112,5 @@
     }
   ],
   "pack_id": "defaultspack",
-  "source_identity": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded"
+  "source_identity": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8"
 }

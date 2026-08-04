@@ -1,19 +1,25 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:785ca39d7e2094252e5440dc93a835578569fbd4492d339fa4151a6cd1b4b317",
+      "kind": "executable",
+      "path": "runtime/conversation.py"
+    }
+  ],
   "contracts": [
     {
       "contract_id": "conversation.turn.v1",
       "operations": [
         "complete"
       ],
-      "revision_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "revision_digest": "sha256:4ab185713b507f4cece1a3fadadcd9b8ed0918f66570d9d6d7b3b22f0ebca59a"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "contract_revision_digest": "sha256:4ab185713b507f4cece1a3fadadcd9b8ed0918f66570d9d6d7b3b22f0ebca59a",
       "id": "defaultspack.conversation",
-      "implementation_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "implementation_digest": "sha256:785ca39d7e2094252e5440dc93a835578569fbd4492d339fa4151a6cd1b4b317",
       "isolation": "pack_vm",
       "operations": [
         "complete"
@@ -22,9 +28,9 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:7b2110303601363f317062d2384ddf81feaa528983b90b2b7bcff73aea646833",
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-    "contract_catalog_digest": "sha256:e6aabc00fdc958885bece4c9ad38f80e9a53c4d5fd46eaca6eeabca6cc837de1"
+    "artifact_set_digest": "sha256:242ad1764af229d28a6ed18f94df5e5c9ef9ae6a7ff5aa089c8858a9f36a15d6",
+    "contract_catalog_digest": "sha256:d2351c83e3e2dfed058a8dfbf1b89cf5c52897ae729f5d9372f19904c4f435bd",
+    "source_identity": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8"
   },
   "migration": {
     "compatibility": "none",
@@ -34,16 +40,16 @@
   },
   "operation_catalog": [
     {
+      "contract_reference": "conversation.turn.v1",
+      "effect_ceiling": [],
       "operation_id": "complete",
       "owner": "defaultspack",
-      "contract_reference": "conversation.turn.v1",
       "provider_id": "defaultspack.conversation",
-      "source_kind": "v3_contract",
-      "effect_ceiling": []
+      "source_kind": "v3_contract"
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "artifact_digest": "sha256:242ad1764af229d28a6ed18f94df5e5c9ef9ae6a7ff5aa089c8858a9f36a15d6",
     "display_name": "Tobkiri Defaults Providers",
     "id": "defaultspack",
     "kind": "normal_sandbox",
@@ -51,38 +57,44 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
-    "evidence": [],
-    "generator": "defaultspack-v4-core",
+    "evidence": [
+      {
+        "digest": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
     "generator_version": "1.0.0",
     "normative": true,
-    "repository_commit": "working-tree",
-    "repository_tree": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/defaultspack.pack.v4.json"
+    "source_digest": "sha256:476f9b161665dd12c3e669f3c56d1c55d585cd3ed1bb15cb961d17df513a34d8",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/defaultspack"
   },
   "provider_catalog": [
     {
-      "provider_id": "defaultspack.conversation",
-      "owner": "defaultspack",
       "contract_reference": "conversation.turn.v1",
       "operations": [
         "complete"
-      ]
+      ],
+      "owner": "defaultspack",
+      "provider_id": "defaultspack.conversation"
     }
   ],
   "requirements": {
-    "pack_dependencies": {},
-    "contract_dependencies": [],
+    "approval_policy": "none",
     "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "sandbox",
     "network": {
       "allowed_domains": [],
       "allowed_ports": []
     },
+    "pack_dependencies": {},
     "secrets": [],
-    "execution_boundary": "sandbox",
-    "approval_policy": "none",
     "workspace_boundary": "pack_local"
   }
 }

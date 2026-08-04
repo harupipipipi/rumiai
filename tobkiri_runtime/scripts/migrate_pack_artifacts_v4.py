@@ -363,26 +363,30 @@ def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
     executable_source: dict[str, Any] | None = None
     implementation_digest: str | None = None
     if pack_id == "defaultspack":
+        source_path = EXECUTABLE_SOURCES
+        pack = {
+            "id": "defaultspack",
+            "version": "4.0.0",
+            "kind": "normal_sandbox",
+            "display_name": "Tobkiri Defaults Providers",
+        }
         executable_source = json.loads(
             EXECUTABLE_SOURCES.read_text(encoding="utf-8")
         )["packs"][pack_id]
         implementation_digest = _file_digest(
             ECOSYSTEM / pack_id / executable_source["implementation_path"]
         )
-        function = source["functions"][0]
-        contract = source["contracts"][0]
         provided.append(
             {
-                "contract_id": contract["contract_id"],
+                "contract_id": executable_source["contract_id"],
                 "version": "1.0.0",
-                "provider_id": function["id"],
+                "provider_id": executable_source["function_id"],
                 "operations": [
                     {
-                        "id": operation_id,
-                        "entrypoint_id": operation_id,
+                        "id": executable_source["operation_id"],
+                        "entrypoint_id": executable_source["operation_id"],
                         "implementation_digest": implementation_digest,
                     }
-                    for operation_id in function["operations"]
                 ],
                 "schemas": {
                     "input": executable_source["input_schema"],

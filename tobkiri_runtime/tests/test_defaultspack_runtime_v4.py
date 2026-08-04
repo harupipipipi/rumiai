@@ -24,8 +24,8 @@ AUTHORITY_BINDINGS = {
         "authority-ref:conversation.default"
     ),
     (
-        "defaultspack.conversation|defaultspack.file.inspect|"
-        "workspace.file.inspect.v1|inspect"
+        "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
+        "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
     ): "authority-ref:file.inspect.default",
 }
 
@@ -60,7 +60,9 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert set(catalog.packs) == {
         "defaults-basepack",
         "defaultspack",
-        "rumi-file-inspect",
+        "rumi_file_inspect_pack",
+        "rumi_host_authority_bridge_pack",
+        "rumi_workspace_mount_pack",
         "shell.cli.default",
     }
     assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v4"
@@ -68,11 +70,13 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert resolved.profile["profile_authority_snapshot_digest"] == SNAPSHOT_DIGEST
     assert {item["pack_id"] for item in resolved.profile["packs"]} == {
         "defaultspack",
-        "rumi-file-inspect",
+        "rumi_file_inspect_pack",
+        "rumi_host_authority_bridge_pack",
+        "rumi_workspace_mount_pack",
     }
     assert [item["function_principal"]["function_id"] for item in resolved.plan["bindings"]] == [
         "defaultspack.conversation",
-        "defaultspack.file.inspect",
+        "rumi_file_inspect_pack.file-inspect.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
 
@@ -116,8 +120,8 @@ def test_bundle_rejects_manifest_hash_drift_and_unlisted_artifacts(tmp_path: Pat
 
     catalog = _catalog()
     approved = _approved(catalog)
-    approved.remove("sha256:" + "e" * 64)
-    with pytest.raises(ProfileResolutionDenied, match="not approved: rumi-file-inspect"):
+    approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
+    with pytest.raises(ProfileResolutionDenied, match="not approved: rumi_file_inspect_pack"):
         resolve_default_profile(
             catalog,
             "defaults",
@@ -163,7 +167,9 @@ def test_requested_pack_dependency_and_authority_references_are_mandatory() -> N
     catalog = _catalog()
     profile = copy.deepcopy(catalog.profiles["defaults"])
     profile["packs"] = [
-        item for item in profile["packs"] if item["pack_id"] != "rumi-file-inspect"
+        item
+        for item in profile["packs"]
+        if item["pack_id"] != "rumi_file_inspect_pack"
     ]
     missing_dependency = replace(catalog, profiles={"defaults": profile})
     with pytest.raises(ProfileResolutionDenied, match="must resolve exactly once; found 0"):

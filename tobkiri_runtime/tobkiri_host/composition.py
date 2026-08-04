@@ -111,6 +111,7 @@ class HostV4Composition:
         artifacts: Sequence[PackArtifact],
         routes: Sequence[OperationRoute],
         authority_ceilings: Mapping[tuple[str, str], AuthorityCeilings],
+        effective_artifacts: Mapping[str, str] | None = None,
     ) -> "HostV4Composition":
         """Capture a complete v4 graph, rejecting missing, stale, or extra input."""
         checked_profile = validate_document(profile, "profile")
@@ -126,7 +127,17 @@ class HostV4Composition:
             for item in checked_lock["effective_set"]
         }
         supplied = {(item.pack_id, item.digest) for item in artifacts}
-        if supplied != effective or len(supplied) != len(artifacts):
+        verified_effective = (
+            set(effective_artifacts.items())
+            if effective_artifacts is not None
+            else supplied
+        )
+        if (
+            verified_effective != effective
+            or len(verified_effective) != len(effective)
+            or not supplied <= effective
+            or len(supplied) != len(artifacts)
+        ):
             raise ResolutionError(
                 "verified artifact inventory must exactly equal ProfileLock effective_set"
             )

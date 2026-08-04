@@ -33,7 +33,7 @@ def _resolved():
     catalog = BundledCatalog.load(BUNDLE)
     bindings = {
         "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
-        "defaultspack.conversation|defaultspack.file.inspect|workspace.file.inspect.v1|inspect": "authority-ref:file.inspect.default",
+        "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
     }
     resolved = resolve_default_profile(
         catalog,
@@ -184,7 +184,12 @@ def test_capture_uses_only_exact_effective_set_and_resolved_routes(tmp_path: Pat
     composition, resolved, activation, artifacts, routes, ceilings = _capture(tmp_path)
     assert composition.plan["plan_digest"] == resolved.plan["plan_digest"]
     assert composition.activation["activation_id"] == activation["activation_id"]
-    assert composition.catalog.resolve("conversation.turn.v1", "complete", ">=1").artifact.digest == "sha256:" + "b" * 64
+    assert (
+        composition.catalog.resolve(
+            "conversation.turn.v1", "complete", ">=1"
+        ).artifact.digest
+        == resolved.plan["bindings"][0]["artifact_digest"]
+    )
 
     with pytest.raises(ResolutionError, match="exactly equal"):
         HostV4Composition.capture(
