@@ -137,21 +137,25 @@ def artifact_size(path: Path) -> int:
     return sum(artifact_size(child) for child in path.iterdir())
 
 
-def _find_variant(catalog: Mapping[str, Any], artifact_id: str) -> dict[str, Any]:
+def _find_variant(
+    catalog: Mapping[str, Any], artifact_id: str
+) -> tuple[Mapping[str, Any], dict[str, Any]]:
     for shell in catalog.get("shell_providers", []):
         if not isinstance(shell, Mapping):
             continue
         for variant in shell.get("artifact_variants", []):
             if isinstance(variant, dict) and variant.get("artifact_id") == artifact_id:
-                return variant
+                return shell, variant
     raise RuntimeError(
         f"artifact variant is not declared in the catalog: {artifact_id}"
     )
 
 
 def _validate_bundle_identity(artifact: Path, expected: str | None) -> None:
-    if not expected or artifact.suffix != ".app":
+    if artifact.suffix != ".app":
         return
+    if not isinstance(expected, str) or not expected.strip():
+        raise RuntimeError("macOS .app artifact has no declared bundle identity")
     plist_path = artifact / "Contents" / "Info.plist"
     if not plist_path.is_file():
         raise RuntimeError(f"macOS artifact is missing Info.plist: {artifact}")
@@ -292,13 +296,25 @@ def package_artifact(
     if build_output.get("build_profile") != "release":
         raise RuntimeError("build-output manifest must identify a release build")
 
-    variant = _find_variant(catalog, artifact_id)
+    shell, variant = _find_variant(catalog, artifact_id)
+    default_selection = catalog.get("default_selection")
+    if not isinstance(default_selection, Mapping):
+        raise RuntimeError("presentation catalog has no exact default Profile selection")
+    if shell.get("provider_id") != default_selection.get("shell_provider_id"):
+        raise RuntimeError(
+            "build-output artifact does not match the default Profile Shell"
+        )
     if (
         variant.get("platform") != platform
         or variant.get("architecture") != architecture
     ):
         raise RuntimeError(
             "build-output platform/architecture does not match the declared variant"
+        )
+    expected_artifact_id = f"{shell.get('provider_id')}.{platform}-{architecture}"
+    if artifact_id != expected_artifact_id:
+        raise RuntimeError(
+            "build-output artifact identity does not match its Shell and target"
         )
     if variant.get("prebuilt") is not True or variant.get("production") is not True:
         raise RuntimeError(

@@ -42,10 +42,22 @@ def test_v4_catalog_is_byte_identical_and_uninstalled_variants_fail_closed(
         "domain/pack_architecture" not in value
         for value in json.dumps(catalog, sort_keys=True).split()
     )
-    variants = catalog["shell_providers"][0]["artifact_variants"]
+    assert catalog["default_selection"]["shell_provider_id"] == "shell.tauri.default"
+    bundle = MODULE.load_v4_bundle(ROOT)
+    assert "shell.tauri.default" in bundle.selected_pack_ids
+    assert "shell.cli.default" not in bundle.selected_pack_ids
+    assert "shell.tauri.default" in catalog["source_manifest_digests"]
+    assert "shell.cli.default" not in catalog["source_manifest_digests"]
+    shell = catalog["shell_providers"][0]
+    assert shell["provider_id"] == "shell.tauri.default"
+    variants = shell["artifact_variants"]
     assert [variant["artifact_id"] for variant in variants] == [
-        "shell.cli.default.macos-arm64"
+        "shell.tauri.default.macos-arm64",
+        "shell.tauri.default.macos-x86_64",
+        "shell.tauri.default.windows-x86_64",
+        "shell.tauri.default.linux-x86_64",
     ]
+    assert variants[0]["bundle_identifier"] == "io.tobkiri.shell.tauri"
     for variant in variants:
         assert all(
             variant[field] is None
@@ -61,7 +73,7 @@ def test_v4_catalog_preserves_installed_metadata_and_release_binding(
     catalog = json.loads(target.read_text(encoding="utf-8"))
     variant = catalog["shell_providers"][0]["artifact_variants"][0]
     installed = {
-        "path": "bundled/presentation-artifacts/shell.cli.default.macos-arm64/tobkiri-shell",
+        "path": "bundled/presentation-artifacts/shell.tauri.default.macos-arm64/Tobkiri.app",
         "sha256": "sha256:" + "1" * 64,
         "size": 17,
         "source_identity": "github:tobkiri/shell",

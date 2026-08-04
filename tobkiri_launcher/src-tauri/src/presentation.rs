@@ -591,12 +591,16 @@ fn verify_release_binding(
         bail!("Shell artifact index/profile lock exact binding is inconsistent");
     }
     validate_release_target(&binding.platform, &binding.architecture)?;
-    let variant = catalog
+    let selected_shell = catalog
         .shell_providers
         .iter()
-        .flat_map(|shell| &shell.artifact_variants)
+        .find(|shell| shell.provider_id == catalog.default_selection.shell_provider_id)
+        .context("default Profile Shell is missing from the catalog")?;
+    let variant = selected_shell
+        .artifact_variants
+        .iter()
         .find(|variant| variant.artifact_id == binding.artifact_id)
-        .context("signed Shell artifact is missing from the catalog")?;
+        .context("signed Shell artifact does not match the default Profile Shell")?;
     if variant.path.as_deref() != Some(index.path.as_str())
         || variant.sha256.as_deref() != Some(index.sha256.as_str())
         || variant.size != Some(index.size)
@@ -1760,7 +1764,7 @@ mod tests {
         assert_eq!(catalog.default_profile_id, "defaults");
         assert_eq!(
             catalog.default_selection.shell_provider_id,
-            "shell.cli.default"
+            "shell.tauri.default"
         );
         assert_eq!(catalog.shell_providers.len(), 1);
         assert!(catalog.shell_providers.iter().all(|shell| {
@@ -1941,7 +1945,11 @@ mod tests {
         let artifact_path = app_dir
             .join("bundled")
             .join("presentation-artifacts")
-            .join("shell.cli.default.macos-arm64")
+            .join(format!(
+                "shell.tauri.default.{}-{}",
+                current_platform(),
+                current_architecture()
+            ))
             .join("Tobkiri.app");
         fs::create_dir_all(&artifact_path).unwrap();
         fs::write(artifact_path.join("Contents"), b"verified shell artifact").unwrap();
@@ -1956,7 +1964,7 @@ mod tests {
         let variant = catalog
             .shell_providers
             .iter_mut()
-            .find(|shell| shell.provider_id == "shell.cli.default")
+            .find(|shell| shell.provider_id == "shell.tauri.default")
             .unwrap()
             .artifact_variants
             .iter_mut()

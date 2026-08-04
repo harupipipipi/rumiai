@@ -32,19 +32,29 @@
       "digest": "sha256:0036eb71bb2ee39500f3e279db4ca4a3a1e3fa47c899a578deaad3c0ccbdad20"
     },
     {
+      "path": "packs/shell.tauri.default.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:dd236516e496d1eaa51dbc03c9df23db94e96fbcd08c512774fb4d5bd40eeea6"
+    },
+    {
       "path": "defaults-basepack.base.v1.json",
       "kind": "base",
-      "digest": "sha256:91336a83b4e58a8c118238394eb5c8d4655778ec08b5f5fba2a6974c90109d91"
+      "digest": "sha256:d7af601063a1f81d7e1c79b3dcf5673f5c74923b6c39ef99ea80629f7a66bada"
     },
     {
       "path": "shell.cli.default.shell.v1.json",
       "kind": "shell",
-      "digest": "sha256:855fad719c02fb7afab398a54e171de6a1860f5486b5d3a2eedb747e661868e9"
+      "digest": "sha256:247eadde1c724f9baaf24a733691d24d5873e479742c765b9cfd8085b0b2ed25"
+    },
+    {
+      "path": "shell.tauri.default.shell.v1.json",
+      "kind": "shell",
+      "digest": "sha256:f2dd6fd4bda358a9012164cd001ec61de2805457a5574207a7acad109a08b00a"
     },
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:5d1f5b7a24076e5108816b7e6aecb5fcf68f0cfdf8cd3d9ea95b199a1f0599b7"
+      "digest": "sha256:770888054be785053a7ac2b725962941150fa72bd730f8541bd5325f5788dc20"
     }
   ]
 }

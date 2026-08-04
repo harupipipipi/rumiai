@@ -8,7 +8,7 @@
     ],
     "required_contracts": []
   },
-  "definition_revision": "sha256:5dcf3b2ee9223415649854f7de72dac8c16ea40bf5e80bc9e77814befb384614",
+  "definition_revision": "sha256:87b8beec3375d3b4467760a6ebb18866495a2ecf4bce2e1d831584815e7358b8",
   "dependencies": [],
   "pack_id": "defaults-basepack",
   "policy_foundation": {
@@ -31,6 +31,7 @@
   "shell_requirements": {
     "mode": "interactive",
     "presentation_families": [
+      "graphical",
       "terminal"
     ],
     "required_capabilities": [

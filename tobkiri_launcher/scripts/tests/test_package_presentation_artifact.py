@@ -27,6 +27,10 @@ package_artifact = MODULE.package_artifact
 def _catalog(entrypoint: str = "true") -> dict[str, object]:
     return {
         "schema": "io.tobkiri.launcher.presentation-catalog.v1",
+        "default_selection": {
+            "base_pack_id": "defaults-basepack",
+            "shell_provider_id": "shell.cli.default",
+        },
         "shell_providers": [
             {
                 "provider_id": "shell.cli.default",
@@ -161,3 +165,58 @@ def test_package_rejects_empty_source_identity_and_bad_key() -> None:
         key.write_bytes(b"short")
         with pytest.raises(RuntimeError, match="32 raw seed bytes"):
             package_artifact(catalog, manifest, key, "key", root / "key-output")
+
+
+def test_package_rejects_unknown_stale_profile_and_wrong_bundle_identity() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-identity-negative-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        build = json.loads(manifest.read_text())
+
+        build["artifact_id"] = "shell.unknown.linux-x86_64"
+        manifest.write_text(json.dumps(build))
+        with pytest.raises(RuntimeError, match="not declared"):
+            package_artifact(catalog, manifest, key, "key", root / "unknown-output")
+
+        build["artifact_id"] = "shell.cli.default.linux-x86_64"
+        manifest.write_text(json.dumps(build))
+        stale = json.loads(catalog.read_text())
+        stale["default_selection"]["shell_provider_id"] = "shell.other.default"
+        catalog.write_text(json.dumps(stale))
+        with pytest.raises(RuntimeError, match="default Profile Shell"):
+            package_artifact(catalog, manifest, key, "key", root / "stale-output")
+
+        app = root / "Tobkiri.app"
+        executable = app / "Contents" / "MacOS" / "tobkiri-shell"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+        executable.chmod(0o755)
+        plist = app / "Contents" / "Info.plist"
+        plist.write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n'
+            b'<plist version="1.0"><dict><key>CFBundleIdentifier</key>'
+            b'<string>io.tobkiri.shell.wrong</string></dict></plist>\n'
+        )
+        mac_catalog = _catalog("Tobkiri.app/Contents/MacOS/tobkiri-shell")
+        variant = mac_catalog["shell_providers"][0]["artifact_variants"][0]
+        variant.update(
+            artifact_id="shell.cli.default.macos-arm64",
+            platform="macos",
+            architecture="arm64",
+            bundle_identifier="io.tobkiri.shell.cli.default",
+        )
+        catalog.write_text(json.dumps(mac_catalog))
+        build.update(
+            artifact_id="shell.cli.default.macos-arm64",
+            artifact_path=os.fspath(app),
+            platform="macos",
+            architecture="arm64",
+        )
+        manifest.write_text(json.dumps(build))
+        with pytest.raises(RuntimeError, match="bundle identity does not match"):
+            package_artifact(catalog, manifest, key, "key", root / "bundle-output")
+
+        variant["bundle_identifier"] = None
+        catalog.write_text(json.dumps(mac_catalog))
+        with pytest.raises(RuntimeError, match="no declared bundle identity"):
+            package_artifact(catalog, manifest, key, "key", root / "missing-bundle-output")

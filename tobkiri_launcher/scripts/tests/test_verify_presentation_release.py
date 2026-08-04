@@ -39,7 +39,7 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
     variant = catalog["shell_providers"][0]["artifact_variants"][0]
     variant.update(
         {
-            "artifact_id": "shell.cli.default.linux-x86_64",
+            "artifact_id": "shell.tauri.default.linux-x86_64",
             "architecture": "x86_64",
             "bundle_identifier": None,
             "platform": "linux",
@@ -54,7 +54,7 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
         json.dumps(
             {
                 "schema": "io.tobkiri.shell.build-output.v4",
-                "artifact_id": "shell.cli.default.linux-x86_64",
+                "artifact_id": "shell.tauri.default.linux-x86_64",
                 "artifact_path": os.fspath(artifact),
                 "platform": "linux",
                 "architecture": "x86_64",

@@ -38,7 +38,7 @@
   },
   "requested_edges": [
     {
-      "caller_function_id": "shell.cli.default",
+      "caller_function_id": "shell.tauri.default",
       "contract_id": "conversation.turn.v1",
       "operation_id": "complete",
       "requested_scope_template": {},
@@ -59,9 +59,9 @@
     "artifact_digest": null,
     "contract_id": "app.shell.v1",
     "definition_revision": null,
-    "pack_id": "shell.cli.default",
+    "pack_id": "shell.tauri.default",
     "platform": "macos",
-    "provider_id": "shell.cli.default"
+    "provider_id": "shell.tauri.default"
   },
   "state": "needs_resolution"
 }

@@ -1,7 +1,7 @@
 {
   "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "contract_id": "app.shell.v1",
-  "definition_revision": "sha256:bec49a1954843931be39bb92153805f0c6247954eb02763559dc5b0dbb43221b",
+  "definition_revision": "sha256:a3cc86455d1e70b1f26020866fd37bd3b0168b8369017f47522dc1069ecac0e8",
   "launch": {
     "prebuilt_only": true,
     "variants": [
@@ -29,7 +29,9 @@
       "rich_text",
       "structured_stdio"
     ],
-    "consumes_contribution_contracts": [],
+    "consumes_contribution_contracts": [
+      "conversation.turn.v1"
+    ],
     "family": "terminal",
     "kind": "terminal_stdio",
     "technology": "cli"

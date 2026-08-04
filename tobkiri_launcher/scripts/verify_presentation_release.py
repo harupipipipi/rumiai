@@ -306,6 +306,21 @@ def verify_catalog(
         raise RuntimeError(
             "packaged default selection is not compatible with the Base Pack"
         )
+    if release_report is not None:
+        selected_shell = next(
+            shell
+            for shell in shells
+            if shell.get("provider_id") == default_selection.get("shell_provider_id")
+        )
+        selected_artifact_ids = {
+            str(variant.get("artifact_id"))
+            for variant in selected_shell.get("artifact_variants", [])
+            if isinstance(variant, dict)
+        }
+        if release_report["artifact_id"] not in selected_artifact_ids:
+            raise RuntimeError(
+                "signed artifact does not match the default Profile Shell"
+            )
 
     return {
         "base_pack_id": base.get("pack_id"),

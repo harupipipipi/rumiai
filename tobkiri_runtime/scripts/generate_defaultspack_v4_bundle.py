@@ -113,6 +113,9 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_base(document: dict[str, Any]) -> dict[str, Any]:
     if document.get("base_api_version") == "io.tobkiri.base.v4":
+        document["definition_revision"] = canonical_digest(
+            {key: value for key, value in document.items() if key != "definition_revision"}
+        )
         return validate_document(document, "base")
     normalized = {
         "base_api_version": "io.tobkiri.base.v4",
@@ -147,6 +150,9 @@ def _normalize_base(document: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
     if document.get("shell_api_version") == "io.tobkiri.shell.v4":
+        document["definition_revision"] = canonical_digest(
+            {key: value for key, value in document.items() if key != "definition_revision"}
+        )
         return validate_document(document, "shell")
     normalized = {
         "shell_api_version": "io.tobkiri.shell.v4",
@@ -217,10 +223,13 @@ def _render() -> dict[Path, bytes]:
         )
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
-    shell_path = BUNDLE / "shell.cli.default.shell.v1.json"
+    shell_paths = sorted(BUNDLE.glob("*.shell.v1.json"))
     profile_path = BUNDLE / "defaults.profile.v4.json"
     base = _normalize_base(json.loads(base_path.read_text(encoding="utf-8")))
-    shell = _normalize_shell(json.loads(shell_path.read_text(encoding="utf-8")))
+    shells = [
+        (path, _normalize_shell(json.loads(path.read_text(encoding="utf-8"))))
+        for path in shell_paths
+    ]
     profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
     for pack in profile["packs"]:
         if pack["pack_id"] == "rumi-file-inspect":
@@ -237,12 +246,18 @@ def _render() -> dict[Path, bytes]:
                 }
             )
     rendered[base_path] = _pretty(base)
-    rendered[shell_path] = _pretty(shell)
+    for shell_path, shell in shells:
+        rendered[shell_path] = _pretty(shell)
     rendered[profile_path] = _pretty(profile)
 
     entries: list[dict[str, str]] = []
     kinds = {"packs": "pack", "base.v1": "base", "shell.v1": "shell", "profile.v4": "profile"}
-    paths = [*sorted(path for path in rendered if path.parent == PACKS), base_path, shell_path, profile_path]
+    paths = [
+        *sorted(path for path in rendered if path.parent == PACKS),
+        base_path,
+        *shell_paths,
+        profile_path,
+    ]
     for path in paths:
         raw = rendered[path] if path in rendered else path.read_bytes()
         relative = path.relative_to(BUNDLE).as_posix()
