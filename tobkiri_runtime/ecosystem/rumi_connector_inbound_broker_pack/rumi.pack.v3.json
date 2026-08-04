@@ -32,25 +32,25 @@
         "cardinality": "one",
         "id": "rumi.resource.connector.registry.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "many",
         "id": "rumi.service.connector.adapter.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "many",
         "id": "rumi.action.connector.route.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:4e56ebd51bab0de92ab59d169e7603fe2a043b11a77aa3650c865d425da16539",
+      "artifact_hash": "sha256:9d31421989dd635b488c4353bf7f50e24c878ded45daa8368c80af9e1361dd4f",
       "contract_id": "rumi.transport.connector.inbound.v1",
       "id": "connector-inbound",
       "loader": "python",

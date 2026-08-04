@@ -57,13 +57,13 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:ea411984ea998031a02738ab1ef6b3c5aa3a0cddbcc018c18c1dc25ba5881776",
+      "artifact_hash": "sha256:0a3b6ca1181907e66b9a42f90c257bf1bf312fbbe0a0dd47fcbc28945f112779",
       "contract_id": "rumi.resource.schedule.v1",
       "id": "schedule-resource",
       "loader": "python",
@@ -71,7 +71,7 @@
       "symbol": "create_schedule_resource"
     },
     {
-      "artifact_hash": "sha256:ea411984ea998031a02738ab1ef6b3c5aa3a0cddbcc018c18c1dc25ba5881776",
+      "artifact_hash": "sha256:0a3b6ca1181907e66b9a42f90c257bf1bf312fbbe0a0dd47fcbc28945f112779",
       "contract_id": "rumi.action.schedule.v1",
       "id": "schedule-action",
       "loader": "python",

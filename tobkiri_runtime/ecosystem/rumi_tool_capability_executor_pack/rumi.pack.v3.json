@@ -74,7 +74,7 @@
         "pack_identity": "rumi:ecosystem/rumi_tool_capability_executor_pack",
         "provenance": {
           "build_identity": "rumi-tool-capability-executor-pack:1.0.0",
-          "content_hash": "sha256:d2c3bf5577d57bfbe6f6d8bb4e976b05bc57f78493d3d6b3d9f3de9fcfcf2857",
+          "content_hash": "sha256:dc9082521f822926a6040c8e5d20c543aef31d072cc9d59b6ef4f533aa66c9f9",
           "signature": null,
           "trust_class": "local"
         },
@@ -131,7 +131,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-tool-capability-executor-pack:1.0.0",
-    "content_hash": "sha256:d2c3bf5577d57bfbe6f6d8bb4e976b05bc57f78493d3d6b3d9f3de9fcfcf2857",
+    "content_hash": "sha256:dc9082521f822926a6040c8e5d20c543aef31d072cc9d59b6ef4f533aa66c9f9",
     "signature": null,
     "trust_class": "local"
   },

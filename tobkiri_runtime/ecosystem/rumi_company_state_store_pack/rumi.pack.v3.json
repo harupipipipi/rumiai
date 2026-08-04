@@ -57,13 +57,13 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:a611c532f78c2c516be31c863c5f5e136af2301380f963b48a85c55b566ee5cd",
+      "artifact_hash": "sha256:a3fd51a3c28c083f0819932964fbab77b55d3cd0b7ab0958dd287d23139bdd9f",
       "contract_id": "rumi.resource.company.v1",
       "id": "company-state-resource",
       "loader": "python",
@@ -71,7 +71,7 @@
       "symbol": "create_company_resource"
     },
     {
-      "artifact_hash": "sha256:a611c532f78c2c516be31c863c5f5e136af2301380f963b48a85c55b566ee5cd",
+      "artifact_hash": "sha256:a3fd51a3c28c083f0819932964fbab77b55d3cd0b7ab0958dd287d23139bdd9f",
       "contract_id": "rumi.action.company.state.v1",
       "id": "company-state-action",
       "loader": "python",

@@ -57,13 +57,13 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:ccf0f8e44377928fed1062529582ca2824b7f173ba60bf35d0f44304b1fec995",
+      "artifact_hash": "sha256:93c188c2347bcee2337f83d6145fe696faaaee7318f2a2b6333b97228f6791ef",
       "contract_id": "rumi.resource.browser.host.v1",
       "id": "browser-host-observe",
       "loader": "python",
@@ -71,7 +71,7 @@
       "symbol": "create_browser_observer"
     },
     {
-      "artifact_hash": "sha256:ccf0f8e44377928fed1062529582ca2824b7f173ba60bf35d0f44304b1fec995",
+      "artifact_hash": "sha256:93c188c2347bcee2337f83d6145fe696faaaee7318f2a2b6333b97228f6791ef",
       "contract_id": "rumi.action.browser.host.v1",
       "id": "browser-host-control",
       "loader": "python",

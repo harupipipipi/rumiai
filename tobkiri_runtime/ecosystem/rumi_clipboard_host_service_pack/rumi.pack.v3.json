@@ -68,13 +68,13 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:944e78c7320bcb99ef2191cbe43bb546a94060c913434e2e1b94a12f903eb75b",
+      "artifact_hash": "sha256:010e09ffd1a31174f05dedf806c86179f229497b6e73acc33fb4b1b3ce2bc510",
       "contract_id": "rumi.resource.clipboard.v1",
       "id": "clipboard-read",
       "loader": "python",
@@ -82,7 +82,7 @@
       "symbol": "create_clipboard_reader"
     },
     {
-      "artifact_hash": "sha256:944e78c7320bcb99ef2191cbe43bb546a94060c913434e2e1b94a12f903eb75b",
+      "artifact_hash": "sha256:010e09ffd1a31174f05dedf806c86179f229497b6e73acc33fb4b1b3ce2bc510",
       "contract_id": "rumi.action.clipboard.v1",
       "id": "clipboard-write",
       "loader": "python",

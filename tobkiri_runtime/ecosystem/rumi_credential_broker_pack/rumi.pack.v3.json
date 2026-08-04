@@ -190,7 +190,7 @@
         "pack_identity": "rumi:ecosystem/rumi_credential_broker_pack",
         "provenance": {
           "build_identity": "rumi-credential-broker-pack:1.0.0",
-          "content_hash": "sha256:59df5fbfa772a0919a6117afccedd9849c080c929eaff861a50c2ba4ec96b0a6",
+          "content_hash": "sha256:eff7eb0b3c0582f41072d62fe1b186e5aba2071b3cefc3fcb26d0ec109ac0369",
           "signature": null,
           "trust_class": "local"
         },
@@ -259,7 +259,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-credential-broker-pack:1.0.0",
-    "content_hash": "sha256:59df5fbfa772a0919a6117afccedd9849c080c929eaff861a50c2ba4ec96b0a6",
+    "content_hash": "sha256:eff7eb0b3c0582f41072d62fe1b186e5aba2071b3cefc3fcb26d0ec109ac0369",
     "signature": null,
     "trust_class": "local"
   },

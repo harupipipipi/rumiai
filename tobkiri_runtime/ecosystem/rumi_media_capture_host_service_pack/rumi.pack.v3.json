@@ -57,13 +57,13 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b",
+      "artifact_hash": "sha256:2350f27970a4283e492bacd40cc95b5a4e21048758e0594f0db74e59c2ed6e01",
       "contract_id": "rumi.action.media.capture.v1",
       "id": "media-capture",
       "loader": "python",
@@ -71,7 +71,7 @@
       "symbol": "create_media_capture"
     },
     {
-      "artifact_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b",
+      "artifact_hash": "sha256:2350f27970a4283e492bacd40cc95b5a4e21048758e0594f0db74e59c2ed6e01",
       "contract_id": "rumi.action.media.output.v1",
       "id": "media-output",
       "loader": "python",

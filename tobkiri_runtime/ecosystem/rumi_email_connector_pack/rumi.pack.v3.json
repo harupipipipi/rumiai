@@ -33,19 +33,19 @@
         "cardinality": "one",
         "id": "rumi.service.credential.resolve.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:4ed03ee010c3a6fe556fc8940589679b64c4f1eed20c09853390c6fd7cd8c519",
+      "artifact_hash": "sha256:1e41994994c9f2e3385d954d5a262ab7922ead75b9f08850ac4105518697bceb",
       "contract_id": "rumi.service.connector.adapter.v1",
       "id": "email-adapter",
       "loader": "python",

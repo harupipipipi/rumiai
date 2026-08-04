@@ -151,7 +151,7 @@
         "pack_identity": "rumi:ecosystem/rumi_tool_registry_pack",
         "provenance": {
           "build_identity": "rumi-tool-registry-pack:1.0.0",
-          "content_hash": "sha256:c244ace51133c9f44d8c74a106904834813629b10b57c0cad1265011884471d9",
+          "content_hash": "sha256:caff1d99b89277f67e83d0e3cfb8cf3c568f2c262cf32e9cae4bd1e3e9bc4fc1",
           "signature": null,
           "trust_class": "local"
         },
@@ -226,7 +226,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-tool-registry-pack:1.0.0",
-    "content_hash": "sha256:c244ace51133c9f44d8c74a106904834813629b10b57c0cad1265011884471d9",
+    "content_hash": "sha256:caff1d99b89277f67e83d0e3cfb8cf3c568f2c262cf32e9cae4bd1e3e9bc4fc1",
     "signature": null,
     "trust_class": "local"
   },

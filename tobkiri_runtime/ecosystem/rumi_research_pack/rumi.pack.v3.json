@@ -72,7 +72,7 @@
         "pack_identity": "rumi:ecosystem/rumi_research_pack",
         "provenance": {
           "build_identity": "rumi-research-content-pack:1.0.0",
-          "content_hash": "sha256:24a839364e793974d91cf5e79601aa6f360518a6b315228342c06b0f39577591",
+          "content_hash": "sha256:7b2e4d34be67be1ce03296fe07ffdc68f3bb8fd0c8236124646a5e9afd1610a8",
           "signature": null,
           "trust_class": "local"
         },
@@ -126,7 +126,7 @@
   "permissions": [],
   "provenance": {
     "build_identity": "rumi-research-content-pack:1.0.0",
-    "content_hash": "sha256:24a839364e793974d91cf5e79601aa6f360518a6b315228342c06b0f39577591",
+    "content_hash": "sha256:7b2e4d34be67be1ce03296fe07ffdc68f3bb8fd0c8236124646a5e9afd1610a8",
     "signature": null,
     "trust_class": "local"
   },

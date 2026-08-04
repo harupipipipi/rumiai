@@ -6,13 +6,13 @@
         "cardinality": "one",
         "id": "rumi.resource.company.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.company.runtime.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
@@ -66,7 +66,7 @@
         "pack_identity": "rumi:ecosystem/rumi_company_surface_pack",
         "provenance": {
           "build_identity": "rumi-company-surface-pack:1.0.0",
-          "content_hash": "sha256:e1ca7e330a87383d2f27a1df7ce646f160c6c8eab069999b9e1367641068d3c7",
+          "content_hash": "sha256:ba4fb3edf25a1860e9e633c961594c8051304ecea55fa3ad35695c81117184f3",
           "signature": null,
           "trust_class": "local"
         },
@@ -125,7 +125,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-company-surface-pack:1.0.0",
-    "content_hash": "sha256:e1ca7e330a87383d2f27a1df7ce646f160c6c8eab069999b9e1367641068d3c7",
+    "content_hash": "sha256:ba4fb3edf25a1860e9e633c961594c8051304ecea55fa3ad35695c81117184f3",
     "signature": null,
     "trust_class": "local"
   },

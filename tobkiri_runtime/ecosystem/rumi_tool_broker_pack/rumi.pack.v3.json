@@ -137,7 +137,7 @@
         "pack_identity": "rumi:ecosystem/rumi_tool_broker_pack",
         "provenance": {
           "build_identity": "rumi-tool-broker-pack:1.0.0",
-          "content_hash": "sha256:b55f22a79f6d20c80d4607bd640ce0d78ab137df8700d1c771c0663b362d5181",
+          "content_hash": "sha256:4fc9a408302b2124b977078ebbe70abb13bf81857ce154cce6bc252c9d9f8126",
           "signature": null,
           "trust_class": "local"
         },
@@ -205,7 +205,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-tool-broker-pack:1.0.0",
-    "content_hash": "sha256:b55f22a79f6d20c80d4607bd640ce0d78ab137df8700d1c771c0663b362d5181",
+    "content_hash": "sha256:4fc9a408302b2124b977078ebbe70abb13bf81857ce154cce6bc252c9d9f8126",
     "signature": null,
     "trust_class": "local"
   },

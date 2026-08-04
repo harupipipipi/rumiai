@@ -178,7 +178,7 @@
         "pack_identity": "rumi:ecosystem/rumi_office_authoring_pack",
         "provenance": {
           "build_identity": "rumi-office-authoring-content-pack:1.0.0",
-          "content_hash": "sha256:7df981fa0208ae75751fb2688e92f8bc04e3b6f606e778cc45e9d5894e74ba58",
+          "content_hash": "sha256:39efbe9f26a9c2d0f78f53d176fcaae321ebb7a51791c93362fe1a0fe9fdb13a",
           "signature": null,
           "trust_class": "local"
         },
@@ -234,7 +234,7 @@
   "permissions": [],
   "provenance": {
     "build_identity": "rumi-office-authoring-content-pack:1.0.0",
-    "content_hash": "sha256:7df981fa0208ae75751fb2688e92f8bc04e3b6f606e778cc45e9d5894e74ba58",
+    "content_hash": "sha256:39efbe9f26a9c2d0f78f53d176fcaae321ebb7a51791c93362fe1a0fe9fdb13a",
     "signature": null,
     "trust_class": "local"
   },

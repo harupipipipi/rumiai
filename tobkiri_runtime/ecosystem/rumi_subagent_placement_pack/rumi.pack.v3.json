@@ -280,7 +280,7 @@
         "pack_identity": "rumi:ecosystem/rumi_subagent_placement_pack",
         "provenance": {
           "build_identity": "rumi-subagent-placement-pack:1.0.0",
-          "content_hash": "sha256:fab5267ad37180ce140fa4b486785f551902b055476f6d0adde3ecdc7d9119e0",
+          "content_hash": "sha256:a8a3716d708d5dd1400316564db7e8776b9141112fa6e67e704a19fce2134ae7",
           "signature": null,
           "trust_class": "local"
         },
@@ -374,7 +374,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-subagent-placement-pack:1.0.0",
-    "content_hash": "sha256:fab5267ad37180ce140fa4b486785f551902b055476f6d0adde3ecdc7d9119e0",
+    "content_hash": "sha256:a8a3716d708d5dd1400316564db7e8776b9141112fa6e67e704a19fce2134ae7",
     "signature": null,
     "trust_class": "local"
   },

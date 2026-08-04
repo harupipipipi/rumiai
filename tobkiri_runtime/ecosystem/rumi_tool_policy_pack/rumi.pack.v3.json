@@ -72,7 +72,7 @@
         "pack_identity": "rumi:ecosystem/rumi_tool_policy_pack",
         "provenance": {
           "build_identity": "rumi-tool-policy-pack:1.0.0",
-          "content_hash": "sha256:15716967ab17f142a850849dd0d295533d480adc0570483bdf16edcef793fd40",
+          "content_hash": "sha256:e2088425d6e0dc5c4ee87974670f925e23923de11dfc12967656026304002ccf",
           "signature": null,
           "trust_class": "local"
         },
@@ -130,7 +130,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-tool-policy-pack:1.0.0",
-    "content_hash": "sha256:15716967ab17f142a850849dd0d295533d480adc0570483bdf16edcef793fd40",
+    "content_hash": "sha256:e2088425d6e0dc5c4ee87974670f925e23923de11dfc12967656026304002ccf",
     "signature": null,
     "trust_class": "local"
   },

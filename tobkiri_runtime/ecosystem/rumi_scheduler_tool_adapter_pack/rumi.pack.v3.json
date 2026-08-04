@@ -61,31 +61,31 @@
         "cardinality": "one",
         "id": "rumi.resource.schedule.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.schedule.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.scheduler.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:27d1adca67c3b3d7e3d503332def8b881f9097e6e84ae908c3df3a4c0403760e",
+      "artifact_hash": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
       "contract_id": "rumi.resource.tool.definition.contribution.v1",
       "id": "scheduler-tool-definitions",
       "loader": "python",
@@ -93,7 +93,7 @@
       "symbol": "create_definition_contribution"
     },
     {
-      "artifact_hash": "sha256:27d1adca67c3b3d7e3d503332def8b881f9097e6e84ae908c3df3a4c0403760e",
+      "artifact_hash": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
       "contract_id": "rumi.service.tool.local.operation.v1",
       "id": "scheduler-tool-operation",
       "loader": "python",

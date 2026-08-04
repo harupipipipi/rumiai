@@ -38,6 +38,9 @@ def _normalize_v3(manifest: dict[str, Any], pack_root: Path) -> dict[str, Any]:
         else:
             required.pop("version", None)
         required.setdefault("optional", required.get("cardinality") == "optional")
+        required["version_range"] = str(required["version_range"]).replace(
+            ",", " "
+        )
         required.pop("failure", None)
         for key in set(required) - {
             "id",
@@ -79,7 +82,54 @@ def _normalize_v3(manifest: dict[str, Any], pack_root: Path) -> dict[str, Any]:
             }
         )
     manifest["resources"] = normalized_resources
+    for entrypoint in manifest.get("entrypoints", []):
+        module = str(entrypoint.get("module") or "").strip()
+        if not module:
+            continue
+        candidate = ROOT.joinpath(*module.split(".")).with_suffix(".py")
+        if candidate.is_file():
+            entrypoint["artifact_hash"] = _sha256(candidate)
     return manifest
+
+
+def _normalize_artifact_index(
+    pack_root: Path,
+    ecosystem: dict[str, Any],
+    *,
+    check: bool,
+) -> None:
+    metadata = ecosystem.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    integrity = metadata.get("integrity")
+    integrity = integrity if isinstance(integrity, dict) else {}
+    relative = str(integrity.get("artifact_manifest") or "").strip()
+    if not relative:
+        return
+    index_path = (pack_root / relative).resolve()
+    index_path.relative_to(pack_root.resolve())
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise SystemExit(f"artifact index has no artifacts: {index_path}")
+    for item in artifacts:
+        if not isinstance(item, dict) or not item.get("path"):
+            raise SystemExit(f"invalid artifact entry: {index_path}")
+        candidate = (pack_root / str(item["path"])).resolve()
+        candidate.relative_to(pack_root.resolve())
+        item["sha256"] = _sha256(candidate)
+    expected = json.dumps(
+        payload, ensure_ascii=False, indent=2, sort_keys=True
+    ) + "\n"
+    if check:
+        if index_path.read_text(encoding="utf-8") != expected:
+            raise SystemExit(f"artifact index drift: {index_path}")
+    else:
+        index_path.write_text(expected, encoding="utf-8")
+    provenance = ecosystem.get("provenance")
+    if isinstance(provenance, dict):
+        provenance["content_hash"] = "sha256:" + hashlib.sha256(
+            expected.encode("utf-8")
+        ).hexdigest()
 
 
 def _schema_properties() -> set[str]:
@@ -168,11 +218,18 @@ def migrate(*, check: bool) -> None:
         ecosystem = _normalize_legacy(
             json.loads(ecosystem_path.read_text(encoding="utf-8"))
         )
+        _normalize_artifact_index(root, ecosystem, check=check)
         v3_path = root / "rumi.pack.v3.json"
         if v3_path.is_file():
             manifest = _normalize_v3(
                 json.loads(v3_path.read_text(encoding="utf-8")), root
             )
+            if isinstance(manifest.get("provenance"), dict) and isinstance(
+                ecosystem.get("provenance"), dict
+            ):
+                manifest["provenance"]["content_hash"] = ecosystem[
+                    "provenance"
+                ]["content_hash"]
             extensions = manifest.setdefault("extensions", {})
             options = extensions.setdefault("rumi.legacy_projection", {})
             options["pack_id"] = root.name

@@ -32,13 +32,13 @@
         "cardinality": "many",
         "id": "rumi.action.job.adapter.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:af2449859b11637b4bf4062b83fed69decf5a663f72ad77e81c05aab7265a51a",
+      "artifact_hash": "sha256:741ba3bb0e01cbd0a485cb63baa3c5ba5b5635a85ede9289d214ea71a73711ac",
       "contract_id": "rumi.action.job.v1",
       "id": "job-action-broker",
       "loader": "python",

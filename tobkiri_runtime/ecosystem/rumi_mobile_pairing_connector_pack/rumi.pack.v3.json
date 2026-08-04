@@ -34,25 +34,25 @@
         "cardinality": "one",
         "id": "rumi.service.credential.resolve.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "optional",
         "id": "rumi.transport.mobile.relay.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:ccdf8da4ba51fb7e382cb4b1e5c4348e896231976f7cf195fc77d574f48ec9c5",
+      "artifact_hash": "sha256:a36fb70dcb0688c414dd734e1398b64a8799f74d2ddbb707595ebb47a42dae87",
       "contract_id": "rumi.service.connector.adapter.v1",
       "id": "mobile-pairing-adapter",
       "loader": "python",

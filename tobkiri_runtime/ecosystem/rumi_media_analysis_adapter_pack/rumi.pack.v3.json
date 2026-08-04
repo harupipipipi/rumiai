@@ -31,25 +31,25 @@
         "cardinality": "one",
         "id": "rumi.service.media.inspect.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.ai.image.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.ai.audio.transcribe.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:ac3a90d1b02a8eae7e995d405ab51b6474a3bd8a72f536530b046c08d42508c2",
+      "artifact_hash": "sha256:70ca9c2696d710018be89a1f8fa406e1185698ec623fbd7860e0bb70fdcd0897",
       "contract_id": "rumi.service.media.analysis.v1",
       "id": "media-analysis",
       "loader": "python",

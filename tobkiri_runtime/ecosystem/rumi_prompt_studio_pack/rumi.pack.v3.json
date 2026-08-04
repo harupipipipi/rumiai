@@ -292,7 +292,7 @@
         "pack_identity": "rumi:ecosystem/rumi_prompt_studio_pack",
         "provenance": {
           "build_identity": "rumi-prompt-studio-pack:1.0.0",
-          "content_hash": "sha256:4bb2b96ba25bfcdb335d86a543fe8c6aba0069d1b0740e385f42c434d721b5fa",
+          "content_hash": "sha256:2a9a173e09ccb3f512915d55bc311763325a6a2f611a8a5f53101f57d7768764",
           "signature": null,
           "trust_class": "local"
         },
@@ -390,7 +390,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-prompt-studio-pack:1.0.0",
-    "content_hash": "sha256:4bb2b96ba25bfcdb335d86a543fe8c6aba0069d1b0740e385f42c434d721b5fa",
+    "content_hash": "sha256:2a9a173e09ccb3f512915d55bc311763325a6a2f611a8a5f53101f57d7768764",
     "signature": null,
     "trust_class": "local"
   },

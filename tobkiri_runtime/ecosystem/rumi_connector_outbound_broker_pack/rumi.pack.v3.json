@@ -57,25 +57,25 @@
         "cardinality": "one",
         "id": "rumi.resource.connector.registry.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "many",
         "id": "rumi.service.connector.adapter.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:cd1d89cfafa4c968b9c4793cf50a99fe55586989d256f5633c29263dad32568a",
+      "artifact_hash": "sha256:f5d20e862418385b9aedf06cb2e58fc3cd4a824022971061add8738c48747573",
       "contract_id": "rumi.resource.connector.outbound.v1",
       "id": "connector-outbound-resource",
       "loader": "python",
@@ -83,7 +83,7 @@
       "symbol": "create_outbound_resource"
     },
     {
-      "artifact_hash": "sha256:cd1d89cfafa4c968b9c4793cf50a99fe55586989d256f5633c29263dad32568a",
+      "artifact_hash": "sha256:f5d20e862418385b9aedf06cb2e58fc3cd4a824022971061add8738c48747573",
       "contract_id": "rumi.action.connector.outbound.v1",
       "id": "connector-outbound-action",
       "loader": "python",

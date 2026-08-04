@@ -1,5 +1,4 @@
 {
-  "version": "rumi.pack-artifacts.v1",
   "artifacts": [
     {
       "path": "runtime/__init__.py",
@@ -21,5 +20,6 @@
       "path": "runtime/health_process.py",
       "sha256": "sha256:f2e3464ed467b6e85dae562a81fa3c0d5ac1c0fd338b96ff3159736f0320d537"
     }
-  ]
+  ],
+  "version": "rumi.pack-artifacts.v1"
 }

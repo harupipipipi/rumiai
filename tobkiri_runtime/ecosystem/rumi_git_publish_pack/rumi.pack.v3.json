@@ -31,25 +31,25 @@
         "cardinality": "one",
         "id": "rumi.service.git.read.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.workspace.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:d3dc43ba0e436d4c5c42ddde6beaf116f76a4c1cff231cfc39e753ecd47cbf66",
+      "artifact_hash": "sha256:63795cba72da62efd567adbf39453de1e8069e59f6453cd5877da51a43048f1a",
       "contract_id": "rumi.service.git.publish.v1",
       "id": "git-publish",
       "loader": "python",

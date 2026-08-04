@@ -58,19 +58,19 @@
         "cardinality": "one",
         "id": "rumi.service.credential.resolve.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:2e9afcd384ee5a6fcca521e1cc8445b5b6d3ba7f189a95a6250dc57f3cfc4048",
+      "artifact_hash": "sha256:b9e67d4e981adc16de2e398fe6f0c9fe3e6ce2568a9a57fffb3c4384afdc41c6",
       "contract_id": "rumi.service.connector.adapter.v1",
       "id": "slack-adapter",
       "loader": "python",
@@ -78,7 +78,7 @@
       "symbol": "create_connector_adapter"
     },
     {
-      "artifact_hash": "sha256:2e9afcd384ee5a6fcca521e1cc8445b5b6d3ba7f189a95a6250dc57f3cfc4048",
+      "artifact_hash": "sha256:b9e67d4e981adc16de2e398fe6f0c9fe3e6ce2568a9a57fffb3c4384afdc41c6",
       "contract_id": "rumi.service.connector.oauth.provider.v1",
       "id": "slack-oauth-provider",
       "loader": "python",

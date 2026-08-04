@@ -87,7 +87,7 @@
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:facf46e5a828e14049f9ef6f91a1871b1630616109c69eeef41753e176d301d7",
+      "artifact_hash": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
       "contract_id": "rumi.resource.memory.v1",
       "id": "memory-resource",
       "loader": "python",
@@ -95,7 +95,7 @@
       "symbol": "create_memory_resource"
     },
     {
-      "artifact_hash": "sha256:facf46e5a828e14049f9ef6f91a1871b1630616109c69eeef41753e176d301d7",
+      "artifact_hash": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
       "contract_id": "rumi.action.memory.manage.v1",
       "id": "memory-manage",
       "loader": "python",
@@ -103,7 +103,7 @@
       "symbol": "create_memory_action"
     },
     {
-      "artifact_hash": "sha256:facf46e5a828e14049f9ef6f91a1871b1630616109c69eeef41753e176d301d7",
+      "artifact_hash": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
       "contract_id": "rumi.action.memory.migrate.v1",
       "id": "memory-migrate",
       "loader": "python",

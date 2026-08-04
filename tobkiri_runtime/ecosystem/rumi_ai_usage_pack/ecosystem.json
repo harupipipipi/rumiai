@@ -17,7 +17,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:f4748c8114dd0f1416399b2316b4980bcd47b0a14aca100f45c373fa2a63983e"
+      "source_content_hash": "sha256:46c731d0afaf7d9f5042e41771cad311e58ee03d88ace7567cbf9961e45f4650"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -38,7 +38,7 @@
   "pack_identity": "rumi:ecosystem/rumi_ai_usage_pack",
   "provenance": {
     "build_identity": "rumi-ai-usage-pack:1.0.0",
-    "content_hash": "sha256:69610cef7ab9b1e6abd0612393e537a3d3f1becf9abe18ecff6e30a75d444567",
+    "content_hash": "sha256:dbd07d5d848332ecf1c8da0f2fc5c9616a3ca260da41751b316812410c731181",
     "signature": null,
     "trust_class": "local"
   },

@@ -33,31 +33,31 @@
         "cardinality": "one",
         "id": "rumi.resource.conversation.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.conversation.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.message.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.job.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:0b497d51b3fc2cf04d718fea79c928ff1f714caf111261955330cb8ebade9436",
+      "artifact_hash": "sha256:d3a22819c65248246b22b225fb9a1d268e89321cf7a624cefa1e36c00bd0472b",
       "contract_id": "rumi.action.connector.route.v1",
       "id": "connector-turn-route",
       "loader": "python",

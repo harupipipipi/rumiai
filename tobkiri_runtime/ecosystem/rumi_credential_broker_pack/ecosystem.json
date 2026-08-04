@@ -20,7 +20,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:25874fc6de28a070fc9aea012260b018167fe39b711ba12ee6bcc2f40e681a36"
+      "source_content_hash": "sha256:5cd4809516569e799d5db59690f05ca8feca221ef285faa3975bce2549242850"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -48,7 +48,7 @@
   "pack_identity": "rumi:ecosystem/rumi_credential_broker_pack",
   "provenance": {
     "build_identity": "rumi-credential-broker-pack:1.0.0",
-    "content_hash": "sha256:59df5fbfa772a0919a6117afccedd9849c080c929eaff861a50c2ba4ec96b0a6",
+    "content_hash": "sha256:eff7eb0b3c0582f41072d62fe1b186e5aba2071b3cefc3fcb26d0ec109ac0369",
     "signature": null,
     "trust_class": "local"
   },

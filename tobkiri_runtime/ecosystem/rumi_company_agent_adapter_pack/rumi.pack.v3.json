@@ -33,31 +33,31 @@
         "cardinality": "one",
         "id": "rumi.resource.conversation.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.conversation.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.message.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.job.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:fed79e81402d3016212dc98c9bf565af3c8b22215c5a3a9a4649d3eeaf441c75",
+      "artifact_hash": "sha256:11909f9bd8fb202506c6972183dab8f7587ba29f9776a196e20609f9d7530580",
       "contract_id": "rumi.action.company.work.v1",
       "id": "company-agent-work",
       "loader": "python",

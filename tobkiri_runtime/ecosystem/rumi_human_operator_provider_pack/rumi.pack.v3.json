@@ -119,7 +119,7 @@
         "pack_identity": "rumi:ecosystem/rumi_human_operator_provider_pack",
         "provenance": {
           "build_identity": "rumi-human-operator-provider-pack:1.0.0",
-          "content_hash": "sha256:9049f47a5b5059631b49efa3f915e523152454030afef0066e04d255e7924520",
+          "content_hash": "sha256:1d317ae9644959f9a96662829c3d96066f65e5b70f06a71da6abb2af784cb0c5",
           "signature": null,
           "trust_class": "local"
         },
@@ -178,7 +178,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-human-operator-provider-pack:1.0.0",
-    "content_hash": "sha256:9049f47a5b5059631b49efa3f915e523152454030afef0066e04d255e7924520",
+    "content_hash": "sha256:1d317ae9644959f9a96662829c3d96066f65e5b70f06a71da6abb2af784cb0c5",
     "signature": null,
     "trust_class": "local"
   },

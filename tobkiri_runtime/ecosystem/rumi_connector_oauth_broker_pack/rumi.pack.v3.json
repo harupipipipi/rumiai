@@ -82,37 +82,37 @@
         "cardinality": "one",
         "id": "rumi.resource.connector.registry.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.connector.registry.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.credential.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "many",
         "id": "rumi.service.connector.oauth.provider.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:232f0139e61435f512285da496e312d591da0d0455ae46b6e4de55e31ad3a42f",
+      "artifact_hash": "sha256:60e25867b283ab9f353d9d87db70d9f877fa5549f7cbc3a1d997dc5deb8de15e",
       "contract_id": "rumi.resource.connector.oauth.v1",
       "id": "connector-oauth-resource",
       "loader": "python",
@@ -120,7 +120,7 @@
       "symbol": "create_oauth_resource"
     },
     {
-      "artifact_hash": "sha256:232f0139e61435f512285da496e312d591da0d0455ae46b6e4de55e31ad3a42f",
+      "artifact_hash": "sha256:60e25867b283ab9f353d9d87db70d9f877fa5549f7cbc3a1d997dc5deb8de15e",
       "contract_id": "rumi.action.connector.oauth.v1",
       "id": "connector-oauth-action",
       "loader": "python",
@@ -128,7 +128,7 @@
       "symbol": "create_oauth_action"
     },
     {
-      "artifact_hash": "sha256:232f0139e61435f512285da496e312d591da0d0455ae46b6e4de55e31ad3a42f",
+      "artifact_hash": "sha256:60e25867b283ab9f353d9d87db70d9f877fa5549f7cbc3a1d997dc5deb8de15e",
       "contract_id": "rumi.transport.connector.oauth.callback.v1",
       "id": "connector-oauth-callback",
       "loader": "python",

@@ -225,7 +225,7 @@
         "pack_identity": "rumi:ecosystem/rumi_conversation_store_pack",
         "provenance": {
           "build_identity": "rumi-conversation-store-pack:1.0.0",
-          "content_hash": "sha256:6b1176152f4c525ea9f23a96bdb828fb71f7b913f894e8837715f979569514b3",
+          "content_hash": "sha256:a576561e08c153f28b62cd5c708e30c03eeb5184115b235a749c35ec038911cd",
           "signature": null,
           "trust_class": "local"
         },
@@ -299,7 +299,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-conversation-store-pack:1.0.0",
-    "content_hash": "sha256:6b1176152f4c525ea9f23a96bdb828fb71f7b913f894e8837715f979569514b3",
+    "content_hash": "sha256:a576561e08c153f28b62cd5c708e30c03eeb5184115b235a749c35ec038911cd",
     "signature": null,
     "trust_class": "local"
   },

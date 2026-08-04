@@ -34,25 +34,25 @@
         "cardinality": "one",
         "id": "rumi.service.credential.resolve.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "optional",
         "id": "rumi.ui.qr.present.v1",
         "optional": true,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:0b293ec52e79c1d964e753e394ae742108ca22c5f84a192ebfa99ea309f0ceeb",
+      "artifact_hash": "sha256:d0df2f80a4ecc591507ba40b2864cfdcb1133d85ed76c1cc612ed89823b970d0",
       "contract_id": "rumi.service.connector.adapter.v1",
       "id": "qr-pairing-adapter",
       "loader": "python",

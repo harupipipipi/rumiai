@@ -19,7 +19,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:20c464cdc3d334d9ad44d94bd5b1e360438e496cd147a67c2e2422583aa7c807"
+      "source_content_hash": "sha256:95816b2c3b3dd9095cc713cc5ebc15a1f2f6c3bc9dadb9d08d6a63b199841d01"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -36,7 +36,7 @@
   "pack_identity": "rumi:ecosystem/rumi_kanban_surface_pack",
   "provenance": {
     "build_identity": "rumi-kanban-surface-pack:1.0.0",
-    "content_hash": "sha256:5898e39b53c9599e9c05f1103df2348cd8cc15e1a00acc430fb235b60deca091",
+    "content_hash": "sha256:c51f2cb992b2406d2ecee2eb51d21ef55d8541e8d4381c82d1a6caf043b490c9",
     "signature": null,
     "trust_class": "local"
   },

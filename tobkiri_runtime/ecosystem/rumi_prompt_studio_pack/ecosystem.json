@@ -80,7 +80,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:8f5cc7882d04e29261c71cf0af3bbed128f6e584d513e4526ab2feeebb14a798"
+      "source_content_hash": "sha256:82241379f9ab460a4270132efc4ff9df66bdd33e275d440bbf667fdc9b073ace"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -109,7 +109,7 @@
   "pack_identity": "rumi:ecosystem/rumi_prompt_studio_pack",
   "provenance": {
     "build_identity": "rumi-prompt-studio-pack:1.0.0",
-    "content_hash": "sha256:4bb2b96ba25bfcdb335d86a543fe8c6aba0069d1b0740e385f42c434d721b5fa",
+    "content_hash": "sha256:2a9a173e09ccb3f512915d55bc311763325a6a2f611a8a5f53101f57d7768764",
     "signature": null,
     "trust_class": "local"
   },

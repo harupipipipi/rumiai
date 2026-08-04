@@ -22,7 +22,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:44ace0a16f972f85be99cf8f5625f30bd1a85ceb5e4338b239ab173430ebab70"
+      "source_content_hash": "sha256:5a4eb0f5275649a32e616620d7ddb3e7a0c8bff58b74d36f7d11ad2baa44c17b"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],

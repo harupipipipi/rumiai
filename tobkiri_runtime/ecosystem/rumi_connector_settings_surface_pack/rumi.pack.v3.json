@@ -6,7 +6,7 @@
         "cardinality": "one",
         "id": "rumi.resource.connector.gateway.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
@@ -57,7 +57,7 @@
         "pack_identity": "rumi:ecosystem/rumi_connector_settings_surface_pack",
         "provenance": {
           "build_identity": "rumi-connector-settings-surface-pack:1.0.0",
-          "content_hash": "sha256:71e6676dfb05b5b2188d21833b920b4f84ccf55da27f7a37bf21b32ae8aaad25",
+          "content_hash": "sha256:4a77e61fd89da631289e967c1f72a41f424b6f547cd1f7f1ab23dc91f6f97743",
           "signature": null,
           "trust_class": "local"
         },
@@ -111,7 +111,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-connector-settings-surface-pack:1.0.0",
-    "content_hash": "sha256:71e6676dfb05b5b2188d21833b920b4f84ccf55da27f7a37bf21b32ae8aaad25",
+    "content_hash": "sha256:4a77e61fd89da631289e967c1f72a41f424b6f547cd1f7f1ab23dc91f6f97743",
     "signature": null,
     "trust_class": "local"
   },

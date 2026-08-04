@@ -6,7 +6,7 @@
         "cardinality": "one",
         "id": "rumi.resource.kanban.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
@@ -55,7 +55,7 @@
         "pack_identity": "rumi:ecosystem/rumi_kanban_surface_pack",
         "provenance": {
           "build_identity": "rumi-kanban-surface-pack:1.0.0",
-          "content_hash": "sha256:5898e39b53c9599e9c05f1103df2348cd8cc15e1a00acc430fb235b60deca091",
+          "content_hash": "sha256:c51f2cb992b2406d2ecee2eb51d21ef55d8541e8d4381c82d1a6caf043b490c9",
           "signature": null,
           "trust_class": "local"
         },
@@ -108,7 +108,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-kanban-surface-pack:1.0.0",
-    "content_hash": "sha256:5898e39b53c9599e9c05f1103df2348cd8cc15e1a00acc430fb235b60deca091",
+    "content_hash": "sha256:c51f2cb992b2406d2ecee2eb51d21ef55d8541e8d4381c82d1a6caf043b490c9",
     "signature": null,
     "trust_class": "local"
   },

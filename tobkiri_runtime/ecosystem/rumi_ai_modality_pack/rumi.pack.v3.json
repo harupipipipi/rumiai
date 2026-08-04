@@ -131,7 +131,7 @@
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+      "artifact_hash": "sha256:1d6aa91e0a925827e59207c9d68fcfa12a7fd913f8264a15b757f018b265a327",
       "contract_id": "rumi.service.ai.embedding.v1",
       "id": "ai-embedding",
       "loader": "python",
@@ -139,7 +139,7 @@
       "symbol": "create_embedding_operation"
     },
     {
-      "artifact_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+      "artifact_hash": "sha256:1d6aa91e0a925827e59207c9d68fcfa12a7fd913f8264a15b757f018b265a327",
       "contract_id": "rumi.service.ai.image.v1",
       "id": "ai-image",
       "loader": "python",
@@ -147,7 +147,7 @@
       "symbol": "create_image_operation"
     },
     {
-      "artifact_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+      "artifact_hash": "sha256:1d6aa91e0a925827e59207c9d68fcfa12a7fd913f8264a15b757f018b265a327",
       "contract_id": "rumi.service.ai.audio.transcribe.v1",
       "id": "ai-transcribe",
       "loader": "python",
@@ -155,7 +155,7 @@
       "symbol": "create_audio_transcribe_operation"
     },
     {
-      "artifact_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+      "artifact_hash": "sha256:1d6aa91e0a925827e59207c9d68fcfa12a7fd913f8264a15b757f018b265a327",
       "contract_id": "rumi.service.ai.audio.speech.v1",
       "id": "ai-speech",
       "loader": "python",
@@ -212,7 +212,7 @@
         "pack_identity": "rumi:ecosystem/rumi_ai_modality_pack",
         "provenance": {
           "build_identity": "rumi-ai-modality-pack:1.0.0",
-          "content_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+          "content_hash": "sha256:139d3958713a151c135b2566c8a8004938b48d572903fe7ec06523efa465675d",
           "signature": null,
           "trust_class": "local"
         },
@@ -282,7 +282,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-ai-modality-pack:1.0.0",
-    "content_hash": "sha256:1ff9dff3217effb90f9ba73c660ff8165e31c7dbaffdc5af652e1d80a41532e9",
+    "content_hash": "sha256:139d3958713a151c135b2566c8a8004938b48d572903fe7ec06523efa465675d",
     "signature": null,
     "trust_class": "local"
   },

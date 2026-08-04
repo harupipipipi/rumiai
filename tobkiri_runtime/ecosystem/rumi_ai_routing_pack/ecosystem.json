@@ -16,7 +16,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:49b9dfe3f8a1fa166147477c4c57f3da946a6bba7895d25162b6dbc4fcb88bc6"
+      "source_content_hash": "sha256:94087cb8ef1aad681b92f57835f3f531e120a6379410193664ddc68149ed8a57"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -39,7 +39,7 @@
   "pack_identity": "rumi:ecosystem/rumi_ai_routing_pack",
   "provenance": {
     "build_identity": "rumi-ai-routing-pack:1.0.0",
-    "content_hash": "sha256:2e57cc82bcbee3362563d95613dc80e717bda3600edc035b13ed911e0225fc43",
+    "content_hash": "sha256:4f8f77c1e191fc6facec589f6c0c61c065cb3017da121609462e3b080b32995d",
     "signature": null,
     "trust_class": "local"
   },

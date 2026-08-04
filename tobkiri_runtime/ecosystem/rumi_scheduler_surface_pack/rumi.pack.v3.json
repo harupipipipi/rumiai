@@ -6,13 +6,13 @@
         "cardinality": "one",
         "id": "rumi.resource.schedule.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.scheduler.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
@@ -55,7 +55,7 @@
         "pack_identity": "rumi:ecosystem/rumi_scheduler_surface_pack",
         "provenance": {
           "build_identity": "rumi-scheduler-surface-pack:1.0.0",
-          "content_hash": "sha256:9d9ed1c0168c4efabe82662303cc6478069770fa87a6d636b8bbf2ddf5f9b967",
+          "content_hash": "sha256:975cebe34cd8169f3003d27382ac670277166d2d22e9128d2057c574758a9f58",
           "signature": null,
           "trust_class": "local"
         },
@@ -123,7 +123,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-scheduler-surface-pack:1.0.0",
-    "content_hash": "sha256:9d9ed1c0168c4efabe82662303cc6478069770fa87a6d636b8bbf2ddf5f9b967",
+    "content_hash": "sha256:975cebe34cd8169f3003d27382ac670277166d2d22e9128d2057c574758a9f58",
     "signature": null,
     "trust_class": "local"
   },

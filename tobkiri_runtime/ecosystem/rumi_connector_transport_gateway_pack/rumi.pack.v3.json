@@ -79,37 +79,37 @@
         "cardinality": "one",
         "id": "rumi.resource.connector.registry.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.transport.connector.inbound.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.connector.outbound.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.connector.outbound.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+      "artifact_hash": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
       "contract_id": "rumi.transport.connector.gateway.v1",
       "id": "connector-gateway-transport",
       "loader": "python",
@@ -117,7 +117,7 @@
       "symbol": "create_gateway_transport"
     },
     {
-      "artifact_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+      "artifact_hash": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
       "contract_id": "rumi.resource.connector.gateway.v1",
       "id": "connector-gateway-resource",
       "loader": "python",
@@ -125,7 +125,7 @@
       "symbol": "create_gateway_resource"
     },
     {
-      "artifact_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+      "artifact_hash": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
       "contract_id": "rumi.action.connector.gateway.v1",
       "id": "connector-gateway-action",
       "loader": "python",

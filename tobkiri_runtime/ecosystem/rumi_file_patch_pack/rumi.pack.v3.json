@@ -31,19 +31,19 @@
         "cardinality": "one",
         "id": "rumi.resource.workspace.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:9f0299403ddc59031a122213f31757578887ef0a746ec08a24c2a52dc135cde0",
+      "artifact_hash": "sha256:c706fc33ef41284698a398f2f3742c0352f325eaf95acbd7448f0a4cfa68d416",
       "contract_id": "rumi.service.file.patch.v1",
       "id": "file-patch",
       "loader": "python",

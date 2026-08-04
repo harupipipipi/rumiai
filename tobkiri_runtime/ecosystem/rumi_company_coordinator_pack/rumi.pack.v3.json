@@ -83,31 +83,31 @@
         "cardinality": "one",
         "id": "rumi.resource.company.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.company.state.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "many",
         "id": "rumi.action.company.work.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:2cbc9e52e3ee88fc1d59ea1e83e98252d45c2c394c94d46c756e06a9a686ce0b",
+      "artifact_hash": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
       "contract_id": "rumi.resource.company.runtime.v1",
       "id": "company-runtime-resource",
       "loader": "python",
@@ -115,7 +115,7 @@
       "symbol": "create_company_runtime_resource"
     },
     {
-      "artifact_hash": "sha256:2cbc9e52e3ee88fc1d59ea1e83e98252d45c2c394c94d46c756e06a9a686ce0b",
+      "artifact_hash": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
       "contract_id": "rumi.action.company.coordinator.v1",
       "id": "company-coordinator-control",
       "loader": "python",
@@ -123,7 +123,7 @@
       "symbol": "create_company_control"
     },
     {
-      "artifact_hash": "sha256:2cbc9e52e3ee88fc1d59ea1e83e98252d45c2c394c94d46c756e06a9a686ce0b",
+      "artifact_hash": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
       "contract_id": "rumi.action.job.adapter.v1",
       "id": "company-supervisor-job-adapter",
       "loader": "python",

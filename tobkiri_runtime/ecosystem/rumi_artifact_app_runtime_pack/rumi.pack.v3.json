@@ -146,7 +146,7 @@
         "pack_identity": "rumi:ecosystem/rumi_artifact_app_runtime_pack",
         "provenance": {
           "build_identity": "rumi-artifact-app-runtime-content-pack:1.0.0",
-          "content_hash": "sha256:10d187bb800639ee935c2dbe4f54b1aa1e3c5342b9df8a4cbb64a33fe86b4b30",
+          "content_hash": "sha256:90cd3bf8eb21fdd99c63359b5111631ff18ddb715d8b6864ba5a1a3e3bea0583",
           "signature": null,
           "trust_class": "local"
         },
@@ -206,7 +206,7 @@
   "permissions": [],
   "provenance": {
     "build_identity": "rumi-artifact-app-runtime-content-pack:1.0.0",
-    "content_hash": "sha256:10d187bb800639ee935c2dbe4f54b1aa1e3c5342b9df8a4cbb64a33fe86b4b30",
+    "content_hash": "sha256:90cd3bf8eb21fdd99c63359b5111631ff18ddb715d8b6864ba5a1a3e3bea0583",
     "signature": null,
     "trust_class": "local"
   },

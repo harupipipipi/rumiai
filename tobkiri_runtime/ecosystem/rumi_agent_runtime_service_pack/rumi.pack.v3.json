@@ -82,67 +82,67 @@
         "cardinality": "one",
         "id": "rumi.resource.agent.state.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.agent.state.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.conversation.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.message.manage.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.turn.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.turn.lifecycle.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.context.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.ai.generate.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.tool.invoke.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:c6e3b6d22a3a86a8fe2314796951d4077ca87e19dd03d04743e172249968ea0c",
+      "artifact_hash": "sha256:e0d97b9e55724486c67d2a9cb37ab64e78e5ad4c9f34563143355765b77490da",
       "contract_id": "rumi.resource.agent.runtime.v1",
       "id": "agent-runtime-resource",
       "loader": "python",
@@ -150,7 +150,7 @@
       "symbol": "create_agent_runtime_resource"
     },
     {
-      "artifact_hash": "sha256:c6e3b6d22a3a86a8fe2314796951d4077ca87e19dd03d04743e172249968ea0c",
+      "artifact_hash": "sha256:e0d97b9e55724486c67d2a9cb37ab64e78e5ad4c9f34563143355765b77490da",
       "contract_id": "rumi.action.agent.run.v1",
       "id": "agent-runtime-control",
       "loader": "python",
@@ -158,7 +158,7 @@
       "symbol": "create_agent_control"
     },
     {
-      "artifact_hash": "sha256:c6e3b6d22a3a86a8fe2314796951d4077ca87e19dd03d04743e172249968ea0c",
+      "artifact_hash": "sha256:e0d97b9e55724486c67d2a9cb37ab64e78e5ad4c9f34563143355765b77490da",
       "contract_id": "rumi.action.job.adapter.v1",
       "id": "agent-turn-job-adapter",
       "loader": "python",

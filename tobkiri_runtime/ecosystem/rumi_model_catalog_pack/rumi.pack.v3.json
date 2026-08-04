@@ -84,7 +84,7 @@
         "pack_identity": "rumi:ecosystem/rumi_model_catalog_pack",
         "provenance": {
           "build_identity": "rumi-model-catalog-pack:2.0.0",
-          "content_hash": "sha256:84a8e5ad9f697540d9bd814f25ee070f31809a463e338f0706c328c6bec735fd",
+          "content_hash": "sha256:1ce355d9c14f5de035b2bb4c8b914161ae1d8df806969785804d4731a2b8c505",
           "signature": null,
           "trust_class": "local"
         },
@@ -142,7 +142,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-model-catalog-pack:2.0.0",
-    "content_hash": "sha256:84a8e5ad9f697540d9bd814f25ee070f31809a463e338f0706c328c6bec735fd",
+    "content_hash": "sha256:1ce355d9c14f5de035b2bb4c8b914161ae1d8df806969785804d4731a2b8c505",
     "signature": null,
     "trust_class": "local"
   },

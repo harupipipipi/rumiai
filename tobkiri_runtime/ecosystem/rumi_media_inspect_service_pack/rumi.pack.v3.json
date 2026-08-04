@@ -31,13 +31,13 @@
         "cardinality": "one",
         "id": "rumi.service.file.inspect.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:39cc9931de498f4a5f683179ad518d48c5c056e119f7117884dad370698f04c6",
+      "artifact_hash": "sha256:5650e0863ed7b5d1e24d11f80c1a706f02d2e096a2a8cba998ce0538cd30ff7a",
       "contract_id": "rumi.service.media.inspect.v1",
       "id": "media-inspect",
       "loader": "python",

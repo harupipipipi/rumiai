@@ -57,19 +57,19 @@
         "cardinality": "one",
         "id": "rumi.resource.workspace.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:57675999a0dfcdceab4c1da2b01358b41f4acf0d0a749be8af5fe5265b0d3d04",
+      "artifact_hash": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
       "contract_id": "rumi.resource.ide.session.v1",
       "id": "ide-observe",
       "loader": "python",
@@ -77,7 +77,7 @@
       "symbol": "create_ide_observe"
     },
     {
-      "artifact_hash": "sha256:57675999a0dfcdceab4c1da2b01358b41f4acf0d0a749be8af5fe5265b0d3d04",
+      "artifact_hash": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
       "contract_id": "rumi.action.ide.session.v1",
       "id": "ide-control",
       "loader": "python",

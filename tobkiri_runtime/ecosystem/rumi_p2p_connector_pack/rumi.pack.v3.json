@@ -33,19 +33,19 @@
         "cardinality": "one",
         "id": "rumi.service.credential.resolve.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:beb7d2f0f1dfe9bb9eaa4f4e2d960ded504465a1de26f9df2f4fead681a146ce",
+      "artifact_hash": "sha256:08de45459e7857a492a480fdf6a028dac404c58c53a81978c2a5a40002497fcb",
       "contract_id": "rumi.service.connector.adapter.v1",
       "id": "p2p-adapter",
       "loader": "python",

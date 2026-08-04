@@ -32,31 +32,31 @@
         "cardinality": "one",
         "id": "rumi.service.host.authorize.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.conversation.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.resource.kanban.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       },
       {
         "cardinality": "one",
         "id": "rumi.action.kanban.v1",
         "optional": false,
-        "version_range": ">=1.0.0,<2.0.0"
+        "version_range": ">=1.0.0 <2.0.0"
       }
     ]
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:54027d2aad5c71e2d66a70f6ae81503d97978d2566d859c48ec1190e2274c29a",
+      "artifact_hash": "sha256:3a1c4b115c1f07a423aaf32cb281452ef21e0d79a559ac6b6a24f5c99711296f",
       "contract_id": "rumi.action.kanban.conversation_import.v1",
       "id": "kanban-conversation-import",
       "loader": "python",
@@ -114,7 +114,7 @@
         "pack_identity": "rumi:ecosystem/rumi_kanban_conversation_adapter_pack",
         "provenance": {
           "build_identity": "rumi-kanban-conversation-adapter-pack:1.0.0",
-          "content_hash": "sha256:54027d2aad5c71e2d66a70f6ae81503d97978d2566d859c48ec1190e2274c29a",
+          "content_hash": "sha256:2bea88f8c1c64e3bc8fb45a3bc70a326fda7dbecbb31ea9e8f3860391a33dd2c",
           "signature": null,
           "trust_class": "local"
         },
@@ -189,7 +189,7 @@
   ],
   "provenance": {
     "build_identity": "rumi-kanban-conversation-adapter-pack:1.0.0",
-    "content_hash": "sha256:54027d2aad5c71e2d66a70f6ae81503d97978d2566d859c48ec1190e2274c29a",
+    "content_hash": "sha256:2bea88f8c1c64e3bc8fb45a3bc70a326fda7dbecbb31ea9e8f3860391a33dd2c",
     "signature": null,
     "trust_class": "local"
   },
