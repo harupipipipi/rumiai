@@ -6242,7 +6242,7 @@
       },
       {
         "evidence": "rumi.pack.v3",
-        "line": 682,
+        "line": 685,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
         "rule_id": "legacy_v3_manifest"
@@ -14493,8 +14493,8 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:289943eb910af0922bb4e987e826270f71fa6a2294f47e9753a21246d88ae071",
-        "line": 682,
+        "evidence_digest": "sha256:1a121af38f71facc0595ed386f220f8ffb19032eac1955d103ad38dca58d2de3",
+        "line": 685,
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
         "rule_id": "legacy_v3_manifest"
       },
@@ -16907,7 +16907,7 @@
     ]
   },
   "repository": {
-    "commit": "3eb091bf23b7a1f30d321c8c76b97a094a05571f",
+    "commit": "13c5a535ec396a7add351d685733a73a7c453d2b",
     "tree_digest": "992a7c940858dfc0f6c9049dec936fadd561dbd5d225613971647bc5272e8fc9"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
