@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 from core_runtime.dependency_resolver import resolve_load_order as _resolve_dependencies
 from core_runtime.manifest_authority import (
     ManifestAuthorityError,
+    load_manifest_authority_catalog,
     repository_manifest_authority,
-    validate_repository_manifest_authority,
+    validate_manifest_authority_scope,
 )
 from core_runtime.manifest_projection import (
     ManifestProjectionError,
@@ -196,7 +197,10 @@ class Registry:
             print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
             return {}
         if self._enforce_manifest_authority:
-            validate_repository_manifest_authority(self.ecosystem_dir)
+            validate_manifest_authority_scope(
+                load_manifest_authority_catalog(),
+                require_complete_catalog=True,
+            )
 
         global _global_registry
         _global_registry = self

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 ManifestAuthority = Literal[
     "legacy-authoritative",
@@ -61,33 +61,29 @@ def repository_manifest_authority(pack_id: str) -> ManifestAuthority:
     return authority
 
 
-def validate_repository_manifest_authority(ecosystem_dir: Path) -> None:
-    """Require an exact one-to-one classification for shipped Pack roots."""
-    excluded = {
-        ".git",
-        ".venv",
-        "__pycache__",
-        "flows",
-        "node_modules",
-        "packs",
-        "setup_pack",
-    }
-    try:
-        discovered = {
-            candidate.name
-            for candidate in ecosystem_dir.iterdir()
-            if candidate.is_dir()
-            and candidate.name not in excluded
-            and not candidate.name.startswith(".")
-        }
-    except OSError as exc:
-        raise ManifestAuthorityError(
-            f"cannot enumerate repository Pack roots: {exc}"
-        ) from exc
+def validate_manifest_authority_scope(
+    pack_ids: Iterable[str] | None,
+    *,
+    require_complete_catalog: bool = False,
+) -> None:
+    """Validate an explicit Pack scope without discovering installed Packs.
+
+    Runtime callers pass a ResolvedProfile effective set or an explicit shipped
+    catalog. Repository-wide discovery belongs only to offline build tooling,
+    which passes its already-discovered IDs with ``require_complete_catalog``.
+    """
+    if pack_ids is None or isinstance(pack_ids, (str, bytes)):
+        raise ManifestAuthorityError("manifest authority scope must be explicit")
+    values = tuple(pack_ids)
+    if any(not isinstance(pack_id, str) or not pack_id for pack_id in values):
+        raise ManifestAuthorityError("manifest authority scope has an invalid Pack ID")
+    if len(set(values)) != len(values):
+        raise ManifestAuthorityError("manifest authority scope has duplicate Pack IDs")
+    scoped = set(values)
     classified = set(load_manifest_authority_catalog())
-    missing = sorted(discovered - classified)
-    stale = sorted(classified - discovered)
-    if missing or stale:
+    extra = sorted(scoped - classified)
+    stale = sorted(classified - scoped) if require_complete_catalog else []
+    if extra or stale:
         raise ManifestAuthorityError(
-            f"manifest authority catalog mismatch: missing={missing}, stale={stale}"
+            f"manifest authority catalog mismatch: extra={extra}, stale={stale}"
         )

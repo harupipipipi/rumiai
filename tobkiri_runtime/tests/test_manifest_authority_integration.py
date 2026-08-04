@@ -21,7 +21,7 @@ from core_runtime.global_contracts.manifest import load_manifest
 from core_runtime.manifest_authority import (
     ManifestAuthorityError,
     load_manifest_authority_catalog,
-    validate_repository_manifest_authority,
+    validate_manifest_authority_scope,
 )
 from core_runtime.manifest_projection import (
     ManifestProjectionError,
@@ -53,11 +53,31 @@ class _Approved:
 def test_every_repository_pack_has_one_explicit_authority() -> None:
     catalog = load_manifest_authority_catalog()
 
-    validate_repository_manifest_authority(ECOSYSTEM)
+    validate_manifest_authority_scope(
+        (path.parent.name for path in ECOSYSTEM.glob("*/ecosystem.json")),
+        require_complete_catalog=True,
+    )
     assert len(catalog) == 141
     assert list(catalog.values()).count("v3-authoritative") == 95
     assert list(catalog.values()).count("legacy-authoritative") == 46
     assert list(catalog.values()).count("modern-only") == 0
+
+
+def test_authority_scope_rejects_missing_extra_and_implicit_inputs() -> None:
+    catalog = load_manifest_authority_catalog()
+    pack_ids = tuple(catalog)
+
+    with pytest.raises(ManifestAuthorityError, match="must be explicit"):
+        validate_manifest_authority_scope(None)
+    with pytest.raises(ManifestAuthorityError, match="extra=.*injected_pack"):
+        validate_manifest_authority_scope((*pack_ids, "injected_pack"))
+    with pytest.raises(ManifestAuthorityError, match="stale="):
+        validate_manifest_authority_scope(
+            pack_ids[:-1],
+            require_complete_catalog=True,
+        )
+
+    validate_manifest_authority_scope(pack_ids[:1])
 
 
 def test_all_authoritative_manifests_and_projections_are_valid() -> None:

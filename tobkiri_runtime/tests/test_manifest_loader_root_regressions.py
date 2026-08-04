@@ -99,9 +99,12 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     """Every discovered Pack has one explicit authority and a matching loader."""
     authority = _authority_module()
     authority.load_manifest_authority_catalog.cache_clear()
-    authority.validate_repository_manifest_authority(ECOSYSTEM)
-    catalog = authority.load_manifest_authority_catalog()
     locations = discover_pack_locations(str(ECOSYSTEM))
+    authority.validate_manifest_authority_scope(
+        (location.pack_id for location in locations),
+        require_complete_catalog=True,
+    )
+    catalog = authority.load_manifest_authority_catalog()
 
     assert len(locations) == 141
     assert len(catalog) == 141
