@@ -5,12 +5,14 @@ use std::process::Command;
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
 const PRESENTATION_RELEASE_ROOT_ENV: &str = "TOBKIRI_PRESENTATION_RELEASE_ROOT";
+const PRESENTATION_CATALOG_FILENAME: &str = "presentation_catalog.json";
 const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
     "bundled",
 ];
 
+#[cfg(not(test))]
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
     println!("cargo:rerun-if-changed=splash/tobkiri_launcher_startup_blade_cut.svg");
@@ -44,6 +46,9 @@ fn main() {
     ))
     .expect("failed to build Tauri application manifest")
 }
+
+#[cfg(test)]
+fn main() {}
 
 fn warn_legacy_defaultspack_app_bundle() {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -115,10 +120,14 @@ fn stage_runtime_bundle() -> io::Result<()> {
     }
     copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
         .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
+    let bundled_catalog = bundled_src.join(PRESENTATION_CATALOG_FILENAME);
+    let staged_catalog = staged_root
+        .join("bundled")
+        .join(PRESENTATION_CATALOG_FILENAME);
     let catalog_source = stage_presentation_release(&staged_root)
         .map_err(|error| stage_error("stage verified presentation artifact", error))?
-        .unwrap_or(bundled_src);
-    verify_staged_catalog(&catalog_source, &staged_root.join("bundled"))
+        .unwrap_or(bundled_catalog);
+    verify_staged_catalog(&catalog_source, &staged_catalog)
         .map_err(|error| stage_error("verify staged presentation catalog", error))?;
 
     stage_pack_shell(&repo_root, &staged_root)
@@ -131,50 +140,102 @@ fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>>
     let Some(raw_root) = std::env::var_os(PRESENTATION_RELEASE_ROOT_ENV) else {
         return Ok(None);
     };
-    let release_root = PathBuf::from(raw_root);
-    let catalog = release_root.join("presentation_catalog.json");
-    let artifacts = release_root.join("bundled").join("presentation-artifacts");
-    if !catalog.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "release presentation catalog is missing at {}",
-                catalog.display()
-            ),
-        ));
-    }
-    if !artifacts.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "release presentation artifacts are missing at {}",
-                artifacts.display()
-            ),
-        ));
-    }
+    stage_presentation_release_at(staged_root, &PathBuf::from(raw_root))
+}
+
+fn stage_presentation_release_at(
+    staged_root: &Path,
+    release_root: &Path,
+) -> io::Result<Option<PathBuf>> {
+    require_directory(release_root, "release presentation root")?;
+    let catalog = release_root.join(PRESENTATION_CATALOG_FILENAME);
+    require_regular_file(&catalog, "release presentation catalog")?;
+
+    let release_bundled = release_root.join("bundled");
+    require_directory(&release_bundled, "release presentation bundle directory")?;
+    let artifacts = release_bundled.join("presentation-artifacts");
+    require_directory(&artifacts, "release presentation artifacts")?;
 
     let staged_bundled = staged_root.join("bundled");
-    copy_file(&catalog, &staged_bundled.join("presentation_catalog.json"))?;
+    copy_file(
+        &catalog,
+        &staged_bundled.join(PRESENTATION_CATALOG_FILENAME),
+    )?;
     copy_dir_recursive(&artifacts, &staged_bundled.join("presentation-artifacts"))?;
     Ok(Some(catalog))
 }
 
-fn verify_staged_catalog(source_dir: &Path, staged_dir: &Path) -> io::Result<()> {
-    let source = source_dir.join("presentation_catalog.json");
-    let staged = staged_dir.join("presentation_catalog.json");
-    let expected = fs::read(&source)?;
-    let actual = fs::read(&staged)?;
+fn verify_staged_catalog(source_catalog: &Path, staged_catalog: &Path) -> io::Result<()> {
+    let expected = read_regular_file(source_catalog, "source presentation catalog")?;
+    let actual = read_regular_file(staged_catalog, "staged presentation catalog")?;
     if expected != actual {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
                 "manifest-derived presentation catalog differs between {} and {}",
-                source.display(),
-                staged.display()
+                source_catalog.display(),
+                staged_catalog.display()
             ),
         ));
     }
     Ok(())
+}
+
+fn require_regular_file(path: &Path, label: &str) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{label} is missing at {}", path.display()),
+            )
+        } else {
+            error
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} may not be a symlink: {}", path.display()),
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} must be a regular file: {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+fn require_directory(path: &Path, label: &str) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{label} is missing at {}", path.display()),
+            )
+        } else {
+            error
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} may not be a symlink: {}", path.display()),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} must be a directory: {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+fn read_regular_file(path: &Path, label: &str) -> io::Result<Vec<u8>> {
+    require_regular_file(path, label)?;
+    fs::read(path)
 }
 
 fn stage_error(step: &str, error: io::Error) -> io::Error {
@@ -533,4 +594,228 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestTree {
+        root: PathBuf,
+    }
+
+    impl TestTree {
+        fn new(label: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after the Unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "tobkiri-build-script-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("test tree should be creatable");
+            Self { root }
+        }
+
+        fn path(&self) -> &Path {
+            &self.root
+        }
+    }
+
+    impl Drop for TestTree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    struct EnvironmentGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvironmentGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvironmentGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {
+        let release_root = tree.path().join("release");
+        let artifacts = release_root.join("bundled").join("presentation-artifacts");
+        let staged_root = tree.path().join("staged");
+        let catalog = release_root.join(PRESENTATION_CATALOG_FILENAME);
+        fs::create_dir_all(&artifacts).expect("release artifacts should be creatable");
+        fs::create_dir_all(staged_root.join("bundled")).expect("staged bundle should be creatable");
+        fs::write(&catalog, b"verified presentation catalog")
+            .expect("release catalog should be writable");
+        fs::write(artifacts.join("verified-shell"), b"verified shell artifact")
+            .expect("release artifact should be writable");
+        (release_root, staged_root, catalog)
+    }
+
+    #[test]
+    fn release_stage_then_verify_uses_exact_catalog_file_paths() {
+        let tree = TestTree::new("stage-verify");
+        let (release_root, staged_root, catalog) = release_fixture(&tree);
+
+        let _release_root =
+            EnvironmentGuard::set_path(PRESENTATION_RELEASE_ROOT_ENV, &release_root);
+        let source_catalog = stage_presentation_release(&staged_root)
+            .expect("release should stage")
+            .expect("release staging should return a catalog");
+        let staged_catalog = staged_root
+            .join("bundled")
+            .join(PRESENTATION_CATALOG_FILENAME);
+
+        assert_eq!(source_catalog, catalog);
+        assert!(source_catalog.is_file());
+        assert!(staged_catalog.is_file());
+        verify_staged_catalog(&source_catalog, &staged_catalog)
+            .expect("staged catalog should match the release catalog");
+        assert!(staged_root
+            .join("bundled")
+            .join("presentation-artifacts")
+            .join("verified-shell")
+            .is_file());
+    }
+
+    #[test]
+    fn verify_rejects_missing_or_wrongly_named_catalog() {
+        let tree = TestTree::new("missing-catalog");
+        let source_root = tree.path().join("source");
+        let staged_root = tree.path().join("staged").join("bundled");
+        fs::create_dir_all(&source_root).expect("source should be creatable");
+        fs::create_dir_all(&staged_root).expect("staged should be creatable");
+        fs::write(source_root.join("wrong_filename.json"), b"catalog")
+            .expect("wrongly named catalog should be writable");
+        let staged_catalog = staged_root.join(PRESENTATION_CATALOG_FILENAME);
+        fs::write(&staged_catalog, b"catalog").expect("staged catalog should be writable");
+
+        let source_catalog = source_root.join(PRESENTATION_CATALOG_FILENAME);
+        let error = verify_staged_catalog(&source_catalog, &staged_catalog)
+            .expect_err("missing exact catalog filename must fail");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains(PRESENTATION_CATALOG_FILENAME));
+    }
+
+    #[test]
+    fn verify_rejects_catalog_directory_substitution() {
+        let tree = TestTree::new("directory-substitution");
+        let source_catalog = tree
+            .path()
+            .join("source")
+            .join(PRESENTATION_CATALOG_FILENAME);
+        let staged_catalog = tree
+            .path()
+            .join("staged")
+            .join(PRESENTATION_CATALOG_FILENAME);
+        fs::create_dir_all(source_catalog.parent().expect("source has a parent"))
+            .expect("source should be creatable");
+        fs::create_dir_all(staged_catalog.parent().expect("staged has a parent"))
+            .expect("staged should be creatable");
+        fs::create_dir_all(&source_catalog).expect("source directory substitution should work");
+        fs::write(&staged_catalog, b"catalog").expect("staged catalog should be writable");
+
+        let error = verify_staged_catalog(&source_catalog, &staged_catalog)
+            .expect_err("source directory substitution must fail");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        fs::remove_dir(&source_catalog).expect("source directory should be removable");
+        fs::write(&source_catalog, b"catalog").expect("source catalog should be writable");
+        fs::remove_file(&staged_catalog).expect("staged catalog should be removable");
+        fs::create_dir(&staged_catalog).expect("staged directory substitution should work");
+
+        let error = verify_staged_catalog(&source_catalog, &staged_catalog)
+            .expect_err("staged directory substitution must fail");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn verify_rejects_catalog_digest_mismatch() {
+        let tree = TestTree::new("tampered-catalog");
+        let source_catalog = tree
+            .path()
+            .join("source")
+            .join(PRESENTATION_CATALOG_FILENAME);
+        let staged_catalog = tree
+            .path()
+            .join("staged")
+            .join(PRESENTATION_CATALOG_FILENAME);
+        fs::create_dir_all(source_catalog.parent().expect("source has a parent"))
+            .expect("source should be creatable");
+        fs::create_dir_all(staged_catalog.parent().expect("staged has a parent"))
+            .expect("staged should be creatable");
+        fs::write(&source_catalog, br#"{"artifact":{"sha256":"sha256:good"}}"#)
+            .expect("source catalog should be writable");
+        fs::write(&staged_catalog, br#"{"artifact":{"sha256":"sha256:bad"}}"#)
+            .expect("staged catalog should be writable");
+
+        let error = verify_staged_catalog(&source_catalog, &staged_catalog)
+            .expect_err("catalog digest mismatch must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("differs"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_rejects_symlinked_catalog_and_artifact_paths() {
+        let tree = TestTree::new("symlink-paths");
+        let (release_root, staged_root, catalog) = release_fixture(&tree);
+        let outside_catalog = tree.path().join("outside-catalog.json");
+        fs::write(&outside_catalog, b"outside catalog").expect("outside catalog should exist");
+        fs::remove_file(&catalog).expect("fixture catalog should be removable");
+        std::os::unix::fs::symlink(&outside_catalog, &catalog)
+            .expect("catalog symlink should be creatable");
+
+        let error = stage_presentation_release_at(&staged_root, &release_root)
+            .expect_err("symlinked release catalog must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        fs::remove_file(&catalog).expect("catalog symlink should be removable");
+        fs::write(&catalog, b"verified presentation catalog")
+            .expect("catalog should be restorable");
+        let outside_artifact = tree.path().join("outside-shell");
+        fs::write(&outside_artifact, b"outside shell").expect("outside artifact should exist");
+        let artifact_link = release_root
+            .join("bundled")
+            .join("presentation-artifacts")
+            .join("escaped-shell");
+        std::os::unix::fs::symlink(&outside_artifact, &artifact_link)
+            .expect("artifact symlink should be creatable");
+
+        let error = stage_presentation_release_at(&staged_root, &release_root)
+            .expect_err("symlinked artifact must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("symlink"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_rejects_release_root_symlink_path_escape() {
+        let tree = TestTree::new("release-root-escape");
+        let (release_root, staged_root, _) = release_fixture(&tree);
+        let release_link = tree.path().join("release-link");
+        std::os::unix::fs::symlink(&release_root, &release_link)
+            .expect("release root symlink should be creatable");
+
+        let error = stage_presentation_release_at(&staged_root, &release_link)
+            .expect_err("release root symlink must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("release presentation root"));
+    }
 }
