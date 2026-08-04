@@ -87,7 +87,12 @@ def test_shell_packs_are_exact_app_shell_providers_and_prebuilt_only() -> None:
             "build_during_activation": False,
             "dev_commands_reachable": False,
         }
-        assert len(pack.variants) == 3
+        assert {variant.variant_id for variant in pack.variants} == {
+            "linux-x86_64",
+            "macos-arm64",
+            "macos-x86_64",
+            "windows-x86_64",
+        }
         for variant in pack.variants:
             artifact_path = pack.source_dir / variant.artifact_ref
             assert artifact_path.is_file()
