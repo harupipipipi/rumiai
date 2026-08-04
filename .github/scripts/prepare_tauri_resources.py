@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import os
 import shutil
 import stat
@@ -44,6 +45,20 @@ EXCLUDED_SUFFIXES = {
 EXCLUDED_TOP_LEVEL_DIRS = {
     "tests",
 }
+LEGACY_AUTHORITY_FILENAMES = frozenset(
+    {
+        "ecosystem.json",
+        "rumi.pack.v3.json",
+    }
+)
+CANONICAL_DEFAULTSPACK_FILES = (
+    Path("ecosystem/defaultspack/pack.v4.json"),
+    Path("ecosystem/defaultspack/contracts.v4.json"),
+    Path("ecosystem/defaultspack/artifact-index.v4.json"),
+    Path("ecosystem/defaultspack/executables.v4.json"),
+    Path("ecosystem/defaultspack/v4/bundle.lock.json"),
+    Path("ecosystem/defaultspack/v4/defaults.profile.v4.json"),
+)
 GENERATED_RESOURCE_DIRS = (
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
@@ -97,6 +112,8 @@ def should_skip_source_rel(rel_under_app: str) -> bool:
     path = Path(rel_under_app)
     if path.name == ".DS_Store":
         return True
+    if path.name in LEGACY_AUTHORITY_FILENAMES:
+        return True
     return any(path.name.endswith(suffix) for suffix in EXCLUDED_SUFFIXES)
 
 
@@ -128,6 +145,8 @@ def copy_tracked_runtime_files(repo_root: Path, source_root: Path, dest_root: Pa
         if should_skip_source_rel(rel_under_app):
             continue
         src = repo_root / rel
+        if src.is_symlink():
+            raise RuntimeError(f"Refusing symlinked runtime source: {rel}")
         if not src.is_file():
             continue
         copy_file(src, dest_root / rel_under_app)
@@ -141,7 +160,14 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
         src_dir = source_root / rel_dir
         if not src_dir.exists():
             continue
+        if src_dir.is_symlink():
+            raise RuntimeError(f"Refusing symlinked generated resource directory: {rel_dir}")
         for src in src_dir.rglob("*"):
+            if src.is_symlink():
+                raise RuntimeError(
+                    "Refusing symlinked generated resource: "
+                    f"{src.relative_to(source_root).as_posix()}"
+                )
             if not src.is_file():
                 continue
             rel_under_app = src.relative_to(source_root).as_posix()
@@ -327,12 +353,63 @@ def stage_uv(source_root: Path, target: str, version: str) -> Path:
     return dest
 
 
-def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | None) -> None:
+def _validate_defaultspack_v4(
+    dest_root: Path,
+    repository_root: Path,
+) -> None:
+    """Run the strict canonical Defaultspack v4 integrity gate on staged bytes."""
+
+    pack_root = dest_root / "ecosystem" / "defaultspack"
+    integrity_script = (
+        repository_root
+        / APP_SOURCE_DIR
+        / "scripts"
+        / "quality"
+        / "scan_defaultspack_integrity.py"
+    )
+    if not integrity_script.is_file():
+        raise FileNotFoundError(
+            f"Defaultspack v4 integrity checker is missing: {integrity_script}"
+        )
+
+    runtime_root = repository_root / APP_SOURCE_DIR
+    if str(runtime_root) not in sys.path:
+        sys.path.insert(0, str(runtime_root))
+    spec = importlib.util.spec_from_file_location(
+        "_prepare_tauri_defaultspack_integrity",
+        integrity_script,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load v4 integrity checker: {integrity_script}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    errors: list[str] = []
+    module.check_v4_integrity(errors, pack_root, strict=True)
+    if errors:
+        detail = "\n".join(f"- {error}" for error in errors[:40])
+        suffix = "\n- ..." if len(errors) > 40 else ""
+        raise RuntimeError(
+            "Canonical Defaultspack v4 preflight failed:\n"
+            f"{detail}{suffix}"
+        )
+
+
+def validate_bundle(
+    dest_root: Path,
+    require_runtime_tools: bool,
+    target: str | None,
+    *,
+    repository_root: Path | None = None,
+) -> None:
+    """Validate staged resources without consulting legacy authority documents."""
+
+    repository_root = (repository_root or Path(__file__).resolve().parents[2]).resolve()
     required = [
         Path("app.py"),
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
-        Path("ecosystem/defaultspack/ecosystem.json"),
+        *CANONICAL_DEFAULTSPACK_FILES,
         Path("ecosystem/defaultspack/ui/shell.html"),
         Path("ecosystem/defaultspack/ui/shell-app.js"),
     ]
@@ -350,12 +427,35 @@ def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | 
     if missing:
         raise FileNotFoundError("Missing bundled resource(s): " + ", ".join(missing))
 
+    symlinks = [
+        path.relative_to(dest_root).as_posix()
+        for path in dest_root.rglob("*")
+        if path.is_symlink()
+    ]
+    if symlinks:
+        raise RuntimeError(
+            "Staged resource contains symlink(s): " + ", ".join(symlinks[:20])
+        )
+
+    legacy = [
+        path.relative_to(dest_root).as_posix()
+        for path in dest_root.rglob("*")
+        if path.is_file() and path.name in LEGACY_AUTHORITY_FILENAMES
+    ]
+    if legacy:
+        raise RuntimeError(
+            "Staged resource contains legacy authority document(s): "
+            + ", ".join(legacy[:20])
+        )
+
     forbidden = []
     for path in dest_root.rglob("*"):
         if path.is_dir() and path.name in EXCLUDED_DIR_NAMES:
             forbidden.append(str(path.relative_to(dest_root)))
     if forbidden:
         raise RuntimeError("Forbidden generated bundle directories: " + ", ".join(forbidden[:20]))
+
+    _validate_defaultspack_v4(dest_root, repository_root)
 
 
 def warn_legacy_defaultspack_app_bundle() -> None:
@@ -437,7 +537,12 @@ def main() -> int:
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
 
-    validate_bundle(dest_root, args.require_runtime_tools, args.target)
+    validate_bundle(
+        dest_root,
+        args.require_runtime_tools,
+        args.target,
+        repository_root=repo_root,
+    )
     warn_legacy_defaultspack_app_bundle()
     print(
         "Prepared "
