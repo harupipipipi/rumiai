@@ -104,74 +104,6 @@ fn read_desktop_api_token(hmac_keys_path: &Path) -> AnyResult<String> {
     bail!("No active key found in hmac_keys.json")
 }
 
-/// Read the `desktop_app.command` from the defaultspack ecosystem.json.
-fn read_desktop_app_command(ecosystem_path: &Path) -> AnyResult<(String, Value)> {
-    let raw = fs::read_to_string(ecosystem_path)
-        .with_context(|| format!("failed to read {}", ecosystem_path.display()))?;
-    let data: Value = serde_json::from_str(&raw)
-        .with_context(|| format!("invalid JSON in {}", ecosystem_path.display()))?;
-
-    let desktop_app = data
-        .get("desktop_app")
-        .context("ecosystem.json missing 'desktop_app' section")?;
-
-    let command = desktop_app
-        .get("command")
-        .and_then(|v| v.as_str())
-        .context("desktop_app.command is missing")?
-        .to_string();
-
-    Ok((command, desktop_app.clone()))
-}
-
-fn resolve_desktop_app_working_dir(desktop_app: &Value, pack_root: &Path) -> PathBuf {
-    let working_dir = desktop_app
-        .get("working_dir")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
-    if working_dir.is_empty() {
-        return pack_root.to_path_buf();
-    }
-
-    let path = PathBuf::from(working_dir);
-    if path.is_absolute() {
-        path
-    } else {
-        pack_root.join(path)
-    }
-}
-
-fn is_valid_env_key(key: &str) -> bool {
-    let mut chars = key.chars();
-    match chars.next() {
-        Some(first) if first == '_' || first.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn read_desktop_app_env(desktop_app: &Value) -> AnyResult<Vec<(String, String)>> {
-    let Some(env) = desktop_app.get("env") else {
-        return Ok(Vec::new());
-    };
-    let env = env
-        .as_object()
-        .context("desktop_app.env must be an object")?;
-    let mut entries = Vec::with_capacity(env.len());
-    for (key, value) in env {
-        if !is_valid_env_key(key) {
-            bail!("desktop_app.env contains invalid shell variable name: {key}");
-        }
-        let value = value
-            .as_str()
-            .with_context(|| format!("desktop_app.env.{key} must be a string"))?;
-        entries.push((key.clone(), value.to_string()));
-    }
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    Ok(entries)
-}
-
 fn shell_quote(value: &str) -> String {
     if value.is_empty() {
         return "''".to_string();
@@ -687,12 +619,7 @@ fn register_with_launch_services(app_dir: &Path) -> AnyResult<()> {
     Ok(())
 }
 
-/// Tauri command: register defaultspack to the macOS Dock.
-///
-/// 1. Resolve pack-shell binary
-/// 2. Read ecosystem.json → desktop_app.command
-/// 3. Read HMAC key (plaintext only) → save to .desktop_api_token
-/// 4. Generate ~/Applications/Rumi Defaultspack.app
+/// Reject the removed legacy Dock wrapper registration path.
 #[tauri::command]
 pub fn register_defaultspack_dock(config: tauri::State<'_, AppConfig>) -> Result<String, String> {
     register_defaultspack_dock_impl(&config).map_err(|e| {
@@ -702,13 +629,10 @@ pub fn register_defaultspack_dock(config: tauri::State<'_, AppConfig>) -> Result
 }
 
 pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
-    let app_dir = ensure_defaultspack_app_bundle(config)?;
-
-    info!("Dock registration complete: {}", app_dir.display());
-    Ok(format!(
-        "Registered 'Tobkiri' to Dock at {}",
-        app_dir.display()
-    ))
+    let _ = config;
+    bail!(
+        "legacy Defaultspack Dock wrappers are removed; select and launch a verified Shell artifact"
+    )
 }
 
 #[tauri::command]
@@ -723,19 +647,11 @@ pub fn launch_defaultspack_desktop(
 }
 
 pub(crate) fn launch_defaultspack_desktop_window_impl(
-    app: &AppHandle,
+    _app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<String> {
-    with_defaultspack_launch_coordination(|| {
-        info!("launch_defaultspack_desktop_impl: starting");
-        let url = ensure_defaultspack_desktop_ready(app, config)?;
-        open_defaultspack_tauri_window(app, &url)?;
-        info!(
-            "launch_defaultspack_desktop_impl: opened Tauri window {}",
-            defaultspack_window_url_for_log(&url)
-        );
-        Ok("Tobkiriを開きました".into())
-    })
+    let result = crate::presentation::launch_selected_presentation_impl(config)?;
+    Ok(result.message)
 }
 
 /// Ensure the real Defaultspack listener is Launcher-owned and registered as
@@ -1123,12 +1039,22 @@ fn read_defaultspack_desktop_metadata(
             ecosystem_path.display()
         );
     }
-    let (command, desktop_app) = read_desktop_app_command(&ecosystem_path)?;
     let pack_root = ecosystem_path
         .parent()
         .context("defaultspack ecosystem.json has no parent directory")?;
-    let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
-    let mut env_vars = read_desktop_app_env(&desktop_app)?;
+    let command = "python defaultspack/desktop_app.py".to_string();
+    let app_working_dir = pack_root.to_path_buf();
+    let mut env_vars = vec![
+        (
+            "DEFAULTS_HTTP_PORT".into(),
+            DEFAULTSPACK_DEFAULT_PORT.to_string(),
+        ),
+        (
+            "RUMI_DEFAULTSPACK_PORT".into(),
+            DEFAULTSPACK_DEFAULT_PORT.to_string(),
+        ),
+        ("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into()),
+    ];
     let mut port = read_defaultspack_port(&env_vars)?;
     if let Some((debug_http_port, debug_kernel_port)) = crate::debug_defaultspack_ports_from_env() {
         if config.kernel_port != debug_kernel_port {
@@ -1946,45 +1872,6 @@ echo "manual defaultspack helper"
     }
 
     #[test]
-    fn read_desktop_app_command_parses_ecosystem() {
-        let dir = std::env::temp_dir().join("rumi_dock_test_eco");
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("ecosystem.json");
-        fs::write(
-            &path,
-            r#"{"pack_id":"defaultspack","desktop_app":{"command":"python app.py"}}"#,
-        )
-        .unwrap();
-        let (cmd, _) = read_desktop_app_command(&path).unwrap();
-        assert_eq!(cmd, "python app.py");
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn read_desktop_app_env_sorts_and_validates_env_vars() {
-        let desktop_app: Value = serde_json::from_str(
-            r#"{"env":{"RUMI_DEFAULTSPACK_SURFACE":"webview","DEFAULTS_HTTP_PORT":"8766"}}"#,
-        )
-        .unwrap();
-
-        let env_vars = read_desktop_app_env(&desktop_app).unwrap();
-        assert_eq!(
-            env_vars,
-            vec![
-                ("DEFAULTS_HTTP_PORT".into(), "8766".into()),
-                ("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into()),
-            ]
-        );
-    }
-
-    #[test]
-    fn read_desktop_app_env_rejects_invalid_shell_names() {
-        let desktop_app: Value = serde_json::from_str(r#"{"env":{"BAD;NAME":"oops"}}"#).unwrap();
-        let err = read_desktop_app_env(&desktop_app).unwrap_err();
-        assert!(err.to_string().contains("invalid shell variable name"));
-    }
-
-    #[test]
     fn read_defaultspack_port_prefers_rumi_specific_port() {
         let port = read_defaultspack_port(&[
             ("DEFAULTS_HTTP_PORT".into(), "8766".into()),
@@ -2065,26 +1952,6 @@ echo "manual defaultspack helper"
         assert_eq!(
             defaultspack_auth_probe_url(DEFAULTSPACK_DEFAULT_PORT),
             "http://127.0.0.1:8766/api/integrations/secrets"
-        );
-    }
-
-    #[test]
-    fn resolve_desktop_app_working_dir_defaults_to_pack_root() {
-        let pack_root = PathBuf::from("/tmp/defaultspack");
-        let desktop_app: Value = serde_json::from_str(r#"{"working_dir":""}"#).unwrap();
-        assert_eq!(
-            resolve_desktop_app_working_dir(&desktop_app, &pack_root),
-            pack_root
-        );
-    }
-
-    #[test]
-    fn resolve_desktop_app_working_dir_joins_relative_path() {
-        let pack_root = PathBuf::from("/tmp/defaultspack");
-        let desktop_app: Value = serde_json::from_str(r#"{"working_dir":"apps"}"#).unwrap();
-        assert_eq!(
-            resolve_desktop_app_working_dir(&desktop_app, &pack_root),
-            pack_root.join("apps")
         );
     }
 }

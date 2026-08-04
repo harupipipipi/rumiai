@@ -12,7 +12,7 @@
 | `tobkiri_launcher` の起動と詰まり方を知りたい | [rumi_viewer_start.md](./rumi_viewer_start.md) | [../README.md](../README.md) の「目的別ガイド」 |
 | Pack を作りたい | [pack-development-guide.md](./pack-development-guide.md) | [pack-development.md](./pack-development.md) |
 | Pack docs の置き方を知りたい | [pack-documentation-contract.md](./pack-documentation-contract.md) | [pack-development.md](./pack-development.md) |
-| desktop app Pack を作りたい | [pack_desktop_app_guide.md](./pack_desktop_app_guide.md) | [examples/desktop_app_pack/README.md](./examples/desktop_app_pack/README.md) |
+| Base/Shell application を作りたい | [ADR-016](./ADR-016_BASE_SHELL_APPLICATION_MODEL.txt) | [v4 protocol contract](../tobkiri_protocol/README.md) |
 | viewer 表示 Pack を作りたい | [examples/viewer_hello_pack/README.md](./examples/viewer_hello_pack/README.md) | [examples/viewer_pack/README.md](./examples/viewer_pack/README.md) |
 | Capability Graph / node / profile 仕様を確認したい | [capability_graph.md](./capability_graph.md) | [node_spec.md](./node_spec.md), [profile_spec.md](./profile_spec.md), [capability_graph_pr_plan.md](./capability_graph_pr_plan.md) |
 | API キー / secrets / 運用を知りたい | [operations.md](./operations.md) | [quality_pack/philosophy_memo.md](./quality_pack/philosophy_memo.md) |

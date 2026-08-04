@@ -10,6 +10,12 @@
   ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt, and
   TOBKIRI_PACK_ARCHITECTURE_IMPLEMENTATION_PLAN.txt
 
+Implementation revision: Profile composition now uses the closed v4 schemas
+`base_definition_v4`, `shell_definition_v4`, `profile_v4`,
+`composition_catalog_v4`, and `profile_lock_v4`. Base/Shell v1 definition
+schemas and ProfileLock v1 have been removed. Legacy input is accepted only by
+the review-only migration adapter and is never activation eligible.
+
 ## Context
 
 The legacy Startup Profile stores one `base_pack` and treats a launchable frontend as

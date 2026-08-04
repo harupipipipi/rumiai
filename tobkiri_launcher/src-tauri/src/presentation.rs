@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result as AnyResult};
-use log::{error, warn};
+use log::error;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State};
@@ -24,6 +24,7 @@ const CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-catalog.v1";
 const SHELL_CONTRACT_ID: &str = "app.shell.v1";
 const SELECTION_DIR: &str = "presentation";
 const SELECTION_FILE: &str = "selection.json";
+const SELECTION_SCHEMA: &str = "io.tobkiri.launcher.profile-selection.v4";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationApproval {
@@ -162,6 +163,20 @@ pub struct PresentationSelection {
     pub shell_provider_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct StoredProfileSelection {
+    schema: String,
+    catalog_revision: String,
+    base_pack_id: String,
+    base_artifact_digest: String,
+    shell_provider_id: String,
+    shell_contract_revision_digest: String,
+    shell_artifact_id: String,
+    shell_artifact_digest: String,
+    platform: String,
+    architecture: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationMaterialization {
     pub status: String,
@@ -228,14 +243,19 @@ fn select_presentation_impl(
     config: &AppConfig,
     selection: PresentationSelection,
 ) -> AnyResult<PresentationState> {
-    let mut catalog = load_catalog(config)?;
+    let catalog = load_catalog(config)?;
     validate_selection(&catalog, &selection)?;
-    write_selection(config, &selection)?;
-    catalog.generated_at = now_seconds();
-    build_state_from_catalog(config, catalog, Some(selection))
+    let state = build_state_from_catalog(config, catalog, Some(selection.clone()))?;
+    if state.materialization.status != "materialized" {
+        bail!("selection cannot be saved until its exact artifact is verified");
+    }
+    write_selection(config, &state.catalog, &selection)?;
+    Ok(state)
 }
 
-fn launch_selected_presentation_impl(config: &AppConfig) -> AnyResult<PresentationLaunchResponse> {
+pub(crate) fn launch_selected_presentation_impl(
+    config: &AppConfig,
+) -> AnyResult<PresentationLaunchResponse> {
     let state = build_state(config)?;
     let selection = state
         .selection
@@ -288,7 +308,7 @@ fn launch_selected_presentation_impl(config: &AppConfig) -> AnyResult<Presentati
 
 fn build_state(config: &AppConfig) -> AnyResult<PresentationState> {
     let catalog = load_catalog(config)?;
-    let selection = read_selection(config)?;
+    let selection = read_selection(config, &catalog)?;
     build_state_from_catalog(config, catalog, selection)
 }
 
@@ -330,31 +350,14 @@ fn presentation_catalog_path(config: &AppConfig) -> PathBuf {
 
 fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
     let path = presentation_catalog_path(config);
-    let (raw, source) = match fs::read_to_string(&path) {
-        Ok(raw) => (raw, format!("packaged resource {}", path.display())),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            warn!(
-                "manifest-derived presentation catalog resource is missing at {}; using the embedded generated catalog",
-                path.display()
-            );
-            (
-                include_str!("../bundled/presentation_catalog.json").to_string(),
-                format!(
-                    "embedded generated catalog (packaged resource missing at {})",
-                    path.display()
-                ),
-            )
-        }
-        Err(error) => {
-            return Err(error).with_context(|| {
-                format!(
-                    "failed to read manifest-derived presentation catalog at {} (app root {})",
-                    path.display(),
-                    config.app_dir.display()
-                )
-            })
-        }
-    };
+    let raw = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "verified presentation catalog is required at {} (app root {}); no embedded, environment, or path fallback is permitted",
+            path.display(),
+            config.app_dir.display()
+        )
+    })?;
+    let source = format!("packaged resource {}", path.display());
     let catalog: PresentationCatalog = serde_json::from_str(&raw).with_context(|| {
         format!("manifest-derived presentation catalog from {source} is malformed and was rejected")
     })?;
@@ -917,7 +920,41 @@ fn safe_artifact_path(config: &AppConfig, relative: &str) -> AnyResult<PathBuf> 
     Ok(canonical)
 }
 
-fn write_selection(config: &AppConfig, selection: &PresentationSelection) -> AnyResult<()> {
+fn write_selection(
+    config: &AppConfig,
+    catalog: &PresentationCatalog,
+    selection: &PresentationSelection,
+) -> AnyResult<()> {
+    let base = catalog
+        .base_packs
+        .iter()
+        .find(|item| item.pack_id == selection.base_pack_id)
+        .context("selected Base disappeared before persistence")?;
+    let shell = catalog
+        .shell_providers
+        .iter()
+        .find(|item| item.provider_id == selection.shell_provider_id)
+        .context("selected Shell disappeared before persistence")?;
+    let artifact = shell
+        .artifact
+        .as_ref()
+        .context("selected Shell artifact was not materialized")?;
+    validate_production_artifact(artifact)?;
+    let stored = StoredProfileSelection {
+        schema: SELECTION_SCHEMA.to_string(),
+        catalog_revision: catalog_revision(catalog)?,
+        base_pack_id: base.pack_id.clone(),
+        base_artifact_digest: base.artifact_digest.clone(),
+        shell_provider_id: shell.provider_id.clone(),
+        shell_contract_revision_digest: shell.contract_revision_digest.clone(),
+        shell_artifact_id: artifact.artifact_id.clone(),
+        shell_artifact_digest: artifact
+            .sha256
+            .clone()
+            .context("verified Shell artifact has no digest")?,
+        platform: artifact.platform.clone(),
+        architecture: artifact.architecture.clone(),
+    };
     let directory = config.user_data_dir.join(SELECTION_DIR);
     fs::create_dir_all(&directory).with_context(|| {
         format!(
@@ -928,7 +965,7 @@ fn write_selection(config: &AppConfig, selection: &PresentationSelection) -> Any
     let path = directory.join(SELECTION_FILE);
     let temporary = directory.join(format!(".selection-{}.tmp", std::process::id()));
     let bytes =
-        serde_json::to_vec_pretty(selection).context("failed to encode presentation selection")?;
+        serde_json::to_vec_pretty(&stored).context("failed to encode exact profile selection")?;
     let result = (|| -> AnyResult<()> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -974,20 +1011,71 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
 
-fn read_selection(config: &AppConfig) -> AnyResult<Option<PresentationSelection>> {
+fn read_selection(
+    config: &AppConfig,
+    catalog: &PresentationCatalog,
+) -> AnyResult<Option<PresentationSelection>> {
     let path = config
         .user_data_dir
         .join(SELECTION_DIR)
         .join(SELECTION_FILE);
     match fs::read_to_string(&path) {
         Ok(raw) => {
-            Ok(Some(serde_json::from_str(&raw).with_context(|| {
-                "saved presentation selection is malformed"
-            })?))
+            let stored: StoredProfileSelection =
+                serde_json::from_str(&raw).context("saved exact profile selection is malformed")?;
+            if stored.schema != SELECTION_SCHEMA {
+                bail!("saved selection is not a Profile v4 selection");
+            }
+            if stored.catalog_revision != catalog_revision(catalog)? {
+                bail!("saved selection is stale for the verified catalog revision");
+            }
+            let base = catalog
+                .base_packs
+                .iter()
+                .find(|item| item.pack_id == stored.base_pack_id)
+                .context("saved Base is missing from the verified catalog")?;
+            if base.artifact_digest != stored.base_artifact_digest {
+                bail!("saved Base artifact binding is stale");
+            }
+            let shell = catalog
+                .shell_providers
+                .iter()
+                .find(|item| item.provider_id == stored.shell_provider_id)
+                .context("saved Shell is missing from the verified catalog")?;
+            if shell.contract_revision_digest != stored.shell_contract_revision_digest {
+                bail!("saved Shell definition binding is stale");
+            }
+            let variant = shell
+                .artifact_variants
+                .iter()
+                .find(|item| {
+                    item.platform == stored.platform
+                        && item.architecture == stored.architecture
+                        && item.artifact_id == stored.shell_artifact_id
+                })
+                .context("saved exact Shell platform artifact is missing")?;
+            if variant.sha256.as_deref() != Some(stored.shell_artifact_digest.as_str()) {
+                bail!("saved Shell artifact digest is stale");
+            }
+            Ok(Some(PresentationSelection {
+                base_pack_id: stored.base_pack_id,
+                shell_provider_id: stored.shell_provider_id,
+            }))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
     }
+}
+
+fn catalog_revision(catalog: &PresentationCatalog) -> AnyResult<String> {
+    let mut normalized = catalog.clone();
+    normalized.generated_at = 0;
+    for shell in &mut normalized.shell_providers {
+        shell.artifact = None;
+    }
+    let bytes = serde_json::to_vec(&normalized)
+        .context("failed to canonicalize presentation catalog revision")?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
 fn sha256_path(path: &Path) -> AnyResult<String> {

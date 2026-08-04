@@ -3,15 +3,10 @@
 //! All paths are derived from Tauri's `resource_dir` and `app_data_dir`
 //! so that the application works correctly when bundled.
 
-use crate::process_utils;
-
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
-const PACK_SHELL_PATH_ENV: &str = "RUMI_PACK_SHELL_PATH";
 const UV_PATH_ENV: &str = "RUMI_UV_PATH";
-const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -222,85 +217,16 @@ impl AppConfig {
         self.dev_workspace_root.is_some()
     }
 
-    /// Resolve the best available `pack-shell` binary path.
-    ///
-    /// Checks `RUMI_PACK_SHELL_PATH` first, then the bundled copy at
-    /// `{app_dir}/bundled/pack-shell`, then the dev workspace build, then
-    /// `PATH`.
+    /// Resolve `pack-shell` only from the packaged application root.
     pub fn pack_shell_path(&self) -> Option<PathBuf> {
-        if let Some(configured) = configured_pack_shell_path() {
-            if configured.is_file() {
-                return Some(configured);
-            }
-        }
-
-        if let Some(bundled) = self.bundled_pack_shell_path() {
-            return Some(bundled);
-        }
-
-        if let Some(ref root) = self.dev_workspace_root {
-            if let Some(dev_pack_shell) = dev_pack_shell_path(root) {
-                return Some(dev_pack_shell);
-            }
-        }
-
-        which::which(pack_shell_binary_name()).ok()
+        self.bundled_pack_shell_path()
     }
 
-    /// Resolve `pack-shell`, building the dev checkout copy on first use.
+    /// Require packaged `pack-shell`; no environment, PATH, or build fallback exists.
     pub fn ensure_pack_shell_path(&self) -> Result<PathBuf> {
-        self.ensure_pack_shell_path_with(build_dev_pack_shell)
-    }
-
-    fn ensure_pack_shell_path_with<F>(&self, mut build_pack_shell: F) -> Result<PathBuf>
-    where
-        F: FnMut(&Path) -> Result<()>,
-    {
-        if let Some(configured) = configured_pack_shell_path() {
-            if configured.is_file() {
-                return Ok(configured);
-            }
-            bail!(
-                "{PACK_SHELL_PATH_ENV} points to a missing pack-shell binary: {}",
-                configured.display()
-            );
-        }
-
-        if let Some(ref root) = self.dev_workspace_root {
-            if let Some(dev_pack_shell) = dev_pack_shell_path(root) {
-                return Ok(dev_pack_shell);
-            }
-
-            let manifest = root.join("pack-shell").join("Cargo.toml");
-            if manifest.is_file() {
-                log::info!(
-                    "pack-shell binary not found; building dev pack-shell from {}",
-                    manifest.display()
-                );
-                build_pack_shell(&manifest).with_context(|| {
-                    format!("failed to build pack-shell from {}", manifest.display())
-                })?;
-
-                return dev_pack_shell_path(root).with_context(|| {
-                    format!(
-                        "pack-shell build completed but {} was not created",
-                        dev_pack_shell_binary_path(root, "debug").display()
-                    )
-                });
-            }
-        }
-
-        if let Some(bundled) = self.bundled_pack_shell_path() {
-            return Ok(bundled);
-        }
-
-        if let Ok(found) = which::which(pack_shell_binary_name()) {
-            return Ok(found);
-        }
-
-        bail!(
-            "pack-shell binary not found. Set {PACK_SHELL_PATH_ENV}, add pack-shell to PATH, or build it with `cargo build --manifest-path pack-shell/Cargo.toml`."
-        );
+        self.bundled_pack_shell_path().context(
+            "verified packaged pack-shell is missing; environment, PATH, and source-build fallbacks are disabled",
+        )
     }
 
     fn bundled_pack_shell_path(&self) -> Option<PathBuf> {
@@ -378,72 +304,6 @@ fn configured_uv_path() -> Option<PathBuf> {
     std::env::var_os(UV_PATH_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-}
-
-fn configured_pack_shell_path() -> Option<PathBuf> {
-    std::env::var_os(PACK_SHELL_PATH_ENV)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-fn dev_pack_shell_binary_path(root: &Path, profile: &str) -> PathBuf {
-    pack_shell_target_dir(root)
-        .join(profile)
-        .join(pack_shell_binary_name())
-}
-
-fn pack_shell_target_dir(root: &Path) -> PathBuf {
-    let configured = std::env::var_os(CARGO_TARGET_DIR_ENV)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    pack_shell_target_dir_with_override(root, configured)
-}
-
-fn pack_shell_target_dir_with_override(root: &Path, configured: Option<PathBuf>) -> PathBuf {
-    let configured = configured.filter(|path| path.is_absolute());
-    configured.unwrap_or_else(|| root.join("pack-shell").join("target"))
-}
-
-fn dev_pack_shell_path(root: &Path) -> Option<PathBuf> {
-    for profile in ["release", "debug"] {
-        let candidate = dev_pack_shell_binary_path(root, profile);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn build_dev_pack_shell(manifest: &Path) -> Result<()> {
-    let workspace_root = manifest
-        .parent()
-        .and_then(Path::parent)
-        .context("pack-shell manifest must be under a workspace root")?;
-    let output = process_utils::command("cargo")
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(manifest)
-        .env(CARGO_TARGET_DIR_ENV, pack_shell_target_dir(workspace_root))
-        .stdin(Stdio::null())
-        .output()
-        .context("failed to run cargo build for pack-shell")?;
-
-    if output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() {
-            log::info!("pack-shell cargo build output: {}", stderr.trim());
-        }
-        return Ok(());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!(
-        "cargo build for pack-shell failed with status {}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        stdout.trim(),
-        stderr.trim()
-    );
 }
 
 /// Return the platform-appropriate file name for the `uv` binary.
@@ -796,98 +656,6 @@ mod tests {
     }
 
     #[test]
-    fn pack_shell_target_can_be_isolated_outside_the_workspace() {
-        let workspace = std::env::temp_dir().join("workspace").join("repository");
-        let isolated_target = std::env::temp_dir()
-            .join("owned")
-            .join("supervisor")
-            .join("cargo_target");
-
-        assert_eq!(
-            pack_shell_target_dir_with_override(&workspace, Some(isolated_target.clone())),
-            isolated_target
-        );
-        assert_eq!(
-            pack_shell_target_dir_with_override(&workspace, Some(PathBuf::from("relative-target"))),
-            workspace.join("pack-shell").join("target")
-        );
-    }
-
-    #[test]
-    fn pack_shell_path_prefers_dev_build_when_present() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_pack_shell_{unique}"));
-        let resource = root
-            .join("tobkiri_launcher")
-            .join("src-tauri")
-            .join("target")
-            .join("debug");
-        let appdata = root.join("appdata");
-        let app_py = root.join("tobkiri_runtime").join("app.py");
-        let pack_shell = dev_pack_shell_binary_path(&root, "debug");
-
-        fs::create_dir_all(&resource).unwrap();
-        fs::create_dir_all(app_py.parent().unwrap()).unwrap();
-        fs::create_dir_all(pack_shell.parent().unwrap()).unwrap();
-        fs::write(&app_py, "print('ok')\n").unwrap();
-        fs::write(&pack_shell, b"pack-shell").unwrap();
-
-        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
-
-        assert_eq!(config.pack_shell_path(), Some(pack_shell.clone()));
-        assert_eq!(config.ensure_pack_shell_path().unwrap(), pack_shell);
-
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn ensure_pack_shell_path_builds_dev_binary_when_missing() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("tobkiri_launcher_pack_shell_build_{unique}"));
-        let resource = root
-            .join("tobkiri_launcher")
-            .join("src-tauri")
-            .join("target")
-            .join("debug");
-        let appdata = root.join("appdata");
-        let app_py = root.join("tobkiri_runtime").join("app.py");
-        let manifest = root.join("pack-shell").join("Cargo.toml");
-        let pack_shell = dev_pack_shell_binary_path(&root, "debug");
-
-        fs::create_dir_all(&resource).unwrap();
-        fs::create_dir_all(app_py.parent().unwrap()).unwrap();
-        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
-        fs::write(&app_py, "print('ok')\n").unwrap();
-        fs::write(&manifest, "[package]\nname = \"pack-shell\"\n").unwrap();
-
-        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
-        let built = config
-            .ensure_pack_shell_path_with(|manifest_path| {
-                assert_eq!(manifest_path, manifest.as_path());
-                fs::create_dir_all(pack_shell.parent().unwrap()).unwrap();
-                fs::write(&pack_shell, b"pack-shell").unwrap();
-                Ok(())
-            })
-            .unwrap();
-
-        assert_eq!(built, pack_shell);
-
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
     fn ensure_pack_shell_path_uses_staged_bundle_without_building_ancestor_workspace() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -916,14 +684,7 @@ mod tests {
         fs::write(&staged_pack_shell, b"staged-pack-shell").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
-        let resolved = config
-            .ensure_pack_shell_path_with(|manifest_path| {
-                panic!(
-                    "unexpected build of ancestor manifest {}",
-                    manifest_path.display()
-                );
-            })
-            .unwrap();
+        let resolved = config.ensure_pack_shell_path().unwrap();
 
         assert_eq!(resolved, staged_pack_shell);
 
