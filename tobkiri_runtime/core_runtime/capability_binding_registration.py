@@ -230,6 +230,18 @@ def _register_v3_contract_bindings(
     manifest_path = pack_location.pack_subdir / "rumi.pack.v3.json"
     if not manifest_path.is_file():
         return False, False
+    loaded = load_manifest(manifest_path)
+    if not loaded.ok or not isinstance(loaded.value, dict):
+        result.ok = False
+        result.diagnostics.append(
+            _diagnostic(
+                "error",
+                "v3_process_manifest_invalid",
+                "; ".join(loaded.diagnostics),
+                pack_id=pack_id,
+            )
+        )
+        return True, False
     if load_manifest_authority_catalog().get(pack_id) == "v3-authoritative":
         try:
             generate_legacy_ecosystem_projection(
@@ -248,18 +260,6 @@ def _register_v3_contract_bindings(
                 )
             )
             return True, False
-    loaded = load_manifest(manifest_path)
-    if not loaded.ok or not isinstance(loaded.value, dict):
-        result.ok = False
-        result.diagnostics.append(
-            _diagnostic(
-                "error",
-                "v3_process_manifest_invalid",
-                "; ".join(loaded.diagnostics),
-                pack_id=pack_id,
-            )
-        )
-        return True, False
     manifest = loaded.value
     ecosystem_manifest = _read_manifest(
         pack_location.ecosystem_json_path,

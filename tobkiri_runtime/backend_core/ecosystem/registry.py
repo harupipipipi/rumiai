@@ -54,6 +54,18 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+class RegistryLoadError(RuntimeError):
+    """Raised when a Pack scan cannot produce one complete valid Registry."""
+
+
+def _is_active_ecosystem_pack(pack_dir: Path, ecosystem_dir: Path) -> bool:
+    """Return whether a candidate belongs to the requested active Pack root."""
+    parent = pack_dir.parent.resolve()
+    root = ecosystem_dir.resolve()
+    return parent in {root, (root / "packs").resolve()}
+
+
 TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 
 # PC-4: function_id validation regex (compiled once at module level)
@@ -244,16 +256,20 @@ class Registry:
                         else:
                             self.packs[pack_info.pack_id] = pack_info
                             print(f"  [OK] Pack読み込み成功: {pack_info.pack_id}")
-                except ManifestAuthorityError:
+                except (ManifestAuthorityError, RegistryLoadError):
                     raise
                 except Exception as e:
-                    if (
-                        self._enforce_manifest_authority
-                        and pack_dir.parent.resolve()
-                        == self.ecosystem_dir.resolve()
-                    ):
-                        raise ManifestAuthorityError(
-                            f"classified Pack '{pack_dir.name}' failed to load: {e}"
+                    if _is_active_ecosystem_pack(pack_dir, self.ecosystem_dir):
+                        if (
+                            self._enforce_manifest_authority
+                            and pack_dir.parent.resolve()
+                            == self.ecosystem_dir.resolve()
+                        ):
+                            raise ManifestAuthorityError(
+                                f"classified Pack '{pack_dir.name}' failed to load: {e}"
+                            ) from e
+                        raise RegistryLoadError(
+                            f"Pack '{pack_dir.name}' failed to load: {e}"
                         ) from e
                     print(f"  [ERROR] Pack読み込みエラー ({pack_dir.name}): {e}")
         
@@ -326,6 +342,10 @@ class Registry:
         Returns:
             PackInfo または None
         """
+        is_active_pack = _is_active_ecosystem_pack(
+            pack_dir,
+            self.ecosystem_dir,
+        )
         is_classified_pack = (
             self._enforce_manifest_authority
             and pack_dir.parent.resolve() == self.ecosystem_dir.resolve()
@@ -338,6 +358,10 @@ class Registry:
                 raise ManifestAuthorityError(
                     f"classified Pack '{pack_dir.name}' has no ecosystem.json"
                 )
+            if is_active_pack:
+                raise RegistryLoadError(
+                    f"Pack '{pack_dir.name}' has no ecosystem.json"
+                )
             print(f"    ecosystem.jsonが見つかりません: {pack_dir}")
             return None
         
@@ -346,6 +370,10 @@ class Registry:
             if is_classified_pack:
                 raise ManifestAuthorityError(
                     f"classified Pack '{pack_dir.name}' has an oversized manifest"
+                )
+            if is_active_pack:
+                raise RegistryLoadError(
+                    f"Pack '{pack_dir.name}' has an oversized ecosystem.json"
                 )
             return None
         with open(ecosystem_file, 'r', encoding='utf-8') as f:
@@ -385,6 +413,10 @@ class Registry:
             if is_classified_pack:
                 raise ManifestAuthorityError(
                     f"classified Pack '{pack_dir.name}' has invalid legacy manifest: {e}"
+                ) from e
+            if is_active_pack:
+                raise RegistryLoadError(
+                    f"Pack '{pack_dir.name}' has invalid legacy manifest: {e}"
                 ) from e
             print(f"    スキーマ検証エラー: {e}")
             return None
