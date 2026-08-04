@@ -287,14 +287,15 @@ def test_host_capabilities_pack_contract_names_boundary_and_privacy():
             ROOT / "ecosystem" / "setup_pack" / "rumi_host_capabilities_pack" / "pack.json"
         ).read_text(encoding="utf-8")
     )
+    legacy_annotations = ecosystem["metadata"]["legacy_annotations"]
 
     assert ecosystem["pack_id"] == "rumi_host_capabilities_pack"
-    assert ecosystem["security_boundary"]["defaultspack_role"] == "ui_orchestration_and_authority_only"
-    assert ecosystem["security_boundary"]["ordinary_pack_contract"] == "return_host_intent_json"
-    assert ecosystem["default_grants"]["include"] == "implemented_host_permissions"
-    assert ecosystem["default_grants"]["exclude"] == []
-    assert ecosystem["privacy"]["store_microphone_audio"] is False
-    assert ecosystem["privacy"]["store_camera_frames"] is False
+    assert legacy_annotations["security_boundary"]["defaultspack_role"] == "ui_orchestration_and_authority_only"
+    assert legacy_annotations["security_boundary"]["ordinary_pack_contract"] == "return_host_intent_json"
+    assert legacy_annotations["default_grants"]["include"] == "implemented_host_permissions"
+    assert legacy_annotations["default_grants"]["exclude"] == []
+    assert legacy_annotations["privacy"]["store_microphone_audio"] is False
+    assert legacy_annotations["privacy"]["store_camera_frames"] is False
     assert setup["overlap_policy"]["defaultspack_host_execution"] == "forbidden"
 
 
@@ -303,6 +304,7 @@ def test_host_capabilities_pack_registry_grants_follow_canonical_host_registry()
 
     registry = _host_permission_registry()
     ecosystem = json.loads((ROOT / "ecosystem" / "rumi_host_capabilities_pack" / "ecosystem.json").read_text())
+    legacy_annotations = ecosystem["metadata"]["legacy_annotations"]
 
     implemented = [
         permission_id
@@ -310,8 +312,8 @@ def test_host_capabilities_pack_registry_grants_follow_canonical_host_registry()
         if definition.get("broker_runner_implemented") is True
     ]
     assert ecosystem["capabilities"] == implemented
-    assert ecosystem["default_grants"]["include"] == "implemented_host_permissions"
-    assert ecosystem["default_grants"]["exclude"] == []
+    assert legacy_annotations["default_grants"]["include"] == "implemented_host_permissions"
+    assert legacy_annotations["default_grants"]["exclude"] == []
     assert default_builtin_grants.HOST_CAPABILITIES_PACK_PERMISSIONS == (
         "function.call",
         *(
@@ -326,11 +328,12 @@ def test_host_capabilities_pack_defines_standard_mediator_functions():
     pack_root = ROOT / "ecosystem" / "rumi_host_capabilities_pack"
     registry = _host_permission_registry()
     ecosystem = json.loads((pack_root / "ecosystem.json").read_text())
+    legacy_annotations = ecosystem["metadata"]["legacy_annotations"]
     expected_functions = _expected_host_mediator_functions()
     generator = _host_mediator_generator()
 
     assert generator.check_generated_files() == []
-    assert ecosystem["host_functions"] == {
+    assert legacy_annotations["host_functions"] == {
         function_id: {
             "operation": operation,
             "stream": bool(registry[operation].get("stream_allowed")),
