@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import importlib
 import json
 import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
-OPERATIONS_PACK_ROOT = ROOT / "ecosystem" / "rumi_operations_company_pack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
@@ -77,44 +75,14 @@ def _bind_fake_contract_stream(monkeypatch, client):
     monkeypatch.setattr(gateway_contract_client, "_invoke", invoke)
 
 
-class _RouteRegistry:
-    def __init__(self):
-        self.routes = []
+def _component_http_routes():
+    """Return route declarations from the current domain component registry."""
+    from ecosystem.defaultspack.transport.registry import component_http_route_specs
 
-    def register(self, key, value, meta=None):
-        if key == "io.http.route":
-            self.routes.append(value)
-
-    def get(self, *args, **kwargs):
-        return None
-
-    def get_interface(self, key, strategy=None):
-        if key == "io.http.route":
-            return self.routes
-        return None
-
-
-def _collect_defaultspack_routes():
-    registry = _RouteRegistry()
-    ecosystem = json.loads((DEFAULTSPACK_ROOT / "ecosystem.json").read_text(encoding="utf-8"))
-    for entry in ecosystem["load_order"]:
-        _, component_id = entry.split(":", 1)
-        component = ecosystem["components"][component_id]
-        module_name = component["path"].replace("/", ".") + ".setup"
-        try:
-            setup = importlib.import_module(module_name)
-        except ModuleNotFoundError:
-            continue
-        setup.run({"interface_registry": registry, "_source_component": entry})
-    from ecosystem.rumi_operations_company_pack.blocks.agent import setup as operations_setup
-
-    operations_setup.run(
-        {
-            "interface_registry": registry,
-            "_source_component": "rumi_operations_company_pack:agent:operations_company",
-        }
-    )
-    return registry
+    return {
+        (spec.method, spec.pattern): spec
+        for spec in component_http_route_specs()
+    }
 
 
 def test_capability_catalog_loads_plan_manifest():
@@ -494,16 +462,28 @@ def test_unit_executor_does_not_pass_integration_tokens_to_python_fallback(monke
     assert process_env["PYTHONDONTWRITEBYTECODE"] == "1"
 
 
-def test_external_integration_routes_are_registered():
-    registry = _collect_defaultspack_routes()
-    patterns = {route["pattern"] for route in registry.routes}
+def test_external_integration_component_routes_are_registered():
+    routes = _component_http_routes()
+    integration_routes = {
+        key: spec
+        for key, spec in routes.items()
+        if "/api/integrations/" in key[1]
+    }
 
-    assert "/api/integrations/slack/events" in patterns
-    assert "/api/integrations/line/webhook" in patterns
-    assert "/api/integrations/discord/interactions" in patterns
-    assert "/api/integrations/secrets" in patterns
-    assert "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
-    assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
+    assert set(integration_routes) == {
+        ("POST", "/api/integrations/discord/interactions"),
+        ("POST", "/api/integrations/discord/events"),
+        ("POST", "/api/integrations/line/webhook"),
+        ("POST", "/api/integrations/slack/events"),
+    }
+    assert all(
+        spec.owner_pack_id == "defaultspack"
+        and spec.block_module.startswith("blocks.integrations.")
+        for spec in integration_routes.values()
+    )
+    assert ("POST", "/api/integrations/secrets") not in routes
+    assert ("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots") not in routes
+    assert ("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots") not in routes
 
 
 def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
@@ -3760,19 +3740,23 @@ def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
     assert message["raw_text"] == "<thought>hidden</thought>shown"
 
 
-def test_builtin_calculator_returns_real_arithmetic_result(
-    defaultspack_capability_plan_context,
-):
-    from domain.tool.executor import ToolExecutor
+def test_builtin_calculator_returns_real_arithmetic_result():
+    from domain.function_runtime.dispatcher import run_defaultspack_function
 
-    result = ToolExecutor().execute(
-        "calculator",
+    result = run_defaultspack_function(
+        "tool_calculator",
         {"expression": "2 + 2 * 3"},
-        defaultspack_capability_plan_context("calculator"),
+        {"flow_id": "v4_pack_function_test"},
     )
 
-    assert result["is_error"] is False
-    assert result["result"] == "Calculated: 2 + 2 * 3 = 8"
+    assert result == {
+        "status": "ok",
+        "data": {
+            "result": "Calculated: 2 + 2 * 3 = 8",
+            "is_error": False,
+            "widget": None,
+        },
+    }
 
 
 def test_coding_tools_are_exposed_through_tool_registry():
@@ -3814,8 +3798,14 @@ def test_tool_executor_dispatches_coding_handler_with_yolo_policy(
         ),
     )
 
-    assert result["is_error"] is True
-    assert "workspace_id is required" in result["result"]
+    assert result == {
+        "result": (
+            "Capability execution failed: CapabilityExecutor is not bound; "
+            "implicit executor creation is forbidden"
+        ),
+        "is_error": True,
+        "widget": None,
+    }
     assert not (tmp_path / "created.txt").exists()
 
     ToolRegistry._instance = None
@@ -3874,22 +3864,18 @@ def test_coding_handlers_accept_only_server_approval_context(tmp_path, monkeypat
     assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "ok"
 
 
-def test_direct_coding_route_cannot_execute_with_forged_approved(tmp_path, monkeypatch):
+def test_retired_direct_coding_route_is_not_registered(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
     monkeypatch.chdir(tmp_path)
-    registry = _collect_defaultspack_routes()
-    route = next(
-        item
-        for item in registry.routes
-        if item["method"] == "POST" and item["pattern"] == "/api/coding/files/write"
+    server = DefaultsHttpServer(facade=None)
+    assert server._match_route("POST", "/api/coding/files/write") == (
+        None,
+        None,
+        None,
+        None,
+        None,
     )
-
-    result = route["handler"](
-        {"path": "direct-pwned.txt", "content": "blocked", "approved": True},
-        {"flow_id": "transport_direct"},
-    )
-
-    assert result["status"] == "ok"
-    assert result["data"]["approval_required"] is True
     assert not (tmp_path / "direct-pwned.txt").exists()
 
 
@@ -3935,40 +3921,34 @@ def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
     assert len(calls) == 3
 
 
-def test_fallback_routes_expose_agent_service_and_coding_surfaces():
-    from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
+def test_pack_operation_fallback_registry_is_empty_and_host_routes_are_handler_owned():
+    from ecosystem.defaultspack.transport.registry import (
+        _FALLBACK_HTTP_ROUTE_SPECS,
+        canonical_http_route_specs,
+    )
 
-    routes = {(spec.method, spec.pattern, spec.block_module) for spec in _FALLBACK_HTTP_ROUTE_SPECS}
-    specs = {(spec.method, spec.pattern, spec.function_id) for spec in _FALLBACK_HTTP_ROUTE_SPECS}
-
-    assert ("GET", "/api/capabilities", "blocks.capability.list") in routes
-    assert ("GET", "/api/agent-service/manifest", "blocks.capability.manifest") in routes
-    assert ("GET", "/api/coding/context", "blocks.coding.context") in routes
-    assert ("GET", "/api/coding/files", "blocks.coding.file_list") in routes
-    assert ("GET", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
-    assert ("POST", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
-    assert ("POST", "/api/coding/files/diff", "blocks.coding.file_diff") in routes
-    assert ("POST", "/api/coding/terminal/exec", "blocks.coding.terminal_exec") in routes
-    assert ("POST", "/api/context/compact", "blocks.context.compact") in routes
-    assert ("POST", "/api/artifacts", "blocks.artifact.create") in routes
-    assert ("POST", "/api/research/local-search", "blocks.research.local_search") in routes
-    assert ("POST", "/api/research/web-search", "blocks.research.web_search") in routes
-    assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
-    assert ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop") in routes
-    assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
-    assert ("GET", "/api/tools/browser-companion/session", "blocks.tool.browser_companion_session") in routes
-    assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
-    assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
-    assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
-    assert ("GET", "/api/agent/company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest") in routes
-    assert ("GET", "/api/agent/company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.company.status") in routes
-    assert ("POST", "/api/agent/company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.company.bootstrap") in routes
-    assert ("GET", "/api/agent/mimo-company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.manifest") in routes
-    assert ("GET", "/api/agent/mimo-company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status") in routes
-    assert ("POST", "/api/agent/mimo-company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.bootstrap") in routes
-    assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
-    assert ("GET", "/api/chat/channels", "chat_channel_list") in specs
-    assert ("POST", "/api/share", "blocks.share.create") in routes
+    assert _FALLBACK_HTTP_ROUTE_SPECS == []
+    routes = canonical_http_route_specs(include_always_available=True)
+    assert routes
+    assert all(spec.handler_name for spec in routes)
+    assert all(
+        not spec.block_module
+        and not spec.fallback_block_module
+        and not spec.legacy_block_module
+        and not spec.function_id
+        for spec in routes
+    )
+    retired_paths = {
+        "/api/capabilities",
+        "/api/agent-service/manifest",
+        "/api/coding/files",
+        "/api/coding/terminal/exec",
+        "/api/chat/conversations/{id}/stop",
+        "/api/agent/company/status",
+        "/api/agent/mimo-company/status",
+        "/api/share",
+    }
+    assert retired_paths.isdisjoint({spec.pattern for spec in routes})
 
 
 def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
@@ -3996,70 +3976,51 @@ def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
     assert calls == [("computer.screenshot", {"reason": "test"}, {}, {"tool_name": "browser_computer", "artifact_root": None, "yolo_mode": False})]
 
 
-def test_stdio_and_uds_chat_stop_routes_inject_conversation_id():
+def test_stdio_rejects_retired_chat_stop_route_and_uds_preserves_wire_injection():
     from ecosystem.defaultspack.transport import stdio, uds
 
-    for transport_module in (stdio, uds):
-        pattern, module_name, path_params = transport_module._match_route(
-            "POST",
-            "/api/chat/conversations/c-stop/stop",
-        )
+    assert stdio._match_route(
+        "POST",
+        "/api/chat/conversations/c-stop/stop",
+    ) == (None, None, {})
 
-        assert pattern == "/api/chat/conversations/{id}/stop"
-        assert module_name == "blocks.chat.stop"
-        assert path_params == {"id": "c-stop"}
-        assert transport_module._ID_INJECT_MAP[pattern] == ("conversation_id", "id")
+    pattern, module_name, path_params = uds._match_route(
+        "POST",
+        "/api/chat/conversations/c-stop/stop",
+    )
+    assert pattern == "/api/chat/conversations/{id}/stop"
+    assert module_name == "blocks.chat.stop"
+    assert path_params == {"id": "c-stop"}
+    assert uds._ID_INJECT_MAP[pattern] == ("conversation_id", "id")
 
 
-def test_fallback_operations_company_routes_precede_generic_agent_status():
+def test_retired_operations_company_route_fails_closed_before_generic_status():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
     server = DefaultsHttpServer(facade=None)
-    captured = {}
-
-    def fake_invoke(block_module, request_data, path_params, inject=None):
-        captured["block_module"] = block_module
-        captured["path_params"] = path_params
-        return {"status": "ok"}
-
-    server._invoke_fallback_block = fake_invoke
-    handler, params, _, path_inject, _ = server._match_route("GET", "/api/agent/company/status")
-
-    assert params == {}
-    assert path_inject == {}
-    assert handler is not None
-    assert handler({}, params) == {"status": "ok"}
-    assert captured == {
-        "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.company.status",
-        "path_params": {},
-    }
+    assert server._match_route("GET", "/api/agent/company/status") == (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
-def test_fallback_mimo_company_routes_precede_generic_agent_status():
+def test_retired_mimo_company_route_fails_closed_before_generic_status():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
     server = DefaultsHttpServer(facade=None)
-    captured = {}
-
-    def fake_invoke(block_module, request_data, path_params, inject=None):
-        captured["block_module"] = block_module
-        captured["path_params"] = path_params
-        return {"status": "ok"}
-
-    server._invoke_fallback_block = fake_invoke
-    handler, params, _, path_inject, _ = server._match_route("GET", "/api/agent/mimo-company/status")
-
-    assert params == {}
-    assert path_inject == {}
-    assert handler is not None
-    assert handler({}, params) == {"status": "ok"}
-    assert captured == {
-        "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status",
-        "path_params": {},
-    }
+    assert server._match_route("GET", "/api/agent/mimo-company/status") == (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
-def test_standalone_http_chat_stream_bypasses_function_runtime_and_unwraps_sse(monkeypatch):
+def test_standalone_http_chat_stream_fails_closed_without_v4_operation(monkeypatch):
     import ecosystem.defaultspack.transport.http as http_transport
 
     server = http_transport.DefaultsHttpServer(facade=None)
@@ -4080,10 +4041,15 @@ def test_standalone_http_chat_stream_bypasses_function_runtime_and_unwraps_sse(m
         {"id": "conversation_id"},
     )
 
-    assert captured["module_name"] == "blocks.chat.stream"
-    assert captured["payload"]["conversation_id"] == "c-http"
-    assert captured["context"]["owner_pack"] == "defaultspack"
-    assert http_transport._RequestHandler._sse_events_from_result(result) == [{"type": "done"}]
+    assert captured == {}
+    assert result == {
+        "status": "error",
+        "error": {
+            "code": "V4_OPERATION_UNAVAILABLE",
+            "message": "Chat operation is absent from the captured Pack v4 catalog",
+        },
+    }
+    assert http_transport._RequestHandler._sse_events_from_result(result) is None
 
 
 def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
@@ -4123,57 +4089,63 @@ def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
     assert denied["_http_status"] == 403
 
 
-def test_transport_direct_routes_json_has_interface_registry_parity():
-    ecosystem_routes = []
-    for routes_path in (DEFAULTSPACK_ROOT / "routes.json", OPERATIONS_PACK_ROOT / "routes.json"):
-        ecosystem_routes.extend(json.loads(routes_path.read_text(encoding="utf-8"))["routes"])
-    contract_routes = {
-        (route["method"], route["path"])
-        for route in ecosystem_routes
-        if route.get("flow_id") == "transport_direct"
-    }
-    registry = _collect_defaultspack_routes()
-    registered_routes = {(route["method"], route["pattern"]) for route in registry.routes}
-
-    missing = contract_routes - registered_routes
-    assert missing <= {
-        ("POST", "/api/authority/browser-exchange"),
-        ("GET", "/calendar"),
-        ("POST", "/api/authority/browser-exchange/revoke"),
-    }
-
-
-def test_frontend_sidebar_api_routes_match_in_registry_mode():
+def test_transport_routes_match_captured_host_route_inventory():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+    from ecosystem.defaultspack.transport.registry import compile_http_route_pattern
 
-    registry = _collect_defaultspack_routes()
+    server = DefaultsHttpServer(facade=None)
+    canonical_routes = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=True)
+    }
+    canonical_by_regex = {
+        (spec.method, compile_http_route_pattern(spec.pattern).pattern): spec.pattern
+        for spec in canonical_http_route_specs(include_always_available=True)
+    }
+    registered_routes = {
+        (method, canonical_by_regex[(method, compiled.pattern)])
+        for method, compiled, _handler, _source, _path_inject in server._routes
+    }
+
+    assert registered_routes == canonical_routes
+    assert ("POST", "/api/coding/files/write") not in registered_routes
+    assert ("GET", "/api/agent/company/status") not in registered_routes
+
+
+def test_frontend_sidebar_uses_host_route_inventory_not_live_registry():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     class Facade:
         def get_interface(self, key, strategy=None):
-            return registry.get_interface(key, strategy=strategy)
+            raise AssertionError("frontend transport must not read a live route registry")
 
     server = DefaultsHttpServer(Facade())
-    expected = [
-        ("GET", "/api/artifacts"),
-        ("POST", "/api/share"),
-        ("POST", "/api/tools/browser-computer"),
-        ("POST", "/api/research/web-search"),
-        ("POST", "/api/research/reddit-search"),
-        ("GET", "/api/coding/context"),
-        ("GET", "/api/coding/files"),
-        ("GET", "/api/coding/git/branch"),
-        ("GET", "/api/ai/profiles"),
-        ("GET", "/api/agent/schedules"),
-        ("GET", "/api/agent/company/status"),
-        ("POST", "/api/agent/company/bootstrap"),
-        ("GET", "/api/chat/channels"),
-        ("GET", "/api/capabilities/local_file"),
-    ]
+    expected = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=True)
+    }
 
     for method, path in expected:
         handler, _, source, _, _ = server._match_route(method, path)
         assert handler is not None, (method, path)
-        assert source == "registry"
+        assert source == "fallback"
+
+    for method, path in (
+        ("GET", "/api/artifacts"),
+        ("POST", "/api/share"),
+        ("GET", "/api/coding/files"),
+        ("GET", "/api/agent/company/status"),
+        ("GET", "/api/chat/channels"),
+    ):
+        assert server._match_route(method, path) == (
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 def test_research_providers_use_shared_source_schema():
