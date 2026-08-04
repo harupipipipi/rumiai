@@ -32,6 +32,9 @@ DEFAULT_OUTPUT = (
 
 def _load_gate_module() -> ModuleType:
     """Load the dedicated gate helpers without importing application code."""
+    runtime_path = ROOT / "tobkiri_runtime"
+    if str(runtime_path) not in sys.path:
+        sys.path.insert(0, str(runtime_path))
     spec = importlib.util.spec_from_file_location(
         "complete_v4_migration_gate", TEST_PATH
     )
@@ -62,16 +65,15 @@ def _counts(report: dict[str, Any]) -> dict[str, Any]:
         "production_pack_directories": report["pack_inventory"][
             "production_pack_directories"
         ],
+        "expected_production_pack_directories": report["pack_inventory"][
+            "expected_production_pack_directories"
+        ],
+        "v4_artifacts_per_pack": report["pack_inventory"]["v4_artifacts_per_pack"],
+        "v4_artifact_files": report["pack_inventory"]["v4_artifact_files"],
         "v4_pack_artifacts": len(report["pack_inventory"]["v4_pack_artifacts"]),
         "v4_profile_artifacts": len(report["pack_inventory"]["v4_profile_artifacts"]),
-        "v4_pack_manifest_compliance": len(
-            report["pack_inventory"]["v4_pack_manifest_compliance"]
-        ),
-        "v4_profile_selection_shape": len(
-            report["pack_inventory"]["v4_profile_selection_shape"]
-        ),
         "authority_classification": report["pack_inventory"]["authority_counts"],
-        **{
+        "gates": {
             key: len(value)
             for key, value in findings.items()
             if isinstance(value, list)
@@ -93,6 +95,7 @@ def build_evidence() -> dict[str, Any]:
         "nodeids": _nodeids(),
         "counts": _counts(report),
         "gate": report["gate"],
+        "gates": report["gates"],
         "pack_inventory": report["pack_inventory"],
         "findings": report["findings"],
     }
@@ -116,10 +119,14 @@ def main() -> int:
         encoding="utf-8",
     )
     counts = evidence["counts"]
+    try:
+        output_name = output.relative_to(ROOT).as_posix()
+    except ValueError:
+        output_name = str(output)
     print(
         json.dumps(
             {
-                "output": output.relative_to(ROOT).as_posix(),
+                "output": output_name,
                 "status": evidence["gate"]["status"],
                 "nodeids": len(evidence["nodeids"]),
                 "counts": counts,

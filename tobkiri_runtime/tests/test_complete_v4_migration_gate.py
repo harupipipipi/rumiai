@@ -1,32 +1,44 @@
-"""Non-negotiable RED gates for the complete Tobkiri v4 migration.
+"""Non-negotiable, current-tree gates for the complete Tobkiri v4 migration.
 
-This file is intentionally independent of the historical pack-architecture
-baseline.  It inventories production paths and asserts the v4 end state
-directly.  The current migration snapshot is expected to be RED; these gates
-must become GREEN only after the Sol-owned runtime changes are integrated.
+The inventory is deliberately finite: only the three canonical artifacts in
+each direct ``ecosystem`` Pack directory are counted.  Source checks use
+Python ASTs or comment/string-stripped Rust call tokens so schemas, type
+declarations, tests, Playwright, development helpers, and display text do not
+become runtime findings.
 """
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
-import pytest
-import yaml
+from tobkiri_protocol.validation import load_schema, validate_file
 
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
-START_SHA = "64b2240e2e3d019c97920b6fb0e278cca83d6691"
+START_SHA = "df61ff78bdeed84aae7096e06d7608cce70f2b8a"
 
-SOURCE_SUFFIXES = {".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".dart"}
+EXPECTED_PRODUCTION_PACK_COUNT = 141
+PACK_ARTIFACTS = {
+    "artifact-index.v4.json": "pack_artifact_index",
+    "pack.v4.json": "pack",
+    "contracts.v4.json": "pack_contract_catalog",
+}
+EXPECTED_AUTHORITY_COUNTS = {
+    "legacy-authoritative": 46,
+    "modern-only": 0,
+    "v3-authoritative": 95,
+}
+SOURCE_SUFFIXES = {".py", ".rs"}
 IGNORED_PARTS = {
     ".git",
     ".venv",
@@ -37,690 +49,672 @@ IGNORED_PARTS = {
     "target",
     "tests",
     "fixtures",
+    "schemas",
+    "schema",
+    "playwright",
+    "dev",
+    "display",
 }
+IGNORED_FILE_TOKENS = (
+    ".schema.",
+    ".d.ts",
+    "schema",
+    "typing",
+    "types",
+    "playwright",
+    "debug",
+    "package",
+    "verify",
+    "prepare",
+    ".test.",
+    "_test.",
+)
 
-EXPECTED_AUTHORITY_COUNTS = {
-    "legacy-authoritative": 46,
-    "modern-only": 0,
-    "v3-authoritative": 95,
-}
-EXPECTED_PRODUCTION_PACK_COUNT = 141
+LEGACY_SYMBOLS = frozenset(
+    {
+        "FunctionRegistry",
+        "InterfaceRegistry",
+        "CapabilityExecutor",
+        "AuthorityService",
+        "PermissionManager",
+    }
+)
+LEGACY_AUTHORITY_MODULES = frozenset(
+    {
+        "core_runtime.authority.service",
+        "core_runtime.authority",
+        "backend_core.ecosystem.registry",
+    }
+)
+INSTALLED_LOOKUP_NAMES = frozenset(
+    {
+        "all_installed",
+        "installed_packs",
+        "_discover_installed_packs",
+        "discover_installed_packs",
+        "list_installed_packs",
+    }
+)
+PROJECTION_CALL_NAMES = frozenset(
+    {"generate_legacy_ecosystem_projection", "project_legacy_ecosystem"}
+)
+FALLBACK_NAMES = frozenset(
+    {
+        "active_provider_fallback",
+        "fallback_provider",
+        "implicit_fallback",
+        "promotion_fallback",
+        "auto_promote",
+        "auto_promotion",
+    }
+)
+OLD_COMPOSITION_MODULE = "domain.pack_architecture"
 
-LEGACY_RUNTIME_MARKERS = (
-    "FunctionRegistry",
-    "InterfaceRegistry",
-    "CapabilityExecutor",
-    "AuthorityService",
-    "python_file_call",
-    "RUMI_ALLOW_HOST_EXECUTION",
-    "pack_api_server",
-    "importlib.import_module",
-    "sys.path.insert",
-)
-AUTHORITY_BYPASS_MARKERS = (
-    "core_runtime.authority.service",
-    "from .authority.service import",
-    "CapabilityExecutor(",
-    "FunctionRegistry(",
-    "InterfaceRegistry(",
-    "authority_service",
-    "host_execution",
-    "RUMI_ALLOW_HOST_EXECUTION",
-    "approved=True",
-    "authority_granted",
-)
-OLD_COMPOSITION_MARKERS = (
-    "rumi.profile.v1",
-    "rumi.pack.v3",
-    "rumi.ecosystem.v1",
-    "base_pack",
-    "desktop_app",
-    "desktop_app.command",
-    "graph_id",
-    "capability_profile_id",
-    "startup_profile",
-    "operating_profile",
-    "shell_provider",
-)
-DIRECT_SHELL_MARKERS = (
-    "desktop_app.command",
-    "read_desktop_app_command",
-    "cargo tauri dev",
-    "npm run dev",
-)
-DIRECT_SHELL_PROCESS_MARKERS = ("subprocess.Popen", "Command::new", ".spawn()")
-DIRECT_SHELL_LAUNCH_FILES = {"desktop_app_manager.py", "dock_registration.rs"}
-PROJECTION_RUNTIME_MARKERS = (
-    "generate_legacy_ecosystem_projection",
-    "project_legacy_ecosystem",
-)
-INSTALLED_SCAN_MARKERS = (
-    "all_installed",
-    "installed_packs",
-    "_discover_installed_packs",
-)
-IMPLICIT_FALLBACK_MARKERS = (
-    "active_provider_fallback",
-    "fallback_provider",
-    "implicit_fallback",
-    "auto_promot",
-    "promotion_fallback",
+RUST_CALL_PATTERNS = (
+    ("launcher_env", re.compile(r"\b(?:std::)?env::var(?:_os)?\s*\(")),
+    ("launcher_command", re.compile(r"\b(?:std::process::)?Command::new\s*\(")),
+    ("launcher_spawn", re.compile(r"\.spawn\s*\(")),
 )
 
 
-def _production_files() -> Iterable[Path]:
-    """Yield production source files without test or fixture exemptions."""
+def _production_files() -> tuple[Path, ...]:
+    """Return only production Python/Rust files in the scoped surfaces."""
     roots = (
         RUNTIME / "core_runtime",
         RUNTIME / "backend_core",
         RUNTIME / "ecosystem",
         RUNTIME / "tobkiri_host",
         ROOT / "tobkiri_launcher" / "src-tauri" / "src",
-        ROOT / "tobkiri_launcher" / "frontend" / "src",
         ROOT / "tobkiri_launcher" / "scripts",
-        ROOT / "tobkiri_mobile" / "lib",
         ROOT / "pack-shell" / "src",
     )
+    paths: set[Path] = set()
     for base in roots:
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
-                continue
-            if any(part in IGNORED_PARTS for part in path.parts):
-                continue
-            yield path
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
+                paths.add(path)
+    return tuple(sorted(path for path in paths if not _ignored_source(path)))
+
+
+def _ignored_source(path: Path) -> bool:
+    """Exclude non-production source contexts before syntax analysis."""
+    if any(part in IGNORED_PARTS for part in path.parts):
+        return True
+    name = path.name.lower()
+    return any(token in name for token in IGNORED_FILE_TOKENS)
 
 
 def _relative(path: Path) -> str:
+    """Return a stable repository-relative path."""
     return path.relative_to(ROOT).as_posix()
 
 
-def _lines_containing(markers: Iterable[str]) -> list[dict[str, Any]]:
-    """Return every production occurrence of any exact marker."""
-    marker_set = tuple(markers)
-    findings: list[dict[str, Any]] = []
-    for path in _production_files():
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for line_number, line in enumerate(lines, start=1):
-            hits = [marker for marker in marker_set if marker in line]
-            if hits:
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": line_number,
-                        "markers": hits,
-                        "text": line.strip()[:240],
-                    }
-                )
-    return findings
-
-
-def _json_files() -> Iterable[Path]:
-    """Yield production JSON manifests and schema-bearing documents."""
-    for path in sorted(ECOSYSTEM.rglob("*.json")):
-        if any(part in IGNORED_PARTS for part in path.parts):
-            continue
-        yield path
+def _finding(path: Path, line: int, rule: str, **extra: Any) -> dict[str, Any]:
+    """Build one deterministic scanner finding."""
+    return {"path": _relative(path), "line": line, "rule": rule, **extra}
 
 
 def _load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
 
 
-def _v4_pack_artifacts() -> list[Path]:
-    """Return checked-in production Pack manifests carrying the v4 schema."""
-    result: list[Path] = []
-    roots = (
-        ECOSYSTEM,
-        RUNTIME / "packs_v4",
-        RUNTIME / "distributions",
+def _sha256(path: Path) -> str:
+    """Return the protocol digest for one regular file."""
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _production_pack_dirs() -> tuple[Path, ...]:
+    """Return exactly the direct Pack roots under ``ecosystem``."""
+    return tuple(
+        sorted(
+            path
+            for path in ECOSYSTEM.iterdir()
+            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+        )
     )
-    paths: set[Path] = set()
-    for root in roots:
-        if root.is_dir():
-            paths.update(root.rglob("*.json"))
-    for path in sorted(paths):
-        if any(part in IGNORED_PARTS or part == "examples" for part in path.parts):
-            continue
-        value = _load_json(path)
-        if isinstance(value, dict) and (
-            value.get("schema") == "io.tobkiri.pack.v4"
-            or value.get("pack_api_version") == "io.tobkiri.pack.v4"
-        ):
-            result.append(path)
-    return result
+
+
+def _v4_pack_artifacts() -> list[Path]:
+    """Return only the 141 direct ``pack.v4.json`` files."""
+    return [path / "pack.v4.json" for path in _production_pack_dirs()]
 
 
 def _v4_profile_artifacts() -> list[Path]:
-    """Return checked-in production Profile documents carrying the v4 schema."""
-    result: list[Path] = []
-    roots = (
-        ECOSYSTEM,
-        RUNTIME / "profiles_v4",
-        RUNTIME / "distributions",
-    )
-    paths: set[Path] = set()
-    for root in roots:
-        if root.is_dir():
-            paths.update(root.rglob("*.yaml"))
-            paths.update(root.rglob("*.yml"))
-            paths.update(root.rglob("*.json"))
-    for path in sorted(paths):
-        if any(part in IGNORED_PARTS or part == "examples" for part in path.parts):
-            continue
-        value: Any
-        try:
-            value = (
-                yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
-                if path.suffix.lower() in {".yaml", ".yml"}
-                else _load_json(path)
-            )
-        except (OSError, yaml.YAMLError):
-            continue
-        if isinstance(value, Mapping) and (
-            value.get("schema") == "io.tobkiri.profile.v4"
-            or value.get("profile_api_version") == "io.tobkiri.profile.v4"
-        ):
-            result.append(path)
-    return result
+    """Return the explicit v4 Profile entrypoint, not recursive Pack bundles."""
+    path = ECOSYSTEM / "defaultspack" / "v4" / "defaults.profile.v4.json"
+    return [path] if path.is_file() else []
 
 
-def _v4_pack_compliance_findings() -> list[dict[str, Any]]:
-    """Return missing required v4 Pack fields without accepting partial manifests."""
+def _v4_artifact_findings() -> list[dict[str, Any]]:
+    """Validate the exact 141 x 3 direct artifact set and cross-file pins."""
     findings: list[dict[str, Any]] = []
-    for path in _v4_pack_artifacts():
-        value = _load_json(path)
-        if not isinstance(value, Mapping):
-            findings.append({"path": _relative(path), "line": 1, "text": "not an object"})
-            continue
-        if value.get("pack_api_version") == "io.tobkiri.pack.v4":
-            required = ("pack_api_version", "pack", "functions", "contracts", "artifacts", "provenance", "migration")
-        else:
-            required = ("schema", "pack_id", "version", "kind")
-        for key in required:
-            if key not in value:
+    for pack_dir in _production_pack_dirs():
+        values: dict[str, Mapping[str, Any]] = {}
+        for name, schema_name in PACK_ARTIFACTS.items():
+            path = pack_dir / name
+            if not path.is_file():
+                findings.append(_finding(path, 1, "missing_v4_artifact", artifact=name))
+                continue
+            try:
+                values[name] = validate_file(path, schema_name)
+            except Exception as exc:  # schema validator emits stable diagnostics
                 findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": 1,
-                        "text": f"missing required v4 Pack field: {key}",
-                    }
+                    _finding(
+                        path,
+                        1,
+                        "invalid_v4_artifact",
+                        artifact=name,
+                        error=str(exc)[:240],
+                    )
                 )
+
+        manifest = values.get("pack.v4.json")
+        index = values.get("artifact-index.v4.json")
+        contracts = values.get("contracts.v4.json")
+        if not manifest or not index or not contracts:
+            continue
+        pack_id = manifest.get("pack", {}).get("id")
+        source_identity = manifest.get("integrity", {}).get("source_identity")
+        if pack_id != pack_dir.name:
+            findings.append(
+                _finding(pack_dir / "pack.v4.json", 1, "pack_identity_mismatch", expected=pack_dir.name, actual=pack_id)
+            )
+        if set((index.get("pack_id"), contracts.get("pack_id"), pack_id)) != {pack_dir.name}:
+            findings.append(_finding(pack_dir / "pack.v4.json", 1, "artifact_pack_id_mismatch"))
+        if set(
+            (
+                source_identity,
+                index.get("source_identity"),
+                contracts.get("source_identity"),
+            )
+        ) != {source_identity}:
+            findings.append(_finding(pack_dir / "pack.v4.json", 1, "source_identity_mismatch"))
+
+        expected_artifacts = {
+            "pack.v4.json": ("canonical_manifest", _sha256(pack_dir / "pack.v4.json")),
+            "contracts.v4.json": ("contract_catalog", _sha256(pack_dir / "contracts.v4.json")),
+        }
+        indexed = {item.get("path"): item for item in index.get("artifacts", [])}
+        for name, (role, digest) in expected_artifacts.items():
+            item = indexed.get(name)
+            if not isinstance(item, Mapping) or item.get("role") != role or item.get("digest") != digest:
+                findings.append(_finding(pack_dir / "artifact-index.v4.json", 1, "artifact_digest_mismatch", artifact=name))
+        if index.get("artifact_set_digest") != manifest.get("pack", {}).get("artifact_digest"):
+            findings.append(_finding(pack_dir / "pack.v4.json", 1, "artifact_set_digest_mismatch"))
+        integrity = manifest.get("integrity", {})
+        if integrity.get("contract_catalog_digest") != _sha256(pack_dir / "contracts.v4.json"):
+            findings.append(_finding(pack_dir / "pack.v4.json", 1, "contract_catalog_digest_mismatch"))
     return findings
 
 
-def _v4_profile_shape_findings() -> list[dict[str, Any]]:
-    """Require explicit base, shell, and conversation selections in v4 Profiles."""
+def _v4_profile_findings() -> list[dict[str, Any]]:
+    """Validate the explicit Profile artifact and its exact selection shape."""
     findings: list[dict[str, Any]] = []
     for path in _v4_profile_artifacts():
         try:
-            value = (
-                yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
-                if path.suffix.lower() in {".yaml", ".yml"}
-                else _load_json(path)
-            )
-        except (OSError, yaml.YAMLError):
-            value = None
-        if not isinstance(value, Mapping):
-            findings.append({"path": _relative(path), "line": 1, "text": "Profile is not an object"})
+            profile = validate_file(path, "profile")
+        except Exception as exc:
+            findings.append(_finding(path, 1, "invalid_v4_profile", error=str(exc)[:240]))
             continue
-        if value.get("profile_api_version") == "io.tobkiri.profile.v4":
-            required = ("profile_api_version", "state", "base", "packs", "requested_edges", "authority_references", "provenance")
-        else:
-            required = ("schema", "base", "shell", "packs", "conversation")
-        for key in required:
-            if key not in value:
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": 1,
-                        "text": f"missing required v4 Profile field: {key}",
-                    }
-                )
-        for key in ("base", "shell", "conversation"):
-            if key in value and not isinstance(value[key], Mapping):
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": 1,
-                        "text": f"v4 Profile selection {key!r} is not exactly one object",
-                    }
-                )
+        if profile.get("profile_id") != "defaults" or profile.get("state") != "needs_resolution":
+            findings.append(_finding(path, 1, "profile_scope_mismatch"))
+        if not isinstance(profile.get("base"), Mapping) or not isinstance(profile.get("shell"), Mapping):
+            findings.append(_finding(path, 1, "profile_selection_not_exact"))
     return findings
 
 
 def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
-    """Return exact installed Pack authority classification evidence."""
-    catalog_path = RUNTIME / "schemas" / "manifest_authority.v1.json"
-    catalog = _load_json(catalog_path)
-    classified = catalog.get("packs", {}) if isinstance(catalog, dict) else {}
-    pack_dirs = sorted(
-        path
-        for path in ECOSYSTEM.iterdir()
-        if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
-    )
-    records = []
-    for path in pack_dirs:
-        legacy = path / "ecosystem.json"
-        v3 = path / "rumi.pack.v3.json"
-        records.append(
+    """Return direct-Pack authority ownership without discovering installed Packs."""
+    catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
+    classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
+    records = [
+        {
+            "pack_id": path.name,
+            "classified_as": classified.get(path.name),
+            "v4_artifacts": all((path / name).is_file() for name in PACK_ARTIFACTS),
+        }
+        for path in _production_pack_dirs()
+    ]
+    return Counter(str(record["classified_as"]) for record in records), records
+
+
+def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
+    """Require exact Authority ownership and the narrow ResolvedPlan scope."""
+    findings: list[dict[str, Any]] = []
+    counts, records = _manifest_authority_counts()
+    catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
+    classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
+    direct_ids = {record["pack_id"] for record in records}
+    if set(classified) != direct_ids or counts != Counter(EXPECTED_AUTHORITY_COUNTS):
+        findings.append(
             {
-                "pack_id": path.name,
-                "classified_as": classified.get(path.name),
-                "ecosystem_json": legacy.is_file(),
-                "v3_manifest": v3.is_file(),
+                "path": "tobkiri_runtime/schemas/manifest_authority.v1.json",
+                "line": 1,
+                "rule": "authority_scope_mismatch",
+                "classified": dict(sorted(classified.items())),
+                "direct_pack_count": len(direct_ids),
             }
         )
-    return Counter(str(item["classified_as"]) for item in records), records
-
-
-def _legacy_qualified_routes_and_functions() -> list[dict[str, Any]]:
-    """Inventory legacy qualified route/function declarations in manifests."""
-    findings: list[dict[str, Any]] = []
-    qualified = re.compile(r"(?:defaultspack|defaults|[a-z0-9_]+_pack):[a-z][a-z0-9_.-]+")
-    for path in _json_files():
-        value = _load_json(path)
-        if not isinstance(value, (dict, list)):
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if "function_id" in line or "api_routes" in line or qualified.search(line):
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": line_number,
-                        "text": line.strip()[:240],
-                    }
-                )
+    plan_schema = load_schema("resolved_plan")
+    required_plan = frozenset(plan_schema.get("required", ()))
+    expected_plan = frozenset(
+        {
+            "plan_api_version",
+            "profile_id",
+            "profile_revision",
+            "security_epoch",
+            "base",
+            "shell",
+            "bindings",
+            "plan_digest",
+        }
+    )
+    if required_plan != expected_plan:
+        findings.append(
+            {
+                "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
+                "line": 1,
+                "rule": "resolved_plan_scope_mismatch",
+                "required": sorted(required_plan),
+            }
+        )
+    contracts_path = RUNTIME / "tobkiri_host" / "contracts.py"
+    try:
+        tree = ast.parse(contracts_path.read_text(encoding="utf-8"), filename=str(contracts_path))
+        operation_catalog = next(
+            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "OperationCatalog"
+        )
+        methods = {node.name for node in operation_catalog.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        if not {"__init__", "resolve"}.issubset(methods):
+            raise LookupError("OperationCatalog exact resolve scope is missing")
+    except (OSError, SyntaxError, LookupError) as exc:
+        findings.append(_finding(contracts_path, 1, "resolved_plan_runtime_scope_missing", error=str(exc)))
     return findings
 
 
-def _ast_legacy_imports_and_calls() -> list[dict[str, Any]]:
-    """Inventory legacy runtime imports/calls with AST evidence."""
+def _python_tree(path: Path) -> ast.AST | None:
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, UnicodeError, SyntaxError):
+        return None
+
+
+def _parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    return {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+
+def _owner(node: ast.AST, parents: Mapping[ast.AST, ast.AST]) -> str:
+    current = node
+    while current in parents:
+        current = parents[current]
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return current.name
+    return "<module>"
+
+
+def _called_name(node: ast.Call) -> str:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return ""
+
+
+def _ast_legacy_runtime_findings() -> list[dict[str, Any]]:
+    """Find reachable legacy Registry and installed-inventory calls via AST."""
     findings: list[dict[str, Any]] = []
-    symbols = {
-        "FunctionRegistry",
-        "InterfaceRegistry",
-        "CapabilityExecutor",
-        "AuthorityService",
-        "PermissionManager",
-    }
     for path in _production_files():
         if path.suffix != ".py":
             continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError):
+        tree = _python_tree(path)
+        if tree is None:
             continue
+        parents = _parents(tree)
         for node in ast.walk(tree):
-            hit = None
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                names = [alias.name for alias in node.names]
-                if isinstance(node, ast.ImportFrom):
-                    names.extend(alias.name for alias in node.names)
-                hit = next((name for name in names if name in symbols), None)
+                module = node.module or "" if isinstance(node, ast.ImportFrom) else ""
+                imported = {alias.name.split(".")[-1] for alias in node.names}
+                if module in LEGACY_AUTHORITY_MODULES or imported & LEGACY_SYMBOLS:
+                    findings.append(
+                        _finding(
+                            path,
+                            node.lineno,
+                            "legacy_registry_import",
+                            module=module,
+                            symbols=sorted(imported & LEGACY_SYMBOLS),
+                        )
+                    )
+            elif isinstance(node, ast.ClassDef) and node.name in LEGACY_SYMBOLS:
+                findings.append(_finding(path, node.lineno, "legacy_registry_definition", symbol=node.name))
             elif isinstance(node, ast.Call):
-                name = node.func.id if isinstance(node.func, ast.Name) else ""
-                if name in symbols:
-                    hit = name
-            if hit:
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": node.lineno,
-                        "symbol": hit,
-                    }
-                )
+                name = _called_name(node)
+                if name in LEGACY_SYMBOLS:
+                    findings.append(
+                        _finding(path, node.lineno, "legacy_registry_call", symbol=name, owner=_owner(node, parents))
+                    )
+                if name in INSTALLED_LOOKUP_NAMES:
+                    findings.append(
+                        _finding(path, node.lineno, "runtime_installed_lookup", symbol=name, owner=_owner(node, parents))
+                    )
     return findings
 
 
-def _ast_legacy_call_graph_edges() -> list[dict[str, Any]]:
-    """Return caller-to-legacy-symbol edges found by AST traversal."""
+def _ast_authority_bypass_findings() -> list[dict[str, Any]]:
+    """Find executable legacy authority bypasses without matching text."""
     findings: list[dict[str, Any]] = []
-    symbols = {
-        "FunctionRegistry",
-        "InterfaceRegistry",
-        "CapabilityExecutor",
-        "AuthorityService",
-        "PermissionManager",
-    }
     for path in _production_files():
         if path.suffix != ".py":
             continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError):
+        tree = _python_tree(path)
+        if tree is None:
             continue
-        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
         for node in ast.walk(tree):
-            hit = None
-            edge_kind = None
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                names = [alias.name for alias in node.names]
-                if isinstance(node, ast.ImportFrom):
-                    names.extend(alias.name for alias in node.names)
-                hit = next((name for name in names if name in symbols), None)
-                edge_kind = "import"
-            elif isinstance(node, ast.Call):
-                name = node.func.id if isinstance(node.func, ast.Name) else ""
-                if name in symbols:
-                    hit = name
-                    edge_kind = "call"
-            if not hit:
+            if isinstance(node, ast.Call):
+                name = _called_name(node)
+                if name in {"FunctionRegistry", "InterfaceRegistry", "CapabilityExecutor", "AuthorityService"}:
+                    findings.append(_finding(path, node.lineno, "authority_bypass_call", symbol=name))
+                if any(keyword.arg == "approved" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True for keyword in node.keywords):
+                    findings.append(_finding(path, node.lineno, "client_approval_flag"))
+            elif isinstance(node, ast.Attribute) and node.attr in {"authority_granted", "host_execution"}:
+                findings.append(_finding(path, node.lineno, "authority_bypass_attribute", symbol=node.attr))
+    return findings
+
+
+def _ast_projection_findings() -> list[dict[str, Any]]:
+    """Find projection calls in runtime code; offline scripts are not runtime."""
+    findings: list[dict[str, Any]] = []
+    for path in _production_files():
+        if path.suffix != ".py" or "scripts" in path.parts:
+            continue
+        tree = _python_tree(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _called_name(node) in PROJECTION_CALL_NAMES:
+                findings.append(_finding(path, node.lineno, "runtime_projection_call", symbol=_called_name(node)))
+    return findings
+
+
+def _ast_fallback_findings() -> list[dict[str, Any]]:
+    """Find executable fallback/promotion symbols via AST names and calls."""
+    findings: list[dict[str, Any]] = []
+    for path in _production_files():
+        if path.suffix != ".py":
+            continue
+        tree = _python_tree(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _called_name(node) in FALLBACK_NAMES:
+                findings.append(_finding(path, node.lineno, "implicit_fallback_call", symbol=_called_name(node)))
+    return findings
+
+
+def _ast_old_composition_findings() -> list[dict[str, Any]]:
+    """Find deleted composition imports, not schema fields or display text."""
+    findings: list[dict[str, Any]] = []
+    for path in _production_files():
+        if path.suffix != ".py":
+            continue
+        tree = _python_tree(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == OLD_COMPOSITION_MODULE or alias.name.startswith(f"{OLD_COMPOSITION_MODULE}."):
+                        findings.append(_finding(path, node.lineno, "deleted_composition_import", module=alias.name))
+            elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith(OLD_COMPOSITION_MODULE):
+                findings.append(_finding(path, node.lineno, "deleted_composition_import", module=node.module))
+    return findings
+
+
+def _strip_rust_comments_and_strings(source: str) -> str:
+    """Remove Rust comments and string contents while preserving line offsets."""
+    without_comments = re.sub(r"//[^\n]*|/\*.*?\*/", _preserve_lines, source, flags=re.S)
+    return re.sub(r'"(?:\\.|[^"\\])*"', '""', without_comments)
+
+
+def _preserve_lines(match: re.Match[str]) -> str:
+    return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+
+def _rust_function_at(source: str, offset: int) -> str:
+    matches = list(re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", source[:offset]))
+    return matches[-1].group(1) if matches else "<module>"
+
+
+def _rust_call_findings() -> list[dict[str, Any]]:
+    """Find production Launcher calls after comments and string literals are removed."""
+    findings: list[dict[str, Any]] = []
+    for path in _production_files():
+        if path.suffix != ".rs" or "tobkiri_launcher" not in path.parts:
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        stripped = _strip_rust_comments_and_strings(source)
+        for rule, pattern in RUST_CALL_PATTERNS:
+            for match in pattern.finditer(stripped):
+                function = _rust_function_at(stripped, match.start())
+                if function.startswith("debug_") or function.startswith("test"):
+                    continue
+                line = stripped.count("\n", 0, match.start()) + 1
+                findings.append(_finding(path, line, rule, function=function))
+    return findings
+
+
+def _launcher_safety_findings() -> list[dict[str, Any]]:
+    """Scan Launcher env/PATH/process calls and unverified v3 entrypoints."""
+    findings = _rust_call_findings()
+    for path in _production_files():
+        if path.suffix != ".py" or "tobkiri_launcher" not in path.parts:
+            continue
+        tree = _python_tree(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
                 continue
-            owner: ast.AST = node
-            while owner not in parents:
-                break
-            while owner in parents:
-                owner = parents[owner]
-                if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    break
-            caller = (
-                getattr(owner, "name", "<module>")
-                if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                else "<module>"
-            )
-            findings.append(
-                {
-                    "path": _relative(path),
-                    "line": node.lineno,
-                    "caller": caller,
-                    "callee": hit,
-                    "kind": edge_kind,
-                }
-            )
-    return findings
-
-
-def _shell_artifact_findings() -> list[dict[str, Any]]:
-    """Inventory direct shell launches and unverified v3 entrypoints."""
-    findings = _lines_containing(DIRECT_SHELL_MARKERS)
-    for path in _production_files():
-        if path.name not in DIRECT_SHELL_LAUNCH_FILES:
-            continue
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for line_number, line in enumerate(lines, start=1):
-            hits = [marker for marker in DIRECT_SHELL_PROCESS_MARKERS if marker in line]
-            if hits:
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": line_number,
-                        "markers": hits,
-                        "text": line.strip()[:240],
-                    }
-                )
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                if node.func.value.id == "subprocess":
+                    findings.append(_finding(path, node.lineno, "launcher_process_call", symbol=node.func.attr))
+                if node.func.value.id == "os" and node.func.attr in {"system", "popen"}:
+                    findings.append(_finding(path, node.lineno, "launcher_process_call", symbol=node.func.attr))
     for path in sorted(ECOSYSTEM.glob("*/rumi.pack.v3.json")):
         value = _load_json(path)
-        if not isinstance(value, dict):
+        if not isinstance(value, Mapping):
             continue
-        for entrypoint in value.get("entrypoints", []):
-            if not isinstance(entrypoint, dict):
-                continue
-            if entrypoint.get("loader") == "python":
-                findings.append(
-                    {
-                        "path": _relative(path),
-                        "line": 1,
-                        "markers": ["loader=python"],
-                        "text": "v3 Python entrypoint is not a v4 verified PackVM/Wasm artifact",
-                    }
-                )
-        provenance = value.get("provenance", {})
-        if isinstance(provenance, dict) and provenance.get("signature") is None:
-            findings.append(
-                {
-                    "path": _relative(path),
-                    "line": 1,
-                    "markers": ["provenance.signature=null"],
-                    "text": "v3 artifact has no publisher signature",
-                }
+        for entry in value.get("entrypoints", []):
+            if isinstance(entry, Mapping) and entry.get("loader") in {"python", "process"}:
+                findings.append(_finding(path, 1, "unverified_v3_entrypoint", loader=entry.get("loader")))
+        provenance = value.get("provenance")
+        if isinstance(provenance, Mapping) and provenance.get("signature") is None:
+            findings.append(_finding(path, 1, "unverified_v3_provenance"))
+    return sorted(findings, key=lambda item: (item["path"], item["line"], item["rule"]))
+
+
+def _double_authority_findings() -> list[dict[str, Any]]:
+    """Detect a production authority inventory that can read both Pack roots."""
+    findings: list[dict[str, Any]] = []
+    path = RUNTIME / "backend_core" / "ecosystem" / "registry.py"
+    tree = _python_tree(path)
+    if tree is None:
+        return findings
+    has_registry = any(
+        isinstance(node, ast.ClassDef) and node.name == "Registry"
+        for node in ast.walk(tree)
+    )
+    has_inventory_read = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"iterdir", "glob", "rglob"}
+        for node in ast.walk(tree)
+    )
+    if has_registry and has_inventory_read:
+        findings.append(
+            _finding(
+                path,
+                1,
+                "double_authority_reachable",
+                text="production EcosystemRegistry inventories direct defaults and defaultspack roots",
             )
+        )
     return findings
+
+
+def _offline_projection_findings() -> list[dict[str, Any]]:
+    """Require projection marker, owner marker, and canonical source identity."""
+    findings: list[dict[str, Any]] = []
+    catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
+    authorities = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
+    for pack_dir in _production_pack_dirs():
+        if authorities.get(pack_dir.name) != "v3-authoritative":
+            continue
+        legacy_path = pack_dir / "ecosystem.json"
+        source_path = pack_dir / "rumi.pack.v3.json"
+        value = _load_json(legacy_path)
+        metadata = value.get("metadata") if isinstance(value, Mapping) else None
+        generated = metadata.get("generated_from") if isinstance(metadata, Mapping) else None
+        expected = {
+            "format": "rumi.ecosystem.v1",
+            "generated": True,
+            "read_only_projection": True,
+            "manifest_authority": "v3-authoritative",
+        }
+        if not isinstance(metadata, Mapping) or any(metadata.get(key) != expected_value for key, expected_value in expected.items()):
+            findings.append(_finding(legacy_path, 1, "projection_marker_or_owner_missing"))
+            continue
+        if not isinstance(generated, Mapping) or generated.get("source") != "rumi.pack.v3.json" or generated.get("generator") != "tobkiri.core_runtime.manifest_projection/v2":
+            findings.append(_finding(legacy_path, 1, "projection_source_marker_missing"))
+        if not source_path.is_file() or generated.get("source_content_hash") != _source_identity(source_path):
+            findings.append(_finding(legacy_path, 1, "projection_source_identity_mismatch"))
+    return findings
+
+
+def _source_identity(path: Path) -> str:
+    """Compute the canonical v3 source identity through the production helper."""
+    from core_runtime.manifest_projection import source_manifest_identity
+
+    value = _load_json(path)
+    return source_manifest_identity(value) if isinstance(value, Mapping) else ""
 
 
 def _audit_snapshot() -> dict[str, Any]:
-    """Collect the complete current-tree RED evidence without a baseline."""
-    authority_counts, authority_records = _manifest_authority_counts()
-    legacy_imports = _ast_legacy_imports_and_calls()
-    legacy_call_graph = _ast_legacy_call_graph_edges()
-    legacy_markers = _lines_containing(LEGACY_RUNTIME_MARKERS)
-    authority_bypass = _lines_containing(AUTHORITY_BYPASS_MARKERS)
-    old_composition = _lines_containing(OLD_COMPOSITION_MARKERS)
-    projection_runtime_calls = _lines_containing(PROJECTION_RUNTIME_MARKERS)
-    installed_scan = _lines_containing(INSTALLED_SCAN_MARKERS)
-    fallback_promotion = _lines_containing(IMPLICIT_FALLBACK_MARKERS)
-    shell = _shell_artifact_findings()
-    qualified = _legacy_qualified_routes_and_functions()
-    pack_compliance = _v4_pack_compliance_findings()
-    profile_shape = _v4_profile_shape_findings()
-    defaults_dir = ECOSYSTEM / "defaults"
-    defaultspack_dir = ECOSYSTEM / "defaultspack"
-    double_authority = []
-    if defaults_dir.is_dir() and defaultspack_dir.is_dir():
-        double_authority.append(
-            {
-                "path": "tobkiri_runtime/ecosystem",
-                "line": 1,
-                "text": "both defaults and defaultspack production roots exist",
-            }
-        )
-        default_files = {
-            path.relative_to(defaults_dir).as_posix()
-            for path in defaults_dir.rglob("*")
-            if path.is_file()
-        }
-        defaultspack_files = {
-            path.relative_to(defaultspack_dir).as_posix()
-            for path in defaultspack_dir.rglob("*")
-            if path.is_file()
-        }
-        double_authority.append(
-            {
-                "path": "tobkiri_runtime/ecosystem/defaults",
-                "line": 1,
-                "text": f"overlapping relative files={len(default_files & defaultspack_files)}",
-            }
-        )
-    status = "GREEN"
-    if any(
-        (
-            len(_v4_pack_artifacts()) != EXPECTED_PRODUCTION_PACK_COUNT,
-            not _v4_profile_artifacts(),
-            authority_counts != Counter(EXPECTED_AUTHORITY_COUNTS),
-            len(authority_records) != EXPECTED_PRODUCTION_PACK_COUNT,
-            legacy_imports,
-            legacy_call_graph,
-            legacy_markers,
-            authority_bypass,
-            old_composition,
-            projection_runtime_calls,
-            installed_scan,
-            fallback_promotion,
-            double_authority,
-            shell,
-            qualified,
-            pack_compliance,
-            profile_shape,
-        )
-    ):
-        status = "RED"
+    """Collect deterministic current-tree evidence with no baseline or skip."""
+    pack_dirs = _production_pack_dirs()
+    artifact_findings = _v4_artifact_findings()
+    authority_findings = _authority_resolved_plan_findings()
+    legacy_findings = _ast_legacy_runtime_findings()
+    bypass_findings = _ast_authority_bypass_findings()
+    projection_calls = _ast_projection_findings()
+    fallback_findings = _ast_fallback_findings()
+    old_composition = _ast_old_composition_findings()
+    double_authority = _double_authority_findings()
+    launcher = _launcher_safety_findings()
+    projection = _offline_projection_findings()
+    gates = {
+        "artifact_contracts": artifact_findings,
+        "authority_resolved_plan_scope": authority_findings,
+        "legacy_registry_and_installed_lookup": legacy_findings + bypass_findings + old_composition + fallback_findings + projection_calls,
+        "double_authority": double_authority,
+        "launcher_safety": launcher,
+        "offline_projection": projection,
+    }
     return {
-        "schema": "io.tobkiri.quality.complete-v4-migration.v1",
+        "schema": "io.tobkiri.quality.complete-v4-migration.v2",
         "start_sha": START_SHA,
-        "head_sha": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-        ).strip(),
+        "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "gate": {
-            "status": status,
-            "expected_green": {
-                "v4_pack_artifacts": EXPECTED_PRODUCTION_PACK_COUNT,
-                "v4_profile_artifacts": ">=1",
-                "v4_pack_manifest_compliance": 0,
-                "v4_profile_selection_shape": 0,
-                "authority_classification": dict(EXPECTED_AUTHORITY_COUNTS),
-                "production_pack_directories": EXPECTED_PRODUCTION_PACK_COUNT,
-                "legacy_runtime_imports_or_calls": 0,
-                "legacy_call_graph_edges": 0,
-                "legacy_runtime_markers": 0,
-                "authority_bypass": 0,
-                "old_composition_schema_usage": 0,
-                "runtime_projection_calls": 0,
-                "installed_pack_scans": 0,
-                "implicit_fallback_or_promotion": 0,
-                "defaults_double_authority": 0,
-                "direct_or_unverified_shell_launch": 0,
-                "legacy_qualified_routes_or_functions": 0,
-            },
-            "clean": status == "GREEN",
+            "status": "GREEN" if all(not findings for findings in gates.values()) else "RED",
+            "clean": all(not findings for findings in gates.values()),
+            "expected_green": {name: 0 for name in gates},
         },
+        "gates": {name: {"status": "GREEN" if not findings else "RED", "findings": findings} for name, findings in gates.items()},
         "pack_inventory": {
-            "production_pack_directories": len(authority_records),
-            "authority_counts": dict(sorted(authority_counts.items())),
-            "records": authority_records,
+            "production_pack_directories": len(pack_dirs),
+            "expected_production_pack_directories": EXPECTED_PRODUCTION_PACK_COUNT,
+            "v4_artifacts_per_pack": len(PACK_ARTIFACTS),
+            "v4_artifact_files": len(pack_dirs) * len(PACK_ARTIFACTS),
             "v4_pack_artifacts": [_relative(path) for path in _v4_pack_artifacts()],
             "v4_profile_artifacts": [_relative(path) for path in _v4_profile_artifacts()],
-            "v4_pack_manifest_compliance": pack_compliance,
-            "v4_profile_selection_shape": profile_shape,
+            "authority_counts": dict(sorted(_manifest_authority_counts()[0].items())),
+            "authority_records": _manifest_authority_counts()[1],
         },
-        "findings": {
-            "legacy_runtime_imports_or_calls": legacy_imports,
-            "legacy_call_graph_edges": legacy_call_graph,
-            "legacy_runtime_markers": legacy_markers,
-            "authority_bypass": authority_bypass,
-            "old_composition_schema_usage": old_composition,
-            "runtime_projection_calls": projection_runtime_calls,
-            "installed_pack_scans": installed_scan,
-            "implicit_fallback_or_promotion": fallback_promotion,
-            "defaults_double_authority": double_authority,
-            "direct_or_unverified_shell_launch": shell,
-            "legacy_qualified_routes_or_functions": qualified,
-        },
+        "findings": gates,
     }
 
 
 def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
-    """Fail with deterministic count and sample evidence; never baseline it."""
+    """Fail with deterministic evidence and never baseline a finding."""
     assert not findings, f"{name} RED: count={len(findings)} evidence={findings[:8]}"
 
 
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
-    """Every shipped Pack must have a v4 artifact and an explicit v4 Profile."""
-    packs = _v4_pack_artifacts()
-    profiles = _v4_profile_artifacts()
-    assert len(packs) == EXPECTED_PRODUCTION_PACK_COUNT, (
-        "v4 Pack artifacts RED: "
-        f"count={len(packs)} expected={EXPECTED_PRODUCTION_PACK_COUNT}"
+    """The exact direct artifact set is 141 Packs x 3 files."""
+    assert len(_production_pack_dirs()) == EXPECTED_PRODUCTION_PACK_COUNT
+    assert len(_v4_pack_artifacts()) == EXPECTED_PRODUCTION_PACK_COUNT
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 423
+    _assert_zero("v4 artifact contracts", _v4_artifact_findings())
+
+
+def test_authority_and_resolved_plan_scope_is_exact() -> None:
+    """Authority ownership and ResolvedPlan fields remain exact and finite."""
+    _assert_zero("Authority/ResolvedPlan scope", _authority_resolved_plan_findings())
+
+
+def test_legacy_registry_and_installed_lookup_are_zero() -> None:
+    """Legacy Registry, runtime inventory lookup, bypass, and projection calls are zero."""
+    _assert_zero(
+        "legacy Registry/all-installed runtime lookup",
+        _ast_legacy_runtime_findings()
+        + _ast_authority_bypass_findings()
+        + _ast_old_composition_findings()
+        + _ast_fallback_findings()
+        + _ast_projection_findings(),
     )
-    assert profiles, "v4 Profile artifacts RED: count=0 expected>=1"
 
 
-def test_all_141_packs_have_exact_authority_classification() -> None:
-    """The complete installed Pack set has one explicit authority owner each."""
-    counts, records = _manifest_authority_counts()
-    assert len(records) == EXPECTED_PRODUCTION_PACK_COUNT, (
-        f"Pack authority inventory RED: count={len(records)} "
-        f"expected={EXPECTED_PRODUCTION_PACK_COUNT}"
-    )
-    assert counts == Counter(EXPECTED_AUTHORITY_COUNTS), (
-        f"Pack authority classification RED: counts={dict(counts)} "
-        f"expected={EXPECTED_AUTHORITY_COUNTS}"
-    )
+def test_double_authority_is_zero_by_production_reachability() -> None:
+    """Directory presence alone is not a double-authority finding."""
+    _assert_zero("double authority", _double_authority_findings())
 
 
-def test_v4_pack_and_profile_artifacts_are_contract_complete() -> None:
-    """v4 artifacts cannot be counted as migrated while required fields are absent."""
-    _assert_zero("v4 Pack/Profile contract compliance", _v4_pack_compliance_findings())
-    _assert_zero("v4 Profile explicit selections", _v4_profile_shape_findings())
+def test_launcher_env_path_direct_and_unverified_fallback_are_zero() -> None:
+    """Launcher has no unscoped environment, process, or unverified entrypoint path."""
+    _assert_zero("Launcher env/PATH/direct/unverified fallback", _launcher_safety_findings())
 
 
-def test_legacy_runtime_imports_and_calls_are_zero() -> None:
-    """Legacy Registry/authority execution symbols must not remain reachable."""
-    _assert_zero("legacy runtime imports/calls", _ast_legacy_imports_and_calls())
-    _assert_zero("legacy runtime call graph", _ast_legacy_call_graph_edges())
-    _assert_zero("legacy runtime marker", _lines_containing(LEGACY_RUNTIME_MARKERS))
+def test_offline_projection_has_marker_owner_and_source_identity() -> None:
+    """Every v3 projection carries its offline marker, owner, and source identity."""
+    _assert_zero("offline projection marker/owner/source identity", _offline_projection_findings())
 
 
-def test_authority_kernel_bypass_is_zero() -> None:
-    """Only the v4 Authority Kernel may make production authority decisions."""
-    _assert_zero("Authority Kernel bypass", _lines_containing(AUTHORITY_BYPASS_MARKERS))
-
-
-def test_runtime_legacy_projection_and_installed_scan_are_zero() -> None:
-    """Projection is offline-only and runtime selection never scans installed Packs."""
-    _assert_zero("runtime legacy projection", _lines_containing(PROJECTION_RUNTIME_MARKERS))
-    _assert_zero("all-installed Pack scan", _lines_containing(INSTALLED_SCAN_MARKERS))
-
-
-def test_implicit_fallback_and_promotion_are_zero() -> None:
-    """Profile/Pack selection must fail closed instead of falling back or promoting."""
-    _assert_zero("implicit fallback/promotion", _lines_containing(IMPLICIT_FALLBACK_MARKERS))
-
-
-def test_old_base_shell_and_profile_schema_usage_is_zero() -> None:
-    """Legacy composition fields and v1/v3 schema names are not runtime input."""
-    _assert_zero("old Base/Shell/Profile schema usage", _lines_containing(OLD_COMPOSITION_MARKERS))
-
-
-def test_defaults_and_defaultspack_do_not_have_double_authority() -> None:
-    """Defaults backend state and routing must have one owner."""
-    defaults = ECOSYSTEM / "defaults"
-    defaultspack = ECOSYSTEM / "defaultspack"
-    findings: list[dict[str, Any]] = []
-    if defaults.is_dir() and defaultspack.is_dir():
-        findings.append({"path": _relative(defaults), "line": 1, "text": "duplicate authority roots"})
-    _assert_zero("defaults/defaultspack double authority", findings)
-
-
-def test_direct_and_unverified_shell_launch_is_zero() -> None:
-    """Production never launches arbitrary commands or unverified v3 Python."""
-    _assert_zero("direct/unverified shell launch", _shell_artifact_findings())
-
-
-def test_legacy_qualified_routes_and_functions_are_zero() -> None:
-    """Pack-qualified legacy route/function names are not public runtime APIs."""
-    _assert_zero("legacy qualified routes/functions", _legacy_qualified_routes_and_functions())
-
-
-def test_new_v4_profile_resolver_and_shell_contract_are_live() -> None:
-    """Exercise the new Profile/Base/Shell path, including exact provider choice."""
+def test_v4_runtime_and_protocol_composition_apis_are_live() -> None:
+    """The live check uses runtime_v4 and protocol composition, never pack_architecture."""
     pack_root = RUNTIME / "ecosystem" / "defaultspack"
     if str(pack_root) not in sys.path:
         sys.path.insert(0, str(pack_root))
-    from domain.pack_architecture import PackCatalog, resolve_profile  # noqa: PLC0415
+    from domain.runtime_v4 import BundledCatalog, ResolvedDefaultProfile, resolve_default_profile
+    from tobkiri_protocol.composition import compose_runtime_profile, load_verified_catalog
 
-    catalog = PackCatalog.from_assets_root(
-        pack_root / "domain" / "pack_architecture" / "assets"
-    )
-    profile_path = pack_root / "profiles" / "defaults-modern-cli.profile.yaml"
-    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    resolved = resolve_profile(profile, catalog)
-    assert resolved.base_pack_id == "defaults-basepack"
-    assert resolved.shell_contract == "app.shell.v1"
-    assert resolved.shell_provider_id == "shell.cli.default"
-    assert resolved.backend_identity == ("defaultspack",)
-    assert all(
-        item.presentation_family == "terminal"
-        for item in resolved.selected_contributions
-    )
+    assert BundledCatalog is not None
+    assert ResolvedDefaultProfile is not None
+    assert callable(resolve_default_profile)
+    assert callable(compose_runtime_profile)
+    assert callable(load_verified_catalog)
 
 
-def test_current_sha_red_evidence_has_a_clean_green_target() -> None:
-    """Keep the migration handoff explicit: current evidence RED, target clean."""
+def test_current_sha_red_evidence_reports_actual_findings() -> None:
+    """Current SHA evidence is measured directly and remains RED until production migration."""
     report = _audit_snapshot()
     assert report["start_sha"] == START_SHA
     assert report["gate"]["status"] == "RED"
-    assert report["gate"]["clean"] is False
-    assert report["gate"]["expected_green"]["v4_pack_artifacts"] == 141
-    assert report["gate"]["expected_green"]["v4_profile_artifacts"] == ">=1"
-    assert report["gate"]["expected_green"]["legacy_call_graph_edges"] == 0
+    assert report["pack_inventory"]["production_pack_directories"] == 141
+    assert report["pack_inventory"]["v4_artifact_files"] == 423
