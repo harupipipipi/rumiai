@@ -121,8 +121,55 @@ fn venv_bin_dir(venv_dir: &Path) -> PathBuf {
     }
 }
 
-fn kernel_command_for_python(python: &Path) -> String {
-    format!("{} -m app", shell_quote_path(python))
+fn kernel_command_for_python(python: &Path, app_dir: &Path) -> String {
+    const BOOTSTRAP: &str = "import runpy,sys; root=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_module('app',run_name='__main__',alter_sys=True)";
+    format!(
+        "{} -I -B -c {} {}",
+        shell_quote_path(python),
+        shell_quote(BOOTSTRAP),
+        shell_quote_path(app_dir),
+    )
+}
+
+fn desktop_python_arguments(command: &str) -> AnyResult<Vec<String>> {
+    let command_parts =
+        shell_words::split(command).context("defaultspack desktop command is invalid")?;
+    let (program, arguments) = command_parts
+        .split_first()
+        .context("defaultspack desktop command is empty")?;
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(program_name.as_str(), "python" | "python3" | "python.exe") {
+        bail!("defaultspack desktop command must use the managed Python runtime");
+    }
+    if arguments.is_empty() {
+        bail!("defaultspack desktop command is missing its entrypoint");
+    }
+    Ok(arguments.to_vec())
+}
+
+fn isolated_desktop_command_for_python(
+    python: &Path,
+    app_dir: &Path,
+    command: &str,
+) -> AnyResult<String> {
+    const BOOTSTRAP: &str = "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv[1]; sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')";
+    let arguments = desktop_python_arguments(command)?;
+    let quoted_arguments = arguments
+        .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "{} -I -B -c {} {} {}",
+        shell_quote_path(python),
+        shell_quote(BOOTSTRAP),
+        shell_quote_path(app_dir),
+        quoted_arguments,
+    ))
 }
 
 fn defaultspack_window_url(port: u16) -> String {
@@ -336,7 +383,8 @@ fn build_launch_script(
         format!("\n# Environment declared by defaultspack desktop_app metadata.\n{env_exports}\n")
     };
 
-    let kernel_command = kernel_command_for_python(&venv_bin_dir(venv_dir).join("python3"));
+    let kernel_command =
+        kernel_command_for_python(&venv_bin_dir(venv_dir).join("python3"), app_dir);
 
     format!(
         r#"#!/bin/bash
@@ -527,6 +575,11 @@ fn create_macos_app_bundle(
 
     // Launch script – runs pack-shell/defaultspack directly under this bundle.
     let launch_path = macos_dir.join("launch");
+    let isolated_command = isolated_desktop_command_for_python(
+        &venv_bin_dir(venv_dir).join("python3"),
+        app_dir,
+        command,
+    )?;
     let launch_script = build_launch_script(
         pack_shell,
         rumi_home,
@@ -536,7 +589,7 @@ fn create_macos_app_bundle(
         venv_dir,
         kernel_port,
         app_working_dir,
-        command,
+        &isolated_command,
         env_vars,
     );
     fs::write(&launch_path, &launch_script)
@@ -1212,22 +1265,7 @@ pub(crate) fn spawn_defaultspack_local_server(
         ],
     )?;
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
-    let command_parts =
-        shell_words::split(&metadata.command).context("defaultspack desktop command is invalid")?;
-    let (program, arguments) = command_parts
-        .split_first()
-        .context("defaultspack desktop command is empty")?;
-    let program_name = Path::new(program)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !matches!(program_name.as_str(), "python" | "python3" | "python.exe") {
-        bail!("defaultspack desktop command must use the managed Python runtime");
-    }
-    if arguments.is_empty() {
-        bail!("defaultspack desktop command is missing its entrypoint");
-    }
+    let arguments = desktop_python_arguments(&metadata.command)?;
 
     info!(
         "spawn_defaultspack_local_server: python={}, port={}, working_dir={}",
@@ -1239,15 +1277,14 @@ pub(crate) fn spawn_defaultspack_local_server(
     // Spawn the actual long-lived server as the Launcher child. pack-shell's
     // `run` command delegates to Kernel and exits, which leaves the real
     // listener orphaned and cannot provide a process-lifetime guardian.
-    let mut command = process_utils::command(config.venv_python());
+    let mut command = process_utils::isolated_python(config.venv_python());
     command
         .args([
-            "-I",
             "-c",
             "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv[1]; sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')",
         ])
         .arg(&config.app_dir)
-        .args(arguments)
+        .args(&arguments)
         .env("PATH", path)
         .env_remove("PYTHONPATH")
         .env("RUMI_HOME", &config.rumi_home)
@@ -1686,7 +1723,8 @@ exec "$PACK_SHELL" run "defaultspack" \
         assert!(script.contains("export TOBKIRI_HOST_CONTRACT_PATH=\"$HOST_CONTRACT_FILE\""));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
-        assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
+        assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -I -B -c"));
+        assert!(script.contains("'/tmp/app dir'"));
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
         assert!(!script.contains("--api-token"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
@@ -1700,6 +1738,20 @@ exec "$PACK_SHELL" run "defaultspack" \
         assert!(!script.contains("RUMI_PANEL_BOOTSTRAP_SECRET"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
+    }
+
+    #[test]
+    fn dock_desktop_python_command_is_isolated_and_disables_bytecode() {
+        let command = isolated_desktop_command_for_python(
+            Path::new("/tmp/venv dir/bin/python3"),
+            Path::new("/tmp/app dir"),
+            "python 'defaultspack/desktop app.py' --serve",
+        )
+        .unwrap();
+
+        assert!(command.starts_with("'/tmp/venv dir/bin/python3' -I -B -c "));
+        assert!(command.contains("'/tmp/app dir'"));
+        assert!(command.ends_with("'defaultspack/desktop app.py' '--serve'"));
     }
 
     #[test]

@@ -38,10 +38,25 @@ fn collect_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Resul
             );
         }
         if metadata.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("__pycache__") {
+                bail!(
+                    "packaged runtime may not contain Python bytecode: {}",
+                    path.display()
+                );
+            }
             collect_files(root, &path, files)?;
         } else if metadata.is_file()
             && path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_NAME)
         {
+            if matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("pyc" | "pyo")
+            ) {
+                bail!(
+                    "packaged runtime may not contain Python bytecode: {}",
+                    path.display()
+                );
+            }
             files.push(path.strip_prefix(root)?.to_path_buf());
         }
     }
@@ -153,6 +168,30 @@ mod tests {
         fs::write(tampered.join("core_runtime/bootstrap.py"), b"tampered").unwrap();
         assert!(verify(&tampered).is_err());
         fs::remove_dir_all(tampered).unwrap();
+    }
+
+    #[test]
+    fn rejects_python_bytecode_even_when_listed() {
+        let root = fixture();
+        let bytecode = b"bytecode";
+        let cache = root.join("core_runtime/__pycache__");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("bootstrap.pyc"), bytecode).unwrap();
+        let manifest_path = root.join(MANIFEST_NAME);
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "path": "core_runtime/__pycache__/bootstrap.pyc",
+                "size": bytecode.len(),
+                "sha256": format!("{:x}", Sha256::digest(bytecode)),
+            }));
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        assert!(verify(&root).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

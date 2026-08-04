@@ -151,6 +151,29 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
     paths = {entry["path"] for entry in manifest["entries"]}
     assert "core_runtime/__init__.py" in paths
     assert "core_runtime/bootstrap/runtime.py" in paths
+    assert not any(path.endswith((".pyc", ".pyo")) for path in paths)
+    assert not list(stage.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize(
+    ("relative", "is_directory"),
+    (("core_runtime/__pycache__", True), ("core_runtime/bootstrap.pyc", False)),
+)
+def test_staging_and_manifest_reject_python_bytecode(
+    tmp_path, relative, is_directory
+):
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    target = stage / relative
+    if is_directory:
+        target.mkdir(parents=True)
+    else:
+        target.write_bytes(b"bytecode")
+
+    with pytest.raises(RuntimeError, match="generated Python bytecode"):
+        module.validate_bundle(stage, False, None, repository_root=ROOT)
+    with pytest.raises(RuntimeError, match="generated Python bytecode"):
+        module.write_runtime_resource_manifest(stage)
 
 
 @pytest.mark.parametrize("case", ("missing", "tampered", "symlink"))

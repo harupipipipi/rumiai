@@ -164,10 +164,9 @@ impl KernelManager {
             )],
         )?;
 
-        let mut command = process_utils::command(&venv_python);
+        let mut command = process_utils::isolated_python(&venv_python);
         command
             .args([
-                "-I",
                 "-c",
                 "import runpy,sys; root=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_module('app',run_name='__main__',alter_sys=True)",
             ])

@@ -191,6 +191,7 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
 
 def _resource_files(dest_root: Path) -> list[Path]:
     """Return the exact regular-file inventory used by the resource seal."""
+    verify_no_python_bytecode(dest_root)
     files: list[Path] = []
     for path in dest_root.rglob("*"):
         if path.is_symlink():
@@ -201,6 +202,21 @@ def _resource_files(dest_root: Path) -> list[Path]:
         if path.is_file() and path.name != RUNTIME_RESOURCE_MANIFEST:
             files.append(path)
     return sorted(files, key=lambda item: item.relative_to(dest_root).as_posix())
+
+
+def verify_no_python_bytecode(dest_root: Path) -> None:
+    """Fail closed if a staged runtime contains generated Python bytecode."""
+    forbidden = []
+    for path in dest_root.rglob("*"):
+        if (path.is_dir() and path.name == "__pycache__") or (
+            path.is_file() and path.suffix in {".pyc", ".pyo"}
+        ):
+            forbidden.append(path.relative_to(dest_root).as_posix())
+    if forbidden:
+        raise RuntimeError(
+            "Staged runtime contains generated Python bytecode: "
+            + ", ".join(sorted(forbidden)[:20])
+        )
 
 
 def build_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
@@ -260,7 +276,7 @@ def verify_staged_bootstrap_import(dest_root: Path) -> None:
         "origin.relative_to(root.resolve())"
     )
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code],
+        [sys.executable, "-I", "-B", "-c", code],
         cwd=dest_root.parent,
         text=True,
         capture_output=True,
@@ -497,6 +513,7 @@ def validate_bundle(
     """Validate staged resources without consulting legacy authority documents."""
 
     repository_root = (repository_root or Path(__file__).resolve().parents[2]).resolve()
+    verify_no_python_bytecode(dest_root)
     required = [
         *REQUIRED_RUNTIME_BOOTSTRAP_FILES,
         Path("requirements.txt"),
@@ -549,6 +566,7 @@ def validate_bundle(
 
     _validate_defaultspack_v4(dest_root, repository_root)
     verify_staged_bootstrap_import(dest_root)
+    verify_no_python_bytecode(dest_root)
 
 
 def warn_legacy_defaultspack_app_bundle() -> None:

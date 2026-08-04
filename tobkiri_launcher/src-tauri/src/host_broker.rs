@@ -2361,7 +2361,7 @@ fn run_computer_helper(
         )));
     }
 
-    let mut command = process_utils::command(config.venv_python());
+    let mut command = process_utils::isolated_python(config.venv_python());
     command
         .arg(helper_path)
         .current_dir(&config.app_dir)
