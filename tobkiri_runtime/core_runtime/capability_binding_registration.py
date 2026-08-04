@@ -22,6 +22,11 @@ from .bounded_process_runner import (
     ProcessExecutionPolicy,
 )
 from .global_contracts.manifest import load_manifest
+from .manifest_authority import load_manifest_authority_catalog
+from .manifest_projection import (
+    ManifestProjectionError,
+    generate_legacy_ecosystem_projection,
+)
 from .global_contract_dispatch import (
     GlobalContractClient,
     GlobalContractInvocationError,
@@ -82,6 +87,44 @@ def register_pack_binding_handlers(
         effective,
     ):
         if effective is not None and pack_id not in effective:
+            continue
+        authority = load_manifest_authority_catalog().get(pack_id)
+        v3_path = pack_location.pack_subdir / "rumi.pack.v3.json"
+        if authority == "modern-only":
+            result.ok = False
+            result.skipped.append(pack_id)
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "binding_registration_authority_mismatch",
+                    "modern-only Pack cannot register runtime bindings",
+                    pack_id=pack_id,
+                )
+            )
+            continue
+        if authority == "v3-authoritative" and not v3_path.is_file():
+            result.ok = False
+            result.skipped.append(pack_id)
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "binding_registration_authority_mismatch",
+                    "v3-authoritative Pack has no canonical manifest",
+                    pack_id=pack_id,
+                )
+            )
+            continue
+        if authority == "legacy-authoritative" and v3_path.is_file():
+            result.ok = False
+            result.skipped.append(pack_id)
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "binding_registration_authority_mismatch",
+                    "legacy-authoritative Pack unexpectedly has a v3 manifest",
+                    pack_id=pack_id,
+                )
+            )
             continue
         ok, reason = _is_pack_approved(approval_manager, pack_id)
         if not ok:
@@ -187,6 +230,24 @@ def _register_v3_contract_bindings(
     manifest_path = pack_location.pack_subdir / "rumi.pack.v3.json"
     if not manifest_path.is_file():
         return False, False
+    if load_manifest_authority_catalog().get(pack_id) == "v3-authoritative":
+        try:
+            generate_legacy_ecosystem_projection(
+                manifest_path,
+                pack_location.ecosystem_json_path,
+                check=True,
+            )
+        except ManifestProjectionError as exc:
+            result.ok = False
+            result.diagnostics.append(
+                _diagnostic(
+                    "error",
+                    "v3_projection_invalid",
+                    str(exc),
+                    pack_id=pack_id,
+                )
+            )
+            return True, False
     loaded = load_manifest(manifest_path)
     if not loaded.ok or not isinstance(loaded.value, dict):
         result.ok = False

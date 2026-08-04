@@ -19,6 +19,15 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
 from core_runtime.dependency_resolver import resolve_load_order as _resolve_dependencies
+from core_runtime.manifest_authority import (
+    ManifestAuthorityError,
+    repository_manifest_authority,
+    validate_repository_manifest_authority,
+)
+from core_runtime.manifest_projection import (
+    ManifestProjectionError,
+    generate_legacy_ecosystem_projection,
+)
 
 from .uuid_utils import generate_pack_uuid, generate_component_uuid
 from .json_patch import apply_patch, JsonPatchError
@@ -155,6 +164,9 @@ class Registry:
         """
         self.ecosystem_dir = Path(ecosystem_dir)
         self._include_core_packs = _should_include_core_packs(self.ecosystem_dir)
+        self._enforce_manifest_authority = (
+            self.ecosystem_dir.resolve() == Path(_ECOSYSTEM_DIR).resolve()
+        )
         self.packs: Dict[str, PackInfo] = {}
         self._component_index: Dict[str, ComponentInfo] = {}  # uuid -> ComponentInfo
         self._type_index: Dict[str, List[ComponentInfo]] = {}  # type -> [ComponentInfo]
@@ -171,6 +183,8 @@ class Registry:
         if not self.ecosystem_dir.exists():
             print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
             return {}
+        if self._enforce_manifest_authority:
+            validate_repository_manifest_authority(self.ecosystem_dir)
 
         global _global_registry
         _global_registry = self
@@ -230,7 +244,17 @@ class Registry:
                         else:
                             self.packs[pack_info.pack_id] = pack_info
                             print(f"  [OK] Pack読み込み成功: {pack_info.pack_id}")
+                except ManifestAuthorityError:
+                    raise
                 except Exception as e:
+                    if (
+                        self._enforce_manifest_authority
+                        and pack_dir.parent.resolve()
+                        == self.ecosystem_dir.resolve()
+                    ):
+                        raise ManifestAuthorityError(
+                            f"classified Pack '{pack_dir.name}' failed to load: {e}"
+                        ) from e
                     print(f"  [ERROR] Pack読み込みエラー ({pack_dir.name}): {e}")
         
         print(f"=== 読み込み完了: {len(self.packs)}個のPack ===\n")
@@ -302,23 +326,66 @@ class Registry:
         Returns:
             PackInfo または None
         """
+        is_classified_pack = (
+            self._enforce_manifest_authority
+            and pack_dir.parent.resolve() == self.ecosystem_dir.resolve()
+        )
         # ecosystem.jsonを探す
         ecosystem_file, pack_subdir = self._find_ecosystem_json(pack_dir)
         
         if ecosystem_file is None:
+            if is_classified_pack:
+                raise ManifestAuthorityError(
+                    f"classified Pack '{pack_dir.name}' has no ecosystem.json"
+                )
             print(f"    ecosystem.jsonが見つかりません: {pack_dir}")
             return None
         
         # ecosystem.jsonを読み込み
         if not _check_json_file_size(ecosystem_file):
+            if is_classified_pack:
+                raise ManifestAuthorityError(
+                    f"classified Pack '{pack_dir.name}' has an oversized manifest"
+                )
             return None
         with open(ecosystem_file, 'r', encoding='utf-8') as f:
             ecosystem_data = json.load(f)
+
+        if is_classified_pack:
+            authority = repository_manifest_authority(pack_dir.name)
+            v3_path = pack_subdir / "rumi.pack.v3.json"
+            if authority == "v3-authoritative":
+                if not v3_path.is_file():
+                    raise ManifestAuthorityError(
+                        f"v3-authoritative Pack '{pack_dir.name}' has no canonical manifest"
+                    )
+                try:
+                    generate_legacy_ecosystem_projection(
+                        v3_path,
+                        ecosystem_file,
+                        check=True,
+                    )
+                except ManifestProjectionError as exc:
+                    raise ManifestAuthorityError(
+                        f"invalid v3 compatibility projection for '{pack_dir.name}': {exc}"
+                    ) from exc
+            elif authority == "legacy-authoritative" and v3_path.is_file():
+                raise ManifestAuthorityError(
+                    f"legacy-authoritative Pack '{pack_dir.name}' unexpectedly has v3 manifest"
+                )
+            elif authority == "modern-only":
+                raise ManifestAuthorityError(
+                    f"modern-only Pack '{pack_dir.name}' cannot enter legacy Registry"
+                )
         
         # スキーマ検証
         try:
             validate_ecosystem(ecosystem_data)
         except SchemaValidationError as e:
+            if is_classified_pack:
+                raise ManifestAuthorityError(
+                    f"classified Pack '{pack_dir.name}' has invalid legacy manifest: {e}"
+                ) from e
             print(f"    スキーマ検証エラー: {e}")
             return None
         

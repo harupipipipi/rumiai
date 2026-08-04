@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
+
 from .dependency_resolver import extract_dependency_specs, version_satisfies
 from .global_contracts.canonical import canonical_json, content_identity
 from .global_contracts.models import (
@@ -29,6 +31,8 @@ from .global_contracts.manifest import load_manifest
 from .global_contracts.registry import ContractRegistry
 from .paths import PackLocation, resolve_pack_locations
 from .pack_artifact_integrity import verify_declared_artifacts
+from .manifest_authority import load_manifest_authority_catalog
+from .manifest_projection import generate_legacy_ecosystem_projection
 
 RESOLVED_PROFILE_VERSION = "rumi.resolved-profile.v1"
 LOCKFILE_VERSION = "rumi.profile-lock.v1"
@@ -628,6 +632,7 @@ def _read_manifests(
     manifests: dict[str, dict[str, Any]] = {}
     diagnostics: list[ResolutionDiagnostic] = []
     for location in locations:
+        authority = load_manifest_authority_catalog().get(location.pack_id)
         try:
             raw = location.ecosystem_json_path.read_bytes()
             payload = json.loads(raw)
@@ -651,6 +656,28 @@ def _read_manifests(
                 )
             )
             continue
+        if authority == "modern-only":
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    "modern-only Pack cannot be resolved by the Pack runtime",
+                    location.pack_id,
+                )
+            )
+            continue
+        if authority is not None:
+            legacy_errors = validate_ecosystem(payload, raise_on_error=False)
+            if legacy_errors:
+                diagnostics.append(
+                    _diagnostic(
+                        "invalid_manifest",
+                        "error",
+                        "; ".join(legacy_errors),
+                        location.pack_id,
+                    )
+                )
+                continue
         manifest = dict(payload)
         manifest["_manifest_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
         provenance = manifest.get("provenance")
@@ -683,9 +710,46 @@ def _read_manifests(
             )
             continue
         v3_path = location.pack_subdir / "rumi.pack.v3.json"
+        if authority == "v3-authoritative" and not v3_path.is_file():
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    "v3-authoritative Pack has no canonical manifest",
+                    location.pack_id,
+                )
+            )
+            continue
+        if authority == "legacy-authoritative" and v3_path.is_file():
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_manifest",
+                    "error",
+                    "legacy-authoritative Pack unexpectedly has a v3 manifest",
+                    location.pack_id,
+                )
+            )
+            continue
         if v3_path.is_file():
             loaded = load_manifest(v3_path)
             if loaded.ok and isinstance(loaded.value, dict):
+                if authority == "v3-authoritative":
+                    try:
+                        generate_legacy_ecosystem_projection(
+                            v3_path,
+                            location.ecosystem_json_path,
+                            check=True,
+                        )
+                    except ValueError as exc:
+                        diagnostics.append(
+                            _diagnostic(
+                                "invalid_manifest",
+                                "error",
+                                str(exc),
+                                location.pack_id,
+                            )
+                        )
+                        continue
                 manifest["_v3_manifest"] = loaded.value
             else:
                 diagnostics.append(
@@ -696,6 +760,7 @@ def _read_manifests(
                         location.pack_id,
                     )
                 )
+                continue
         manifests[location.pack_id] = manifest
     return manifests, diagnostics
 

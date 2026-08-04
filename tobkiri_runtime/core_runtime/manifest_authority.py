@@ -63,12 +63,27 @@ def repository_manifest_authority(pack_id: str) -> ManifestAuthority:
 
 def validate_repository_manifest_authority(ecosystem_dir: Path) -> None:
     """Require an exact one-to-one classification for shipped Pack roots."""
-    from .paths import discover_pack_locations
-
-    discovered = {
-        location.pack_id
-        for location in discover_pack_locations(str(ecosystem_dir))
+    excluded = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        "flows",
+        "node_modules",
+        "packs",
+        "setup_pack",
     }
+    try:
+        discovered = {
+            candidate.name
+            for candidate in ecosystem_dir.iterdir()
+            if candidate.is_dir()
+            and candidate.name not in excluded
+            and not candidate.name.startswith(".")
+        }
+    except OSError as exc:
+        raise ManifestAuthorityError(
+            f"cannot enumerate repository Pack roots: {exc}"
+        ) from exc
     classified = set(load_manifest_authority_catalog())
     missing = sorted(discovered - classified)
     stale = sorted(classified - discovered)
