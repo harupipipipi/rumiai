@@ -77,6 +77,30 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
 
 
+def test_duplicate_pack_and_legacy_route_authorities_are_absent() -> None:
+    from ecosystem.defaultspack.domain.function_runtime.compat_aliases import (
+        compatibility_alias_allowed,
+    )
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    defaultspack_root = ROOT / "ecosystem" / "defaultspack"
+    assert not (ROOT / "ecosystem" / "defaults").exists()
+    assert not (defaultspack_root / "ecosystem.json").exists()
+    assert not (defaultspack_root / "permissions.json").exists()
+    assert not (defaultspack_root / "routes.json").exists()
+    assert not (defaultspack_root / "compat_aliases.yaml").exists()
+    assert not (defaultspack_root / "docs" / "legacy_http_routes.yaml").exists()
+    assert not (defaultspack_root / "domain" / "pack_architecture").exists()
+
+    routes = canonical_http_route_specs()
+    assert routes
+    assert all(route.handler_name for route in routes)
+    assert not any(route.block_module for route in routes)
+    assert not any(route.fallback_block_module for route in routes)
+    assert not any(route.legacy_block_module for route in routes)
+    assert compatibility_alias_allowed("defaults.chat.send") is False
+
+
 def test_bundle_rejects_manifest_hash_drift_and_unlisted_artifacts(tmp_path: Path) -> None:
     copied = tmp_path / "v4"
     shutil.copytree(BUNDLE_ROOT, copied)

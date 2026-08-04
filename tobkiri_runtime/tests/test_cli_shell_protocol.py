@@ -46,47 +46,13 @@ def _run_cli(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [validate_document(line, "cli_io") for line in completed.stdout.splitlines()]
 
 
-def test_actual_cli_shell_structured_protocol_resolves_profiles_and_identity() -> None:
-    requests = [
-        _command("cli:req:identity001", "profile.identity", profile_id=profile_id)
-        for profile_id in (
-            "defaults-modern",
-            "defaults-modern-electron",
-            "defaults-modern-cli",
-        )
-    ]
-    responses = _run_cli(requests)
-    identities = [json.loads(response["stdout"]) for response in responses]
+def test_actual_cli_shell_does_not_infer_profile_identity_from_bundled_definition() -> None:
+    responses = _run_cli(
+        [_command("cli:req:identity001", "profile.identity", profile_id="defaults")]
+    )
 
-    assert [item["shell_provider_id"] for item in identities] == [
-        "shell.tauri.default",
-        "shell.electron.default",
-        "shell.cli.default",
-    ]
-    assert {tuple(item["backend_provider_ids"]) for item in identities} == {("defaultspack",)}
-    assert {tuple(item["state_owners"]) for item in identities} == {
-        (
-            "defaultspack.conversation",
-            "defaultspack.agent",
-            "defaultspack.tool_catalog",
-            "defaultspack.local_settings",
-        )
-    }
-    assert {json.dumps(item["authority_identity"], sort_keys=True) for item in identities} == {
-        json.dumps(
-            {
-                "backend_provider_ids": ["defaultspack"],
-                "state_owners": [
-                    "defaultspack.conversation",
-                    "defaultspack.agent",
-                    "defaultspack.tool_catalog",
-                    "defaultspack.local_settings",
-                ],
-                "profile_may_mint_host_authority": False,
-            },
-            sort_keys=True,
-        )
-    }
+    assert responses[0]["type"] == "error"
+    assert "Host-captured active Profile v4" in responses[0]["error"]
 
 
 def test_actual_cli_shell_rejects_arbitrary_commands_and_keeps_artifacts_non_executable() -> None:

@@ -267,9 +267,6 @@ domains:
   output_profiles:
     may_import: []
     path: domain/output_profiles
-  pack_architecture:
-    may_import: []
-    path: domain/pack_architecture
   p2p:
     may_import:
     - domain/external

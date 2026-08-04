@@ -2,8 +2,8 @@
 
 The CLI Shell accepts only the commands declared by ``cli.io.v1``.  It does
 not interpret a command string, invoke a shell, or reach the Host directly.
-Profile identity is resolved through the same Base Pack/Shell catalog used by
-the other presentation surfaces.
+Profile identity is never inferred from a bundled definition. The Host must
+capture an active Profile v4/ResolvedPlan before exposing identity to a Shell.
 """
 
 from __future__ import annotations
@@ -23,14 +23,10 @@ _PACK_ROOT = _RUNTIME_ROOT / "ecosystem" / "defaultspack"
 if str(_PACK_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACK_ROOT))
 
-from domain.pack_architecture import (  # noqa: E402
-    PackCatalog,
-    ProfileResolutionError,
-    resolve_profile,
-)
+from domain.runtime_v4 import BundledCatalog, DefaultProfileV4Error  # noqa: E402
 
 PROTOCOL = "io.tobkiri.cli.io.v1"
-DEFAULT_PROFILE_ID = "defaults-modern-cli"
+DEFAULT_PROFILE_ID = "defaults"
 DEFAULT_OUTPUT_LIMIT = 1_048_576
 MAX_OUTPUT_LIMIT = 1_048_576
 INVALID_REQUEST_ID = "cli:req:invalid000"
@@ -51,13 +47,12 @@ def run_structured_stdio(
     request-level error is reported as a frame and does not make the process
     execute an arbitrary fallback command.
     """
-    catalog = PackCatalog.from_assets_root()
-    profiles = _load_profiles()
+    catalog = BundledCatalog.load(_PACK_ROOT / "v4")
     for raw_line in input_stream:
         line = raw_line.strip()
         if not line:
             continue
-        response = _dispatch_line(line, catalog, profiles)
+        response = _dispatch_line(line, catalog)
         output_stream.write(json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n")
         output_stream.flush()
     return 0
@@ -77,21 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     return run_structured_stdio()
 
 
-def _load_profiles() -> dict[str, Path]:
-    profiles_root = _PACK_ROOT / "profiles"
-    profiles: dict[str, Path] = {}
-    for path in sorted(profiles_root.glob("defaults-modern*.profile.yaml")):
-        profile_id = path.stem.removesuffix(".profile")
-        profiles[profile_id] = path
-    if DEFAULT_PROFILE_ID not in profiles:
-        raise CliShellError("defaults-modern-cli profile is not installed")
-    return profiles
-
-
 def _dispatch_line(
     line: str,
-    catalog: PackCatalog,
-    profiles: dict[str, Path],
+    catalog: BundledCatalog,
 ) -> dict[str, Any]:
     request_id = _request_id_from_line(line)
     try:
@@ -99,9 +82,9 @@ def _dispatch_line(
         request_id = str(request["request_id"])
         if request["type"] != "command":
             raise CliShellError("CLI Shell accepts command frames only")
-        result = _handle_request(request, catalog, profiles)
+        result = _handle_request(request, catalog)
         return _validated_response(result)
-    except (CliShellError, ProfileResolutionError, SchemaValidationError, OSError) as exc:
+    except (CliShellError, DefaultProfileV4Error, SchemaValidationError, OSError) as exc:
         return _validated_response(
             {
                 "protocol": PROTOCOL,
@@ -127,8 +110,7 @@ def _dispatch_line(
 
 def _handle_request(
     request: dict[str, Any],
-    catalog: PackCatalog,
-    profiles: dict[str, Path],
+    catalog: BundledCatalog,
 ) -> dict[str, Any]:
     output_limit = _output_limit(request.get("output_limit"))
     if request.get("cancel") or request.get("signal"):
@@ -173,38 +155,10 @@ def _handle_request(
         )
     if command == "profile.identity":
         profile_id = str(request.get("profile_id") or DEFAULT_PROFILE_ID)
-        profile_path = profiles.get(profile_id)
-        if profile_path is None:
+        if profile_id not in catalog.profiles:
             raise CliShellError(f"profile is not cataloged: {profile_id}")
-        resolved = resolve_profile(profile_path, catalog)
-        requested_shell = request.get("shell_provider_id")
-        if requested_shell is not None and requested_shell != resolved.shell_provider_id:
-            raise CliShellError("requested Shell Provider does not match the exact profile")
-        payload = {
-            "profile_id": resolved.profile_id,
-            "profile_revision": resolved.profile_revision,
-            "base_pack_id": resolved.base_pack_id,
-            "shell_contract": resolved.shell_contract,
-            "shell_provider_id": resolved.shell_provider_id,
-            "presentation_family": resolved.presentation_family,
-            "technology": resolved.technology,
-            "platform": resolved.platform,
-            "architecture": resolved.architecture,
-            "backend_provider_ids": list(resolved.backend_provider_ids),
-            "state_owners": list(resolved.state_owners),
-            "authority_identity": {
-                "backend_provider_ids": list(resolved.backend_provider_ids),
-                "state_owners": list(resolved.state_owners),
-                "profile_may_mint_host_authority": False,
-            },
-        }
-        return _result(
-            request,
-            stdout=_json_text(payload),
-            stderr="",
-            exit_status=0,
-            stream="complete",
-            output_limit=output_limit,
+        raise CliShellError(
+            "profile identity requires a Host-captured active Profile v4 activation"
         )
     raise CliShellError(f"command is not declared by {PROTOCOL}: {command!r}")
 
