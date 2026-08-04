@@ -3,33 +3,26 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import shutil
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-import backend_core.ecosystem.registry as registry_module
-import core_runtime.manifest_authority as authority_module
-from backend_core.ecosystem.registry import Registry
+from backend_core.ecosystem.registry import LegacyRegistryUnavailable, Registry
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
-from core_runtime.function_registry import FunctionRegistry
-from core_runtime.capability_binding_registration import (
-    register_pack_binding_handlers,
-)
 from core_runtime.global_contracts.manifest import load_manifest
 from core_runtime.manifest_authority import (
     ManifestAuthorityError,
     load_manifest_authority_catalog,
     validate_manifest_authority_scope,
 )
-from core_runtime.manifest_projection import (
+from scripts.offline_legacy_projection import (
     ManifestProjectionError,
     generate_legacy_ecosystem_projection,
     project_legacy_ecosystem,
     source_manifest_identity,
 )
-from core_runtime.interface_registry import InterfaceRegistry
 from core_runtime.pack_artifact_integrity import verify_declared_artifacts
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 
@@ -37,30 +30,28 @@ ROOT = Path(__file__).resolve().parents[1]
 ECOSYSTEM = ROOT / "ecosystem"
 
 
-class _Container:
-    def __init__(self, registry: FunctionRegistry) -> None:
-        self.registry = registry
-
-    def get_or_none(self, name: str):
-        return self.registry if name == "function_registry" else None
-
-
-class _Approved:
-    def is_pack_approved_and_verified(self, pack_id: str):
-        return (True, None)
-
-
 def test_every_repository_pack_has_one_explicit_authority() -> None:
     catalog = load_manifest_authority_catalog()
+    direct_pack_ids = tuple(
+        sorted(
+            path.name
+            for path in ECOSYSTEM.iterdir()
+            if path.is_dir()
+            and path.name != "setup_pack"
+            and not path.name.startswith(".")
+        )
+    )
 
     validate_manifest_authority_scope(
-        (path.parent.name for path in ECOSYSTEM.glob("*/ecosystem.json")),
+        direct_pack_ids,
         require_complete_catalog=True,
     )
     assert len(catalog) == 141
     assert list(catalog.values()).count("v3-authoritative") == 95
-    assert list(catalog.values()).count("legacy-authoritative") == 46
-    assert list(catalog.values()).count("modern-only") == 0
+    assert list(catalog.values()).count("legacy-authoritative") == 44
+    assert list(catalog.values()).count("modern-only") == 2
+    assert catalog["defaults"] == "modern-only"
+    assert catalog["defaultspack"] == "modern-only"
 
 
 def test_authority_scope_rejects_missing_extra_and_implicit_inputs() -> None:
@@ -86,6 +77,12 @@ def test_all_authoritative_manifests_and_projections_are_valid() -> None:
     for pack_id, authority in sorted(catalog.items()):
         pack_root = ECOSYSTEM / pack_id
         ecosystem_path = pack_root / "ecosystem.json"
+        if authority == "modern-only":
+            assert pack_id in {"defaults", "defaultspack"}
+            assert not ecosystem_path.exists()
+            assert not (pack_root / "rumi.pack.v3.json").exists()
+            assert (pack_root / "pack.v4.json").is_file()
+            continue
         ecosystem = json.loads(ecosystem_path.read_text(encoding="utf-8"))
         assert validate_ecosystem(ecosystem, raise_on_error=False) == [], pack_id
         integrity_ok, integrity_diagnostics = verify_declared_artifacts(
@@ -147,49 +144,10 @@ def test_projection_and_artifact_tamper_fail_closed(
     assert "artifact manifest hash does not match provenance" in diagnostics
 
 
-def test_classified_registry_rejects_a_malformed_manifest(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    ecosystem_dir = tmp_path / "ecosystem"
-    pack_root = ecosystem_dir / "broken_pack"
-    pack_root.mkdir(parents=True)
-    (pack_root / "ecosystem.json").write_text("{", encoding="utf-8")
-    catalog_path = tmp_path / "manifest_authority.v1.json"
-    catalog_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "packs": {"broken_pack": "legacy-authoritative"},
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(authority_module, "CATALOG_PATH", catalog_path)
-    monkeypatch.setattr(registry_module, "_ECOSYSTEM_DIR", str(ecosystem_dir))
-    load_manifest_authority_catalog.cache_clear()
-    try:
-        with pytest.raises(ManifestAuthorityError, match="failed to load"):
-            Registry(str(ecosystem_dir)).load_all_packs()
-    finally:
-        load_manifest_authority_catalog.cache_clear()
-
-
-def test_registry_loads_all_classified_packs_and_host_mediators() -> None:
-    function_registry = FunctionRegistry()
-    with patch(
-        "core_runtime.di_container.get_container",
-        return_value=_Container(function_registry),
-    ):
-        packs = Registry().load_all_packs()
-
-    assert len(packs) == 141
-    assert "rumi_model_evals_pack" in packs
-    assert function_registry.get("rumi_host_capabilities_pack:host_permission_status") is not None
-    assert (
-        function_registry.get("rumi_host_capabilities_pack:host_permission_open_settings")
-        is not None
-    )
+def test_removed_registry_rejects_runtime_discovery(tmp_path: Path) -> None:
+    """Pack v4 runtime must refuse the removed filesystem registry path."""
+    with pytest.raises(LegacyRegistryUnavailable, match="removed"):
+        Registry(str(tmp_path / "ecosystem")).load_all_packs()
 
 
 def test_invalid_v3_manifest_is_not_available_or_effective(tmp_path: Path) -> None:
@@ -229,17 +187,11 @@ def test_invalid_v3_manifest_is_not_available_or_effective(tmp_path: Path) -> No
     assert any(item.code == "invalid_manifest" for item in plan.diagnostics)
 
 
-def test_model_evals_binding_is_explicitly_unavailable_without_host_gate(
-    monkeypatch,
-) -> None:
-    monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
-
-    result = register_pack_binding_handlers(
-        interface_registry=InterfaceRegistry(),
-        approval_manager=_Approved(),
-        effective_pack_ids=("rumi_model_evals_pack",),
-    )
-
-    assert result.registered == []
-    assert result.skipped == ["rumi_model_evals_pack"]
-    assert any(item["code"] == "v3_python_host_execution_required" for item in result.diagnostics)
+def test_removed_binding_authorities_are_not_importable() -> None:
+    """v4 composition must not restore deleted Core binding registries."""
+    for module_name in (
+        "core_runtime.capability_binding_registration",
+        "core_runtime.function_registry",
+        "core_runtime.interface_registry",
+    ):
+        assert importlib.util.find_spec(module_name) is None

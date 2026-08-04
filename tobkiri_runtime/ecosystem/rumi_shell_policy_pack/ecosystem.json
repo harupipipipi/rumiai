@@ -10,12 +10,18 @@
   "display_name": "Rumi Shell Policy",
   "host_execution": false,
   "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:727dc1d5c541d566a5505a9801e538dddadba110506a2eee6d2b78bfd9a817de",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:c690bf1dc81db11bc8a777c4e8f0195e4d7800fbbc9104c3b4c42f234fc33805"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:88feba8f2972eb494270e30bdb18c0b7544ec0d1dc1c55d65b14060ddd17bbad"
+      "source_content_hash": "sha256:c2888e8b8bda1ebdb97d4f67f744b6b5c82c1fd3e0282bd1acea3f4b10585aa3"
     },
     "manifest_authority": "v3-authoritative",
     "read_only_projection": true
@@ -23,7 +29,7 @@
   "pack_id": "rumi_shell_policy_pack",
   "pack_identity": "rumi:ecosystem/rumi_shell_policy_pack",
   "provenance": {
-    "build_identity": "rumi-shell-policy-pack:1.0.0",
+    "build_identity": "rumi_shell_policy_pack:1.0.0",
     "content_hash": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
     "signature": null,
     "trust_class": "local"

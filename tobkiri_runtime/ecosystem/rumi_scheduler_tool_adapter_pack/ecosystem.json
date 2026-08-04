@@ -23,12 +23,18 @@
   "host_execution": false,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:10833ae5e044683acadc789394da31d5d932f50353ebb55f68f05f1ffa5c6017",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:0ab448cc66e9ec55b65dd632aef8c29434d53a40d173ed9a6658eee8af1adc3c"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:4cc4346212833e6c314c51c79fa801875dd89fbc9c43e0b4aff38696774e7e33"
+      "source_content_hash": "sha256:9fac9f89e406719d06a5c51f3ae5e680f7bc48b39d0b3fd1933d2be70de37abe"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -39,8 +45,8 @@
   "pack_id": "rumi_scheduler_tool_adapter_pack",
   "pack_identity": "rumi:ecosystem/rumi_scheduler_tool_adapter_pack",
   "provenance": {
-    "build_identity": "rumi-scheduler-tool-adapter-pack:1.0.0",
-    "content_hash": "sha256:27d1adca67c3b3d7e3d503332def8b881f9097e6e84ae908c3df3a4c0403760e",
+    "build_identity": "rumi_scheduler_tool_adapter_pack:1.0.0",
+    "content_hash": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
     "signature": null,
     "trust_class": "local"
   },

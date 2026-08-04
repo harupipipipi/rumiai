@@ -71,6 +71,12 @@
         "templates/runbook.template.md"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:53cbb2ff1842cefd6f46b367e4d9dfb24a36421d30af1335008e20a89cbdfd3b"
+    },
     "declarative_only": true,
     "excluded_surfaces": [
       "automation_execution",
@@ -129,6 +135,12 @@
   },
   "pack_id": "rumi_sop_mining_pack",
   "pack_identity": "rumi:ecosystem/rumi_sop_mining_pack",
+  "provenance": {
+    "build_identity": "rumi_sop_mining_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": {
     "allowed_domains": [],
     "allowed_ports": []

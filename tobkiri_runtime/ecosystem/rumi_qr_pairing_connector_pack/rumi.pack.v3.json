@@ -98,6 +98,12 @@
         "host_execution": false,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:9acd3eb07a00691fc362a847a8276ad98fdf9fad6f625e659f1559cc08b221d4",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:7d7ba73b32dd0334154da53a3dbfb0f6ae7b5b3f18c469058d8d6c1ce4553820"
+          },
           "owner_surfaces": [
             "qr_pairing_nonce_ledger"
           ]
@@ -105,8 +111,8 @@
         "pack_id": "rumi_qr_pairing_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_qr_pairing_connector_pack",
         "provenance": {
-          "build_identity": "rumi-qr-pairing-connector-pack:1.0.0",
-          "content_hash": "sha256:0b293ec52e79c1d964e753e394ae742108ca22c5f84a192ebfa99ea309f0ceeb",
+          "build_identity": "rumi_qr_pairing_connector_pack:1.0.0",
+          "content_hash": "sha256:d0df2f80a4ecc591507ba40b2864cfdcb1133d85ed76c1cc612ed89823b970d0",
           "signature": null,
           "trust_class": "local"
         },
@@ -179,8 +185,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-qr-pairing-connector-pack:1.0.0",
-    "content_hash": "sha256:0b293ec52e79c1d964e753e394ae742108ca22c5f84a192ebfa99ea309f0ceeb",
+    "build_identity": "rumi_qr_pairing_connector_pack:1.0.0",
+    "content_hash": "sha256:d0df2f80a4ecc591507ba40b2864cfdcb1133d85ed76c1cc612ed89823b970d0",
     "signature": null,
     "trust_class": "local"
   },

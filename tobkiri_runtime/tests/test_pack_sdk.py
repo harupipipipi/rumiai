@@ -12,7 +12,7 @@ from core_runtime.pack_sdk import (
     scaffold_pack,
     validate_pack_manifest,
 )
-from core_runtime.manifest_projection import generate_legacy_ecosystem_projection
+from scripts.offline_legacy_projection import generate_legacy_ecosystem_projection
 from core_runtime.pack_templates import (
     PackTemplateError,
     resolve_profile,

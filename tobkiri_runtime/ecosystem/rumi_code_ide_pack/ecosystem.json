@@ -7,6 +7,12 @@
   "load_order": [],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:3dc7e91b9511971f45a6fa70789b35aa238e8a006fceaffd575cf7a6cc36cc9f"
+    },
     "description": "Optional advanced code, CLI, and IDE workflow profiles, prompts, presets, command recipes, and tool scope metadata.",
     "legacy_annotations": {
       "assets": {
@@ -69,6 +75,12 @@
   },
   "pack_id": "rumi_code_ide_pack",
   "pack_identity": "rumi:ecosystem/rumi_code_ide_pack",
+  "provenance": {
+    "build_identity": "rumi_code_ide_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "1.0.0",
   "vocabulary": {
     "types": [

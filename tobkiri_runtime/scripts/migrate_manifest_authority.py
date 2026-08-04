@@ -20,16 +20,117 @@ from core_runtime.global_contracts.manifest import load_manifest  # noqa: E402
 from scripts.offline_legacy_projection import (  # noqa: E402
     render_legacy_ecosystem,
 )
+from tobkiri_protocol.errors import SchemaValidationError  # noqa: E402
+from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "manifest_authority.v1.json"
+V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 
 
 def _sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _normalize_v3(manifest: dict[str, Any], pack_root: Path) -> dict[str, Any]:
+def _load_v4(pack_root: Path) -> dict[str, Any]:
+    """Load the Pack v4 artifact that owns one compatibility projection."""
+    path = pack_root / "pack.v4.json"
+    try:
+        payload = validate_document(path.read_bytes(), "pack")
+    except (OSError, SchemaValidationError) as exc:
+        raise SystemExit(f"cannot read canonical v4 artifact {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"canonical v4 artifact must be an object: {path}")
+    pack = payload.get("pack")
+    integrity = payload.get("integrity")
+    if not isinstance(pack, dict) or not isinstance(integrity, dict):
+        raise SystemExit(f"canonical v4 artifact is missing integrity: {path}")
+    if str(pack.get("id") or "") != pack_root.name:
+        raise SystemExit(f"canonical v4 Pack identity mismatch: {path}")
+    source_identity = str(integrity.get("source_identity") or "").strip()
+    artifact_digest = str(pack.get("artifact_digest") or "").strip()
+    if not source_identity or not artifact_digest:
+        raise SystemExit(f"canonical v4 artifact has incomplete integrity: {path}")
+    implementation_digests = {
+        str(function.get("implementation_digest"))
+        for function in payload.get("functions", [])
+        if isinstance(function, dict) and function.get("implementation_digest")
+    }
+    return {
+        "pack_id": str(pack["id"]),
+        "version": str(pack.get("version") or ""),
+        "source_identity": source_identity,
+        "artifact_digest": artifact_digest,
+        "implementation_digests": implementation_digests,
+    }
+
+
+def _v4_build_identity(v4: dict[str, Any]) -> str:
+    """Return a deterministic build identity derived from the v4 Pack."""
+    return f"{v4['pack_id']}:{v4['version']}"
+
+
+def _pin_v4_projection(ecosystem: dict[str, Any], v4: dict[str, Any]) -> None:
+    """Bind a legacy compatibility document to its finite v4 source."""
+    metadata = ecosystem.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    metadata["canonical_v4"] = {
+        "artifact": "pack.v4.json",
+        "artifact_digest": v4["artifact_digest"],
+        "generator": V4_PROJECTION_GENERATOR,
+        "source_identity": v4["source_identity"],
+    }
+    ecosystem["metadata"] = metadata
+
+
+def _set_provenance(
+    value: dict[str, Any],
+    *,
+    content_hash: str,
+    build_identity: str,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Set only deterministic provenance fields while preserving trust data."""
+    provenance = dict(existing) if isinstance(existing, dict) else {}
+    provenance.update(
+        {
+            "content_hash": content_hash,
+            "build_identity": build_identity,
+            "trust_class": str(provenance.get("trust_class") or "local"),
+            "signature": provenance.get("signature"),
+        }
+    )
+    value["provenance"] = provenance
+    return provenance
+
+
+def _projection_content_hash(
+    manifest: dict[str, Any],
+    v4: dict[str, Any],
+    artifact_index_hash: str | None,
+) -> str:
+    """Choose an unambiguous content hash for one finite projection."""
+    if artifact_index_hash:
+        return artifact_index_hash
+    entrypoint_hashes = {
+        str(item.get("artifact_hash") or "")
+        for item in manifest.get("entrypoints", [])
+        if isinstance(item, dict) and item.get("artifact_hash")
+    }
+    if len(entrypoint_hashes) == 1:
+        return next(iter(entrypoint_hashes))
+    if len(entrypoint_hashes) > 1:
+        raise SystemExit(
+            "projection has multiple entrypoint artifacts without an artifact index"
+        )
+    return v4["artifact_digest"]
+
+
+def _normalize_v3(
+    manifest: dict[str, Any],
+    pack_root: Path,
+    v4: dict[str, Any],
+) -> dict[str, Any]:
     for provided in manifest.get("contracts", {}).get("provides", []):
         if provided.get("security") == "critical":
             provided["security"] = "restricted"
@@ -91,8 +192,16 @@ def _normalize_v3(manifest: dict[str, Any], pack_root: Path) -> dict[str, Any]:
         if not module:
             continue
         candidate = ROOT.joinpath(*module.split(".")).with_suffix(".py")
-        if candidate.is_file():
-            entrypoint["artifact_hash"] = _sha256(candidate)
+        if not candidate.is_file():
+            raise SystemExit(f"v3 entrypoint module is missing: {candidate}")
+        artifact_hash = _sha256(candidate)
+        if v4["implementation_digests"] and artifact_hash not in v4[
+            "implementation_digests"
+        ]:
+            raise SystemExit(
+                f"v3 entrypoint is not pinned by canonical v4 implementation: {candidate}"
+            )
+        entrypoint["artifact_hash"] = artifact_hash
     return manifest
 
 
@@ -101,14 +210,14 @@ def _normalize_artifact_index(
     ecosystem: dict[str, Any],
     *,
     check: bool,
-) -> None:
+) -> str | None:
     metadata = ecosystem.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     integrity = metadata.get("integrity")
     integrity = integrity if isinstance(integrity, dict) else {}
     relative = str(integrity.get("artifact_manifest") or "").strip()
     if not relative:
-        return
+        return None
     index_path = (pack_root / relative).resolve()
     index_path.relative_to(pack_root.resolve())
     payload = json.loads(index_path.read_text(encoding="utf-8"))
@@ -129,11 +238,7 @@ def _normalize_artifact_index(
             raise SystemExit(f"artifact index drift: {index_path}")
     else:
         index_path.write_text(expected, encoding="utf-8")
-    provenance = ecosystem.get("provenance")
-    if isinstance(provenance, dict):
-        provenance["content_hash"] = "sha256:" + hashlib.sha256(
-            expected.encode("utf-8")
-        ).hexdigest()
+    return "sha256:" + hashlib.sha256(expected.encode("utf-8")).hexdigest()
 
 
 def _schema_properties() -> set[str]:
@@ -226,21 +331,35 @@ def migrate(*, check: bool) -> None:
         ecosystem_path = root / "ecosystem.json"
         if not ecosystem_path.is_file():
             continue
+        v4 = _load_v4(root)
         ecosystem = _normalize_legacy(
             json.loads(ecosystem_path.read_text(encoding="utf-8"))
         )
-        _normalize_artifact_index(root, ecosystem, check=check)
+        artifact_index_hash = _normalize_artifact_index(
+            root, ecosystem, check=check
+        )
+        _pin_v4_projection(ecosystem, v4)
         v3_path = root / "rumi.pack.v3.json"
         if v3_path.is_file():
             manifest = _normalize_v3(
-                json.loads(v3_path.read_text(encoding="utf-8")), root
+                json.loads(v3_path.read_text(encoding="utf-8")), root, v4
             )
-            if isinstance(manifest.get("provenance"), dict) and isinstance(
-                ecosystem.get("provenance"), dict
-            ):
-                manifest["provenance"]["content_hash"] = ecosystem[
-                    "provenance"
-                ]["content_hash"]
+            content_hash = _projection_content_hash(
+                manifest, v4, artifact_index_hash
+            )
+            build_identity = _v4_build_identity(v4)
+            manifest_provenance = _set_provenance(
+                manifest,
+                content_hash=content_hash,
+                build_identity=build_identity,
+                existing=manifest.get("provenance"),
+            )
+            _set_provenance(
+                ecosystem,
+                content_hash=content_hash,
+                build_identity=build_identity,
+                existing=manifest_provenance,
+            )
             extensions = manifest.setdefault("extensions", {})
             options = extensions.setdefault("rumi.legacy_projection", {})
             options["pack_id"] = root.name
@@ -262,6 +381,12 @@ def migrate(*, check: bool) -> None:
                 raise SystemExit(f"invalid canonical v3 manifest {v3_path}: {loaded.diagnostics}")
             ecosystem_text = render_legacy_ecosystem(loaded.value)
         else:
+            _set_provenance(
+                ecosystem,
+                content_hash=v4["artifact_digest"],
+                build_identity=_v4_build_identity(v4),
+                existing=ecosystem.get("provenance"),
+            )
             ecosystem_text = json.dumps(
                 ecosystem, ensure_ascii=False, indent=2, sort_keys=True
             ) + "\n"

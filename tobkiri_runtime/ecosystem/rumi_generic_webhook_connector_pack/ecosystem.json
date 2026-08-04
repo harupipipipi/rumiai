@@ -17,12 +17,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:23f0ea13af6083ea9e17d8ea927cddc17aa62d8f18d555dbadbc8abf65e8c817",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:c92be55ffb15f318e0aa4edb4ebfe058db4c5d9824fec8bf3d37a1035ce9901d"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:42f15e006fd6b41ca17c597e80fa2851da0d565e61d7597979a7824db64e2f5d"
+      "source_content_hash": "sha256:ece18e8189fd8a95371fdb4a2150935cd0835d08a2cfe4f8343ab60f83cf8180"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],
@@ -31,8 +37,8 @@
   "pack_id": "rumi_generic_webhook_connector_pack",
   "pack_identity": "rumi:ecosystem/rumi_generic_webhook_connector_pack",
   "provenance": {
-    "build_identity": "rumi-generic-webhook-connector-pack:1.0.0",
-    "content_hash": "sha256:32daaf74379e1748c22410911c2992f19801d4816f0a758aa7c8c039e3582ac2",
+    "build_identity": "rumi_generic_webhook_connector_pack:1.0.0",
+    "content_hash": "sha256:a937eb103d12acf15b3e246f3e5b182b9f1061ffb18b3a39360443c80f266dce",
     "signature": null,
     "trust_class": "local"
   },

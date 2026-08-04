@@ -34,6 +34,12 @@
       ]
     },
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:dcc36012d012a7d50f8ed26ce076574fcb6685f899d9b5a1e0810c30d0437547"
+    },
     "description": "Declarative local-first security and privacy review pack for threat modeling, secret scanning review, permission review, MCP/browser risk, dependency review, and release signoff.",
     "executable_code": false,
     "grant_override": false,
@@ -52,6 +58,12 @@
   },
   "pack_id": "rumi_security_review_pack",
   "pack_identity": "rumi:ecosystem/rumi_security_review_pack",
+  "provenance": {
+    "build_identity": "rumi_security_review_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": {
     "allowed_domains": [],
     "allowed_ports": []

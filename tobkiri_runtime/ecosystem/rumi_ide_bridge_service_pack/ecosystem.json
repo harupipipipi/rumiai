@@ -21,6 +21,12 @@
       "observe",
       "control"
     ],
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:2036ac3558278f354277eb88293f0e46adfefd1e3b43176e19c36e4fcb5b21c4",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:f5d7cbc78810e3071952b9ea99ce10713cbf38f4d4960c02987865139ffa9b6c"
+    },
     "chat_or_ui_imports": false,
     "file_shell_git_authority": false,
     "format": "rumi.ecosystem.v1",
@@ -28,7 +34,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:81feaffe3e4d7e52602318fce306bd181145eb4410580bdd395e2800dcec93c1"
+      "source_content_hash": "sha256:f947ef98eddef2bc172ab047e052b1e73a273872aa55f61939d3b2f137b08372"
     },
     "manifest_authority": "v3-authoritative",
     "read_only_projection": true,
@@ -37,8 +43,8 @@
   "pack_id": "rumi_ide_bridge_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_ide_bridge_service_pack",
   "provenance": {
-    "build_identity": "rumi-ide-bridge-service-pack:1.0.0",
-    "content_hash": "sha256:57675999a0dfcdceab4c1da2b01358b41f4acf0d0a749be8af5fe5265b0d3d04",
+    "build_identity": "rumi_ide_bridge_service_pack:1.0.0",
+    "content_hash": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
     "signature": null,
     "trust_class": "local"
   },

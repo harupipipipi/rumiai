@@ -13,12 +13,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:ca3bcf907eaef4d59757cfee5bfcd40ab6b66d9b29368e1eea4548406d044298",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:3083d694905aa5906894e508bf9d07f2749cfe33fca0fd4236f78f1d09221838"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:2319120a650aa4277039f6ef5cbec16832e0b2a8a926fd8f585096f395dd8a50"
+      "source_content_hash": "sha256:76ccc8039811ed62f80d79ffd4da91b5633e0810a5c85175ab77443b0a5492ec"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -37,7 +43,7 @@
   "pack_id": "rumi_tool_remote_executor_pack",
   "pack_identity": "rumi:ecosystem/rumi_tool_remote_executor_pack",
   "provenance": {
-    "build_identity": "rumi-tool-remote-executor-pack:1.0.0",
+    "build_identity": "rumi_tool_remote_executor_pack:1.0.0",
     "content_hash": "sha256:59098fa917f79189b1ee657882ffe5df4e43656c15c20c2a362a1bc74355978e",
     "signature": null,
     "trust_class": "local"

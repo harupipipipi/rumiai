@@ -98,6 +98,12 @@
         "host_execution": false,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:46a70d0905db576cb416ae4aa1e76538b443caedec4db00638a7bb53f4b9e3d2",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:ebe6c31454f5a9f97e367051b53d3d041448db6a57133398cac6c2e14f5e19e7"
+          },
           "owner_surfaces": [
             "mobile_pairing_nonce_ledger"
           ]
@@ -105,8 +111,8 @@
         "pack_id": "rumi_mobile_pairing_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_mobile_pairing_connector_pack",
         "provenance": {
-          "build_identity": "rumi-mobile-pairing-connector-pack:1.0.0",
-          "content_hash": "sha256:ccdf8da4ba51fb7e382cb4b1e5c4348e896231976f7cf195fc77d574f48ec9c5",
+          "build_identity": "rumi_mobile_pairing_connector_pack:1.0.0",
+          "content_hash": "sha256:a36fb70dcb0688c414dd734e1398b64a8799f74d2ddbb707595ebb47a42dae87",
           "signature": null,
           "trust_class": "local"
         },
@@ -179,8 +185,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-mobile-pairing-connector-pack:1.0.0",
-    "content_hash": "sha256:ccdf8da4ba51fb7e382cb4b1e5c4348e896231976f7cf195fc77d574f48ec9c5",
+    "build_identity": "rumi_mobile_pairing_connector_pack:1.0.0",
+    "content_hash": "sha256:a36fb70dcb0688c414dd734e1398b64a8799f74d2ddbb707595ebb47a42dae87",
     "signature": null,
     "trust_class": "local"
   },

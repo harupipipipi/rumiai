@@ -87,6 +87,12 @@
         "host_execution": true,
         "metadata": {
           "authority": "mutate",
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:c494b36bfb4ecd4647c1d887cab880ce2ce368f0549851486e6e83653d469333",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:6c718ba79ed1cbf38c09eb86c46b59b8d83621944140935e17a9c43c2daf6d93"
+          },
           "inspect": false,
           "receipt_required": true,
           "tool_or_ui_registry_imports": false
@@ -94,7 +100,7 @@
         "pack_id": "rumi_file_mutation_pack",
         "pack_identity": "rumi:ecosystem/rumi_file_mutation_pack",
         "provenance": {
-          "build_identity": "rumi-file-mutation-pack:1.0.0",
+          "build_identity": "rumi_file_mutation_pack:1.0.0",
           "content_hash": "sha256:738c06d2712518cd7a32769eb9a2eaf967eecdf5607a907d1a397f5ff131c100",
           "signature": null,
           "trust_class": "local"
@@ -159,7 +165,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-file-mutation-pack:1.0.0",
+    "build_identity": "rumi_file_mutation_pack:1.0.0",
     "content_hash": "sha256:738c06d2712518cd7a32769eb9a2eaf967eecdf5607a907d1a397f5ff131c100",
     "signature": null,
     "trust_class": "local"

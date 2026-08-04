@@ -73,6 +73,12 @@
         "templates/artifact_card.template.md"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:ff430b69aa926e039c3803a91df901d0b5ba4576d84e8a3913d55479093e520f"
+    },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
@@ -112,6 +118,12 @@
   },
   "pack_id": "rumi_experiment_design_pack",
   "pack_identity": "rumi:ecosystem/rumi_experiment_design_pack",
+  "provenance": {
+    "build_identity": "rumi_experiment_design_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "version": "0.1.0",

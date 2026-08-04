@@ -8,6 +8,12 @@
   },
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:ab53f5a65dc0e2bbbdba67dc8f99707ed91cc753aaf69ff6f03b8e728b37f14b"
+    },
     "description": "Typed local host capability broker for OS-facing Rumi operations.",
     "legacy_annotations": {
       "default_grants": {
@@ -65,6 +71,12 @@
   },
   "pack_id": "rumi_host_capabilities_pack",
   "pack_identity": "rumi:ecosystem/rumi_host_capabilities_pack",
+  "provenance": {
+    "build_identity": "rumi_host_capabilities_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "0.1.0",
   "vocabulary": {
     "types": [

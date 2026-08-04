@@ -21,12 +21,24 @@
   ],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:df343c6684bf3450690cdbd8630132212d0b1cbc3c091e60356582cd6d977791"
+    },
     "description": "Operations Company and MiMo Coding Company profiles, routes, prompts, and UI extensions.",
     "license": "MIT",
     "name": "Rumi Operations Company Pack"
   },
   "pack_id": "rumi_operations_company_pack",
   "pack_identity": "rumi:ecosystem/rumi_operations_company_pack",
+  "provenance": {
+    "build_identity": "rumi_operations_company_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "1.0.0",
   "vocabulary": {
     "types": [

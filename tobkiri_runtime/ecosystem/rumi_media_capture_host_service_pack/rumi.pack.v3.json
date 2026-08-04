@@ -106,6 +106,12 @@
             "capture",
             "output"
           ],
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:dc830abfd06cd3759d8ce365166ff53e338e0ae7172e979d693ec58fb4f70d9b",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:0bf23f7a2044e9197bb83017ba50452873f2a5d267e05012875b8ec245323563"
+          },
           "executor_owner": "rumi_viewer_host_broker",
           "network_send": false,
           "raw_media_persistence": false,
@@ -114,8 +120,8 @@
         "pack_id": "rumi_media_capture_host_service_pack",
         "pack_identity": "rumi:ecosystem/rumi_media_capture_host_service_pack",
         "provenance": {
-          "build_identity": "rumi-media-capture-host-service-pack:1.0.0",
-          "content_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b",
+          "build_identity": "rumi_media_capture_host_service_pack:1.0.0",
+          "content_hash": "sha256:2350f27970a4283e492bacd40cc95b5a4e21048758e0594f0db74e59c2ed6e01",
           "signature": null,
           "trust_class": "local"
         },
@@ -186,8 +192,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-media-capture-host-service-pack:1.0.0",
-    "content_hash": "sha256:7a627ab9a07468bcbe3adcf67c53f7e8c7413f35126229c9753a2d7ac0c93a1b",
+    "build_identity": "rumi_media_capture_host_service_pack:1.0.0",
+    "content_hash": "sha256:2350f27970a4283e492bacd40cc95b5a4e21048758e0594f0db74e59c2ed6e01",
     "signature": null,
     "trust_class": "local"
   },

@@ -102,6 +102,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:0c39273467b0c61f7dde1db93a2bc29afd2fd13fbcf2af0b5a89980f16b9ce9a",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:aa9cbbb8c48bc750c132c883e2c25384530d8b0c7a14e899f35b10e4284e9049"
+          },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
           },
@@ -118,7 +124,7 @@
         "pack_id": "rumi_human_operator_provider_pack",
         "pack_identity": "rumi:ecosystem/rumi_human_operator_provider_pack",
         "provenance": {
-          "build_identity": "rumi-human-operator-provider-pack:1.0.0",
+          "build_identity": "rumi_human_operator_provider_pack:1.0.0",
           "content_hash": "sha256:1d317ae9644959f9a96662829c3d96066f65e5b70f06a71da6abb2af784cb0c5",
           "signature": null,
           "trust_class": "local"
@@ -177,7 +183,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-human-operator-provider-pack:1.0.0",
+    "build_identity": "rumi_human_operator_provider_pack:1.0.0",
     "content_hash": "sha256:1d317ae9644959f9a96662829c3d96066f65e5b70f06a71da6abb2af784cb0c5",
     "signature": null,
     "trust_class": "local"

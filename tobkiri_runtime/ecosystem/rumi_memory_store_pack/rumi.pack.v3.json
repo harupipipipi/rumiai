@@ -130,6 +130,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:17c61d17c971d03f8bc4b5f318153c3c1844a9988d8369498a76ccb426a0337c",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:dc5bf1b2e8b70ea92829165afa19697f58ae8c3347af9da039642fa9fa8e9c58"
+          },
           "owner_surfaces": [
             "memory"
           ],
@@ -141,8 +147,8 @@
         "pack_id": "rumi_memory_store_pack",
         "pack_identity": "rumi:ecosystem/rumi_memory_store_pack",
         "provenance": {
-          "build_identity": "rumi-memory-store-pack:1.0.0",
-          "content_hash": "sha256:facf46e5a828e14049f9ef6f91a1871b1630616109c69eeef41753e176d301d7",
+          "build_identity": "rumi_memory_store_pack:1.0.0",
+          "content_hash": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
           "signature": null,
           "trust_class": "local"
         },
@@ -211,8 +217,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-memory-store-pack:1.0.0",
-    "content_hash": "sha256:facf46e5a828e14049f9ef6f91a1871b1630616109c69eeef41753e176d301d7",
+    "build_identity": "rumi_memory_store_pack:1.0.0",
+    "content_hash": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
     "signature": null,
     "trust_class": "local"
   },

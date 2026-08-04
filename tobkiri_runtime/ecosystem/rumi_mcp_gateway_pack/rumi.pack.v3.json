@@ -95,6 +95,12 @@
             ]
           },
           "author": "Rumi AI Team",
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:679bfeb3df6f832ea99eb9f7909baa1522c2a72cdb843b2daedd16fd358d5ff6",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:4252b87f63c946554b097d22b7e5667cfe382c9ceb0e09ad839714d921f66368"
+          },
           "dependency_notes": {
             "defaultspack": "Finite connection-runtime compatibility source until Wave 10; approval and invocation are globally brokered."
           },
@@ -122,7 +128,7 @@
         "pack_id": "rumi_mcp_gateway_pack",
         "pack_identity": "rumi:ecosystem/rumi_mcp_gateway_pack",
         "provenance": {
-          "build_identity": "rumi-mcp-gateway-pack:1.1.0",
+          "build_identity": "rumi_mcp_gateway_pack:1.1.0",
           "content_hash": "sha256:9e2f3c61f5ec2364192ab8d86965e126f9d83bb647d7cf942f6d3ff002c9e162",
           "signature": null,
           "trust_class": "local"
@@ -194,7 +200,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-mcp-gateway-pack:1.1.0",
+    "build_identity": "rumi_mcp_gateway_pack:1.1.0",
     "content_hash": "sha256:9e2f3c61f5ec2364192ab8d86965e126f9d83bb647d7cf942f6d3ff002c9e162",
     "signature": null,
     "trust_class": "local"

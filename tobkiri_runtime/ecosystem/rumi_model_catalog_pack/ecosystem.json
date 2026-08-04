@@ -11,13 +11,19 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:c39477f75bbc29dc2d6e1aded43192d2872cc0f809bbbaeb00e46dca1d7a667d",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:f27e991bf3993a1509d098a069ea832d371e8c3611a0c4164d7a3ff1efa2af46"
+    },
     "catalog_revision": "sha256:23cd323554cef32f891827a9a6ddd9c75b7fd3c898d0b501c7e62b091a5001cd",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:66e198fb8e782ba1c20daef3ddfcc8cd256b936dd3dcfcda75f0bc8e74f7685a"
+      "source_content_hash": "sha256:840232e23c88d7cf7cccb10dfba92bfc00d655ac881de109c59d9ebcd402d677"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -45,7 +51,7 @@
   "pack_id": "rumi_model_catalog_pack",
   "pack_identity": "rumi:ecosystem/rumi_model_catalog_pack",
   "provenance": {
-    "build_identity": "rumi-model-catalog-pack:2.0.0",
+    "build_identity": "rumi_model_catalog_pack:2.0.0",
     "content_hash": "sha256:1ce355d9c14f5de035b2bb4c8b914161ae1d8df806969785804d4731a2b8c505",
     "signature": null,
     "trust_class": "local"

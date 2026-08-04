@@ -180,6 +180,12 @@
         "host_execution": false,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:0c8a5edc4a8c54b17569c38f184bc20c50e7b1fd353ca4f334a6d91f0ab8f4d7",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:e55db561459265ee4c4bbfcd3b0e0f5a8104212615148fa4c9bc02e501272069"
+          },
           "owner_surfaces": [
             "oauth_pending_flow_state"
           ]
@@ -187,8 +193,8 @@
         "pack_id": "rumi_connector_oauth_broker_pack",
         "pack_identity": "rumi:ecosystem/rumi_connector_oauth_broker_pack",
         "provenance": {
-          "build_identity": "rumi-connector-oauth-broker-pack:1.0.0",
-          "content_hash": "sha256:232f0139e61435f512285da496e312d591da0d0455ae46b6e4de55e31ad3a42f",
+          "build_identity": "rumi_connector_oauth_broker_pack:1.0.0",
+          "content_hash": "sha256:60e25867b283ab9f353d9d87db70d9f877fa5549f7cbc3a1d997dc5deb8de15e",
           "signature": null,
           "trust_class": "local"
         },
@@ -274,8 +280,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-connector-oauth-broker-pack:1.0.0",
-    "content_hash": "sha256:232f0139e61435f512285da496e312d591da0d0455ae46b6e4de55e31ad3a42f",
+    "build_identity": "rumi_connector_oauth_broker_pack:1.0.0",
+    "content_hash": "sha256:60e25867b283ab9f353d9d87db70d9f877fa5549f7cbc3a1d997dc5deb8de15e",
     "signature": null,
     "trust_class": "local"
   },

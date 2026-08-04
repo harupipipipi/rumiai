@@ -16,12 +16,18 @@
   "host_execution": false,
   "metadata": {
     "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:cd97ee803bf99f6dba493876e8b81ecb2b4ff45bfa91e1910a02dd0e13cb592a",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:7e627d95a4945c651f25b3533857922df6bd6ea3cfa433a0e8d2a7140b155134"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:47a790bd046e639ab3f152e2d459fe08907f2cee261dd7c642e6bb790384f268"
+      "source_content_hash": "sha256:aaca7ebc4452a2e1d05d03cb9c3bd7a08de0fa7fa0e6cbc69c2df7c1c736d775"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -33,8 +39,8 @@
   "pack_id": "rumi_connector_registry_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_connector_registry_service_pack",
   "provenance": {
-    "build_identity": "rumi-connector-registry-service-pack:1.0.0",
-    "content_hash": "sha256:77ae96f0f2b6b996ae63069535b0f14f597da9389685b4fa3fcba3463087cd79",
+    "build_identity": "rumi_connector_registry_service_pack:1.0.0",
+    "content_hash": "sha256:86e41154adfd84c3ffc0b583d0cc2835a327033716eb16c42efda4afda07909c",
     "signature": null,
     "trust_class": "local"
   },

@@ -110,13 +110,19 @@
   ],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:2a314400051ac12857ed61415998a4c2d628a70853e966d27f1f43b97f96c210",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:a7bb5f90461b001222f81e9697d21d159d210964585492954a82e4164a30a537"
+    },
     "description": "Declarative, local-first data analysis profiles, prompts, presets, catalogs, and reproducible recipe specs.",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:bfa63a3c129a8d123b15ee381e47ab3a4eb1d1a576604c2ead2b7833697b32d7"
+      "source_content_hash": "sha256:8a832011c0be5b0c437c454da44f1bf26e7f80d5d75a3d0bd70efc2d1400cfe6"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -129,7 +135,7 @@
   "pack_id": "rumi_data_analysis_pack",
   "pack_identity": "rumi:ecosystem/rumi_data_analysis_pack",
   "provenance": {
-    "build_identity": "rumi-data-analysis-content-pack:1.0.0",
+    "build_identity": "rumi_data_analysis_pack:1.0.0",
     "content_hash": "sha256:37dc8e19d1f8a394cd40aaedc6287990d24deba4cd98beee060f677a74c8db97",
     "signature": null,
     "trust_class": "local"

@@ -3,12 +3,24 @@
   "load_order": [],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:60f2f6abb4866bc0b2d7d4554284f530be32f9a8152721c366a55d6aad56c8c1"
+    },
     "description": "Semantic DOM and browser-use style element recognition profiles for the Rumi Browser Companion extension.",
     "license": "MIT",
     "name": "Rumi Browser Element Pack"
   },
   "pack_id": "rumi_browser_element_pack",
   "pack_identity": "rumi:ecosystem/rumi_browser_element_pack",
+  "provenance": {
+    "build_identity": "rumi_browser_element_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "1.0.0",
   "vocabulary": {
     "types": [

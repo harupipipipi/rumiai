@@ -93,6 +93,12 @@
         "templates/ui_contract.template.md"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:f39b67a55cab9764f5ecf1dfca8dc20c5bd7e22aaae8dd87772e8af3a9626540"
+    },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
@@ -149,6 +155,12 @@
   },
   "pack_id": "rumi_code_migration_pack",
   "pack_identity": "rumi:ecosystem/rumi_code_migration_pack",
+  "provenance": {
+    "build_identity": "rumi_code_migration_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "runtime": {

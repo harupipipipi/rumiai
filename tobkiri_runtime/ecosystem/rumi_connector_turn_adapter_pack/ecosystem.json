@@ -19,12 +19,18 @@
   "host_execution": false,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:9d1dfd5f15939743eaef9728162cbe04a55bad9fb43a59a177367357884a4c0b",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:ae1a16f00bfe395489d60c45640035bcb8429b73834c9976923955b39f0ec7ee"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:2878ace9380f9f8250b493237d19fe0a3f2a4fd7cc3093f6c0e4488731c6b73e"
+      "source_content_hash": "sha256:b1a3e2fd467dd0cd0becf5526dcaca5c6c7c2ae7d9401149254bb1d8623e253b"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],
@@ -33,8 +39,8 @@
   "pack_id": "rumi_connector_turn_adapter_pack",
   "pack_identity": "rumi:ecosystem/rumi_connector_turn_adapter_pack",
   "provenance": {
-    "build_identity": "rumi-connector-turn-adapter-pack:1.0.0",
-    "content_hash": "sha256:0b497d51b3fc2cf04d718fea79c928ff1f714caf111261955330cb8ebade9436",
+    "build_identity": "rumi_connector_turn_adapter_pack:1.0.0",
+    "content_hash": "sha256:d3a22819c65248246b22b225fb9a1d268e89321cf7a624cefa1e36c00bd0472b",
     "signature": null,
     "trust_class": "local"
   },

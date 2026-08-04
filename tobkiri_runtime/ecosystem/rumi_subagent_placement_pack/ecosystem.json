@@ -24,12 +24,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:760d7a71732786195b7325fa74ca75b09c86511a29c880ab6b48bff3f40dd2e8",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:35effd7d2e30412c4c9629748185263e21dbd9d8acbb6fec91831a3c03647fea"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:f0631ca856a726eb19fe55f1fd8ebcaf478e1b6f0beb099c6b6e366efe84a88a"
+      "source_content_hash": "sha256:b6570e91d8b07860060c418268c5f8eee8942dd5226ceb59a10131497b8928b2"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -45,7 +51,7 @@
   "pack_id": "rumi_subagent_placement_pack",
   "pack_identity": "rumi:ecosystem/rumi_subagent_placement_pack",
   "provenance": {
-    "build_identity": "rumi-subagent-placement-pack:1.0.0",
+    "build_identity": "rumi_subagent_placement_pack:1.0.0",
     "content_hash": "sha256:a8a3716d708d5dd1400316564db7e8776b9141112fa6e67e704a19fce2134ae7",
     "signature": null,
     "trust_class": "local"

@@ -179,6 +179,12 @@
         "host_execution": false,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:08a25534c7b551d7419bea34ed3d6c8bcf906491b1060314aa9e7f602ccd5b4f",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:e86e64eb0a73400a9419a7325ef92c846566355b63e8aea35132539441026f57"
+          },
           "owner_surfaces": [
             "connector_transport_facade"
           ]
@@ -186,8 +192,8 @@
         "pack_id": "rumi_connector_transport_gateway_pack",
         "pack_identity": "rumi:ecosystem/rumi_connector_transport_gateway_pack",
         "provenance": {
-          "build_identity": "rumi-connector-transport-gateway-pack:1.0.0",
-          "content_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+          "build_identity": "rumi_connector_transport_gateway_pack:1.0.0",
+          "content_hash": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
           "signature": null,
           "trust_class": "local"
         },
@@ -279,8 +285,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-connector-transport-gateway-pack:1.0.0",
-    "content_hash": "sha256:4075e5fdbbc277dc38c41f373e360bab9afcf253b3e10a8c56be055fee8cad95",
+    "build_identity": "rumi_connector_transport_gateway_pack:1.0.0",
+    "content_hash": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
     "signature": null,
     "trust_class": "local"
   },

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.manifest_projection import (
+from scripts.offline_legacy_projection import (
     ManifestProjectionError,
     generate_legacy_ecosystem_projection,
     project_legacy_ecosystem,

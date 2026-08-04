@@ -39,6 +39,12 @@
       ]
     },
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:12658056907a738d60eb2d152bbdaf5abb23c408f5e9056400b1f5f1b769db79"
+    },
     "description": "Declarative local-first workflow scheduler pack for recurring tasks, monitors, wakeups, follow-ups, cron-like schedules, delivery handoffs, retry policy, evidence, and stop conditions.",
     "executable_code": false,
     "implements_automations": false,
@@ -59,6 +65,12 @@
   },
   "pack_id": "rumi_workflow_scheduler_pack",
   "pack_identity": "rumi:ecosystem/rumi_workflow_scheduler_pack",
+  "provenance": {
+    "build_identity": "rumi_workflow_scheduler_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "version": "1.0.0",

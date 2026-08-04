@@ -51,6 +51,12 @@
       ]
     },
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:cce73431c6e2898fb5ff1f11f636246a7def2b7bb36289282b986b7f0d86504d"
+    },
     "dependency_notes": {
       "defaultspack": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, and core tool routing.",
       "rumi_default_tools_pack": "References existing computer/browser/file/terminal tools and does not replace their implementations."
@@ -98,6 +104,12 @@
   },
   "pack_id": "rumi_computer_control_pack",
   "pack_identity": "rumi:ecosystem/rumi_computer_control_pack",
+  "provenance": {
+    "build_identity": "rumi_computer_control_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "version": "1.0.0",

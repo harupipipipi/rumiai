@@ -14,6 +14,12 @@
   "display_name": "Rumi Media Inspect Service",
   "host_execution": false,
   "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4ab16d6bcdca23282668e8edf1e2ba5757ebdc3860a6ee6055401bd6b271ad43",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:cdae205b9a0aef7d72828c3e0507da63742ad4c2f3b848afe56c4a09bb0b6e25"
+    },
     "capture": false,
     "file_access": "global_contract_only",
     "format": "rumi.ecosystem.v1",
@@ -21,7 +27,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:fd547ec1f07747bc0a66c6cf5dad80d6e807b6e57995a6b46a07386f8fa1a51a"
+      "source_content_hash": "sha256:ad1955d8d6b83158d5a73e9133d3f5bac9af0c02c5745d7ae0ab3905dc4816cd"
     },
     "manifest_authority": "v3-authoritative",
     "read_only": true,
@@ -32,8 +38,8 @@
   "pack_id": "rumi_media_inspect_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_media_inspect_service_pack",
   "provenance": {
-    "build_identity": "rumi-media-inspect-service-pack:1.0.0",
-    "content_hash": "sha256:39cc9931de498f4a5f683179ad518d48c5c056e119f7117884dad370698f04c6",
+    "build_identity": "rumi_media_inspect_service_pack:1.0.0",
+    "content_hash": "sha256:5650e0863ed7b5d1e24d11f80c1a706f02d2e096a2a8cba998ce0538cd30ff7a",
     "signature": null,
     "trust_class": "local"
   },

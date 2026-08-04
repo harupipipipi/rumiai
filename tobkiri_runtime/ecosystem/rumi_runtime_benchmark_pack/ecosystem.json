@@ -58,6 +58,12 @@
         "specs/environment_descriptor.yaml"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:fafb328798b19f20c4d7c9b847168881e6cd12ea5fdf15149da27b98b1462914"
+    },
     "executable_code": false,
     "network_policy": "none_by_default",
     "optional_integrations": [
@@ -92,6 +98,12 @@
   },
   "pack_id": "rumi_runtime_benchmark_pack",
   "pack_identity": "rumi:ecosystem/rumi_runtime_benchmark_pack",
+  "provenance": {
+    "build_identity": "rumi_runtime_benchmark_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "version": "0.1.0",

@@ -21,6 +21,12 @@
       "observe",
       "control"
     ],
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:eeaeb9ed727aa1d52757eb210136ffa63f804cbdcc2952b3a7cd39b88479e1a8",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:53366842a59a320c1041900d903c9e29a56b4e09aa10e1689f2beadf774b84f8"
+    },
     "docker": {
       "digest_pinned": true,
       "host_downgrade": false,
@@ -32,7 +38,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:88a6bed5074840006add0ca95c50b113ec852f034558a2295bce488a1abb0ddc"
+      "source_content_hash": "sha256:31f934a67447f732bb68122051be47b84ae955e28f3a9e3fca43b8dff5d79cc5"
     },
     "host_apply": false,
     "manifest_authority": "v3-authoritative",
@@ -42,7 +48,7 @@
   "pack_id": "rumi_coding_sandbox_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_coding_sandbox_service_pack",
   "provenance": {
-    "build_identity": "rumi-coding-sandbox-service-pack:1.0.0",
+    "build_identity": "rumi_coding_sandbox_service_pack:1.0.0",
     "content_hash": "sha256:8fab76d8f3a830cb634c186ffa32c4ffc3d067c9bbdd671baa2f55e256725f2f",
     "signature": null,
     "trust_class": "local"

@@ -13,6 +13,12 @@
     "working_dir": ""
   },
   "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:6dd9d1028e100dc464bd90ff821b090b554833678cc86765782e43831456ed43"
+    },
     "category": "frontend",
     "description": "Local search surface that resolves the best destination URL before navigation.",
     "legacy_annotations": {
@@ -22,6 +28,12 @@
   },
   "pack_id": "search_home_pack",
   "pack_identity": "rumi:ecosystem/search_home_pack",
+  "provenance": {
+    "build_identity": "search_home_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "0.1.0",
   "vocabulary": {
     "types": [

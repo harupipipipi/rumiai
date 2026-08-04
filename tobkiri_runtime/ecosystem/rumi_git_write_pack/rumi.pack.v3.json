@@ -94,6 +94,12 @@
         "host_execution": true,
         "metadata": {
           "authority": "write",
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:1e66c204ffd46b5927aaee57860a82d308ec690cdcb9f4a35758a32730c78507",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:8d982bd5db9c1d36a0bfb130361346f4ed490e07155a82efb245e42fe00be6d4"
+          },
           "network": false,
           "publication": false,
           "receipt_required": true,
@@ -102,8 +108,8 @@
         "pack_id": "rumi_git_write_pack",
         "pack_identity": "rumi:ecosystem/rumi_git_write_pack",
         "provenance": {
-          "build_identity": "rumi-git-write-pack:1.0.0",
-          "content_hash": "sha256:6bf113f3b3bf4f169eeea8cdc57df0a331dd906ea6193d91532baf658735f143",
+          "build_identity": "rumi_git_write_pack:1.0.0",
+          "content_hash": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e",
           "signature": null,
           "trust_class": "local"
         },
@@ -173,8 +179,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-git-write-pack:1.0.0",
-    "content_hash": "sha256:6bf113f3b3bf4f169eeea8cdc57df0a331dd906ea6193d91532baf658735f143",
+    "build_identity": "rumi_git_write_pack:1.0.0",
+    "content_hash": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e",
     "signature": null,
     "trust_class": "local"
   },

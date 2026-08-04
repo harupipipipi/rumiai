@@ -49,6 +49,12 @@
         "specs/webhook_contract_review.yaml"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:20cce767dc2a831df2b2d806be8c6c584115df3eef2247574ff6dcb48643c4d1"
+    },
     "executable_code": false,
     "network_policy": "none_by_default",
     "optional_integrations": [
@@ -84,6 +90,12 @@
   },
   "pack_id": "rumi_api_toolsmith_pack",
   "pack_identity": "rumi:ecosystem/rumi_api_toolsmith_pack",
+  "provenance": {
+    "build_identity": "rumi_api_toolsmith_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "required_network": [],
   "required_secrets": [],
   "version": "0.1.0",

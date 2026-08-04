@@ -106,6 +106,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:2f05352c69f3841b50f6ec66d099f9b829f4c2af84b91bad5b5d6f255aa08dc9",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:99601b50c34c1ff5ff43e72d1c68445f0132509d59c199bc7d8315d0586987e9"
+          },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
           },
@@ -120,7 +126,7 @@
         "pack_id": "rumi_mcp_server_pack",
         "pack_identity": "rumi:ecosystem/rumi_mcp_server_pack",
         "provenance": {
-          "build_identity": "rumi-mcp-server-pack:1.0.0",
+          "build_identity": "rumi_mcp_server_pack:1.0.0",
           "content_hash": "sha256:480d6d9c0b206c55b15526e92be981e1851de05a48d9a54215aacdd7010470ae",
           "signature": null,
           "trust_class": "local"
@@ -182,7 +188,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-mcp-server-pack:1.0.0",
+    "build_identity": "rumi_mcp_server_pack:1.0.0",
     "content_hash": "sha256:480d6d9c0b206c55b15526e92be981e1851de05a48d9a54215aacdd7010470ae",
     "signature": null,
     "trust_class": "local"

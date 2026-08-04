@@ -24,12 +24,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:7ecda2d3ae94c06cb29a5152142ac9ad54b0652f7fbd66a50a68b0dd3628e8de"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:5ab7b730d7ad5c9101b2c066630cd7b571c2f066d1e8e51251189cbacd631c5a"
+      "source_content_hash": "sha256:5dbf95ca1ffc508fef280c704b1d4fd13c9f18ab8628f030f4cc9937885cf549"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -49,7 +55,7 @@
   "pack_id": "rumi_repository_context_pack",
   "pack_identity": "rumi:ecosystem/rumi_repository_context_pack",
   "provenance": {
-    "build_identity": "rumi-repository-context-pack:1.0.0",
+    "build_identity": "rumi_repository_context_pack:1.0.0",
     "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
     "signature": null,
     "trust_class": "local"

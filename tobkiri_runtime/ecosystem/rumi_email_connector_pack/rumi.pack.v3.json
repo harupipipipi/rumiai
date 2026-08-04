@@ -90,13 +90,19 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:b0e4bc7425b53eb68570c5f9059b2c9cff0dc62efdf50e79e48655f870c99512",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:de014105454b8d270380c6116b5deba2645fbf2da982c8fe1d44de16cfe2a178"
+          },
           "owner_surfaces": []
         },
         "pack_id": "rumi_email_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_email_connector_pack",
         "provenance": {
-          "build_identity": "rumi-email-connector-pack:1.0.0",
-          "content_hash": "sha256:4ed03ee010c3a6fe556fc8940589679b64c4f1eed20c09853390c6fd7cd8c519",
+          "build_identity": "rumi_email_connector_pack:1.0.0",
+          "content_hash": "sha256:1e41994994c9f2e3385d954d5a262ab7922ead75b9f08850ac4105518697bceb",
           "signature": null,
           "trust_class": "local"
         },
@@ -163,8 +169,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-email-connector-pack:1.0.0",
-    "content_hash": "sha256:4ed03ee010c3a6fe556fc8940589679b64c4f1eed20c09853390c6fd7cd8c519",
+    "build_identity": "rumi_email_connector_pack:1.0.0",
+    "content_hash": "sha256:1e41994994c9f2e3385d954d5a262ab7922ead75b9f08850ac4105518697bceb",
     "signature": null,
     "trust_class": "local"
   },

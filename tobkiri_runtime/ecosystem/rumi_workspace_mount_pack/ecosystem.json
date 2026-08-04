@@ -20,12 +20,18 @@
       "control": "workspace.mount.manage",
       "read": "workspace.metadata.read"
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:3a787463f8fe5c7ee1add6c5c1eabea1270a6a8b281de858aa67315eb616a56e",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:23bc0506d6ecc56f37eba3a9b0ec4f31089903421a0dcc8dd7cb993773b2ddf0"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:61d148c42bbd6f5a65cb9b448d745b7c4b0cc42157895cfdb9818a96d0fd5d20"
+      "source_content_hash": "sha256:2dae18cfc537ea89e18569c2125e76899f9374debee66ad2f59c19211487dd9d"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -36,7 +42,7 @@
   "pack_id": "rumi_workspace_mount_pack",
   "pack_identity": "rumi:ecosystem/rumi_workspace_mount_pack",
   "provenance": {
-    "build_identity": "rumi-workspace-mount-pack:1.0.0",
+    "build_identity": "rumi_workspace_mount_pack:1.0.0",
     "content_hash": "sha256:746432a4b642fc74701ece23f9b38fbf2c57f32d85517e0ddd431bd69c302eb6",
     "signature": null,
     "trust_class": "local"

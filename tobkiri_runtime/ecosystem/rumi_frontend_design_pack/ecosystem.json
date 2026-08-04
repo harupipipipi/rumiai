@@ -52,6 +52,12 @@
       ],
       "template": []
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:90fcf5a5d2829e2bda942c7f34997928753e365f258d02144de1045d85f915d9"
+    },
     "declarative_only": true,
     "executable_code": false,
     "network_policy": "none_by_default",
@@ -87,6 +93,12 @@
   },
   "pack_id": "rumi_frontend_design_pack",
   "pack_identity": "rumi:ecosystem/rumi_frontend_design_pack",
+  "provenance": {
+    "build_identity": "rumi_frontend_design_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "0.1.0",
   "vocabulary": {
     "types": [

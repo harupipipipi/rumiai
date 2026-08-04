@@ -76,6 +76,12 @@
         "templates/artifact_card.template.md"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:c39beae899f99186fac7d3e5c12c806960c2ca8f3df8f346f46935fedad57ada"
+    },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
@@ -85,7 +91,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:79a1b1e3fb93bf2f6accb39ae2d0520366dea26438834c017934aa1ca91e412c"
+      "source_content_hash": "sha256:b6b7e3ef9ace5e8f6abdfe16ed6036484c56e02ea39eec247601144377d3660f"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -140,7 +146,7 @@
   "pack_id": "rumi_customer_research_pack",
   "pack_identity": "rumi:ecosystem/rumi_customer_research_pack",
   "provenance": {
-    "build_identity": "rumi-customer-research-content-pack:1.0.0",
+    "build_identity": "rumi_customer_research_pack:1.0.0",
     "content_hash": "sha256:17d8811e7cec99871443a75d69fb07bec5d220b6a2873ad19f8ed2e964bb5ba8",
     "signature": null,
     "trust_class": "local"

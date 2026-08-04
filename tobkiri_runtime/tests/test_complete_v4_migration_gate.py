@@ -28,6 +28,7 @@ RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
 
 EXPECTED_PRODUCTION_PACK_COUNT = 141
+V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
     "pack.v4.json": "pack",
@@ -326,7 +327,7 @@ def _authority_source_sets() -> dict[str, set[str]]:
         "manifest_ids": manifest_ids,
         "manifest_source_ids": manifest_source_ids,
         "v4_ids": v4_ids,
-        "v4_only_ids": v4_ids - manifest_ids,
+        "v4_only_ids": direct_ids - manifest_source_ids,
     }
 
 
@@ -403,13 +404,41 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "manifest_authority",
             classified=dict(sorted(classified.items())) if isinstance(classified, Mapping) else classified,
         )
-    manifest_delta = _source_set_delta(manifest_ids, manifest_source_ids)
+    catalog_delta = _source_set_delta(direct_ids, manifest_ids)
+    expected_authority_counts = Counter(
+        {
+            "modern-only": len(v4_only_ids),
+            "v3-authoritative": 95,
+            "legacy-authoritative": 44,
+        }
+    )
+    observed_authority_counts = (
+        Counter(str(classified.get(pack_id)) for pack_id in direct_ids)
+        if isinstance(classified, Mapping)
+        else Counter()
+    )
+    if (
+        catalog_delta is not None
+        or observed_authority_counts != expected_authority_counts
+    ):
+        add_scope_finding(
+            manifest_path,
+            "authority_catalog_scope_mismatch",
+            "manifest_authority",
+            **(catalog_delta or {"missing": [], "extra": []}),
+            expected_authority_counts=dict(sorted(expected_authority_counts.items())),
+            observed_authority_counts=dict(sorted(observed_authority_counts.items())),
+        )
+    manifest_delta = _source_set_delta(
+        manifest_ids - v4_only_ids, manifest_source_ids
+    )
     if manifest_delta is not None:
         add_scope_finding(
             manifest_path,
             "manifest_canonical_source_set_mismatch",
             "manifest_authority",
             **manifest_delta,
+            v4_only=sorted(v4_only_ids),
         )
     v4_entry_delta = _source_set_delta(v4_ids, entry_ids)
     if (
@@ -439,9 +468,9 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "pack_v4_catalog",
             **v4_direct_delta,
         )
-    canonical_ids = manifest_ids | v4_only_ids
+    canonical_ids = manifest_source_ids | v4_only_ids
     canonical_delta = _source_set_delta(canonical_ids, direct_ids)
-    v4_only_delta = _source_set_delta(direct_ids - manifest_ids, v4_only_ids)
+    v4_only_delta = _source_set_delta(direct_ids - manifest_source_ids, v4_only_ids)
     if canonical_delta is not None or v4_only_delta is not None:
         add_scope_finding(
             v4_catalog_path,
@@ -1060,19 +1089,137 @@ def _rust_call_findings() -> list[dict[str, Any]]:
 
 
 def _launcher_safety_findings() -> list[dict[str, Any]]:
-    """Scan Launcher env/PATH/process calls and unverified v3 entrypoints."""
+    """Scan Launcher calls and verify v3 projections against v4 artifacts."""
     findings = _rust_call_findings()
     for path in sorted(ECOSYSTEM.glob("*/rumi.pack.v3.json")):
         value = _load_json(path)
         if not isinstance(value, Mapping):
             continue
+        pack_dir = path.parent
+        v4 = _load_json(pack_dir / "pack.v4.json")
+        v4_functions = v4.get("functions", []) if isinstance(v4, Mapping) else []
+        v4_implementation_digests = {
+            str(function.get("implementation_digest"))
+            for function in v4_functions
+            if isinstance(function, Mapping) and function.get("implementation_digest")
+        }
         for entry in value.get("entrypoints", []):
-            if isinstance(entry, Mapping) and entry.get("loader") in {"python", "process"}:
-                findings.append(_finding(path, 1, "unverified_v3_entrypoint", loader=entry.get("loader")))
+            if not isinstance(entry, Mapping) or entry.get("loader") not in {
+                "python",
+                "process",
+            }:
+                continue
+            module = str(entry.get("module") or "").strip()
+            candidate = (
+                RUNTIME.joinpath(*module.split(".")).with_suffix(".py")
+                if module
+                else None
+            )
+            actual = (
+                _sha256(candidate)
+                if candidate is not None and candidate.is_file()
+                else ""
+            )
+            declared = str(entry.get("artifact_hash") or "")
+            if (
+                not actual
+                or declared != actual
+                or (
+                    v4_implementation_digests
+                    and actual not in v4_implementation_digests
+                )
+            ):
+                findings.append(
+                    _finding(
+                        path,
+                        1,
+                        "unverified_v3_entrypoint",
+                        loader=entry.get("loader"),
+                        module=module,
+                        declared=declared,
+                        actual=actual,
+                    )
+                )
         provenance = value.get("provenance")
-        if isinstance(provenance, Mapping) and provenance.get("signature") is None:
+        ecosystem = _load_json(pack_dir / "ecosystem.json")
+        expected_content_hash = _expected_v3_content_hash(
+            pack_dir, value, ecosystem
+        )
+        expected_build_identity = _expected_v4_build_identity(v4)
+        if not isinstance(provenance, Mapping):
             findings.append(_finding(path, 1, "unverified_v3_provenance"))
+            continue
+        ecosystem_provenance = (
+            ecosystem.get("provenance")
+            if isinstance(ecosystem, Mapping)
+            else None
+        )
+        if (
+            str(provenance.get("content_hash") or "") != expected_content_hash
+            or str(provenance.get("build_identity") or "")
+            != expected_build_identity
+            or not isinstance(ecosystem_provenance, Mapping)
+            or str(ecosystem_provenance.get("content_hash") or "")
+            != expected_content_hash
+            or str(ecosystem_provenance.get("build_identity") or "")
+            != expected_build_identity
+        ):
+            findings.append(
+                _finding(
+                    path,
+                    1,
+                    "unverified_v3_provenance",
+                    expected_content_hash=expected_content_hash,
+                    expected_build_identity=expected_build_identity,
+                )
+            )
     return sorted(findings, key=lambda item: (item["path"], item["line"], item["rule"]))
+
+
+def _expected_v4_build_identity(v4: Any) -> str:
+    """Return the build identity derived from one canonical v4 artifact."""
+    if not isinstance(v4, Mapping):
+        return ""
+    pack = v4.get("pack")
+    if not isinstance(pack, Mapping):
+        return ""
+    pack_id = str(pack.get("id") or "").strip()
+    version = str(pack.get("version") or "").strip()
+    return f"{pack_id}:{version}" if pack_id and version else ""
+
+
+def _expected_v3_content_hash(
+    pack_dir: Path,
+    manifest: Mapping[str, Any],
+    ecosystem: Any,
+) -> str:
+    """Resolve the actual content hash represented by one v3 projection."""
+    metadata = ecosystem.get("metadata") if isinstance(ecosystem, Mapping) else None
+    integrity = (
+        metadata.get("integrity") if isinstance(metadata, Mapping) else None
+    )
+    relative = (
+        integrity.get("artifact_manifest")
+        if isinstance(integrity, Mapping)
+        else None
+    )
+    if relative:
+        index_path = (pack_dir / str(relative)).resolve()
+        if index_path.is_file():
+            return _sha256(index_path)
+        return ""
+    hashes = {
+        str(item.get("artifact_hash") or "")
+        for item in manifest.get("entrypoints", [])
+        if isinstance(item, Mapping) and item.get("artifact_hash")
+    }
+    if len(hashes) == 1:
+        return next(iter(hashes))
+    if hashes:
+        return ""
+    v4 = _load_json(pack_dir / "pack.v4.json")
+    pack = v4.get("pack") if isinstance(v4, Mapping) else None
+    return str(pack.get("artifact_digest") or "") if isinstance(pack, Mapping) else ""
 
 
 def _double_authority_findings() -> list[dict[str, Any]]:
@@ -1155,37 +1302,89 @@ def _double_authority_findings() -> list[dict[str, Any]]:
 
 
 def _offline_projection_findings() -> list[dict[str, Any]]:
-    """Require projection marker, owner marker, and canonical source identity."""
+    """Require finite v4 binding for all legacy compatibility projections."""
     findings: list[dict[str, Any]] = []
     catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
     authorities = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
+    source_sets = _authority_source_sets()
     for pack_dir in _production_pack_dirs():
-        if authorities.get(pack_dir.name) != "v3-authoritative":
+        if (
+            pack_dir.name in source_sets["v4_only_ids"]
+            or pack_dir.name not in authorities
+        ):
             continue
         legacy_path = pack_dir / "ecosystem.json"
         source_path = pack_dir / "rumi.pack.v3.json"
         value = _load_json(legacy_path)
         metadata = value.get("metadata") if isinstance(value, Mapping) else None
         generated = metadata.get("generated_from") if isinstance(metadata, Mapping) else None
-        expected = {
-            "format": "rumi.ecosystem.v1",
-            "generated": True,
-            "read_only_projection": True,
-            "manifest_authority": "v3-authoritative",
-        }
-        if not isinstance(metadata, Mapping) or any(metadata.get(key) != expected_value for key, expected_value in expected.items()):
-            findings.append(_finding(legacy_path, 1, "projection_marker_or_owner_missing"))
+        authority = authorities.get(pack_dir.name)
+        if authority == "v3-authoritative":
+            expected = {
+                "format": "rumi.ecosystem.v1",
+                "generated": True,
+                "read_only_projection": True,
+                "manifest_authority": "v3-authoritative",
+            }
+            if not isinstance(metadata, Mapping) or any(
+                metadata.get(key) != expected_value
+                for key, expected_value in expected.items()
+            ):
+                findings.append(
+                    _finding(legacy_path, 1, "projection_marker_or_owner_missing")
+                )
+                continue
+            if (
+                not isinstance(generated, Mapping)
+                or generated.get("source") != "rumi.pack.v3.json"
+                or generated.get("generator")
+                != "tobkiri.core_runtime.manifest_projection/v2"
+            ):
+                findings.append(
+                    _finding(legacy_path, 1, "projection_source_marker_missing")
+                )
+            if (
+                not source_path.is_file()
+                or generated.get("source_content_hash")
+                != _source_identity(source_path)
+            ):
+                findings.append(
+                    _finding(legacy_path, 1, "projection_source_identity_mismatch")
+                )
+        v4 = _load_json(pack_dir / "pack.v4.json")
+        integrity = v4.get("integrity") if isinstance(v4, Mapping) else None
+        canonical_v4 = (
+            metadata.get("canonical_v4")
+            if isinstance(metadata, Mapping)
+            else None
+        )
+        if not isinstance(integrity, Mapping) or not isinstance(canonical_v4, Mapping):
+            findings.append(
+                _finding(legacy_path, 1, "canonical_v4_projection_missing")
+            )
             continue
-        if not isinstance(generated, Mapping) or generated.get("source") != "rumi.pack.v3.json" or generated.get("generator") != "tobkiri.core_runtime.manifest_projection/v2":
-            findings.append(_finding(legacy_path, 1, "projection_source_marker_missing"))
-        if not source_path.is_file() or generated.get("source_content_hash") != _source_identity(source_path):
-            findings.append(_finding(legacy_path, 1, "projection_source_identity_mismatch"))
+        pack = v4.get("pack") if isinstance(v4, Mapping) else None
+        if (
+            canonical_v4.get("artifact") != "pack.v4.json"
+            or canonical_v4.get("generator") != V4_PROJECTION_GENERATOR
+            or canonical_v4.get("source_identity")
+            != integrity.get("source_identity")
+            or canonical_v4.get("artifact_digest")
+            != (pack.get("artifact_digest") if isinstance(pack, Mapping) else None)
+        ):
+            findings.append(
+                _finding(
+                    legacy_path,
+                    1,
+                    "canonical_v4_projection_identity_mismatch",
+                )
+            )
     return findings
 
 
 def _source_identity(path: Path) -> str:
-    """Compute the canonical v3 source identity through the production helper."""
-    from core_runtime.manifest_projection import source_manifest_identity
+    """Compute the canonical v3 source identity through the offline helper."""
+    from scripts.offline_legacy_projection import source_manifest_identity
 
     value = _load_json(path)
     return source_manifest_identity(value) if isinstance(value, Mapping) else ""
@@ -1382,13 +1581,14 @@ def test_v4_runtime_and_protocol_composition_apis_are_live() -> None:
     assert callable(load_verified_catalog)
 
 
-def test_current_sha_red_evidence_reports_actual_findings() -> None:
-    """Current SHA evidence is measured directly and remains RED until production migration."""
+def test_current_sha_green_evidence_reports_no_findings() -> None:
+    """Current SHA evidence is measured directly and is green after migration."""
     report = _audit_snapshot()
     expected_head = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
     ).strip()
     assert report["head_sha"] == expected_head
-    assert report["gate"]["status"] == "RED"
+    assert report["gate"]["status"] == "GREEN"
+    assert report["gate"]["clean"] is True
     assert report["pack_inventory"]["production_pack_directories"] == 141
     assert report["pack_inventory"]["v4_artifact_files"] == 423

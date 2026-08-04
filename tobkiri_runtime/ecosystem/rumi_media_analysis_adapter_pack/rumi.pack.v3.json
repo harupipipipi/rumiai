@@ -83,6 +83,12 @@
         "display_name": "Rumi Media Analysis Adapter",
         "host_execution": false,
         "metadata": {
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:f3bdc7fcd149de4e5ea4f9f5d5f672bb1c566eaf04d36f7192c68843bcca65fa",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:a202f9548cdcf4b9d199932ccfeae6c52fd5f09fe88b5486f5784c989e70b97f"
+          },
           "capture_authority": false,
           "file_access": "global_contract_only",
           "provider_execution": false,
@@ -91,8 +97,8 @@
         "pack_id": "rumi_media_analysis_adapter_pack",
         "pack_identity": "rumi:ecosystem/rumi_media_analysis_adapter_pack",
         "provenance": {
-          "build_identity": "rumi-media-analysis-adapter-pack:1.0.0",
-          "content_hash": "sha256:ac3a90d1b02a8eae7e995d405ab51b6474a3bd8a72f536530b046c08d42508c2",
+          "build_identity": "rumi_media_analysis_adapter_pack:1.0.0",
+          "content_hash": "sha256:70ca9c2696d710018be89a1f8fa406e1185698ec623fbd7860e0bb70fdcd0897",
           "signature": null,
           "trust_class": "local"
         },
@@ -169,8 +175,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-media-analysis-adapter-pack:1.0.0",
-    "content_hash": "sha256:ac3a90d1b02a8eae7e995d405ab51b6474a3bd8a72f536530b046c08d42508c2",
+    "build_identity": "rumi_media_analysis_adapter_pack:1.0.0",
+    "content_hash": "sha256:70ca9c2696d710018be89a1f8fa406e1185698ec623fbd7860e0bb70fdcd0897",
     "signature": null,
     "trust_class": "local"
   },

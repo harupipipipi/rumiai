@@ -92,6 +92,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:2abb7694d7047206ca317c76bc518433cb99aded2439d99b63d1a2d73e132d93",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:c23b43789040ff28add7c33c5a69d9ab80696e68a5a26c887d1fc7f1ffbf2d1c"
+          },
           "owner_surfaces": [],
           "security": {
             "first_found_fallback": false,
@@ -101,8 +107,8 @@
         "pack_id": "rumi_context_runtime_pack",
         "pack_identity": "rumi:ecosystem/rumi_context_runtime_pack",
         "provenance": {
-          "build_identity": "rumi-context-runtime-pack:1.0.0",
-          "content_hash": "sha256:0f4c8fa9e0d00f326675257548e279ddfbeb88bed69f0f4e81710cdbdcf0076b",
+          "build_identity": "rumi_context_runtime_pack:1.0.0",
+          "content_hash": "sha256:0f5cf7acdb2419c0f921b100506eee87acd21681a4f7ae88814a999a97deea33",
           "signature": null,
           "trust_class": "local"
         },
@@ -151,8 +157,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-context-runtime-pack:1.0.0",
-    "content_hash": "sha256:0f4c8fa9e0d00f326675257548e279ddfbeb88bed69f0f4e81710cdbdcf0076b",
+    "build_identity": "rumi_context_runtime_pack:1.0.0",
+    "content_hash": "sha256:0f5cf7acdb2419c0f921b100506eee87acd21681a4f7ae88814a999a97deea33",
     "signature": null,
     "trust_class": "local"
   },

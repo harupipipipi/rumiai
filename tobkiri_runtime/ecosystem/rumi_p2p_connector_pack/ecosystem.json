@@ -17,12 +17,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:05ea2e905be01008966960de6dfe69994fc888d698673bc10febafb894364ec6",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:dd5aae335287d9924458baddcc04ffc28c1d5bc9ddb288cfe4c4d21586b2716c"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:b5dc16a20f914d371e14dc5c312004bc2b0afa7e9229b70365c09f4bc8a7fc0f"
+      "source_content_hash": "sha256:618b6adc41d93d601a6d0e78f98e29c904fb47d29956dbcdf18de5323b956601"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],
@@ -31,8 +37,8 @@
   "pack_id": "rumi_p2p_connector_pack",
   "pack_identity": "rumi:ecosystem/rumi_p2p_connector_pack",
   "provenance": {
-    "build_identity": "rumi-p2p-connector-pack:1.0.0",
-    "content_hash": "sha256:beb7d2f0f1dfe9bb9eaa4f4e2d960ded504465a1de26f9df2f4fead681a146ce",
+    "build_identity": "rumi_p2p_connector_pack:1.0.0",
+    "content_hash": "sha256:08de45459e7857a492a480fdf6a028dac404c58c53a81978c2a5a40002497fcb",
     "signature": null,
     "trust_class": "local"
   },

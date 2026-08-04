@@ -14,12 +14,18 @@
   "display_name": "Rumi File Inspect",
   "host_execution": true,
   "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:b2ae2191789ff05bc019e96e30e8155afdb83d5c726230089722c9b14d9a89ed",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:d9346435aa8e9e20bbaf267c15ff05846a197a5581eaa25ede4d1bcfe0025c5b"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:7bca3ac9962f3ab50fce06d8391f0f9d0949e3344051d2f7481321f7e7c9b0f5"
+      "source_content_hash": "sha256:191c876e2f82b8e4b7e5605716cac3ade266aad28d792bcad432c41380451f36"
     },
     "manifest_authority": "v3-authoritative",
     "read_only_projection": true
@@ -27,8 +33,8 @@
   "pack_id": "rumi_file_inspect_pack",
   "pack_identity": "rumi:ecosystem/rumi_file_inspect_pack",
   "provenance": {
-    "build_identity": "rumi-file-inspect-pack:1.0.0",
-    "content_hash": "sha256:d055c25ba8c455a431cb2976e21f26a99bf27fcc27ee0c87b1a369aceb15d3c8",
+    "build_identity": "rumi_file_inspect_pack:1.0.0",
+    "content_hash": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd",
     "signature": null,
     "trust_class": "local"
   },

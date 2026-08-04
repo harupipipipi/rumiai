@@ -49,6 +49,12 @@
   ],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:9ebb2de0da424c46423668744737a56151d48afc29bb3d18182821e23b1958aa"
+    },
     "declarative_only": true,
     "description": "Declarative local-first contracts for session recall, user profile memory, project knowledge, skill-learning proposals, hygiene, and evidence-backed recall.",
     "inspired_by": [
@@ -65,6 +71,12 @@
   },
   "pack_id": "rumi_memory_knowledge_pack",
   "pack_identity": "rumi:ecosystem/rumi_memory_knowledge_pack",
+  "provenance": {
+    "build_identity": "rumi_memory_knowledge_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "1.0.0",
   "vocabulary": {
     "types": [

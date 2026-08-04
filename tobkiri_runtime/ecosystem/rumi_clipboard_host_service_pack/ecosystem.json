@@ -19,13 +19,19 @@
       "read",
       "write"
     ],
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:40d3bfe0776fd3dfd9f628f1fd00a8bbe8480059ddfa6ba88c9ad0d01b85f7cf",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:2a284c9a63eec26161bdf873705ca70be1dded7b67aabab0e9f415be49675ec0"
+    },
     "executor_owner": "rumi_viewer_host_broker",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:07db9749244a41acafa28f47d43b50c938cf4f0ca2a36e23c48fdee4fb34ecf6"
+      "source_content_hash": "sha256:33b8e3dc777e9a58a749c3b4535d4987f738c0271dc4f1b686a981e87c2e477e"
     },
     "manifest_authority": "v3-authoritative",
     "payload_persistence": false,
@@ -36,8 +42,8 @@
   "pack_id": "rumi_clipboard_host_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_clipboard_host_service_pack",
   "provenance": {
-    "build_identity": "rumi-clipboard-host-service-pack:1.0.0",
-    "content_hash": "sha256:944e78c7320bcb99ef2191cbe43bb546a94060c913434e2e1b94a12f903eb75b",
+    "build_identity": "rumi_clipboard_host_service_pack:1.0.0",
+    "content_hash": "sha256:010e09ffd1a31174f05dedf806c86179f229497b6e73acc33fb4b1b3ce2bc510",
     "signature": null,
     "trust_class": "local"
   },

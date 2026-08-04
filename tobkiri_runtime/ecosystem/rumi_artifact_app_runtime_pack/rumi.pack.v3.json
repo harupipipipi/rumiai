@@ -97,6 +97,12 @@
               "templates/ui_contract.template.md"
             ]
           },
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:7438ba4f6ec32564fe2e75d940154098127d47c4e51d305da1f3afceaa187ad4",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:4e3eb2d1d16c697e1fdabe4db5f5ddac99936aee6d144a56cf9e8bdffb5d0f9d"
+          },
           "consumes_existing_sources_only": true,
           "declarative_only": true,
           "defaultspack_promotion_eligible": false,
@@ -145,7 +151,7 @@
         "pack_id": "rumi_artifact_app_runtime_pack",
         "pack_identity": "rumi:ecosystem/rumi_artifact_app_runtime_pack",
         "provenance": {
-          "build_identity": "rumi-artifact-app-runtime-content-pack:1.0.0",
+          "build_identity": "rumi_artifact_app_runtime_pack:1.0.0",
           "content_hash": "sha256:90cd3bf8eb21fdd99c63359b5111631ff18ddb715d8b6864ba5a1a3e3bea0583",
           "signature": null,
           "trust_class": "local"
@@ -205,7 +211,7 @@
   "pack_api_version": "rumi.pack.v3",
   "permissions": [],
   "provenance": {
-    "build_identity": "rumi-artifact-app-runtime-content-pack:1.0.0",
+    "build_identity": "rumi_artifact_app_runtime_pack:1.0.0",
     "content_hash": "sha256:90cd3bf8eb21fdd99c63359b5111631ff18ddb715d8b6864ba5a1a3e3bea0583",
     "signature": null,
     "trust_class": "local"

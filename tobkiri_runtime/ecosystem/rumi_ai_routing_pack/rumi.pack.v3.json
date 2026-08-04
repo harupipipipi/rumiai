@@ -62,6 +62,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:27c99a7bd9d7ce76eed8a2964cc1bb10bc568543a670459606d51f5f417b7b9f",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:cf170bbb335d8aa045580297d248505612596c677f29377a56e21cde189bbe34"
+          },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
           },
@@ -80,7 +86,7 @@
         "pack_id": "rumi_ai_routing_pack",
         "pack_identity": "rumi:ecosystem/rumi_ai_routing_pack",
         "provenance": {
-          "build_identity": "rumi-ai-routing-pack:1.0.0",
+          "build_identity": "rumi_ai_routing_pack:1.0.0",
           "content_hash": "sha256:4f8f77c1e191fc6facec589f6c0c61c065cb3017da121609462e3b080b32995d",
           "signature": null,
           "trust_class": "local"
@@ -131,7 +137,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-ai-routing-pack:1.0.0",
+    "build_identity": "rumi_ai_routing_pack:1.0.0",
     "content_hash": "sha256:4f8f77c1e191fc6facec589f6c0c61c065cb3017da121609462e3b080b32995d",
     "signature": null,
     "trust_class": "local"

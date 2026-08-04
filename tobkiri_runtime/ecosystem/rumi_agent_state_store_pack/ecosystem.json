@@ -16,12 +16,18 @@
   "host_execution": false,
   "metadata": {
     "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:7f26f41ebd6091b56f646c2d8f28292f083c5348418aad78adf8953bcbb55e68",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:2fb541d339e3a4086cb273b49afe917abed2f3120e1426530bc958e947e6ead4"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:3fdc9d38c6c25fd32044abf6766aecce9198016c62ae48b7630329deabbea942"
+      "source_content_hash": "sha256:068461734d56ca1ede9901f4b3080d837ba1ac496e66a9cde7df1cc488eb3ebd"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -36,8 +42,8 @@
   "pack_id": "rumi_agent_state_store_pack",
   "pack_identity": "rumi:ecosystem/rumi_agent_state_store_pack",
   "provenance": {
-    "build_identity": "rumi-agent-state-store-pack:1.0.0",
-    "content_hash": "sha256:8bd9b84463ba7d5570b38889426e333391b476f8399de3d25c37b6237e1b3128",
+    "build_identity": "rumi_agent_state_store_pack:1.0.0",
+    "content_hash": "sha256:1dbcc2f6137687e4c7422d9a6393fec7a14110c8c87f62021297ab7301e02ce8",
     "signature": null,
     "trust_class": "local"
   },

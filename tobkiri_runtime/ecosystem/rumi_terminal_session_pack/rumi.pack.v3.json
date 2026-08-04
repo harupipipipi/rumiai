@@ -124,14 +124,20 @@
             "observe",
             "control"
           ],
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:45884af99c7650e6e1e3497304a7e21d072e1e34b7d7f7b3d0c541b76a256cce",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:0ebecace33a3bbc8649972891c8903b79804b04ad4c8cd2802fb6547d8f0fc9b"
+          },
           "control_receipt_required": true,
           "tool_or_ui_registry_imports": false
         },
         "pack_id": "rumi_terminal_session_pack",
         "pack_identity": "rumi:ecosystem/rumi_terminal_session_pack",
         "provenance": {
-          "build_identity": "rumi-terminal-session-pack:1.0.0",
-          "content_hash": "sha256:b3ea30abdbce708741ae2ee646b8c2820542ade3731e734c1f6877765609e3c6",
+          "build_identity": "rumi_terminal_session_pack:1.0.0",
+          "content_hash": "sha256:4363d9f58c34afaf7a3ca8117f81f2fc986ea9c80f71d6429454118d2c35269f",
           "signature": null,
           "trust_class": "local"
         },
@@ -213,8 +219,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-terminal-session-pack:1.0.0",
-    "content_hash": "sha256:b3ea30abdbce708741ae2ee646b8c2820542ade3731e734c1f6877765609e3c6",
+    "build_identity": "rumi_terminal_session_pack:1.0.0",
+    "content_hash": "sha256:4363d9f58c34afaf7a3ca8117f81f2fc986ea9c80f71d6429454118d2c35269f",
     "signature": null,
     "trust_class": "local"
   },

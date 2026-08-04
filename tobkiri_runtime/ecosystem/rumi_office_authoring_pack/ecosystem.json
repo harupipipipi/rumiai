@@ -94,6 +94,12 @@
         "templates/ui_contract.template.md"
       ]
     },
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:6a1e783c17c46e8c2a791265963f715701a166816f0d31ffa58916d44296cb9f",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:2b129c0bab686110776a833daecd63c7d03ceb3b5824d1a5237dcd877e7cdf59"
+    },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
@@ -103,7 +109,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:05a824ccda6506cc3220dcf876ccb9005c94d1654db0358ba72112b81b0ea977"
+      "source_content_hash": "sha256:e5ee980901cae6fd3bbc7cb2a342c9bc092f18911c24902eaecfa26c8688d283"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -174,7 +180,7 @@
   "pack_id": "rumi_office_authoring_pack",
   "pack_identity": "rumi:ecosystem/rumi_office_authoring_pack",
   "provenance": {
-    "build_identity": "rumi-office-authoring-content-pack:1.0.0",
+    "build_identity": "rumi_office_authoring_pack:1.0.0",
     "content_hash": "sha256:39efbe9f26a9c2d0f78f53d176fcaae321ebb7a51791c93362fe1a0fe9fdb13a",
     "signature": null,
     "trust_class": "local"

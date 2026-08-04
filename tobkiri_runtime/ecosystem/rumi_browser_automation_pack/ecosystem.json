@@ -7,6 +7,12 @@
   "display_name": "Rumi Browser Automation Pack",
   "load_order": [],
   "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:70fd1a1625bf4ce121e294be101e2750f75aec4373656d8372e5df5d87468134"
+    },
     "executable_code": false,
     "network_policy": "none_by_default",
     "optional_integrations": [
@@ -28,6 +34,12 @@
   },
   "pack_id": "rumi_browser_automation_pack",
   "pack_identity": "rumi:ecosystem/rumi_browser_automation_pack",
+  "provenance": {
+    "build_identity": "rumi_browser_automation_pack:0.1.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "runtime": {
     "type": "declarative_pack"
   },

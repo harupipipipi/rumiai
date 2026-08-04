@@ -11,12 +11,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:eece212123ea442c89a598b31ea2d589dad67b3876eba1a177c45c7b3aa23e4f",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:5841d937c68addce093af263f59db1113d43b39c022fb0bcebe90099c3e61837"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:f9a426c68a9a5f3cfdbf391c979c5aff64c36e897005ca5cede13765be04691a"
+      "source_content_hash": "sha256:bdcb0bde4bcbf4cf0adc666b960bb5c52252e4300ab7ed981d3db0fe053d0876"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -34,7 +40,7 @@
   "pack_id": "rumi_tool_sandbox_executor_pack",
   "pack_identity": "rumi:ecosystem/rumi_tool_sandbox_executor_pack",
   "provenance": {
-    "build_identity": "rumi-tool-sandbox-executor-pack:1.0.0",
+    "build_identity": "rumi_tool_sandbox_executor_pack:1.0.0",
     "content_hash": "sha256:651498c5fadbda3e62dea1b80a5a3d540ae768fcd7e902ae80c14fc63bf39eee",
     "signature": null,
     "trust_class": "local"

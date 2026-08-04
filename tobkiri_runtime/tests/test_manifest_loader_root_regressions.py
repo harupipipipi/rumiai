@@ -7,40 +7,29 @@ production fix can be applied independently of the existing Wave 0 tests.
 
 from __future__ import annotations
 
-import contextlib
 import importlib
-import io
 import json
-import shutil
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from backend_core.ecosystem.registry import Registry
+from backend_core.ecosystem.registry import LegacyRegistryUnavailable, Registry
 from backend_core.ecosystem.spec.schema.validator import (
     SchemaValidationError,
     validate_ecosystem,
 )
-from core_runtime.capability_binding_registration import (
-    register_pack_binding_handlers,
-)
 from core_runtime.global_contracts.manifest import load_manifest
-from core_runtime.interface_registry import InterfaceRegistry
-from core_runtime.manifest_projection import (
+from scripts.offline_legacy_projection import (
     generate_legacy_ecosystem_projection,
     source_manifest_identity,
 )
 from core_runtime.paths import discover_pack_locations
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
-from core_runtime.function_registry import FunctionRegistry
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ECOSYSTEM = ROOT / "ecosystem"
 EXAMPLE_V3 = ROOT / "examples" / "pack_v3" / "minimal_service.json"
-MODEL_EVALS_PACK = "rumi_model_evals_pack"
-HOST_PACK = "rumi_host_capabilities_pack"
 
 
 def _authority_module():
@@ -72,46 +61,37 @@ def _write_legacy_pack(root: Path, pack_id: str) -> Path:
     return pack_dir
 
 
-class _RegistryContainer:
-    """DI adapter used to observe the single legacy FunctionRegistry path."""
-
-    def __init__(self, function_registry: FunctionRegistry) -> None:
-        self.function_registry = function_registry
-
-    def get_or_none(self, name: str):
-        """Return the test FunctionRegistry and no unrelated services."""
-        if name == "function_registry":
-            return self.function_registry
-        return None
-
-
-def _load_legacy_registry() -> tuple[dict[str, object], FunctionRegistry]:
-    """Load the repository through the legacy Registry and capture functions."""
-    function_registry = FunctionRegistry()
-    container = _RegistryContainer(function_registry)
-    with patch("core_runtime.di_container.get_container", return_value=container):
-        with contextlib.redirect_stdout(io.StringIO()):
-            packs = Registry(str(ECOSYSTEM)).load_all_packs()
-    return packs, function_registry
-
-
 def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     """Every discovered Pack has one explicit authority and a matching loader."""
     authority = _authority_module()
     authority.load_manifest_authority_catalog.cache_clear()
     locations = discover_pack_locations(str(ECOSYSTEM))
+    direct_pack_ids = {
+        path.name
+        for path in ECOSYSTEM.iterdir()
+        if path.is_dir()
+        and path.name != "setup_pack"
+        and not path.name.startswith(".")
+    }
     authority.validate_manifest_authority_scope(
-        (location.pack_id for location in locations),
+        direct_pack_ids,
         require_complete_catalog=True,
     )
     catalog = authority.load_manifest_authority_catalog()
 
-    assert len(locations) == 141
+    assert len(locations) == 139
     assert len(catalog) == 141
-    assert set(catalog) == {location.pack_id for location in locations}
+    assert set(catalog) == direct_pack_ids
     assert set(catalog.values()) == {
         "legacy-authoritative",
         "v3-authoritative",
+        "modern-only",
+    }
+    assert catalog["defaults"] == "modern-only"
+    assert catalog["defaultspack"] == "modern-only"
+    assert direct_pack_ids - {location.pack_id for location in locations} == {
+        "defaults",
+        "defaultspack",
     }
 
     for location in locations:
@@ -129,7 +109,7 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
 
 
 def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> None:
-    """The authoritative legacy scan must accept all 141 repository manifests."""
+    """The authoritative legacy scan must accept all 139 repository manifests."""
     paths = sorted(ECOSYSTEM.glob("*/ecosystem.json"))
     errors: list[str] = []
     for path in paths:
@@ -138,7 +118,7 @@ def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> 
         except (OSError, json.JSONDecodeError, SchemaValidationError) as exc:
             errors.append(f"{path.parent.name}: {exc}")
 
-    assert len(paths) == 141
+    assert len(paths) == 139
     assert not errors, "legacy manifest diagnostics: " + " | ".join(errors[:8])
 
 
@@ -155,47 +135,12 @@ def test_all_repository_v3_manifests_validate_with_actionable_diagnostics() -> N
     assert not errors, "v3 manifest diagnostics: " + " | ".join(errors[:8])
 
 
-def test_legacy_registry_loads_every_pack_and_registers_host_mediators() -> None:
-    """Registry loading must retain all Packs and both host mediator Functions."""
-    packs, function_registry = _load_legacy_registry()
-    locations = discover_pack_locations(str(ECOSYSTEM))
-
-    assert len(packs) == 141
-    assert set(packs) == {location.pack_id for location in locations}
-    for function_id, permission_id in (
-        ("host_permission_status", "host.permission.status"),
-        ("host_permission_open_settings", "host.permission.open_settings"),
-    ):
-        entry = function_registry.get(f"{HOST_PACK}:{function_id}")
-        assert entry is not None, function_id
-        assert entry.calling_convention == "subprocess"
-        assert entry.host_execution is False
-        assert permission_id in entry.requires
-
-
-def test_legacy_registry_hard_fails_invalid_pack_with_concrete_diagnostic(
+def test_removed_legacy_registry_rejects_filesystem_discovery(
     tmp_path: Path,
 ) -> None:
-    """An invalid legacy Pack must not be printed-and-skipped."""
-    ecosystem_dir = tmp_path / "ecosystem"
-    _write_legacy_pack(ecosystem_dir, "valid_pack")
-    invalid_dir = _write_legacy_pack(ecosystem_dir, "invalid_pack")
-    invalid_manifest = json.loads(
-        (invalid_dir / "ecosystem.json").read_text(encoding="utf-8")
-    )
-    invalid_manifest["vocabulary"]["types"] = []
-    (invalid_dir / "ecosystem.json").write_text(
-        json.dumps(invalid_manifest),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(Exception) as raised:
-        with contextlib.redirect_stdout(io.StringIO()):
-            Registry(str(ecosystem_dir)).load_all_packs()
-
-    diagnostic = str(raised.value)
-    assert "invalid_pack" in diagnostic
-    assert "vocabulary" in diagnostic.lower()
+    """Invalid or installed legacy Packs never reach the v4 runtime registry."""
+    with pytest.raises(LegacyRegistryUnavailable, match="removed"):
+        Registry(str(tmp_path / "ecosystem")).load_all_packs()
 
 
 def test_v3_projection_is_legacy_schema_valid_source_bound_and_deterministic(
@@ -303,113 +248,11 @@ def test_invalid_v3_manifest_is_not_available_or_effective(
     )
 
 
-class _Approved:
-    """Approval fixture for manifest binding tests."""
-
-    def is_pack_approved_and_verified(self, _pack_id: str) -> tuple[bool, str]:
-        """Approve the selected Pack without changing artifact verification."""
-        return True, "verified test fixture"
-
-
-def test_valid_model_evals_manifest_binds_all_declared_providers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A canonical model-evals manifest must be usable by the binding loader."""
-    import core_runtime.capability_binding_registration as binding_module
-
-    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
-    monkeypatch.setattr(
-        binding_module,
-        "verify_declared_artifacts",
-        lambda *_args, **_kwargs: (True, ()),
-    )
-    manifest = json.loads(
-        (ECOSYSTEM / MODEL_EVALS_PACK / "rumi.pack.v3.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    expected_contracts = {
-        item["id"] for item in manifest["contracts"]["provides"]
-    }
-    interface_registry = InterfaceRegistry()
-
-    result = register_pack_binding_handlers(
-        interface_registry=interface_registry,
-        approval_manager=_Approved(),
-        ecosystem_dir=str(ECOSYSTEM),
-        effective_pack_ids=(MODEL_EVALS_PACK,),
-    )
-
-    assert result.ok is True
-    assert result.registered == [MODEL_EVALS_PACK]
-    assert set(interface_registry.list(prefix="global_contract.provider.")) == {
-        f"global_contract.provider.{contract_id}"
-        for contract_id in expected_contracts
-    }
-
-
-def test_model_evals_binding_fails_closed_on_tampered_artifact(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Approval cannot override a Host-detected model-evals artifact tamper."""
-    import core_runtime.capability_binding_registration as binding_module
-
-    monkeypatch.setattr(
-        binding_module,
-        "verify_declared_artifacts",
-        lambda *_args, **_kwargs: (False, ("fixture artifact is tampered",)),
-    )
-    interface_registry = InterfaceRegistry()
-    result = register_pack_binding_handlers(
-        interface_registry=interface_registry,
-        approval_manager=_Approved(),
-        ecosystem_dir=str(ECOSYSTEM),
-        effective_pack_ids=(MODEL_EVALS_PACK,),
-    )
-
-    assert result.ok is False
-    assert result.registered == []
-    assert interface_registry.list(prefix="global_contract.provider.") == {}
-    assert any(
-        diagnostic["code"] == "v3_pack_artifact_integrity_failed"
-        for diagnostic in result.diagnostics
-    )
-
-
-def test_malformed_model_evals_manifest_cannot_bind(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Malformed/unknown v3 schema data is rejected before provider activation."""
-    import core_runtime.capability_binding_registration as binding_module
-
-    ecosystem_dir = tmp_path / "ecosystem"
-    shutil.copytree(
-        ECOSYSTEM / MODEL_EVALS_PACK,
-        ecosystem_dir / MODEL_EVALS_PACK,
-    )
-    manifest_path = ecosystem_dir / MODEL_EVALS_PACK / "rumi.pack.v3.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["unknown_schema_key"] = True
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    monkeypatch.setattr(
-        binding_module,
-        "verify_declared_artifacts",
-        lambda *_args, **_kwargs: (True, ()),
-    )
-
-    interface_registry = InterfaceRegistry()
-    result = register_pack_binding_handlers(
-        interface_registry=interface_registry,
-        approval_manager=_Approved(),
-        ecosystem_dir=str(ecosystem_dir),
-        effective_pack_ids=(MODEL_EVALS_PACK,),
-    )
-
-    assert result.ok is False
-    assert result.registered == []
-    assert interface_registry.list(prefix="global_contract.provider.") == {}
-    assert any(
-        diagnostic["code"] == "v3_process_manifest_invalid"
-        for diagnostic in result.diagnostics
-    )
+def test_removed_binding_modules_are_not_importable() -> None:
+    """v4 composition must not restore deleted Core binding registries."""
+    for module_name in (
+        "core_runtime.capability_binding_registration",
+        "core_runtime.function_registry",
+        "core_runtime.interface_registry",
+    ):
+        assert importlib.util.find_spec(module_name) is None

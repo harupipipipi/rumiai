@@ -11,12 +11,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:735f56d445defea6efe58fc5855ecce211ae9391e8342a460fb3f927ef15e471",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:be7461b8538d08f5a9c4e2d8236f4b7ffc4654921df98c018bb1656597a99566"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:fea340b524aa77699d7cec1dc332dc334e52c164a58fce4c52bf4c137077b4bd"
+      "source_content_hash": "sha256:a180419906dff66af3790baa3a0a835e934cec8dab9439fb8707848e0a3cf195"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -35,7 +41,7 @@
   "pack_id": "rumi_ai_tool_bridge_pack",
   "pack_identity": "rumi:ecosystem/rumi_ai_tool_bridge_pack",
   "provenance": {
-    "build_identity": "rumi-ai-tool-bridge-pack:1.0.0",
+    "build_identity": "rumi_ai_tool_bridge_pack:1.0.0",
     "content_hash": "sha256:da74403ececa936c41455583735a9547c01d0f8931a250454712341ece43263e",
     "signature": null,
     "trust_class": "local"

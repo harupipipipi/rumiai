@@ -265,6 +265,12 @@
             ]
           },
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:28ea33fb63021a277ae78134d331e1162ef4a4425ae2a23e89d4dc0aafa600a0",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:ad00b31a0176decea62c5c73c350b48eea832ed14a2c1dc952640bcf3e171354"
+          },
           "declarative_only": false,
           "executable_code": true,
           "integrity": {
@@ -291,7 +297,7 @@
         "pack_id": "rumi_prompt_studio_pack",
         "pack_identity": "rumi:ecosystem/rumi_prompt_studio_pack",
         "provenance": {
-          "build_identity": "rumi-prompt-studio-pack:1.0.0",
+          "build_identity": "rumi_prompt_studio_pack:1.0.0",
           "content_hash": "sha256:2a9a173e09ccb3f512915d55bc311763325a6a2f611a8a5f53101f57d7768764",
           "signature": null,
           "trust_class": "local"
@@ -389,7 +395,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-prompt-studio-pack:1.0.0",
+    "build_identity": "rumi_prompt_studio_pack:1.0.0",
     "content_hash": "sha256:2a9a173e09ccb3f512915d55bc311763325a6a2f611a8a5f53101f57d7768764",
     "signature": null,
     "trust_class": "local"

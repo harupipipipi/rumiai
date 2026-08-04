@@ -19,13 +19,19 @@
       "observe",
       "control"
     ],
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:14a3095a6c98a93bc31715c0330b0dd44e826f120f7e2f16fbac17d6261a5cd8",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:28ff831b5d209cd5e42f69fe988f01c7480f985a8d1b6fb1a4ea7681b6ee69e6"
+    },
     "executor_owner": "rumi_viewer_host_broker",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:02c99061b13576d9b50d29b0b4c09cbe79a29023e0ad6fe335e99be695a7a19f"
+      "source_content_hash": "sha256:5b0ef055e9ead104943cb74905a4ee0b78de1a79f086d12947918b0e3d43394e"
     },
     "manifest_authority": "v3-authoritative",
     "operation_descriptor_owner": true,
@@ -35,8 +41,8 @@
   "pack_id": "rumi_desktop_host_service_pack",
   "pack_identity": "rumi:ecosystem/rumi_desktop_host_service_pack",
   "provenance": {
-    "build_identity": "rumi-desktop-host-service-pack:1.0.0",
-    "content_hash": "sha256:331df96aaafce1d1ff58ad94736467453e388c5f7610c9e9739cfbbd8e5a7a6c",
+    "build_identity": "rumi_desktop_host_service_pack:1.0.0",
+    "content_hash": "sha256:978f30aeae69ba9c5616e837c712e0977447e82268cdb82ad3a11366e3f819de",
     "signature": null,
     "trust_class": "local"
   },

@@ -3,12 +3,24 @@
   "load_order": [],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:84a758992c436d6fe34fb3df950ece54cfde134427947e0ca703dbf6e316342c"
+    },
     "description": "Starter local agent profiles, prompts, presets, and examples.",
     "license": "MIT",
     "name": "Rumi Local Agent Pack"
   },
   "pack_id": "rumi_local_agent_pack",
   "pack_identity": "rumi:ecosystem/rumi_local_agent_pack",
+  "provenance": {
+    "build_identity": "rumi_local_agent_pack:1.0.0",
+    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "signature": null,
+    "trust_class": "local"
+  },
   "version": "1.0.0",
   "vocabulary": {
     "types": [

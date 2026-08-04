@@ -199,6 +199,12 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:7ecda2d3ae94c06cb29a5152142ac9ad54b0652f7fbd66a50a68b0dd3628e8de"
+          },
           "owner_surfaces": [
             "repository_context_preparation"
           ],
@@ -215,7 +221,7 @@
         "pack_id": "rumi_repository_context_pack",
         "pack_identity": "rumi:ecosystem/rumi_repository_context_pack",
         "provenance": {
-          "build_identity": "rumi-repository-context-pack:1.0.0",
+          "build_identity": "rumi_repository_context_pack:1.0.0",
           "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
           "signature": null,
           "trust_class": "local"
@@ -326,7 +332,7 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-repository-context-pack:1.0.0",
+    "build_identity": "rumi_repository_context_pack:1.0.0",
     "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
     "signature": null,
     "trust_class": "local"

@@ -17,12 +17,18 @@
   "host_execution": true,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:949a4fab9dffb4c8485899f793c7ae125bee9cb07e1f0fb32a8c5757921fbda1",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:ebd4762ba332bcd5dae82a55b97f6d7c19e4b03d0fa316bd472997cb7f1a20b6"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:cf1bffcecb8addd0877a3e0ab10073aef5b230c515b635d9ae5aa7d736d43664"
+      "source_content_hash": "sha256:1b65218822c315065995161b5af1b3a33331f53689c49b33656caf5a70266a6e"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],
@@ -31,8 +37,8 @@
   "pack_id": "rumi_line_connector_pack",
   "pack_identity": "rumi:ecosystem/rumi_line_connector_pack",
   "provenance": {
-    "build_identity": "rumi-line-connector-pack:1.0.0",
-    "content_hash": "sha256:5ec760100d57c39b9d585a5e6732d6da56a6b973fc8860dc0dc04ebc171c5d71",
+    "build_identity": "rumi_line_connector_pack:1.0.0",
+    "content_hash": "sha256:33d9f699a92c4ef64d4d1797c9014936c1c07cdcc4ea2a44df5cf63ebc2f7f60",
     "signature": null,
     "trust_class": "local"
   },

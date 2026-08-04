@@ -18,12 +18,18 @@
   "metadata": {
     "apply_receipt_required": true,
     "authority": "patch",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:b64150979768bb0e76bb1cb3390bdc9217bde28d74db7a7260d50be44d0c75fc",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:621b628be2ba204efeddf2c1610a8e9328777cb6c060a550e841a048cafd850d"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:cdd5907b4c5e5062196d53e7e00ddb2a304b13afb86ec2e85ee81a3f39f9b086"
+      "source_content_hash": "sha256:396e854ed847d8a6cdfef055b8e336158e4fd80842d0772ba6bd19b242bb59c1"
     },
     "manifest_authority": "v3-authoritative",
     "preview": "read_only",
@@ -33,8 +39,8 @@
   "pack_id": "rumi_file_patch_pack",
   "pack_identity": "rumi:ecosystem/rumi_file_patch_pack",
   "provenance": {
-    "build_identity": "rumi-file-patch-pack:1.0.0",
-    "content_hash": "sha256:9f0299403ddc59031a122213f31757578887ef0a746ec08a24c2a52dc135cde0",
+    "build_identity": "rumi_file_patch_pack:1.0.0",
+    "content_hash": "sha256:c706fc33ef41284698a398f2f3742c0352f325eaf95acbd7448f0a4cfa68d416",
     "signature": null,
     "trust_class": "local"
   },

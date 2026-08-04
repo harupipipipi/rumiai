@@ -125,13 +125,19 @@
         "host_execution": true,
         "metadata": {
           "authoritative_owner": false,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:85a4e117988a8815a5d5e978a1ba505c47af617d959bf84513d34e1f979cada4",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:f8f612d58f5ae79d2e07f8c54178382f5a96a5f4bb2d5188f7cdc9f3430dd42c"
+          },
           "owner_surfaces": []
         },
         "pack_id": "rumi_slack_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_slack_connector_pack",
         "provenance": {
-          "build_identity": "rumi-slack-connector-pack:1.0.0",
-          "content_hash": "sha256:2e9afcd384ee5a6fcca521e1cc8445b5b6d3ba7f189a95a6250dc57f3cfc4048",
+          "build_identity": "rumi_slack_connector_pack:1.0.0",
+          "content_hash": "sha256:b9e67d4e981adc16de2e398fe6f0c9fe3e6ce2568a9a57fffb3c4384afdc41c6",
           "signature": null,
           "trust_class": "local"
         },
@@ -205,8 +211,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-slack-connector-pack:1.0.0",
-    "content_hash": "sha256:2e9afcd384ee5a6fcca521e1cc8445b5b6d3ba7f189a95a6250dc57f3cfc4048",
+    "build_identity": "rumi_slack_connector_pack:1.0.0",
+    "content_hash": "sha256:b9e67d4e981adc16de2e398fe6f0c9fe3e6ce2568a9a57fffb3c4384afdc41c6",
     "signature": null,
     "trust_class": "local"
   },

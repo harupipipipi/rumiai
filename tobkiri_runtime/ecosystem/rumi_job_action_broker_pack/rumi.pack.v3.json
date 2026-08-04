@@ -72,6 +72,12 @@
         "host_execution": false,
         "metadata": {
           "authoritative_owner": true,
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:9d92d6a33c8b009d4f8a705cf910d34787ca86b2d7e99137d99f0bda68caa347",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:2bfecee2a7c02406e5b62b9e796104d7af5f905a3c7cd21bee7db8f314bb932a"
+          },
           "owner_surfaces": [
             "job_dispatch_idempotency_ledger"
           ]
@@ -79,8 +85,8 @@
         "pack_id": "rumi_job_action_broker_pack",
         "pack_identity": "rumi:ecosystem/rumi_job_action_broker_pack",
         "provenance": {
-          "build_identity": "rumi-job-action-broker-pack:1.0.0",
-          "content_hash": "sha256:af2449859b11637b4bf4062b83fed69decf5a663f72ad77e81c05aab7265a51a",
+          "build_identity": "rumi_job_action_broker_pack:1.0.0",
+          "content_hash": "sha256:741ba3bb0e01cbd0a485cb63baa3c5ba5b5635a85ede9289d214ea71a73711ac",
           "signature": null,
           "trust_class": "local"
         },
@@ -135,8 +141,8 @@
     }
   ],
   "provenance": {
-    "build_identity": "rumi-job-action-broker-pack:1.0.0",
-    "content_hash": "sha256:af2449859b11637b4bf4062b83fed69decf5a663f72ad77e81c05aab7265a51a",
+    "build_identity": "rumi_job_action_broker_pack:1.0.0",
+    "content_hash": "sha256:741ba3bb0e01cbd0a485cb63baa3c5ba5b5635a85ede9289d214ea71a73711ac",
     "signature": null,
     "trust_class": "local"
   },

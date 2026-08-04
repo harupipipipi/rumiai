@@ -1453,7 +1453,7 @@ class CommandProtocolRegistry:
 
         digest = hashlib.sha256()
         for relative in (
-            Path("ecosystem.json"),
+            Path("pack.v4.json"),
             Path("commands/default_commands.json"),
             Path("schemas/command-protocol-v1.schema.json"),
         ):

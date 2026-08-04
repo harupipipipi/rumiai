@@ -11,12 +11,18 @@
   "host_execution": true,
   "metadata": {
     "authority_owner": "core_runtime.authority",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:6cd76560192a26c3d0ba24fc0a653ed5f49c7400bd80fa137bd922966a1040bc",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:3871ad9144a2477e87b684e29b4d841d754de91425bcd55aa0a80553a600fc37"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:a36f1611af5246fc35a88528625a6d236ec2a0cd334c8ba04b9b8c5f1c3725f7"
+      "source_content_hash": "sha256:f68d1d151f7d1b45da3a155e5c356e54c9d1218a33334569f244892cd93ba854"
     },
     "manifest_authority": "v3-authoritative",
     "read_only_projection": true,
@@ -29,7 +35,7 @@
   "pack_id": "rumi_host_authority_bridge_pack",
   "pack_identity": "rumi:ecosystem/rumi_host_authority_bridge_pack",
   "provenance": {
-    "build_identity": "rumi-host-authority-bridge-pack:1.0.0",
+    "build_identity": "rumi_host_authority_bridge_pack:1.0.0",
     "content_hash": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955",
     "signature": null,
     "trust_class": "local"

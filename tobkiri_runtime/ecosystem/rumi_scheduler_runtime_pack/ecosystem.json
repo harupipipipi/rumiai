@@ -21,12 +21,18 @@
   "host_execution": false,
   "metadata": {
     "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:19e3002d64b9b8cc0959feecd45fa5e3adba8ebaeb2b6efe76d61b0bc2781c6a",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:e949fa151b5166495259d6708a1cdf47f685f83b9fab108bce2878e32706af7b"
+    },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:8f154dd6b6a470bf79c1a295c4369db566eeb437728ca6386047402070dbde2c"
+      "source_content_hash": "sha256:422a4440ed2f5d46a2fca15817b4160892bf070bc85100427f53522020dbfa6f"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [
@@ -37,8 +43,8 @@
   "pack_id": "rumi_scheduler_runtime_pack",
   "pack_identity": "rumi:ecosystem/rumi_scheduler_runtime_pack",
   "provenance": {
-    "build_identity": "rumi-scheduler-runtime-pack:1.0.0",
-    "content_hash": "sha256:d5d648a9512a7d7d0dce88968d9d05d6461d4f34f6cd24f503dfcf37457c5288",
+    "build_identity": "rumi_scheduler_runtime_pack:1.0.0",
+    "content_hash": "sha256:986d9cc2de014ad4f54a37c767a1772d849e615a3fd2cfa77ef1caa57d98e4a9",
     "signature": null,
     "trust_class": "local"
   },

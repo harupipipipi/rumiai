@@ -43,6 +43,12 @@
   ],
   "metadata": {
     "author": "Rumi AI Team",
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:41c650c166ce785c367b90ae961c7b6b84a878588eef00514014005631b9ed50"
+    },
     "declarative_only": true,
     "description": "Declarative local-first deep research, evidence, source quality, and citation workflow pack for Rumi-native research agents.",
     "format": "rumi.ecosystem.v1",
@@ -50,7 +56,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:97cab55e2f669041818d03d537c8e28d5e40db80e045808ce6d98d5d02bcabc2"
+      "source_content_hash": "sha256:9c7e5a6f28d0299d6246cb402c99289ff83b352bd99be537d96dca31498f9591"
     },
     "inspired_by": [
       "ChatGPT Deep Research-style synthesis",
@@ -70,7 +76,7 @@
   "pack_id": "rumi_research_pack",
   "pack_identity": "rumi:ecosystem/rumi_research_pack",
   "provenance": {
-    "build_identity": "rumi-research-content-pack:1.0.0",
+    "build_identity": "rumi_research_pack:1.0.0",
     "content_hash": "sha256:7b2e4d34be67be1ce03296fe07ffdc68f3bb8fd0c8236124646a5e9afd1610a8",
     "signature": null,
     "trust_class": "local"
