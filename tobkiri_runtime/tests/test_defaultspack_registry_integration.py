@@ -52,6 +52,7 @@ class TestDefaultspackRegistryIntegration(unittest.TestCase):
             packs = registry.load_all_packs()
 
         self.assertIn("defaultspack", packs)
+        self.assertIn("rumi_conversation_store_pack", packs)
         self.assertIsNotNone(function_registry.get("defaultspack:list_modules"))
         self.assertIsNotNone(function_registry.get("defaultspack:install_setup_pack"))
 
