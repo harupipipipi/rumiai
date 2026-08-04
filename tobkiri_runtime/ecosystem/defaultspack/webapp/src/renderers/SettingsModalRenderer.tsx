@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, ArrowRight, Check, ChevronDown, Copy, Loader2, MessageCircle, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
-import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../lib/api";
+import { defaultspackCanonicalRouteKey, type CodexAppServerConfig, type ModelSearchItem, type SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { MobilePairingApproval } from "../components/MobilePairingApproval";
@@ -1565,7 +1565,7 @@ function PublicUrlField({
   const config = publicUrlConfig(value, field.default);
   const [providerId, setProviderId] = useState(String(config.provider_id ?? "cloudflare_quick_tunnel"));
   const [localUrl, setLocalUrl] = useState(String(config.local_url ?? "http://127.0.0.1:8766"));
-  const [routePath, setRoutePath] = useState(String(config.route_path ?? "/api/integrations/line/webhook"));
+  const [routePath, setRoutePath] = useState(String(config.route_path ?? defaultspackCanonicalRouteKey("api/integrations/line/webhook")));
   const [result, setResult] = useState<Record<string, unknown> | null>(
     config.result && typeof config.result === "object" ? config.result as Record<string, unknown> : null,
   );
@@ -1576,16 +1576,16 @@ function PublicUrlField({
     const next = publicUrlConfig(value, field.default);
     setProviderId(String(next.provider_id ?? "cloudflare_quick_tunnel"));
     setLocalUrl(String(next.local_url ?? "http://127.0.0.1:8766"));
-    setRoutePath(String(next.route_path ?? "/api/integrations/line/webhook"));
+    setRoutePath(String(next.route_path ?? defaultspackCanonicalRouteKey("api/integrations/line/webhook")));
     setResult(next.result && typeof next.result === "object" ? next.result as Record<string, unknown> : null);
   }, [field.default, value]);
 
   const routeOptions = [
-    { value: "/api/integrations/line/webhook", label: "LINE webhook" },
-    { value: "/api/integrations/discord/interactions", label: "Discord interactions" },
-    { value: "/api/integrations/discord/events", label: "Discord events" },
-    { value: "/api/integrations/slack/events", label: "Slack events" },
-    { value: "/api/webhooks/inbound/{webhook_id}", label: "Generic webhook" },
+    { value: defaultspackCanonicalRouteKey("api/integrations/line/webhook"), label: "LINE webhook" },
+    { value: defaultspackCanonicalRouteKey("api/integrations/discord/interactions"), label: "Discord interactions" },
+    { value: defaultspackCanonicalRouteKey("api/integrations/discord/events"), label: "Discord events" },
+    { value: defaultspackCanonicalRouteKey("api/integrations/slack/events"), label: "Slack events" },
+    { value: defaultspackCanonicalRouteKey("api/webhooks/inbound/{webhook_id}"), label: "Generic webhook" },
   ];
   const providerOptions = [
     { value: "cloudflare_quick_tunnel", label: "Cloudflare Quick Tunnel" },

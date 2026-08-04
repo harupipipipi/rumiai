@@ -1,4 +1,9 @@
-import type { ComposerWidgetAction, ComposerWidgetKind } from "./api";
+import {
+  defaultspackCanonicalRouteKey,
+  isDefaultspackRouteKey,
+  type ComposerWidgetAction,
+  type ComposerWidgetKind,
+} from "./api";
 import type { ComposerExtensionItem, ComposerSkillItem, DroppedWidget } from "../renderers/types";
 import { extractMentionTokens, hasUnescapedMentionSyntax } from "./mentionContract";
 import { supportedComposerDropKind, supportsComposerToggleDrop } from "./toolUi";
@@ -20,7 +25,9 @@ export type ReconciledComposerSemanticDraft = {
   selectedToolIds: string[];
 };
 
-const COMPOSER_ENDPOINT_ACTION_ALLOWLIST = new Set(["GET /api/coding/git/status"]);
+const COMPOSER_ENDPOINT_ACTION_ALLOWLIST = new Set([
+  `GET ${defaultspackCanonicalRouteKey("api/coding/git/status")}`,
+]);
 
 function composerWidgetTypeForKind(kind: ComposerWidgetKind): DroppedWidget["type"] {
   return kind === "tool_toggle" ? "tool" : kind;
@@ -566,7 +573,7 @@ export function skillMentionIdsFromText(text: string, items: ComposerSkillItem[]
 }
 
 export function isSafeLocalEndpoint(endpoint: string): boolean {
-  return endpoint.startsWith("/api/") && !endpoint.startsWith("//") && !/^https?:\/\//i.test(endpoint);
+  return isDefaultspackRouteKey(endpoint) && !endpoint.startsWith("//") && !/^https?:\/\//i.test(endpoint);
 }
 
 function composerEndpointActionKey(action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>): string {

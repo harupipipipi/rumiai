@@ -77,6 +77,7 @@ from .api import (
     WebMountMixin,
 )
 from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .frontend_contract_routes import ContractRouteError, resolve_contract_route
 
 
 logger = logging.getLogger(__name__)
@@ -970,6 +971,37 @@ class PackAPIHandler(
             )
             return True
 
+    def _resolve_frontend_contract_target(
+        self,
+        method: str,
+        path: str,
+        query: Optional[dict[str, Any]] = None,
+    ) -> Optional[tuple[str, dict[str, Any]]]:
+        """Rewrite a canonical frontend operation to its Host route.
+
+        The returned target is fed back through the ordinary route tables and
+        hard-coded handlers, so pack approval, profile allowlists, local
+        guards, CSRF, and handler-specific authorization remain authoritative.
+        ``None`` is returned only after an error response has been emitted.
+        """
+
+        try:
+            resolved = resolve_contract_route(self, method, path)
+        except ContractRouteError as exc:
+            self._send_raw_json(
+                {
+                    "status": "error",
+                    "error": {"code": exc.code, "message": str(exc)},
+                },
+                status=exc.status,
+            )
+            return None
+        if resolved is None:
+            return path, dict(query or {})
+        merged_query = dict(query or {})
+        merged_query.update(resolved.query)
+        return resolved.path, merged_query
+
     def _discard_request_body(self) -> None:
         """Consume unread request bytes before returning an early response."""
         try:
@@ -1615,6 +1647,11 @@ class PackAPIHandler(
 
         query = self._parse_query()
 
+        contract_target = self._resolve_frontend_contract_target("GET", path, query)
+        if contract_target is None:
+            return
+        path, query = contract_target
+
         try:
             if path == "/api/auth/whoami":
                 self._auth_whoami()
@@ -1790,6 +1827,11 @@ class PackAPIHandler(
                 for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
                 if values
             }
+
+            contract_target = self._resolve_frontend_contract_target("POST", path, query)
+            if contract_target is None:
+                return
+            path, query = contract_target
 
             if path == "/api/auth/access-tokens":
                 self._auth_issue_access_token(body)
@@ -2273,6 +2315,11 @@ class PackAPIHandler(
                 if values
             }
 
+            contract_target = self._resolve_frontend_contract_target("PUT", path, query)
+            if contract_target is None:
+                return
+            path, query = contract_target
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("PUT", path, body, query=query):
                 return
@@ -2313,6 +2360,10 @@ class PackAPIHandler(
                 for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
                 if values
             }
+            contract_target = self._resolve_frontend_contract_target("PATCH", path, query)
+            if contract_target is None:
+                return
+            path, query = contract_target
             if self._dispatch_api_route("PATCH", path, body, query=query):
                 return
             if self._dispatch_defaultspack_http_route("PATCH", path, body):
@@ -2346,6 +2397,10 @@ class PackAPIHandler(
                 for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
                 if values
             }
+            contract_target = self._resolve_frontend_contract_target("DELETE", path, query)
+            if contract_target is None:
+                return
+            path, query = contract_target
             if path.startswith("/api/auth/access-tokens/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 4:

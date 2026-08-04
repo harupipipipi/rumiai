@@ -7,12 +7,24 @@ test.use({ viewport: { width: 1440, height: 900 } });
 const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
 
+function routeKey(path: string): string {
+  return `/${path}`;
+}
+
+function requestTarget(url: URL): string {
+  const marker = "/api/contracts/defaultspack/";
+  if (!url.pathname.startsWith(marker)) return url.pathname;
+  const operation = decodeURIComponent(url.pathname.slice(marker.length));
+  const separator = operation.indexOf(" ");
+  return separator < 0 ? operation : operation.slice(separator + 1);
+}
+
 test("bootstrap loading state uses the Tobkiri Launcher animation and honors reduced motion", async ({ page }) => {
   let releaseCatalogRequest: (() => void) | undefined;
   const catalogGate = new Promise<void>((resolve) => {
     releaseCatalogRequest = resolve;
   });
-  await page.route("**/api/ui/catalog", async (route) => {
+  await page.route("**/api/contracts/defaultspack/**", async (route) => {
     await catalogGate;
     await route.abort();
   });
@@ -574,19 +586,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/api/contracts/defaultspack/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const path = url.pathname;
+    const path = requestTarget(url);
     const method = request.method();
     const conversation = smokeConversation();
     options.conversationMutator?.(conversation);
 
-    if (path === "/api/health") {
+    if (path === routeKey("api/health")) {
       return fulfill(route, { status: "ok", pack: "defaultspack", ts: "2026-05-20T00:00:00Z" });
     }
 
-    if (path === "/api/ui/catalog") {
+    if (path === routeKey("api/ui/catalog")) {
       return fulfill(route, {
         app: { id: "defaultspack", name: "Rumi", account: { display_name: "Smoke User", plan_label: "Local" } },
         agent_service: { profiles: [], capabilities: [], presets: [] },
@@ -618,7 +630,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/settings" && method === "PUT") {
+    if (path === routeKey("api/ui/settings") && method === "PUT") {
       const payload = request.postDataJSON() as {
         values?: Record<string, Record<string, unknown>>;
         patches?: Array<{ section: string; field: string; value: unknown }>;
@@ -636,11 +648,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
-    if (path === "/api/ui/settings") {
+    if (path === routeKey("api/ui/settings")) {
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
-    if (path === "/api/command-protocol/v1/catalog") {
+    if (path === routeKey("api/command-protocol/v1/catalog")) {
       await options.beforeCommandCatalogResponse?.();
       const protocolCommand = (
         id: string,
@@ -685,7 +697,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/commands") {
+    if (path === routeKey("api/ui/commands")) {
       return fulfill(route, {
         commands: [
           {
@@ -714,7 +726,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/commands/execute" && method === "POST") {
+    if (path === routeKey("api/ui/commands/execute") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       return fulfill(route, {
         executed: true,
@@ -726,11 +738,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ai/profiles") {
+    if (path === routeKey("api/ai/profiles")) {
       return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile, opencodeZenProfile], count: 4 });
     }
 
-    if (path === "/api/ai/models/search" && method === "POST") {
+    if (path === routeKey("api/ai/models/search") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const types = Array.isArray(payload.type)
         ? payload.type.map((item) => String(item).trim())
@@ -741,7 +753,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { models, count: models.length });
     }
 
-    if (path === "/api/tools/catalog") {
+    if (path === routeKey("api/tools/catalog")) {
       return fulfill(route, {
         services: toolCatalogServices,
         tools: toolCatalogTools,
@@ -749,7 +761,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/tools/selection/preview" && method === "POST") {
+    if (path === routeKey("api/tools/selection/preview") && method === "POST") {
       return fulfill(route, {
         preview_id: "preview-tool-selection",
         expires_at: "2026-05-20T00:05:00Z",
@@ -766,23 +778,23 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/chat/conversations" && method === "GET") {
+    if (path === routeKey("api/chat/conversations") && method === "GET") {
       return fulfill(route, { conversations: [{ ...conversation, messages: [] }], total: 1 });
     }
 
-    if (path === "/api/chat/conversations" && method === "POST") {
+    if (path === routeKey("api/chat/conversations") && method === "POST") {
       options.onConversationCreate?.(request.postDataJSON() as Record<string, unknown>);
       return fulfill(route, conversation);
     }
 
-    if (path === "/api/command-protocol/v1/invocations/events/query" && method === "POST") {
+    if (path === routeKey("api/command-protocol/v1/invocations/events/query") && method === "POST") {
       return fulfill(route, {
         api_version: "command-protocol/v1",
         pending_approvals: [],
       });
     }
 
-    if (path === "/api/chat/conversations/c-smoke/stream" && method === "POST") {
+    if (path === routeKey("api/chat/conversations/c-smoke/stream") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onStreamRequest?.(payload);
       const message = {
@@ -809,11 +821,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfillStream(route, message);
     }
 
-    if (path === "/api/chat/conversations/c-smoke") {
+    if (path === routeKey("api/chat/conversations/c-smoke")) {
       return fulfill(route, conversation);
     }
 
-    if ((path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") && method === "PUT") {
+    if ((path === routeKey("api/conversations/c-smoke/tool-preferences") || path === routeKey("api/chat/conversations/c-smoke/tool-preferences")) && method === "PUT") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       conversationToolPreferences = (payload.preferences && typeof payload.preferences === "object" && !Array.isArray(payload.preferences))
         ? payload.preferences as Record<string, unknown>
@@ -821,11 +833,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
     }
 
-    if (path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") {
+    if (path === routeKey("api/conversations/c-smoke/tool-preferences") || path === routeKey("api/chat/conversations/c-smoke/tool-preferences")) {
       return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
     }
 
-    if (path === "/api/ui/conversations/c-smoke/preview") {
+    if (path === routeKey("api/ui/conversations/c-smoke/preview")) {
       return fulfill(route, {
         conversation_id: "c-smoke",
         previews: [
@@ -845,11 +857,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/chat/steer") {
+    if (path === routeKey("api/chat/steer")) {
       return fulfill(route, { items: [] });
     }
 
-    if (path === "/api/agent/schedules") {
+    if (path === routeKey("api/agent/schedules")) {
       return fulfill(route, {
         schedules: [
           { id: "nightly-review", name: "nightly-review", schedule: "every 1h", next_run_at: "2026-05-20T12:00:00Z" },
@@ -857,14 +869,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/workspaces") {
+    if (path === routeKey("api/coding/workspaces")) {
       return fulfill(route, {
         workspaces: [{ workspace_id: "ws-main", label: "Main Repo", root_path: "/repo", trusted: true }],
         selected_workspace_id: "ws-main",
       });
     }
 
-    if (path === "/api/coding/context") {
+    if (path === routeKey("api/coding/context")) {
       return fulfill(route, {
         branch: "main",
         root_folder: "/repo",
@@ -880,7 +892,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/files/read" && method === "POST") {
+    if (path === routeKey("api/coding/files/read") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       await options.beforeWorkspaceFileReadResponse?.(payload);
       return fulfill(route, {
@@ -893,19 +905,19 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/git/branch") {
+    if (path === routeKey("api/coding/git/branch")) {
       return fulfill(route, { branch: "main", branches: ["main", "codex/pr97"], workspace_id: "ws-main" });
     }
 
-    if (path === "/api/coding/git/status") {
+    if (path === routeKey("api/coding/git/status")) {
       return fulfill(route, { branch: "main", clean: false, modified: ["src/App.tsx"], untracked: [], staged: [] });
     }
 
-    if (path === "/api/coding/git/diff") {
+    if (path === routeKey("api/coding/git/diff")) {
       return fulfill(route, { diff: "-old\n+new", files_changed: 1, files: ["src/App.tsx"], workspace_id: "ws-main" });
     }
 
-    if (path === "/api/coding/approvals/approve" && method === "POST") {
+    if (path === routeKey("api/coding/approvals/approve") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("approve", payload);
       if (codingApprovalRequest?.request_id === payload.approval_request_id) {
@@ -918,13 +930,13 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/approvals/deny" && method === "POST") {
+    if (path === routeKey("api/coding/approvals/deny") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("deny", payload);
       return fulfill(route, { request_id: payload.approval_request_id, approved: false, status: "denied" });
     }
 
-    if (path === "/api/coding/terminal/exec" && method === "POST" && options.codingApprovalAfterTerminal) {
+    if (path === routeKey("api/coding/terminal/exec") && method === "POST" && options.codingApprovalAfterTerminal) {
       const payload = request.postDataJSON() as Record<string, unknown>;
       codingApprovalRequest = {
         request_id: "apr-terminal-write",
@@ -946,7 +958,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/files/restore" && method === "POST" && options.codingApprovalAfterRestore) {
+    if (path === routeKey("api/coding/files/restore") && method === "POST" && options.codingApprovalAfterRestore) {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const snapshotId = String(payload.snapshot_id ?? "checkpoint-1");
       if (payload.approval_token) {
@@ -966,12 +978,12 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/approvals") {
+    if (path === routeKey("api/coding/approvals")) {
       const requests = codingApprovalRequest ? [codingApprovalRequest] : [];
       return fulfill(route, { requests, pending: requests, count: requests.length });
     }
 
-    if (path === "/api/coding/checkpoints") {
+    if (path === routeKey("api/coding/checkpoints")) {
       if (method === "POST") {
         const checkpoint = {
           snapshot_id: "checkpoint-2",
@@ -987,7 +999,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/rumi-log") {
+    if (path === routeKey("api/coding/rumi-log")) {
       return fulfill(route, {
         rumi_dir: "/repo/.rumi",
         events_path: "/repo/.rumi/events.jsonl",
@@ -1012,14 +1024,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/browser/artifacts") {
+    if (path === routeKey("api/browser/artifacts")) {
       return fulfill(route, {
         artifacts: [{ artifact_id: "browser-1", session_id: "s1", action: "browser.session", created_at: "2026-05-20T00:00:00Z", url: "https://example.com" }],
         count: 1,
       });
     }
 
-    if (path === "/api/tools/mcp" && method === "POST") {
+    if (path === routeKey("api/tools/mcp") && method === "POST") {
       const payload = request.postDataJSON() as { server?: Record<string, unknown> };
       const server = {
         server_id: String(payload.server?.server_id ?? "contract_digest"),
@@ -1033,7 +1045,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { server });
     }
 
-    if (path === "/api/tools/mcp/connect" && method === "POST") {
+    if (path === routeKey("api/tools/mcp/connect") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
       if (!payload.approval_token) {
@@ -1058,7 +1070,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/tools/mcp") {
+    if (path === routeKey("api/tools/mcp")) {
       return fulfill(route, {
         servers: mcpServers,
         count: mcpServers.length,
