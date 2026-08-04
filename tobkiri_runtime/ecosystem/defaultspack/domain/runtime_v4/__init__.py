@@ -1,6 +1,7 @@
 """Defaultspack's fail-closed Protocol v4 composition boundary."""
 
 from .service import (
+    ActiveDefaultProfile,
     ActivationStore,
     BundleIntegrityError,
     BundledCatalog,
@@ -11,6 +12,7 @@ from .service import (
 )
 
 __all__ = [
+    "ActiveDefaultProfile",
     "ActivationStore",
     "BundleIntegrityError",
     "BundledCatalog",

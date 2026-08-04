@@ -1,46 +1,88 @@
 {
-  "pack_api_version": "io.tobkiri.pack.v4",
-  "pack": {
-    "id": "shell.cli.default",
-    "version": "1.0.0",
-    "kind": "shell",
-    "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "display_name": "Tobkiri CLI Shell"
-  },
-  "functions": [
-    {
-      "id": "shell.cli.default",
-      "implementation_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      "contract_revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-      "operations": ["present"],
-      "role": "brokered",
-      "isolation": "dedicated_process"
-    }
-  ],
+  "artifacts": [],
   "contracts": [
     {
       "contract_id": "app.shell.v1",
-      "revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-      "operations": ["present"]
+      "operations": [
+        "present"
+      ],
+      "revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
     }
   ],
-  "artifacts": [],
-  "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
-    "source_digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-    "repository_commit": "working-tree",
-    "repository_tree": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "evidence": []
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "id": "shell.cli.default",
+      "implementation_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "isolation": "dedicated_process",
+      "operations": [
+        "present"
+      ],
+      "role": "brokered"
+    }
+  ],
+  "integrity": {
+    "source_identity": "sha256:2b4cc6733b449ef10dfc5b4da7bf185e1c99cbc206eeabfb0c0b7c93dc45adb6",
+    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
   },
   "migration": {
     "compatibility": "none",
     "legacy_ids": [],
     "removal_wave": 0,
     "sunset_at": "2026-08-05"
+  },
+  "operation_catalog": [
+    {
+      "operation_id": "present",
+      "owner": "shell.cli.default",
+      "contract_reference": "app.shell.v1",
+      "provider_id": "shell.cli.default",
+      "source_kind": "v3_contract",
+      "effect_ceiling": []
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "display_name": "Tobkiri CLI Shell",
+    "id": "shell.cli.default",
+    "kind": "shell",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [],
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "working-tree",
+    "repository_tree": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json"
+  },
+  "provider_catalog": [
+    {
+      "provider_id": "shell.cli.default",
+      "owner": "shell.cli.default",
+      "contract_reference": "app.shell.v1",
+      "operations": [
+        "present"
+      ]
+    }
+  ],
+  "requirements": {
+    "pack_dependencies": {},
+    "contract_dependencies": [],
+    "capabilities": [],
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "secrets": [],
+    "execution_boundary": "host_brokered",
+    "approval_policy": "none",
+    "workspace_boundary": "pack_local"
   }
 }

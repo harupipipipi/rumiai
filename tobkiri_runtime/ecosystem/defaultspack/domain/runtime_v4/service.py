@@ -159,6 +159,14 @@ class ResolvedDefaultProfile:
     plan: Mapping[str, Any]
 
 
+@dataclass(frozen=True)
+class ActiveDefaultProfile:
+    """Restart-safe v4 records plus their exact ActivationRecord."""
+
+    resolved: ResolvedDefaultProfile
+    activation: Mapping[str, Any]
+
+
 def _edge_key(edge: Mapping[str, Any]) -> str:
     return "|".join(
         str(edge.get(field) or "")
@@ -248,8 +256,8 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(f"Shell Pack is missing or invalid: {shell_pack_id}")
     if shell_definition["artifact_digest"] != shell_manifest["pack"]["artifact_digest"]:
         raise ProfileResolutionDenied("Shell definition does not pin its exact artifact")
-    if not set(base_definition["required_shell_capabilities"]).issubset(
-        set(shell_definition.get("required_capabilities", []))
+    if not set(base_definition["shell_requirements"]["required_capabilities"]).issubset(
+        set(shell_definition["presentation"]["capabilities"])
     ):
         raise ProfileResolutionDenied("Shell does not satisfy Base capabilities")
 
@@ -321,13 +329,17 @@ def resolve_default_profile(
     profile["base"] = {
         "pack_id": base_id,
         "artifact_digest": base_manifest["pack"]["artifact_digest"],
+        "definition_revision": base_definition["definition_revision"],
         "resolution": "verified",
     }
     profile["shell"] = {
         "provider_id": provider_id,
         "pack_id": shell_pack_id,
         "artifact_digest": shell_manifest["pack"]["artifact_digest"],
+        "definition_revision": shell_definition["definition_revision"],
         "contract_id": "app.shell.v1",
+        "platform": shell_request["platform"],
+        "architecture": shell_request["architecture"],
     }
     profile["packs"] = [
         {
@@ -341,6 +353,12 @@ def resolve_default_profile(
     profile["requested_edges"] = resolved_edges
     profile["authority_references"] = references
     profile["profile_authority_snapshot_digest"] = snapshot_digest
+    profile["catalog_revision"] = canonical_digest(
+        {
+            manifest["pack"]["id"]: manifest["integrity"]["source_identity"]
+            for manifest in selected
+        }
+    )
     profile = validate_document(profile, "profile")
     profile_revision = canonical_digest(profile)
 
@@ -368,19 +386,35 @@ def resolve_default_profile(
     plan = validate_document(plan, "resolved_plan")
 
     lock: dict[str, Any] = {
-        "lock_api_version": "io.tobkiri.profile-lock.v1",
+        "lock_api_version": "io.tobkiri.profile-lock.v4",
         "profile_id": profile_id,
         "profile_revision": profile_revision,
+        "catalog_revision": profile["catalog_revision"],
         "security_epoch": security_epoch,
-        "base": dict(plan["base"]),
-        "shell": dict(plan["shell"]),
-        "packs": list(profile["packs"]),
+        "base": {
+            "pack_id": base_id,
+            "artifact_digest": base_manifest["pack"]["artifact_digest"],
+            "definition_revision": base_definition["definition_revision"],
+        },
+        "shell": dict(profile["shell"]),
+        "effective_set": [
+            {
+                "role": (
+                    "base"
+                    if manifest["pack"]["id"] == base_id
+                    else "shell"
+                    if manifest["pack"]["id"] == shell_pack_id
+                    else "pack"
+                ),
+                "identity": manifest["pack"]["id"],
+                "artifact_digest": manifest["pack"]["artifact_digest"],
+            }
+            for manifest in selected
+        ],
         "plan_digest": plan["plan_digest"],
         "profile_authority_snapshot_digest": snapshot_digest,
         "lock_digest": "sha256:" + "0" * 64,
     }
-    lock["base"].pop("definition_digest", None)
-    lock["shell"].pop("definition_digest", None)
     lock["lock_digest"] = canonical_digest({key: value for key, value in lock.items() if key != "lock_digest"})
     lock = validate_document(lock, "profile_lock")
     return ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan)
@@ -462,8 +496,8 @@ class ActivationStore:
         _write_atomic(self.state_root / "active.json", pointer)
         return activation
 
-    def load_active(self) -> ResolvedDefaultProfile:
-        """Load the committed activation and reject stale/tampered restart state."""
+    def load_active_snapshot(self) -> ActiveDefaultProfile:
+        """Load the exact activation snapshot and reject stale restart state."""
         try:
             pointer = strict_loads((self.state_root / "active.json").read_bytes())
         except (OSError, ProtocolError) as exc:
@@ -505,7 +539,14 @@ class ActivationStore:
             raise ProfileResolutionDenied("active pointer selects another activation")
         if activation["state"] != "active" or activation["plan_digest"] != plan["plan_digest"]:
             raise ProfileResolutionDenied("activation is stale or not active")
-        return ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan)
+        return ActiveDefaultProfile(
+            resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
+            activation=activation,
+        )
+
+    def load_active(self) -> ResolvedDefaultProfile:
+        """Load validated Profile/Lock/Plan records for compatibility callers."""
+        return self.load_active_snapshot().resolved
 
     @staticmethod
     def _validate_record_graph(

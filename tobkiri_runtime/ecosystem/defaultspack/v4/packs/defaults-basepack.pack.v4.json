@@ -1,31 +1,51 @@
 {
-  "pack_api_version": "io.tobkiri.pack.v4",
-  "pack": {
-    "id": "defaults-basepack",
-    "version": "4.0.0",
-    "kind": "base",
-    "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "display_name": "Tobkiri Defaults Base"
-  },
-  "functions": [],
-  "contracts": [],
   "artifacts": [],
-  "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
-    "source_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-    "repository_commit": "working-tree",
-    "repository_tree": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "evidence": []
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:257b590566eca463989ab9a954a9e99e5e18041f2f160a25be4ebb2fe454de41",
+    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   "migration": {
     "compatibility": "none",
     "legacy_ids": [],
     "removal_wave": 0,
     "sunset_at": "2026-08-05"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "display_name": "Tobkiri Defaults Base",
+    "id": "defaults-basepack",
+    "kind": "base",
+    "version": "4.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [],
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "working-tree",
+    "repository_tree": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json"
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "pack_dependencies": {},
+    "contract_dependencies": [],
+    "capabilities": [],
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "secrets": [],
+    "execution_boundary": "declarative_only",
+    "approval_policy": "none",
+    "workspace_boundary": "pack_local"
   }
 }

@@ -1,46 +1,91 @@
 {
-  "pack_api_version": "io.tobkiri.pack.v4",
-  "pack": {
-    "id": "rumi-file-inspect",
-    "version": "4.0.0",
-    "kind": "normal_sandbox",
-    "artifact_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "display_name": "Tobkiri Workspace File Inspect"
-  },
-  "functions": [
-    {
-      "id": "defaultspack.file.inspect",
-      "implementation_digest": "sha256:e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
-      "contract_revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-      "operations": ["inspect"],
-      "role": "brokered",
-      "isolation": "pack_vm"
-    }
-  ],
+  "artifacts": [],
   "contracts": [
     {
       "contract_id": "workspace.file.inspect.v1",
-      "revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-      "operations": ["inspect"]
+      "operations": [
+        "inspect"
+      ],
+      "revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
     }
   ],
-  "artifacts": [],
-  "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json",
-    "source_digest": "sha256:e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
-    "repository_commit": "working-tree",
-    "repository_tree": "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3",
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "evidence": []
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "id": "defaultspack.file.inspect",
+      "implementation_digest": "sha256:e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+      "isolation": "pack_vm",
+      "operations": [
+        "inspect"
+      ],
+      "role": "brokered"
+    }
+  ],
+  "integrity": {
+    "source_identity": "sha256:d578bfb1072f8afd95b168c35b28d9465513d19327b73cf7f10af9824876a39a",
+    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "contract_catalog_digest": "sha256:fa3d9ddda0567b325fdcc74a03b25e476d7e4a1a108ca2ef20b088fab8e4803b"
   },
   "migration": {
     "compatibility": "none",
     "legacy_ids": [],
     "removal_wave": 0,
     "sunset_at": "2026-08-05"
+  },
+  "operation_catalog": [
+    {
+      "operation_id": "inspect",
+      "owner": "rumi-file-inspect",
+      "contract_reference": "workspace.file.inspect.v1",
+      "provider_id": "defaultspack.file.inspect",
+      "source_kind": "v3_contract",
+      "effect_ceiling": []
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "display_name": "Tobkiri Workspace File Inspect",
+    "id": "rumi-file-inspect",
+    "kind": "normal_sandbox",
+    "version": "4.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [],
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "working-tree",
+    "repository_tree": "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json"
+  },
+  "provider_catalog": [
+    {
+      "provider_id": "defaultspack.file.inspect",
+      "owner": "rumi-file-inspect",
+      "contract_reference": "workspace.file.inspect.v1",
+      "operations": [
+        "inspect"
+      ]
+    }
+  ],
+  "requirements": {
+    "pack_dependencies": {},
+    "contract_dependencies": [],
+    "capabilities": [
+      "file.inspect",
+      "workspace.metadata.read"
+    ],
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "secrets": [],
+    "execution_boundary": "host_brokered",
+    "approval_policy": "capability_gated",
+    "workspace_boundary": "host_brokered"
   }
 }

@@ -1,34 +1,48 @@
 {
-  "base_api_version": "io.tobkiri.base.v1",
-  "pack_id": "defaults-basepack",
   "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "required_shell_capabilities": [
-    "commands",
-    "interactive_prompt",
-    "navigation",
-    "notifications",
-    "rich_text"
-  ],
-  "presentation_families": ["terminal"],
-  "backend_contracts": [
-    "conversation.turn.v1",
-    "workspace.file.inspect.v1"
-  ],
-  "contribution_contracts": [],
-  "state_owners": [
-    "defaultspack.conversation",
-    "defaultspack.settings"
-  ],
+  "base_api_version": "io.tobkiri.base.v4",
+  "capability_foundation": {
+    "provided_contracts": [
+      "conversation.turn.v1",
+      "workspace.file.inspect.v1"
+    ],
+    "required_contracts": []
+  },
+  "definition_revision": "sha256:5dcf3b2ee9223415649854f7de72dac8c16ea40bf5e80bc9e77814befb384614",
+  "dependencies": [],
+  "pack_id": "defaults-basepack",
+  "policy_foundation": {
+    "host_effect_default": "lease_only",
+    "network_default": "deny",
+    "policy_digest": "sha256:a49520a95e91553c6729ab93b7bae564510205fdddf7af2e2c62540d49f1286d"
+  },
   "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
-    "source_digest": "sha256:a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
-    "repository_commit": "working-tree",
-    "repository_tree": "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4",
+    "evidence": [],
     "generator": "defaultspack-v4-core",
     "generator_version": "1.0.0",
     "normative": true,
-    "evidence": []
-  }
+    "repository_commit": "working-tree",
+    "repository_tree": "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json"
+  },
+  "shell_requirements": {
+    "mode": "interactive",
+    "presentation_families": [
+      "terminal"
+    ],
+    "required_capabilities": [
+      "commands",
+      "interactive_prompt",
+      "navigation",
+      "notifications",
+      "rich_text"
+    ]
+  },
+  "state_owners": [
+    "defaultspack.conversation",
+    "defaultspack.settings"
+  ]
 }

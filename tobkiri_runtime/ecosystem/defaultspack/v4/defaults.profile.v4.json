@@ -1,61 +1,67 @@
 {
-  "profile_api_version": "io.tobkiri.profile.v4",
-  "profile_id": "defaults",
-  "state": "needs_resolution",
-  "display_name": "Tobkiri Defaults",
+  "authority_references": [],
   "base": {
-    "pack_id": "defaults-basepack",
     "artifact_digest": null,
+    "definition_revision": null,
+    "pack_id": "defaults-basepack",
     "resolution": "verified_exact_artifact_required"
   },
-  "shell": {
-    "provider_id": "shell.cli.default",
-    "pack_id": "shell.cli.default",
-    "artifact_digest": null,
-    "contract_id": "app.shell.v1"
-  },
+  "catalog_revision": null,
+  "display_name": "Tobkiri Defaults",
+  "mode": "interactive",
   "packs": [
     {
-      "pack_id": "defaultspack",
       "artifact_digest": null,
+      "pack_id": "defaultspack",
       "role": "provider"
     },
     {
-      "pack_id": "rumi-file-inspect",
       "artifact_digest": null,
+      "pack_id": "rumi-file-inspect",
       "role": "provider"
     }
   ],
+  "profile_api_version": "io.tobkiri.profile.v4",
+  "profile_authority_snapshot_digest": null,
+  "profile_id": "defaults",
+  "provenance": {
+    "evidence": [],
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "working-tree",
+    "repository_tree": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json"
+  },
   "requested_edges": [
     {
       "caller_function_id": "shell.cli.default",
-      "target_provider_id": "defaultspack.conversation",
       "contract_id": "conversation.turn.v1",
       "operation_id": "complete",
-      "requested_scope_template": {}
+      "requested_scope_template": {},
+      "target_provider_id": "defaultspack.conversation"
     },
     {
       "caller_function_id": "defaultspack.conversation",
-      "target_provider_id": "defaultspack.file.inspect",
       "contract_id": "workspace.file.inspect.v1",
       "operation_id": "inspect",
       "requested_scope_template": {
         "resource_namespace": "workspace"
-      }
+      },
+      "target_provider_id": "defaultspack.file.inspect"
     }
   ],
-  "authority_references": [],
-  "profile_authority_snapshot_digest": null,
-  "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
-    "source_digest": "sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
-    "repository_commit": "working-tree",
-    "repository_tree": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "evidence": []
-  }
+  "shell": {
+    "architecture": "arm64",
+    "artifact_digest": null,
+    "contract_id": "app.shell.v1",
+    "definition_revision": null,
+    "pack_id": "shell.cli.default",
+    "platform": "macos",
+    "provider_id": "shell.cli.default"
+  },
+  "state": "needs_resolution"
 }
