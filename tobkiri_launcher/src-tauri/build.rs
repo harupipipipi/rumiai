@@ -6,6 +6,9 @@ use std::process::Command;
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
 const PRESENTATION_RELEASE_ROOT_ENV: &str = "TOBKIRI_PRESENTATION_RELEASE_ROOT";
 const PRESENTATION_CATALOG_FILENAME: &str = "presentation_catalog.json";
+const PRESENTATION_RELEASE_FILENAME: &str = "presentation_release.v4.json";
+const PRESENTATION_INDEX_FILENAME: &str = "shell_artifact_index.v4.json";
+const PRESENTATION_LOCK_FILENAME: &str = "shell_profile_lock.v4.json";
 const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
@@ -138,6 +141,8 @@ fn stage_runtime_bundle() -> io::Result<()> {
 
 fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
     let Some(raw_root) = std::env::var_os(PRESENTATION_RELEASE_ROOT_ENV) else {
+        println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64=");
+        println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
         return Ok(None);
     };
     stage_presentation_release_at(staged_root, &PathBuf::from(raw_root))
@@ -155,6 +160,42 @@ fn stage_presentation_release_at(
     require_directory(&release_bundled, "release presentation bundle directory")?;
     let artifacts = release_bundled.join("presentation-artifacts");
     require_directory(&artifacts, "release presentation artifacts")?;
+    for filename in [
+        PRESENTATION_RELEASE_FILENAME,
+        PRESENTATION_INDEX_FILENAME,
+        PRESENTATION_LOCK_FILENAME,
+    ] {
+        require_regular_file(
+            &release_bundled.join(filename),
+            "release presentation binding file",
+        )?;
+    }
+
+    let release_manifest = read_regular_file(
+        &release_bundled.join(PRESENTATION_RELEASE_FILENAME),
+        "release presentation manifest",
+    )?;
+    let release: serde_json::Value =
+        serde_json::from_slice(&release_manifest).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("release presentation manifest is malformed: {error}"),
+            )
+        })?;
+    let public_key = release
+        .get("public_key")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "release public key is missing")
+        })?;
+    let key_id = release
+        .get("key_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "release key id is missing"))?;
+    println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64={public_key}");
+    println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID={key_id}");
 
     let staged_bundled = staged_root.join("bundled");
     copy_file(
@@ -162,6 +203,16 @@ fn stage_presentation_release_at(
         &staged_bundled.join(PRESENTATION_CATALOG_FILENAME),
     )?;
     copy_dir_recursive(&artifacts, &staged_bundled.join("presentation-artifacts"))?;
+    for filename in [
+        PRESENTATION_RELEASE_FILENAME,
+        PRESENTATION_INDEX_FILENAME,
+        PRESENTATION_LOCK_FILENAME,
+    ] {
+        copy_file(
+            &release_bundled.join(filename),
+            &staged_bundled.join(filename),
+        )?;
+    }
     Ok(Some(catalog))
 }
 
@@ -663,6 +714,25 @@ mod tests {
         fs::create_dir_all(staged_root.join("bundled")).expect("staged bundle should be creatable");
         fs::write(&catalog, b"verified presentation catalog")
             .expect("release catalog should be writable");
+        fs::write(
+            release_root.join("bundled").join(PRESENTATION_RELEASE_FILENAME),
+            br#"{"key_id":"fixture-key","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"#,
+        )
+        .expect("release manifest should be writable");
+        fs::write(
+            release_root
+                .join("bundled")
+                .join(PRESENTATION_INDEX_FILENAME),
+            b"fixture index",
+        )
+        .expect("release index should be writable");
+        fs::write(
+            release_root
+                .join("bundled")
+                .join(PRESENTATION_LOCK_FILENAME),
+            b"fixture lock",
+        )
+        .expect("release lock should be writable");
         fs::write(artifacts.join("verified-shell"), b"verified shell artifact")
             .expect("release artifact should be writable");
         (release_root, staged_root, catalog)

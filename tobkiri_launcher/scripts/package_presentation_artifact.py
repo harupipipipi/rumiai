@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Package one verified prebuilt Shell artifact into a Launcher release.
+"""Materialize one build-produced Shell v4 artifact for a Launcher package.
 
-The checked-in presentation catalog describes available variants but never
-claims that an executable is installed.  Release builds call this script with
-the already-built Shell bundle/binary.  The script verifies the declared
-variant, copies the immutable artifact into a release staging directory, and
-pins the staged path and content digest in a release-only catalog.
+The source catalog is only a declaration and deliberately contains no installed
+paths.  This command consumes an exact build-output manifest after the Shell
+build has completed, copies that artifact, and emits a signed catalog/index/lock
+set.  Runtime discovery, PATH lookup, and development-command fallbacks are not
+accepted.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -21,18 +22,75 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
+BUILD_OUTPUT_SCHEMA = "io.tobkiri.shell.build-output.v4"
+ARTIFACT_INDEX_SCHEMA = "io.tobkiri.shell.artifact-index.v4"
+PROFILE_LOCK_SCHEMA = "io.tobkiri.shell.profile-lock.v4"
+RELEASE_SCHEMA = "io.tobkiri.shell.release.v4"
 ARTIFACT_ROOT = Path("bundled/presentation-artifacts")
+INDEX_PATH = Path("bundled/shell_artifact_index.v4.json")
+LOCK_PATH = Path("bundled/shell_profile_lock.v4.json")
+RELEASE_PATH = Path("bundled/presentation_release.v4.json")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse release artifact packaging arguments."""
+    """Parse release materialization arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
-    parser.add_argument("--artifact-id", required=True)
-    parser.add_argument("--artifact", type=Path, required=True)
+    parser.add_argument("--build-output-manifest", type=Path, required=True)
+    parser.add_argument("--signing-key", type=Path, required=True)
+    parser.add_argument("--signing-key-id", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args(argv)
+
+
+def canonical_json(value: Any) -> bytes:
+    """Encode deterministic JSON used for revision and lock digests."""
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def json_digest(value: Any) -> str:
+    """Return a canonical SHA-256 digest for a JSON value."""
+    return "sha256:" + hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def file_digest(path: Path) -> str:
+    """Return the SHA-256 digest of exact file bytes."""
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_json(path: Path, value: Any) -> None:
+    """Write stable human-readable JSON and a trailing newline."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_object(path: Path, schema: str, label: str) -> dict[str, Any]:
+    """Load a non-symlinked JSON object with the exact schema."""
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"{label} must be a regular non-symlink file: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"failed to read {label} {path}: {error}") from error
+    if not isinstance(value, dict) or value.get("schema") != schema:
+        raise RuntimeError(f"unsupported {label} schema: {path}")
+    return value
+
+
+def _required_text(value: Mapping[str, Any], name: str) -> str:
+    """Read a required non-empty string field."""
+    result = value.get(name)
+    if not isinstance(result, str) or not result.strip():
+        raise RuntimeError(f"build-output manifest field {name!r} is required")
+    return result
 
 
 def _reject_symlinks(path: Path) -> None:
@@ -45,15 +103,7 @@ def _reject_symlinks(path: Path) -> None:
         _reject_symlinks(child)
 
 
-def _hash_path(path: Path, relative: Path = Path("")) -> Any:
-    """Return the Launcher-compatible streaming hash for a file/tree."""
-    digest = hashlib.sha256()
-    _hash_path_into(path, relative, digest)
-    return digest
-
-
 def _hash_path_into(path: Path, relative: Path, digest: Any) -> None:
-    """Hash one path using relative names and NUL separators."""
     if path.is_symlink():
         raise RuntimeError(f"release artifact may not contain a symlink: {path}")
     if path.is_file():
@@ -71,24 +121,23 @@ def _hash_path_into(path: Path, relative: Path, digest: Any) -> None:
 
 def artifact_digest(path: Path) -> str:
     """Return the digest format consumed by the Rust Launcher resolver."""
-    return "sha256:" + _hash_path(path).hexdigest()
+    digest = hashlib.sha256()
+    _hash_path_into(path, Path(""), digest)
+    return "sha256:" + digest.hexdigest()
 
 
-def _load_catalog(path: Path) -> dict[str, Any]:
-    """Load a checked-in presentation catalog."""
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"failed to read presentation catalog {path}: {error}"
-        ) from error
-    if not isinstance(value, dict) or value.get("schema") != CATALOG_SCHEMA:
-        raise RuntimeError(f"unsupported presentation catalog: {path}")
-    return value
+def artifact_size(path: Path) -> int:
+    """Return deterministic payload bytes, excluding filesystem allocation."""
+    if path.is_symlink():
+        raise RuntimeError(f"release artifact may not contain a symlink: {path}")
+    if path.is_file():
+        return path.stat().st_size
+    if not path.is_dir():
+        raise RuntimeError(f"release artifact is not a file or directory: {path}")
+    return sum(artifact_size(child) for child in path.iterdir())
 
 
 def _find_variant(catalog: Mapping[str, Any], artifact_id: str) -> dict[str, Any]:
-    """Return the exact declared variant or fail closed."""
     for shell in catalog.get("shell_providers", []):
         if not isinstance(shell, Mapping):
             continue
@@ -101,7 +150,6 @@ def _find_variant(catalog: Mapping[str, Any], artifact_id: str) -> dict[str, Any
 
 
 def _validate_bundle_identity(artifact: Path, expected: str | None) -> None:
-    """Validate a macOS bundle identity when the descriptor pins one."""
     if not expected or artifact.suffix != ".app":
         return
     plist_path = artifact / "Contents" / "Info.plist"
@@ -122,7 +170,6 @@ def _validate_bundle_identity(artifact: Path, expected: str | None) -> None:
 
 
 def _validate_macos_signature(artifact: Path, platform: str) -> None:
-    """Require strict code-signature verification for macOS bundles."""
     if platform != "macos":
         return
     codesign = Path("/usr/bin/codesign")
@@ -140,16 +187,13 @@ def _validate_macos_signature(artifact: Path, platform: str) -> None:
 
 
 def _validate_entrypoint(artifact: Path, entrypoint: str) -> None:
-    """Ensure the declared executable exists and is executable."""
     entry = Path(entrypoint)
-    if entry.is_absolute() or ".." in entry.parts:
+    if not entrypoint or entry.is_absolute() or ".." in entry.parts:
         raise RuntimeError(f"artifact entrypoint is unsafe: {entrypoint}")
-
     if artifact.is_dir():
-        top = entry.parts[0] if entry.parts else ""
         candidate = (
             artifact / Path(*entry.parts[1:])
-            if top == artifact.name
+            if entry.parts[0] == artifact.name
             else artifact / entry
         )
     else:
@@ -162,29 +206,13 @@ def _validate_entrypoint(artifact: Path, entrypoint: str) -> None:
         )
 
 
-def _copy_artifact(source: Path, destination_dir: Path, entrypoint: str) -> Path:
-    """Copy an artifact under a deterministic, bundle-local name."""
-    destination_dir.mkdir(parents=True, exist_ok=False)
-    if source.is_dir():
-        name = Path(entrypoint).parts[0]
-        destination = destination_dir / name
-        _copy_tree(source, destination)
-    else:
-        destination = destination_dir / Path(entrypoint).name
-        _copy_file(source, destination)
-    _reject_symlinks(destination)
-    return destination
-
-
 def _copy_file(source: Path, destination: Path) -> None:
-    """Copy bytes and executable mode without copying platform flags/owners."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(stat.S_IMODE(source.stat().st_mode))
 
 
 def _copy_tree(source: Path, destination: Path) -> None:
-    """Copy a tree without following or reproducing symlinks."""
     destination.mkdir(parents=True, exist_ok=False)
     destination.chmod(stat.S_IMODE(source.stat().st_mode))
     for child in sorted(source.iterdir(), key=lambda item: item.name):
@@ -199,15 +227,79 @@ def _copy_tree(source: Path, destination: Path) -> None:
             raise RuntimeError(f"unsupported release artifact entry: {child}")
 
 
+def _copy_artifact(source: Path, destination_dir: Path, entrypoint: str) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=False)
+    destination = destination_dir / (
+        Path(entrypoint).parts[0] if source.is_dir() else Path(entrypoint).name
+    )
+    if source.is_dir():
+        _copy_tree(source, destination)
+    else:
+        _copy_file(source, destination)
+    _reject_symlinks(destination)
+    return destination
+
+
+def _signature_message(release: Mapping[str, Any]) -> bytes:
+    """Return the cross-language fixed-field Ed25519 message."""
+    fields = (
+        RELEASE_SCHEMA,
+        str(release["catalog_sha256"]),
+        str(release["artifact_index_sha256"]),
+        str(release["profile_lock_sha256"]),
+        str(release["source_identity"]),
+        str(release["source_revision"]),
+        str(release["platform"]),
+        str(release["architecture"]),
+        str(release["artifact_id"]),
+        str(release["key_id"]),
+    )
+    return b"\0".join(field.encode("utf-8") for field in fields)
+
+
+def _load_signing_key(path: Path) -> Ed25519PrivateKey:
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"signing key must be a regular non-symlink file: {path}")
+    raw = path.read_bytes()
+    if len(raw) != 32:
+        raise RuntimeError("Ed25519 signing key must contain exactly 32 raw seed bytes")
+    return Ed25519PrivateKey.from_private_bytes(raw)
+
+
 def package_artifact(
     catalog_path: Path,
-    artifact_id: str,
-    artifact_path: Path,
+    build_output_manifest: Path,
+    signing_key_path: Path,
+    signing_key_id: str,
     output_dir: Path,
 ) -> dict[str, Any]:
-    """Verify and stage one prebuilt artifact for a release build."""
-    catalog = _load_catalog(catalog_path.resolve())
+    """Verify and bind one exact build output into a signed Shell v4 release."""
+    if not signing_key_id.strip():
+        raise RuntimeError("signing key id is required")
+    catalog = _load_object(
+        catalog_path.resolve(), CATALOG_SCHEMA, "presentation catalog"
+    )
+    manifest_path = build_output_manifest.expanduser().resolve()
+    build_output = _load_object(
+        manifest_path, BUILD_OUTPUT_SCHEMA, "build-output manifest"
+    )
+    artifact_id = _required_text(build_output, "artifact_id")
+    platform = _required_text(build_output, "platform")
+    architecture = _required_text(build_output, "architecture")
+    source_identity = _required_text(build_output, "source_identity")
+    source_revision = _required_text(build_output, "source_revision")
+    artifact_value = _required_text(build_output, "artifact_path")
+    if build_output.get("build_profile") != "release":
+        raise RuntimeError("build-output manifest must identify a release build")
+
     variant = _find_variant(catalog, artifact_id)
+    if (
+        variant.get("platform") != platform
+        or variant.get("architecture") != architecture
+    ):
+        raise RuntimeError(
+            "build-output platform/architecture does not match the declared variant"
+        )
     if variant.get("prebuilt") is not True or variant.get("production") is not True:
         raise RuntimeError(
             f"artifact variant is not production-prebuilt: {artifact_id}"
@@ -215,52 +307,127 @@ def package_artifact(
     if variant.get("development_command") not in (None, ""):
         raise RuntimeError(f"development command is forbidden for {artifact_id}")
 
-    source_input = artifact_path.expanduser()
+    declared_path = Path(artifact_value).expanduser()
+    source_input = (
+        declared_path
+        if declared_path.is_absolute()
+        else manifest_path.parent / declared_path
+    )
     if source_input.is_symlink():
-        raise RuntimeError(
-            f"release artifact is missing or symlinked: {artifact_path}"
-        )
+        raise RuntimeError(f"release artifact is missing or symlinked: {source_input}")
     source = source_input.resolve()
     if not source.exists():
-        raise RuntimeError(f"release artifact is missing or symlinked: {artifact_path}")
+        raise RuntimeError(f"release artifact is missing or symlinked: {source_input}")
     _reject_symlinks(source)
-    _validate_entrypoint(source, str(variant.get("entrypoint") or ""))
+    entrypoint = str(variant.get("entrypoint") or "")
+    _validate_entrypoint(source, entrypoint)
     _validate_bundle_identity(source, variant.get("bundle_identifier"))
-    _validate_macos_signature(source, str(variant.get("platform") or ""))
+    _validate_macos_signature(source, platform)
 
     output = output_dir.expanduser().resolve()
     if output.exists():
         raise RuntimeError(f"release artifact output already exists: {output}")
     output.mkdir(parents=True)
-    staged = _copy_artifact(
-        source,
-        output / ARTIFACT_ROOT / artifact_id,
-        str(variant["entrypoint"]),
-    )
+    staged = _copy_artifact(source, output / ARTIFACT_ROOT / artifact_id, entrypoint)
     digest = artifact_digest(staged)
+    size = artifact_size(staged)
     relative = staged.relative_to(output).as_posix()
-    variant["path"] = relative
-    variant["sha256"] = digest
-
-    (output / "presentation_catalog.json").write_text(
-        json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    variant.update(
+        path=relative,
+        sha256=digest,
+        size=size,
+        source_identity=source_identity,
+        source_revision=source_revision,
     )
+
+    index = {
+        "schema": ARTIFACT_INDEX_SCHEMA,
+        "artifact_id": artifact_id,
+        "path": relative,
+        "sha256": digest,
+        "size": size,
+        "platform": platform,
+        "architecture": architecture,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+    }
+    index_digest = json_digest(index)
+    catalog_revision = json_digest(catalog)
+    lock_body = {
+        "schema": PROFILE_LOCK_SCHEMA,
+        "catalog_revision": catalog_revision,
+        "artifact_index_sha256": index_digest,
+        "artifact_id": artifact_id,
+        "artifact_sha256": digest,
+        "platform": platform,
+        "architecture": architecture,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+    }
+    lock = {**lock_body, "lock_revision": json_digest(lock_body)}
+    catalog["release_binding"] = {
+        "schema": RELEASE_SCHEMA,
+        "artifact_index_path": INDEX_PATH.as_posix(),
+        "artifact_index_sha256": index_digest,
+        "profile_lock_path": LOCK_PATH.as_posix(),
+        "profile_lock_sha256": json_digest(lock),
+        "catalog_revision": catalog_revision,
+        "artifact_id": artifact_id,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+        "platform": platform,
+        "architecture": architecture,
+    }
+
+    catalog_output = output / "presentation_catalog.json"
+    _write_json(output / INDEX_PATH, index)
+    _write_json(output / LOCK_PATH, lock)
+    _write_json(catalog_output, catalog)
+    release = {
+        "schema": RELEASE_SCHEMA,
+        "catalog_path": "bundled/presentation_catalog.json",
+        "catalog_sha256": file_digest(catalog_output),
+        "artifact_index_path": INDEX_PATH.as_posix(),
+        "artifact_index_sha256": file_digest(output / INDEX_PATH),
+        "profile_lock_path": LOCK_PATH.as_posix(),
+        "profile_lock_sha256": file_digest(output / LOCK_PATH),
+        "artifact_id": artifact_id,
+        "platform": platform,
+        "architecture": architecture,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+        "key_id": signing_key_id,
+    }
+    signing_key = _load_signing_key(signing_key_path.expanduser())
+    public_key = signing_key.public_key().public_bytes_raw()
+    release["public_key"] = base64.b64encode(public_key).decode("ascii")
+    release["signature"] = base64.b64encode(
+        signing_key.sign(_signature_message(release))
+    ).decode("ascii")
+    _write_json(output / RELEASE_PATH, release)
+
     return {
         "artifact_id": artifact_id,
         "path": relative,
         "sha256": digest,
+        "size": size,
+        "platform": platform,
+        "architecture": architecture,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+        "catalog_sha256": release["catalog_sha256"],
         "output_dir": os.fspath(output),
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run release artifact verification and staging."""
+    """Run release artifact verification and materialization."""
     args = parse_args(argv)
     report = package_artifact(
         args.catalog,
-        args.artifact_id,
-        args.artifact,
+        args.build_output_manifest,
+        args.signing_key,
+        args.signing_key_id,
         args.output_dir,
     )
     print(json.dumps(report, indent=2, sort_keys=True))

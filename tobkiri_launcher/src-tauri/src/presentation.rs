@@ -13,6 +13,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result as AnyResult};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use log::error;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,6 +27,8 @@ const SHELL_CONTRACT_ID: &str = "app.shell.v1";
 const SELECTION_DIR: &str = "presentation";
 const SELECTION_FILE: &str = "selection.json";
 const SELECTION_SCHEMA: &str = "io.tobkiri.launcher.profile-selection.v4";
+const RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
+const RELEASE_FILE: &str = "presentation_release.v4.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationApproval {
@@ -83,6 +87,12 @@ pub struct ArtifactVariant {
     pub path: Option<String>,
     #[serde(default)]
     pub sha256: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub source_identity: Option<String>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
     pub prebuilt: bool,
     pub production: bool,
     #[serde(default)]
@@ -101,6 +111,12 @@ pub struct PresentationArtifact {
     pub path: Option<String>,
     #[serde(default)]
     pub sha256: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub source_identity: Option<String>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
     pub prebuilt: bool,
     pub production: bool,
     #[serde(default)]
@@ -155,6 +171,69 @@ pub struct PresentationCatalog {
     pub shell_providers: Vec<ShellProviderDescriptor>,
     #[serde(default)]
     pub generated_at: u64,
+    #[serde(default)]
+    pub release_binding: Option<PresentationReleaseBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresentationReleaseBinding {
+    pub schema: String,
+    pub artifact_index_path: String,
+    pub artifact_index_sha256: String,
+    pub profile_lock_path: String,
+    pub profile_lock_sha256: String,
+    pub catalog_revision: String,
+    pub artifact_id: String,
+    pub source_identity: String,
+    pub source_revision: String,
+    pub platform: String,
+    pub architecture: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PresentationReleaseManifest {
+    schema: String,
+    catalog_path: String,
+    catalog_sha256: String,
+    artifact_index_path: String,
+    artifact_index_sha256: String,
+    profile_lock_path: String,
+    profile_lock_sha256: String,
+    artifact_id: String,
+    platform: String,
+    architecture: String,
+    source_identity: String,
+    source_revision: String,
+    key_id: String,
+    public_key: String,
+    signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShellArtifactIndex {
+    schema: String,
+    artifact_id: String,
+    path: String,
+    sha256: String,
+    size: u64,
+    platform: String,
+    architecture: String,
+    source_identity: String,
+    source_revision: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShellProfileLock {
+    schema: String,
+    catalog_revision: String,
+    artifact_index_sha256: String,
+    artifact_id: String,
+    artifact_sha256: String,
+    platform: String,
+    architecture: String,
+    source_identity: String,
+    source_revision: String,
+    lock_revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -375,7 +454,203 @@ fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
     validate_catalog_integrity(&catalog).with_context(|| {
         format!("manifest-derived presentation catalog from {source} failed integrity validation")
     })?;
+    verify_release_binding(config, &path, &raw, &catalog)
+        .with_context(|| format!("signed Shell v4 release binding from {source} was rejected"))?;
     Ok(catalog)
+}
+
+fn verify_release_binding(
+    config: &AppConfig,
+    catalog_path: &Path,
+    catalog_raw: &str,
+    catalog: &PresentationCatalog,
+) -> AnyResult<()> {
+    let installed = catalog
+        .shell_providers
+        .iter()
+        .flat_map(|shell| &shell.artifact_variants)
+        .any(|variant| {
+            variant.path.is_some() || variant.sha256.is_some() || variant.size.is_some()
+        });
+    let Some(binding) = catalog.release_binding.as_ref() else {
+        if installed {
+            bail!("installed Shell metadata requires a signed release binding");
+        }
+        return Ok(());
+    };
+    if binding.schema != RELEASE_SCHEMA {
+        bail!(
+            "unsupported Shell release binding schema: {}",
+            binding.schema
+        );
+    }
+    let manifest_path = config.app_dir.join("bundled").join(RELEASE_FILE);
+    let manifest_raw = read_verified_regular_file(&manifest_path, "Shell release manifest")?;
+    let manifest: PresentationReleaseManifest =
+        serde_json::from_slice(&manifest_raw).context("Shell release manifest is malformed")?;
+    if manifest.schema != RELEASE_SCHEMA
+        || manifest.catalog_path != "bundled/presentation_catalog.json"
+        || manifest.artifact_index_path != binding.artifact_index_path
+        || manifest.profile_lock_path != binding.profile_lock_path
+        || manifest.artifact_id != binding.artifact_id
+        || manifest.platform != binding.platform
+        || manifest.architecture != binding.architecture
+        || manifest.source_identity != binding.source_identity
+        || manifest.source_revision != binding.source_revision
+    {
+        bail!("Shell release manifest does not exactly match its catalog binding");
+    }
+    if byte_digest(catalog_raw.as_bytes()) != manifest.catalog_sha256 {
+        bail!("packaged presentation catalog digest does not match the signed release");
+    }
+
+    let index_path = safe_fixed_release_path(config, &manifest.artifact_index_path)?;
+    let lock_path = safe_fixed_release_path(config, &manifest.profile_lock_path)?;
+    let index_raw = read_verified_regular_file(&index_path, "Shell artifact index")?;
+    let lock_raw = read_verified_regular_file(&lock_path, "Shell profile lock")?;
+    if byte_digest(&index_raw) != manifest.artifact_index_sha256
+        || byte_digest(&lock_raw) != manifest.profile_lock_sha256
+    {
+        bail!("signed Shell release index or lock digest does not match packaged bytes");
+    }
+
+    let index_value: serde_json::Value =
+        serde_json::from_slice(&index_raw).context("Shell artifact index is malformed")?;
+    let lock_value: serde_json::Value =
+        serde_json::from_slice(&lock_raw).context("Shell profile lock is malformed")?;
+    if canonical_value_digest(&index_value)? != binding.artifact_index_sha256
+        || canonical_value_digest(&lock_value)? != binding.profile_lock_sha256
+    {
+        bail!("Shell catalog binding does not match the exact index/lock content");
+    }
+    let index: ShellArtifactIndex =
+        serde_json::from_value(index_value).context("Shell artifact index fields are invalid")?;
+    let lock: ShellProfileLock = serde_json::from_value(lock_value.clone())
+        .context("Shell profile lock fields are invalid")?;
+    let mut lock_body = lock_value;
+    lock_body
+        .as_object_mut()
+        .context("Shell profile lock must be an object")?
+        .remove("lock_revision");
+    if index.schema != "io.tobkiri.shell.artifact-index.v4"
+        || lock.schema != "io.tobkiri.shell.profile-lock.v4"
+        || lock.lock_revision != canonical_value_digest(&lock_body)?
+        || lock.catalog_revision != binding.catalog_revision
+        || lock.artifact_index_sha256 != binding.artifact_index_sha256
+        || index.artifact_id != binding.artifact_id
+        || lock.artifact_id != binding.artifact_id
+        || index.sha256 != lock.artifact_sha256
+        || index.platform != binding.platform
+        || lock.platform != binding.platform
+        || index.architecture != binding.architecture
+        || lock.architecture != binding.architecture
+        || index.source_identity != binding.source_identity
+        || lock.source_identity != binding.source_identity
+        || index.source_revision != binding.source_revision
+        || lock.source_revision != binding.source_revision
+    {
+        bail!("Shell artifact index/profile lock exact binding is inconsistent");
+    }
+    validate_release_target(&binding.platform, &binding.architecture)?;
+    let variant = catalog
+        .shell_providers
+        .iter()
+        .flat_map(|shell| &shell.artifact_variants)
+        .find(|variant| variant.artifact_id == binding.artifact_id)
+        .context("signed Shell artifact is missing from the catalog")?;
+    if variant.path.as_deref() != Some(index.path.as_str())
+        || variant.sha256.as_deref() != Some(index.sha256.as_str())
+        || variant.size != Some(index.size)
+        || variant.source_identity.as_deref() != Some(index.source_identity.as_str())
+        || variant.source_revision.as_deref() != Some(index.source_revision.as_str())
+    {
+        bail!("catalog variant differs from the signed Shell artifact index");
+    }
+
+    let embedded_key = option_env!("TOBKIRI_PRESENTATION_TRUST_KEY_B64").unwrap_or("");
+    let embedded_key_id = option_env!("TOBKIRI_PRESENTATION_TRUST_KEY_ID").unwrap_or("");
+    if embedded_key.is_empty()
+        || embedded_key_id.is_empty()
+        || manifest.public_key != embedded_key
+        || manifest.key_id != embedded_key_id
+    {
+        bail!("Shell release signer is not the compile-time trusted build signer");
+    }
+    let key_bytes: [u8; 32] = BASE64
+        .decode(&manifest.public_key)
+        .context("Shell release public key is not base64")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Shell release public key must be 32 bytes"))?;
+    let signature_bytes: [u8; 64] = BASE64
+        .decode(&manifest.signature)
+        .context("Shell release signature is not base64")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Shell release signature must be 64 bytes"))?;
+    VerifyingKey::from_bytes(&key_bytes)
+        .context("Shell release public key is invalid")?
+        .verify(
+            &release_signature_message(&manifest),
+            &Signature::from_bytes(&signature_bytes),
+        )
+        .context("Shell release signature verification failed")?;
+
+    // Ensure the caller-provided catalog path is the fixed packaged location.
+    if catalog_path != presentation_catalog_path(config) {
+        bail!("presentation catalog path differs from the packaged contract");
+    }
+    Ok(())
+}
+
+fn validate_release_target(platform: &str, architecture: &str) -> AnyResult<()> {
+    if platform != current_platform() || architecture != current_architecture() {
+        bail!("signed Shell release targets the wrong platform or architecture");
+    }
+    Ok(())
+}
+
+fn release_signature_message(manifest: &PresentationReleaseManifest) -> Vec<u8> {
+    [
+        RELEASE_SCHEMA,
+        &manifest.catalog_sha256,
+        &manifest.artifact_index_sha256,
+        &manifest.profile_lock_sha256,
+        &manifest.source_identity,
+        &manifest.source_revision,
+        &manifest.platform,
+        &manifest.architecture,
+        &manifest.artifact_id,
+        &manifest.key_id,
+    ]
+    .join("\0")
+    .into_bytes()
+}
+
+fn safe_fixed_release_path(config: &AppConfig, relative: &str) -> AnyResult<PathBuf> {
+    if !matches!(
+        relative,
+        "bundled/shell_artifact_index.v4.json" | "bundled/shell_profile_lock.v4.json"
+    ) {
+        bail!("Shell release binding uses a non-canonical path");
+    }
+    safe_artifact_path(config, relative)
+}
+
+fn read_verified_regular_file(path: &Path, label: &str) -> AnyResult<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("{label} is missing at {}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("{label} must be a regular non-symlink file");
+    }
+    fs::read(path).with_context(|| format!("failed to read {label} at {}", path.display()))
+}
+
+fn byte_digest(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn canonical_value_digest(value: &serde_json::Value) -> AnyResult<String> {
+    let bytes = serde_json::to_vec(value).context("failed to canonicalize release JSON")?;
+    Ok(byte_digest(&bytes))
 }
 
 fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
@@ -440,6 +715,7 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
         .collect::<BTreeMap<_, _>>();
 
     let mut shell_ids = std::collections::HashSet::new();
+    let mut artifact_ids = std::collections::HashSet::new();
     for shell in &catalog.shell_providers {
         if !shell_ids.insert(&shell.provider_id) {
             bail!("presentation catalog contains duplicate Shell Provider IDs");
@@ -499,6 +775,7 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
         let mut variants = std::collections::HashSet::new();
         for variant in &shell.artifact_variants {
             if !variants.insert((&variant.platform, &variant.architecture))
+                || !artifact_ids.insert(&variant.artifact_id)
                 || variant.artifact_id.trim().is_empty()
                 || variant.artifact_ref.trim().is_empty()
                 || variant.entrypoint.trim().is_empty()
@@ -525,25 +802,32 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
                     shell.provider_id
                 );
             }
-            match (variant.path.as_deref(), variant.sha256.as_deref()) {
-                (Some(path), Some(_))
+            match (
+                variant.path.as_deref(),
+                variant.sha256.as_deref(),
+                variant.size,
+                variant.source_identity.as_deref(),
+                variant.source_revision.as_deref(),
+            ) {
+                (Some(path), Some(_), Some(size), Some(identity), Some(revision))
                     if !Path::new(path).is_absolute()
                         && !Path::new(path)
                             .components()
-                            .any(|component| matches!(component, Component::ParentDir)) => {}
-                (None, None) => {}
-                (Some(_), None) | (None, Some(_)) => {
-                    bail!(
-                        "Shell Provider {} has incomplete installed artifact metadata",
-                        shell.provider_id
-                    )
-                }
-                (Some(_), Some(_)) => {
+                            .any(|component| matches!(component, Component::ParentDir))
+                        && size > 0
+                        && !identity.trim().is_empty()
+                        && !revision.trim().is_empty() => {}
+                (None, None, None, None, None) => {}
+                (Some(_), Some(_), Some(_), Some(_), Some(_)) => {
                     bail!(
                         "Shell Provider {} has an unsafe installed artifact path",
                         shell.provider_id
                     )
                 }
+                _ => bail!(
+                    "Shell Provider {} has incomplete installed artifact metadata",
+                    shell.provider_id
+                ),
             }
         }
     }
@@ -735,6 +1019,9 @@ fn resolve_artifact(
             architecture: architecture.to_string(),
             path: None,
             sha256: None,
+            size: None,
+            source_identity: None,
+            source_revision: None,
             prebuilt: false,
             production: false,
             development_command: None,
@@ -754,6 +1041,9 @@ fn resolve_artifact(
         architecture: variant.architecture.clone(),
         path: variant.path.clone(),
         sha256: variant.sha256.clone(),
+        size: variant.size,
+        source_identity: variant.source_identity.clone(),
+        source_revision: variant.source_revision.clone(),
         prebuilt: variant.prebuilt,
         production: variant.production,
         development_command: variant.development_command.clone(),
@@ -810,6 +1100,18 @@ fn resolve_artifact(
     if normalize_digest(expected_digest) != actual_digest {
         artifact.status = "digest_mismatch".to_string();
         artifact.status_detail = "Artifact digest does not match the pinned variant.".to_string();
+        return Ok(artifact);
+    }
+    let actual_size = match payload_size(&path) {
+        Ok(size) => size,
+        Err(error) => {
+            artifact.status_detail = format!("Artifact size could not be measured: {error}");
+            return Ok(artifact);
+        }
+    };
+    if artifact.size != Some(actual_size) {
+        artifact.status = "size_mismatch".to_string();
+        artifact.status_detail = "Artifact size does not match the signed index.".to_string();
         return Ok(artifact);
     }
 
@@ -1084,6 +1386,28 @@ fn sha256_path(path: &Path) -> AnyResult<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+fn payload_size(path: &Path) -> AnyResult<u64> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect artifact path {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!("symlinked artifact content is not accepted");
+    }
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        bail!("artifact path is neither a file nor a directory");
+    }
+    fs::read_dir(path)
+        .with_context(|| format!("failed to read artifact directory {}", path.display()))?
+        .try_fold(0_u64, |total, entry| {
+            let entry = entry?;
+            total
+                .checked_add(payload_size(&entry.path())?)
+                .context("artifact payload size overflow")
+        })
+}
+
 fn hash_path_contents(path: &Path, relative: &Path, hasher: &mut Sha256) -> AnyResult<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect artifact path {}", path.display()))?;
@@ -1238,6 +1562,7 @@ mod tests {
                 protocol_revision_digest: None,
             }],
             generated_at: 0,
+            release_binding: None,
         }
     }
 
@@ -1365,6 +1690,9 @@ mod tests {
             architecture: current_architecture().into(),
             path: None,
             sha256: None,
+            size: None,
+            source_identity: None,
+            source_revision: None,
             prebuilt: true,
             production: true,
             development_command: None,
@@ -1497,7 +1825,7 @@ mod tests {
         let (root, config) = relocated_release_config("error");
         let catalog_path = presentation_catalog_path(&config);
         fs::write(&catalog_path, "{\"schema\": \"broken\"}").unwrap();
-        let error = load_catalog(&config).unwrap_err().to_string();
+        let error = format!("{:#}", load_catalog(&config).unwrap_err());
         assert!(error.contains("packaged resource"));
         assert!(error.contains("is malformed and was rejected"));
         let catalog_path_text = catalog_path.to_string_lossy();
@@ -1532,6 +1860,9 @@ mod tests {
             descriptor_digest: "sha256:".to_string() + &"a".repeat(64),
             path: Some("installed.bin".into()),
             sha256: Some(digest),
+            size: Some(contents.len() as u64),
+            source_identity: Some("test:fixture".into()),
+            source_revision: Some("test-revision".into()),
             prebuilt: true,
             production: true,
             development_command: None,
@@ -1603,28 +1934,31 @@ mod tests {
                 .into_owned(),
         );
         variant.sha256 = Some(digest);
-        fs::write(
-            app_dir.join("bundled").join("presentation_catalog.json"),
-            serde_json::to_vec_pretty(&catalog).unwrap(),
-        )
-        .unwrap();
+        variant.size = Some(contents.len() as u64);
+        variant.source_identity = Some("test:persistence".into());
+        variant.source_revision = Some("test-revision".into());
 
         let mut config = test_config(&app_dir);
         config.user_data_dir = root.join("Application Support").join("user_data");
+        let selection = catalog.default_selection.clone();
         let selected =
-            select_presentation_impl(&config, catalog.default_selection.clone()).unwrap();
+            build_state_from_catalog(&config, catalog.clone(), Some(selection.clone())).unwrap();
+        write_selection(&config, &selected.catalog, &selection).unwrap();
         assert_eq!(selected.materialization.status, "materialized");
         assert_eq!(
             selected.materialization.artifact.as_ref().unwrap().status,
             "verified"
         );
 
-        let restarted = build_state(&config).unwrap();
+        let restarted_selection = read_selection(&config, &catalog).unwrap();
+        let restarted =
+            build_state_from_catalog(&config, catalog.clone(), restarted_selection).unwrap();
         assert_eq!(restarted.selection, Some(catalog.default_selection.clone()));
         assert_eq!(restarted.materialization.status, "materialized");
 
         fs::write(artifact_path.join("Contents"), b"tampered shell artifact").unwrap();
-        let tampered = build_state(&config).unwrap();
+        let tampered_selection = read_selection(&config, &catalog).unwrap();
+        let tampered = build_state_from_catalog(&config, catalog, tampered_selection).unwrap();
         assert_eq!(tampered.materialization.status, "blocked");
         assert_eq!(
             tampered.materialization.artifact.as_ref().unwrap().status,
@@ -1657,5 +1991,58 @@ mod tests {
         values.insert(normalize_digest("sha256:ABC"), true);
         values.insert(normalize_digest(" abc "), true);
         assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn signed_release_rejects_wrong_platform_and_architecture() {
+        assert!(validate_release_target(current_platform(), current_architecture()).is_ok());
+        let error = validate_release_target("wrong-platform", current_architecture()).unwrap_err();
+        assert!(error.to_string().contains("wrong platform"));
+        let error = validate_release_target(current_platform(), "wrong-architecture").unwrap_err();
+        assert!(error.to_string().contains("wrong platform"));
+    }
+
+    #[test]
+    fn catalog_rejects_duplicate_shell_artifact_identity() {
+        let mut catalog: PresentationCatalog =
+            serde_json::from_str(include_str!("../bundled/presentation_catalog.json")).unwrap();
+        let mut duplicate = catalog.shell_providers[0].artifact_variants[0].clone();
+        duplicate.platform = "fixture-platform".into();
+        duplicate.architecture = "fixture-architecture".into();
+        catalog.shell_providers[1].artifact_variants.push(duplicate);
+        let error = validate_catalog_integrity(&catalog).unwrap_err();
+        assert!(error.to_string().contains("invalid production variant"));
+    }
+
+    #[test]
+    fn installed_catalog_without_signed_release_binding_fails_closed() {
+        let (root, config) = relocated_release_config("unsigned-installed");
+        let mut catalog: PresentationCatalog =
+            serde_json::from_str(include_str!("../bundled/presentation_catalog.json")).unwrap();
+        let variant = catalog
+            .shell_providers
+            .iter_mut()
+            .flat_map(|shell| &mut shell.artifact_variants)
+            .find(|variant| {
+                variant.platform == current_platform()
+                    && variant.architecture == current_architecture()
+            })
+            .unwrap();
+        variant.path = Some("bundled/presentation-artifacts/unsigned".into());
+        variant.sha256 = Some("sha256:".to_string() + &"a".repeat(64));
+        variant.size = Some(1);
+        variant.source_identity = Some("test:unsigned".into());
+        variant.source_revision = Some("test-revision".into());
+        fs::write(
+            presentation_catalog_path(&config),
+            serde_json::to_vec_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+        let error = format!("{:#}", load_catalog(&config).unwrap_err());
+        assert!(
+            error.contains("installed Shell metadata requires a signed release binding"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

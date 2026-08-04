@@ -22,18 +22,26 @@ jobs:
             target: aarch64-apple-darwin
             shell_bundles: app
             presentation_variant: shell.tauri.default.macos-arm64
+            presentation_platform: macos
+            presentation_architecture: arm64
           - os: macos-15-intel
             target: x86_64-apple-darwin
             shell_bundles: app
             presentation_variant: shell.tauri.default.macos-x86_64
+            presentation_platform: macos
+            presentation_architecture: x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             shell_bundles: nsis
             presentation_variant: shell.tauri.default.windows-x86_64
+            presentation_platform: windows
+            presentation_architecture: x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             shell_bundles: appimage
             presentation_variant: shell.tauri.default.linux-x86_64
+            presentation_platform: linux
+            presentation_architecture: x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -45,6 +53,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Install Shell release signing dependency
+        run: python -m pip install cryptography==46.0.5
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -129,10 +140,17 @@ jobs:
         run: |
           artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
           test -n "$artifact"
+          python -c 'import secrets,sys; open(sys.argv[1], "wb").write(secrets.token_bytes(32))' "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw"
+          python tobkiri_launcher/scripts/write_shell_build_output.py \
+            --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
+            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' \
+            --output "$RUNNER_TEMP/shell-build-output.v4.json"
           python tobkiri_launcher/scripts/package_presentation_artifact.py \
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
-            --artifact-id '${{ matrix.presentation_variant }}' \
-            --artifact "$artifact" \
+            --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
+            --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
+            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
             --output-dir "$RELEASE_ROOT"
 
       - name: Stage verified Linux Tauri Shell artifact
@@ -143,10 +161,17 @@ jobs:
         run: |
           artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$artifact"
+          python -c 'import secrets,sys; open(sys.argv[1], "wb").write(secrets.token_bytes(32))' "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw"
+          python tobkiri_launcher/scripts/write_shell_build_output.py \
+            --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
+            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' \
+            --output "$RUNNER_TEMP/shell-build-output.v4.json"
           python tobkiri_launcher/scripts/package_presentation_artifact.py \
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
-            --artifact-id '${{ matrix.presentation_variant }}' \
-            --artifact "$artifact" \
+            --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
+            --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
+            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
             --output-dir "$RELEASE_ROOT"
 
       - name: Stage verified Windows Tauri Shell artifact
@@ -157,10 +182,17 @@ jobs:
         run: |
           $artifact = Join-Path $env:GITHUB_WORKSPACE "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/tobkiri-shell.exe"
           if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Tauri Shell binary not found: $artifact" }
+          $key = Join-Path $env:RUNNER_TEMP "tobkiri-presentation-signing-key.raw"
+          $manifest = Join-Path $env:RUNNER_TEMP "shell-build-output.v4.json"
+          python -c "import secrets,sys; open(sys.argv[1], 'wb').write(secrets.token_bytes(32))" $key
+          python tobkiri_launcher/scripts/write_shell_build_output.py `
+            --artifact-id '${{ matrix.presentation_variant }}' --artifact $artifact `
+            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' `
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' --output $manifest
           python tobkiri_launcher/scripts/package_presentation_artifact.py `
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json `
-            --artifact-id '${{ matrix.presentation_variant }}' `
-            --artifact $artifact `
+            --build-output-manifest $manifest --signing-key $key `
+            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' `
             --output-dir $env:RELEASE_ROOT
 
       - name: Build with cargo tauri

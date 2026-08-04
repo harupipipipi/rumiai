@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -13,6 +14,9 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Sequence
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
 
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
 SHELL_CONTRACT = "app.shell.v1"
@@ -26,6 +30,7 @@ PRESENTATION_PERMISSIONS = (
     "allow-select-presentation",
     "allow-launch-selected-presentation",
 )
+RELEASE_SCHEMA = "io.tobkiri.shell.release.v4"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -96,6 +101,107 @@ def _artifact_digest(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _byte_digest(contents: bytes) -> str:
+    return "sha256:" + hashlib.sha256(contents).hexdigest()
+
+
+def _canonical_digest(value: Any) -> str:
+    contents = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return _byte_digest(contents)
+
+
+def _regular_bytes(path: Path, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"{label} must be a regular non-symlink file: {path}")
+    return path.read_bytes()
+
+
+def _release_signature_message(release: dict[str, Any]) -> bytes:
+    fields = (
+        RELEASE_SCHEMA,
+        release["catalog_sha256"],
+        release["artifact_index_sha256"],
+        release["profile_lock_sha256"],
+        release["source_identity"],
+        release["source_revision"],
+        release["platform"],
+        release["architecture"],
+        release["artifact_id"],
+        release["key_id"],
+    )
+    return b"\0".join(str(field).encode("utf-8") for field in fields)
+
+
+def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Verify signed catalog/index/lock bytes and their exact cross-bindings."""
+    binding = catalog.get("release_binding")
+    if not isinstance(binding, dict) or binding.get("schema") != RELEASE_SCHEMA:
+        raise RuntimeError(
+            "installed artifact metadata requires a Shell v4 release binding"
+        )
+    release_path = root / "bundled" / "presentation_release.v4.json"
+    release = json.loads(_regular_bytes(release_path, "release manifest"))
+    if release.get("schema") != RELEASE_SCHEMA:
+        raise RuntimeError("release manifest schema is invalid")
+    fixed_paths = {
+        "catalog_path": "bundled/presentation_catalog.json",
+        "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+        "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+    }
+    for field, expected in fixed_paths.items():
+        if release.get(field) != expected:
+            raise RuntimeError(f"release manifest {field} is not canonical")
+    catalog_bytes = _regular_bytes(root / fixed_paths["catalog_path"], "catalog")
+    index_bytes = _regular_bytes(
+        root / fixed_paths["artifact_index_path"], "artifact index"
+    )
+    lock_bytes = _regular_bytes(root / fixed_paths["profile_lock_path"], "profile lock")
+    if _byte_digest(catalog_bytes) != release.get("catalog_sha256"):
+        raise RuntimeError("signed catalog digest mismatch")
+    if _byte_digest(index_bytes) != release.get("artifact_index_sha256"):
+        raise RuntimeError("signed artifact index digest mismatch")
+    if _byte_digest(lock_bytes) != release.get("profile_lock_sha256"):
+        raise RuntimeError("signed profile lock digest mismatch")
+    index = json.loads(index_bytes)
+    lock = json.loads(lock_bytes)
+    if _canonical_digest(index) != binding.get("artifact_index_sha256"):
+        raise RuntimeError("catalog artifact index binding mismatch")
+    if _canonical_digest(lock) != binding.get("profile_lock_sha256"):
+        raise RuntimeError("catalog profile lock binding mismatch")
+    lock_body = {key: value for key, value in lock.items() if key != "lock_revision"}
+    if _canonical_digest(lock_body) != lock.get("lock_revision"):
+        raise RuntimeError("profile lock revision mismatch")
+    exact_fields = (
+        "artifact_id",
+        "platform",
+        "architecture",
+        "source_identity",
+        "source_revision",
+    )
+    for field in exact_fields:
+        if release.get(field) != binding.get(field) or index.get(field) != binding.get(
+            field
+        ):
+            raise RuntimeError(f"release exact field mismatch: {field}")
+    public_key = base64.b64decode(release["public_key"], validate=True)
+    signature = base64.b64decode(release["signature"], validate=True)
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, _release_signature_message(release)
+        )
+    except (InvalidSignature, ValueError, TypeError) as error:
+        raise RuntimeError("Shell release signature verification failed") from error
+    return {
+        "artifact_id": release["artifact_id"],
+        "catalog_sha256": release["catalog_sha256"],
+        "key_id": release["key_id"],
+        "source_identity": release["source_identity"],
+        "source_revision": release["source_revision"],
+    }
+
+
 def verify_catalog(
     catalog: dict[str, Any], resource_root_path: Path | None = None
 ) -> dict[str, Any]:
@@ -122,6 +228,7 @@ def verify_catalog(
     compatible_shells: list[str] = []
     blocked_artifacts: list[str] = []
     verified_artifacts: list[str] = []
+    has_installed_artifact = False
     for shell in shells:
         if not isinstance(shell, dict):
             raise RuntimeError("packaged Shell Provider descriptor is invalid")
@@ -148,6 +255,7 @@ def verify_catalog(
             if path_value is None:
                 blocked_artifacts.append(str(variant["artifact_id"]))
                 continue
+            has_installed_artifact = True
             if resource_root_path is None:
                 raise RuntimeError(
                     "installed artifact metadata requires a package resource root"
@@ -168,7 +276,26 @@ def verify_catalog(
                 raise RuntimeError(
                     f"packaged artifact digest mismatch for {variant['artifact_id']}"
                 )
+            actual_size = sum(
+                item.stat().st_size
+                for item in ([artifact] if artifact.is_file() else artifact.rglob("*"))
+                if item.is_file()
+            )
+            if variant.get("size") != actual_size:
+                raise RuntimeError(
+                    f"packaged artifact size mismatch for {variant['artifact_id']}"
+                )
+            if not variant.get("source_identity") or not variant.get("source_revision"):
+                raise RuntimeError(
+                    "packaged artifact source identity/revision is incomplete"
+                )
             verified_artifacts.append(str(variant["artifact_id"]))
+
+    release_report = (
+        verify_release_binding(catalog, resource_root_path)
+        if has_installed_artifact and resource_root_path
+        else None
+    )
 
     default_selection = catalog.get("default_selection")
     if not isinstance(default_selection, dict):
@@ -186,6 +313,7 @@ def verify_catalog(
         "blocked_uninstalled_artifact_count": len(blocked_artifacts),
         "verified_artifact_ids": verified_artifacts,
         "profile_identity": identity,
+        "release": release_report,
     }
 
 
