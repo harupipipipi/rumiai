@@ -15536,13 +15536,13 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:6bc067136f807a3d881255fe2bfaedeb8ec5e1a4b33d966ec0f2584c912d6ba5",
+        "evidence_digest": "sha256:75d35b72e1bbecaeb0a0f7a13bcffff4c275b575f6075c823f122b60e3b3acba",
         "line": 352,
         "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:6bc067136f807a3d881255fe2bfaedeb8ec5e1a4b33d966ec0f2584c912d6ba5",
+        "evidence_digest": "sha256:75d35b72e1bbecaeb0a0f7a13bcffff4c275b575f6075c823f122b60e3b3acba",
         "line": 386,
         "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
         "rule_id": "legacy_v3_manifest"
@@ -18518,7 +18518,7 @@
     ]
   },
   "repository": {
-    "commit": "80db79598200bd410665994c3eb82b12bf52ebc7",
+    "commit": "36cc0900a8c58b462ec70cf02979be87e8e791b9",
     "tree_digest": "d4f4813e95cc2b1042073530d251ff5b4390f4eb67bf95e6d9498935e68305e7"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -1799,15 +1801,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 return {}
 
         routes = build_fallback_http_routes(FakeServer())
-        tools_route = next(
-            handler
-            for method, pattern, handler, _source, _inject in routes
-            if method == "GET" and pattern.match("/api/tools")
+        self.assertFalse(
+            any(
+                method == "GET" and pattern.match("/api/tools")
+                for method, pattern, _handler, _source, _inject in routes
+            )
         )
-        result = tools_route({}, {})
-
-        self.assertEqual(result["block_module"], "blocks.tool.list")
-        self.assertEqual(result["request_data"]["_method"], "GET")
+        self.assertTrue(
+            any(
+                method == "GET" and pattern.match("/api/health")
+                for method, pattern, _handler, _source, _inject in routes
+            )
+        )
 
     def test_fallback_http_uses_block_when_function_bridge_rejects_unapproved_pack(self):
         from transport.http import DefaultsHttpServer

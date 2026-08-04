@@ -171,7 +171,9 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
     def test_gitlawb_opengateway_includes_mimo_v2_omni(self):
         from domain.ai_client.client import AIClient
+        from domain.ai_client.api_key_store import set_provider_api_key
         from domain.ai_client.providers.gitlawb_opengateway_provider import GitlawbOpengatewayProvider
+        from core_runtime.host_contract import bind_host_contract
 
         AIClient._instance = None
         live_omni = {
@@ -192,19 +194,30 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
-                    "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
                     "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
-                    "GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token",
                 },
                 clear=True,
             ):
-                client = AIClient()
+                saved = set_provider_api_key(
+                    "gitlawb-opengateway",
+                    "test-ogw-token",
+                )
+                self.assertTrue(saved["success"])
+                with bind_host_contract(
+                    {
+                        "profile_id": "default",
+                        "values": {"cloud_providers_enabled": "true"},
+                    }
+                ):
+                    client = AIClient()
 
-            try:
-                models = client.list_models(provider="gitlawb-opengateway")
-                provider, model_name = client.resolve_provider("gitlawb-opengateway/mimo-v2-omni")
-            finally:
-                AIClient._instance = None
+                    try:
+                        models = client.list_models(provider="gitlawb-opengateway")
+                        provider, model_name = client.resolve_provider(
+                            "gitlawb-opengateway/mimo-v2-omni"
+                        )
+                    finally:
+                        AIClient._instance = None
 
         model = next(item for item in models if item["id"] == "gitlawb-opengateway/mimo-v2-omni")
         self.assertEqual(model_name, "mimo-v2-omni")

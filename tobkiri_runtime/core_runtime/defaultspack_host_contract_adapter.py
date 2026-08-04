@@ -1,4 +1,4 @@
-"""Defaultspack compatibility projection onto the global host contracts."""
+"""Defaultspack action projection onto captured global Host contracts."""
 
 from __future__ import annotations
 

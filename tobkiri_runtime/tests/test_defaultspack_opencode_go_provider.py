@@ -72,10 +72,11 @@ class _FakeSseResponse:
 
 
 def _provider(monkeypatch):
-    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-opencode-go-key")
     from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
 
-    return OpencodeGoProvider()
+    provider = OpencodeGoProvider()
+    provider._api_key = "test-opencode-go-key"
+    return provider
 
 
 class _FakeJsonResponse:

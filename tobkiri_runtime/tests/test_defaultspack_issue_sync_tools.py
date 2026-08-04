@@ -145,11 +145,14 @@ def defaultspack_tools_selected(monkeypatch):
     from domain.components import registry as component_registry
     from domain.tool import registry as tool_registry
 
-    selected = frozenset({"defaultspack"})
+    selected = frozenset({"defaultspack", "rumi_default_tools_pack"})
     monkeypatch.setattr(resolved_profile_scope, "effective_pack_ids", lambda: selected)
     monkeypatch.setattr(tool_registry, "effective_pack_ids", lambda: selected)
     monkeypatch.setattr(component_registry, "effective_pack_ids", lambda: selected)
+    component_registry.get_domain_component_registry(force_reload=True)
+    tool_registry.ToolRegistry._instance = None
     yield
+    tool_registry.ToolRegistry._instance = None
 
 
 def test_issue_sync_manifests_load_with_connector_approval_policy(

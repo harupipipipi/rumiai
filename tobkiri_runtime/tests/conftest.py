@@ -1595,3 +1595,51 @@ def provider_model_catalog_selected(monkeypatch):
     component_registry.get_domain_component_registry(force_reload=True)
     yield
     component_registry.get_domain_component_registry(force_reload=True)
+
+
+@pytest.fixture
+def defaultspack_component_catalog_selected(monkeypatch):
+    """Select the finite first-party catalog for legacy component unit tests."""
+
+    from core_runtime import resolved_profile_scope
+    from domain.components import registry as component_registry
+    from domain.tool import registry as tool_registry
+
+    selected = _LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "effective_pack_ids",
+        lambda: selected,
+    )
+    monkeypatch.setattr(component_registry, "effective_pack_ids", lambda: selected)
+    monkeypatch.setattr(tool_registry, "effective_pack_ids", lambda: selected)
+    component_registry.get_domain_component_registry(force_reload=True)
+    tool_registry.ToolRegistry._instance = None
+    yield
+    tool_registry.ToolRegistry._instance = None
+    component_registry.get_domain_component_registry(force_reload=True)
+
+
+@pytest.fixture
+def configured_cloud_provider(monkeypatch, tmp_path):
+    """Configure broker-backed cloud credentials under an explicit Host bind."""
+
+    from core_runtime.host_contract import bind_host_contract
+    from domain.ai_client.api_key_store import set_provider_api_key
+
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_SECRETS_DIR",
+        str(tmp_path / "provider-secrets"),
+    )
+
+    def configure(provider_id: str, value: str) -> None:
+        result = set_provider_api_key(provider_id, value)
+        assert result["success"] is True
+
+    with bind_host_contract(
+        {
+            "profile_id": "default",
+            "values": {"cloud_providers_enabled": "true"},
+        }
+    ):
+        yield configure

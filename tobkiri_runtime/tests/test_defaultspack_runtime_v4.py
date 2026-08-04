@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT_DIGEST = "sha256:" + "9" * 64
 AUTHORITY_BINDINGS = {
-    "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
         "authority-ref:conversation.default"
     ),
     (
@@ -64,9 +64,14 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
         "shell.cli.default",
+        "shell.tauri.default",
     }
     assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v4"
     assert resolved.profile["state"] == "resolved"
+    assert resolved.profile["shell"]["provider_id"] == "shell.tauri.default"
+    assert "shell.cli.default" not in {
+        item["identity"] for item in resolved.lock["effective_set"]
+    }
     assert resolved.profile["profile_authority_snapshot_digest"] == SNAPSHOT_DIGEST
     assert {item["pack_id"] for item in resolved.profile["packs"]} == {
         "defaultspack",

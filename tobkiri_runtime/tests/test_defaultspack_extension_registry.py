@@ -581,7 +581,11 @@ def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):
     assert "hello {{name}}" in prompt["body"]
 
 
-def test_prompt_manager_rejects_spoofed_builtin_extension_prompt(monkeypatch, tmp_path: Path):
+def test_prompt_manager_rejects_spoofed_builtin_extension_prompt(
+    monkeypatch,
+    tmp_path: Path,
+    defaultspack_component_catalog_selected,
+):
     extensions_root = tmp_path / "extensions"
     _write_json(
         extensions_root / "prompts/default_chat/manifest.json",

@@ -519,9 +519,9 @@ def test_fal_discovers_every_page_and_uses_the_universal_queue_protocol(monkeypa
 
     from domain.ai_client.providers.fal_ai_provider import FalAIProvider
 
-    monkeypatch.setenv("FAL_KEY", "fal-key")
     FalAIProvider._INVENTORY_CACHE.clear()
     provider = FalAIProvider()
+    provider._api_key = "fal-key"
     requested = []
     responses = {
         "https://api.fal.ai/v1/models": {

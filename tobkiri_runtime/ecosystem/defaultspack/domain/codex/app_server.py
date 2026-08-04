@@ -1015,6 +1015,7 @@ def _safe_codex_message(message: dict[str, Any]) -> dict[str, Any]:
 def _redact_known_secrets(text: str) -> str:
     from core_runtime.host_contract import host_contract_value
 
+    values: set[str] = set()
     for key in (
         "RUMI_CODEX_ACCESS_TOKEN",
         "CODEX_ACCESS_TOKEN",
@@ -1023,7 +1024,9 @@ def _redact_known_secrets(text: str) -> str:
     ):
         value = host_contract_value(key)
         if value:
-            text = text.replace(value, "[redacted]")
+            values.add(value)
+    for value in sorted(values, key=len, reverse=True):
+        text = text.replace(value, "[redacted]")
     return text
 
 

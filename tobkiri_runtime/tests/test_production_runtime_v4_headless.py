@@ -45,7 +45,7 @@ def _principal(binding: Mapping[str, Any]) -> FunctionPrincipal:
 
 
 def _shell_artifact(catalog: BundledCatalog) -> PackArtifact:
-    manifest = catalog.packs["shell.cli.default"]
+    manifest = catalog.packs["shell.tauri.default"]
     function = manifest["functions"][0]
     contract = manifest["contracts"][0]
     operation = ContractOperation(

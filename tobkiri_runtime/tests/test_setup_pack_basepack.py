@@ -10,12 +10,15 @@ def test_basepack_setup_profile_is_discoverable() -> None:
     selector = PackSelector(repo_root / "ecosystem")
     candidates = {candidate.pack_id: candidate for candidate in selector.scan_candidates()}
 
-    assert "basepack" in candidates
-    candidate = candidates["basepack"]
+    assert "defaultspack" in candidates
+    candidate = candidates["defaultspack"]
     assert candidate.target_pack_id == "defaultspack"
-    assert candidate.display_name == "Basepack"
-    assert candidate.risk_level == "low"
-    assert candidate.all_ok_eligible is True
-    assert candidate.compatibility["target_pack_version"] == ">=2.0.0"
+    assert candidate.display_name == "Tobkiri Defaults v4"
+    assert candidate.risk_level == "medium"
+    assert candidate.all_ok_eligible is False
+    assert candidate.compatibility["target_pack_version"] == ">=4.0.0"
     assert candidate.marketplace["status"] == "verified"
     assert candidate.signing["mode"] == "repository_reviewed"
+    assert candidate.install_prompt["base_pack_id"] == "defaults-basepack"
+    assert candidate.install_prompt["shell_provider_id"] == "shell.tauri.default"
+    assert candidate.install_prompt["profile_id"] == "defaults"

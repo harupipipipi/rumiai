@@ -32,7 +32,7 @@ SNAPSHOT = "sha256:" + "9" * 64
 def _resolved():
     catalog = BundledCatalog.load(BUNDLE)
     bindings = {
-        "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
+        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
         "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
     }
     resolved = resolve_default_profile(
@@ -46,9 +46,14 @@ def _resolved():
     return catalog, resolved
 
 
-def _artifacts(catalog: BundledCatalog) -> tuple[PackArtifact, ...]:
+def _artifacts(
+    catalog: BundledCatalog,
+    selected_pack_ids: set[str],
+) -> tuple[PackArtifact, ...]:
     result = []
     for manifest in catalog.packs.values():
+        if manifest["pack"]["id"] not in selected_pack_ids:
+            continue
         functions = []
         variants = []
         for index, function in enumerate(manifest["functions"]):
@@ -120,7 +125,12 @@ def _capture(tmp_path: Path):
     restarted = store.load_active_snapshot()
     assert restarted.activation == activation
     resolved = restarted.resolved
-    artifacts = _artifacts(catalog)
+    effective_pack_ids = {
+        item["identity"] for item in resolved.lock["effective_set"]
+    }
+    assert "shell.tauri.default" in effective_pack_ids
+    assert "shell.cli.default" not in effective_pack_ids
+    artifacts = _artifacts(catalog, effective_pack_ids)
     principals = {
         (principal.function_id, principal.operation_id): principal
         for artifact in artifacts
@@ -163,7 +173,15 @@ def _capture(tmp_path: Path):
     )
     ceilings = {
         (
-            principals[(edge["caller_function_id"], "present" if edge["caller_function_id"] == "shell.cli.default" else "complete")].principal_id,
+            principals[
+                (
+                    edge["caller_function_id"],
+                    "present"
+                    if edge["caller_function_id"]
+                    == resolved.profile["shell"]["provider_id"]
+                    else "complete",
+                )
+            ].principal_id,
             principals[(edge["target_provider_id"], edge["operation_id"])].principal_id,
         ): AuthorityCeilings(scope, scope, scope)
         for edge in resolved.profile["requested_edges"]

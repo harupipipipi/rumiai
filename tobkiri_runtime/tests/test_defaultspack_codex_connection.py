@@ -372,6 +372,7 @@ def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_p
 
 
 def test_codex_app_server_stdio_smoke_runs_thread_turn_and_streams_events(monkeypatch):
+    from core_runtime.host_contract import bind_host_contract
     from domain.codex import app_server
 
     token = _fresh_token()
@@ -442,7 +443,12 @@ def test_codex_app_server_stdio_smoke_runs_thread_turn_and_streams_events(monkey
             created["killed"] = True
 
     monkeypatch.setattr(app_server.subprocess, "Popen", FakeProcess)
-    with patch.dict(os.environ, {"RUMI_CODEX_ACCESS_TOKEN": token}, clear=False):
+    with bind_host_contract(
+        {
+            "profile_id": "default",
+            "values": {"RUMI_CODEX_ACCESS_TOKEN": token},
+        }
+    ):
         result = app_server.codex_app_server_stdio_smoke(
             prompt="Hello. Return exactly: rumi-codex-smoke-ok",
             cwd=str(ROOT),

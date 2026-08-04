@@ -1145,7 +1145,10 @@ def test_tool_file_reader_ignores_caller_supplied_workspace_root(
     assert "SECRET" not in str(result)
 
 
-def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
+def test_sandbox_exec_ignores_client_supplied_approval_flags(
+    tmp_path,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool.executor import ToolExecutor
 
     result = ToolExecutor().execute(
@@ -1163,7 +1166,11 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path, monkeypatch):
+def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(
+    tmp_path,
+    monkeypatch,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool.executor import ToolExecutor
     from domain.tool import sandbox_tools
     from domain.coding.terminal import Terminal
@@ -1195,7 +1202,11 @@ def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_ru
     assert result["widget"]["error"]["argv"] == ["pwd"]
 
 
-def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, monkeypatch):
+def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(
+    tmp_path,
+    monkeypatch,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
 
@@ -1230,7 +1241,10 @@ def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, mon
     assert fake_api.calls[2]["confirm_destructive"] is True
 
 
-def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_path):
+def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(
+    tmp_path,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
 
@@ -1845,7 +1859,10 @@ def test_package_install_plan_never_executes_packages(tmp_path):
     assert result["widget"]["data"]["command"][-1] == "requests"
 
 
-def test_connector_approval_request_redacts_secret_arguments(tmp_path):
+def test_connector_approval_request_redacts_secret_arguments(
+    tmp_path,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool.executor import ToolExecutor
 
     result = ToolExecutor().execute(
@@ -1861,7 +1878,10 @@ def test_connector_approval_request_redacts_secret_arguments(tmp_path):
     assert "xoxb-secret" not in result["result"]
 
 
-def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(tmp_path):
+def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(
+    tmp_path,
+    defaultspack_component_catalog_selected,
+):
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
 

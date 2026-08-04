@@ -210,7 +210,10 @@ def test_groq_manifest_first_runtime_provider_and_allowlist(monkeypatch):
     assert "groq" in detect_available_providers()
 
 
-def test_cerebras_manifest_first_runtime_provider(monkeypatch):
+def test_cerebras_manifest_first_runtime_provider(
+    monkeypatch,
+    configured_cloud_provider,
+):
     from domain.ai_client.providers import detect_available_providers
 
     provider, models = _catalog_and_models("cerebras")
@@ -222,7 +225,7 @@ def test_cerebras_manifest_first_runtime_provider(monkeypatch):
     assert models == {}
     assert provider["metadata"]["config"]["model_sync"] == "remote_merge"
 
-    monkeypatch.setenv("CEREBRAS_API_KEY", "test-cerebras-key")
+    configured_cloud_provider("cerebras", "test-cerebras-key")
     assert "cerebras" in detect_available_providers()
 
 

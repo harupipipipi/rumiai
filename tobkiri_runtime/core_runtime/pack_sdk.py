@@ -388,10 +388,22 @@ def scaffold_pack(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    # The v3 manifest is authoritative.  Never retain the legacy template's
+    # independently rendered ecosystem.json because its provenance cannot
+    # match the final canonical manifest.
+    template_files.pop("ecosystem.json", None)
     for relative, content in sorted(template_files.items()):
         path = target / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+    from scripts.offline_legacy_projection import (
+        generate_legacy_ecosystem_projection,
+    )
+
+    generate_legacy_ecosystem_projection(
+        manifest_path,
+        target / "ecosystem.json",
+    )
     return manifest_path
 
 

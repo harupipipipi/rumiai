@@ -92,25 +92,18 @@ def test_opengateway_not_auto_registered_with_cloud_opt_in_without_api_key():
                 _reset_client()
 
 
-def test_opengateway_auto_registered_with_cloud_opt_in_and_api_key():
+def test_opengateway_auto_registered_with_cloud_opt_in_and_api_key(
+    configured_cloud_provider,
+):
     from domain.ai_client.client import AIClient
 
     _reset_client()
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.dict(
-            os.environ,
-            {
-                "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
-                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
-                "GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token",
-            },
-            clear=True,
-        ):
-            client = AIClient()
-            try:
-                assert "gitlawb-opengateway" in client._providers
-            finally:
-                _reset_client()
+    configured_cloud_provider("gitlawb-opengateway", "test-ogw-token")
+    client = AIClient()
+    try:
+        assert "gitlawb-opengateway" in client._providers
+    finally:
+        _reset_client()
 
 
 def test_opengateway_base_url_alone_does_not_configure_required_api_key():
@@ -148,25 +141,20 @@ def test_opengateway_base_url_alone_does_not_configure_required_api_key():
         ("gitlawb-opengateway/mimo-v2.5", "mimo-v2.5"),
     ],
 )
-def test_opengateway_resolve_provider(model_ref, model_id):
+def test_opengateway_resolve_provider(
+    model_ref,
+    model_id,
+    configured_cloud_provider,
+):
     from domain.ai_client.client import AIClient
 
     _reset_client()
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch.dict(
-            os.environ,
-            {
-                "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
-                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
-                "GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token",
-            },
-            clear=True,
-        ):
-            client = AIClient()
-            try:
-                provider, resolved_model = client.resolve_provider(model_ref)
-            finally:
-                _reset_client()
+    configured_cloud_provider("gitlawb-opengateway", "test-ogw-token")
+    client = AIClient()
+    try:
+        provider, resolved_model = client.resolve_provider(model_ref)
+    finally:
+        _reset_client()
 
     assert getattr(provider, "provider_id", "") == "gitlawb-opengateway"
     assert resolved_model == model_id

@@ -1,7 +1,7 @@
 {
   "pack_id": "defaultspack",
   "display_name": "Tobkiri Defaults v4",
-  "description": "Installs the explicit defaults-basepack, shell.cli.default, defaultspack, and rumi-file-inspect Profile v4 composition. Approval and activation require exact Authority Kernel records.",
+  "description": "Installs the explicit defaults-basepack, shell.tauri.default, defaultspack, and rumi-file-inspect Profile v4 composition. Approval and activation require exact Authority Kernel records.",
   "target_pack_id": "defaultspack",
   "version": "4.0.0",
   "compatibility": {
@@ -25,7 +25,7 @@
   "install_surfaces": ["profile_v4"],
   "install_prompt": {
     "base_pack_id": "defaults-basepack",
-    "shell_provider_id": "shell.cli.default",
+    "shell_provider_id": "shell.tauri.default",
     "profile_id": "defaults",
     "authority_mode": "authority_kernel_exact_records"
   }

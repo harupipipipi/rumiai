@@ -14,13 +14,39 @@ TRUSTED_BUILTIN_PROMPT_PACK_IDS = {
 }
 
 
+def _has_matching_pack_manifest(pack_root: Path, pack_id: str) -> bool:
+    candidates = (
+        pack_root / "pack.v4.json",
+        pack_root / "v4" / "packs" / f"{pack_id}.pack.v4.json",
+    )
+    for manifest_path in candidates:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            declared = str((manifest.get("pack") or {}).get("id") or "").strip()
+        except (OSError, UnicodeError, ValueError, TypeError):
+            continue
+        if declared == pack_id:
+            return True
+    try:
+        legacy = json.loads(
+            (pack_root / "ecosystem.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
+    return str(legacy.get("pack_id") or legacy.get("id") or "").strip() == pack_id
+
+
 def _bundled_prompt_pack_root(pack_id: str) -> Path | None:
     if pack_id == "defaultspack":
         pack_root = Path(__file__).resolve().parents[2]
-        return pack_root if (pack_root / "ecosystem.json").is_file() else None
+        return pack_root if _has_matching_pack_manifest(pack_root, pack_id) else None
     ecosystem_root = Path(__file__).resolve().parents[3]
     pack_root = ecosystem_root / pack_id
-    return pack_root if pack_root.is_dir() and (pack_root / "ecosystem.json").is_file() else None
+    return (
+        pack_root
+        if pack_root.is_dir() and _has_matching_pack_manifest(pack_root, pack_id)
+        else None
+    )
 
 
 def _source_path_within_pack(source_path: str | Path | None, pack_root: Path | None) -> bool:

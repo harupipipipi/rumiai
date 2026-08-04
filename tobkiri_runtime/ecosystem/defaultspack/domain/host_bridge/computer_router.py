@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..tool_policy.internal_context import tool_server_approval_context_is_internal
-from ..tool.host_contract_adapter import run_host_contract_action
-
+from core_runtime.defaultspack_host_contract_adapter import run_host_contract_action
 from .viewer_broker_client import ViewerBrokerClient
 
 _VIEWER_RECOVERY_MESSAGE = (

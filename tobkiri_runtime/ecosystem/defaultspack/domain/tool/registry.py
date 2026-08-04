@@ -312,10 +312,34 @@ class ToolRegistry:
             path = ecosystem_dir / pack_id
             if (
                 path.is_dir()
-                and (path / "ecosystem.json").is_file()
+                and self._has_selected_pack_manifest(path, pack_id)
             ):
                 roots.append(path)
         return roots
+
+    @staticmethod
+    def _has_selected_pack_manifest(pack_root: Path, pack_id: str) -> bool:
+        """Accept only a finite selected Pack with a matching canonical manifest."""
+
+        candidates = (
+            pack_root / "pack.v4.json",
+            pack_root / "v4" / "packs" / f"{pack_id}.pack.v4.json",
+        )
+        for manifest_path in candidates:
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                declared = str((manifest.get("pack") or {}).get("id") or "").strip()
+            except (OSError, UnicodeError, ValueError, TypeError):
+                continue
+            if declared == pack_id:
+                return True
+        try:
+            legacy = json.loads(
+                (pack_root / "ecosystem.json").read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, ValueError, TypeError):
+            return False
+        return str(legacy.get("pack_id") or "").strip() == pack_id
 
     def _load_pack_tools(self):
         loaded = self._load_extension_tools()
