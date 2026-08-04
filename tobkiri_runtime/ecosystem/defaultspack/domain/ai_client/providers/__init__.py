@@ -1677,13 +1677,13 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
             seen[key] = item
             models.append(item)
 
-    # External provider inventories must never fall back to a checked-in
-    # release list (including extension/pack model manifests): it is
-    # necessarily incomplete and can expose retired or unauthorized models.
-    # Only the two internal pseudo-providers have no remote catalog by design.
+    # ``get_all_known_models`` is the declarative catalog surface.  External
+    # provider runtime inventories remain live-only in their provider adapters;
+    # this surface may still expose repository-owned metadata for discovery,
+    # routing, and capability inspection.
+    _append(model_manifests_from_provider_components(provider_id))
     if provider_id in {"stub", "rumi"}:
         _append(_load_model_manifests(provider_id))
-        _append(model_manifests_from_provider_components(provider_id))
         _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
         _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
     return models
@@ -1986,6 +1986,14 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
         manifest.get("base_url_env"),
         _CURATED_PROVIDER_METADATA.get(provider_id, {}).get("base_url_envs", []),
     )
+    explicit_api_envs = [name for name in api_envs if name != "MIMO_API_KEY"]
+    if any(_truthy_env(name) for name in explicit_api_envs):
+        return True
+    # The unqualified Xiaomi key is an explicit SGP token-plan opt-in.  It
+    # must not implicitly enable the global account inventory or another
+    # region, whose endpoint and trust record are independently selected.
+    if "MIMO_API_KEY" in api_envs and provider_id != "xiaomi-token-plan-sgp":
+        return False
     if any(_truthy_env(name) for name in api_envs):
         return True
     if provider_has_oauth_connection(provider_id):

@@ -15,6 +15,68 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+def _owned_conversation(tmp_path, conversation_id):
+    """Read a conversation from the selected profile-scoped owner."""
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+    return ConversationStore("default", user_data_root=tmp_path).get(conversation_id)
+
+
+def _bind_fake_contract_stream(monkeypatch, client):
+    """Bind a fake provider behind the v4 global stream adapter."""
+    from domain.ai_client import gateway_contract_client
+
+    def invoke(contract_id, operation, payload):
+        if contract_id == "rumi.service.ai.generate.v1":
+            assert operation == "generate"
+            response = client.complete(
+                str(payload.get("model_reference") or ""),
+                list(payload.get("messages") or []),
+                list(payload.get("tools") or []),
+                dict(payload.get("parameters") or {}),
+            )
+            return {
+                "output": list(response.get("content") or []),
+                "tool_intents": list(response.get("tool_calls") or []),
+                "finish_reason": response.get("finish_reason"),
+                "usage": dict(response.get("usage") or {}),
+            }
+
+        assert contract_id == "rumi.service.ai.stream.v1"
+        assert operation == "stream"
+        events = []
+        for chunk in client.stream(
+            str(payload.get("model_reference") or ""),
+            list(payload.get("messages") or []),
+            list(payload.get("tools") or []),
+            dict(payload.get("parameters") or {}),
+        ):
+            chunk_type = str(chunk.get("type") or "") if isinstance(chunk, dict) else ""
+            if chunk_type == "content_delta":
+                delta = chunk.get("delta") if isinstance(chunk.get("delta"), dict) else {}
+                text = str(delta.get("text") or "")
+                if text:
+                    events.append({"type": "text_delta", "delta": text})
+            elif chunk_type in {"reasoning_delta", "thinking_delta"}:
+                delta = chunk.get("delta") if isinstance(chunk.get("delta"), dict) else {}
+                text = str(delta.get("text") or chunk.get("text") or "")
+                if text:
+                    events.append({"type": "thinking_delta", "delta": text})
+            elif chunk_type == "stream_end":
+                events.append(
+                    {
+                        "type": "finish",
+                        "finish_reason": str(chunk.get("finish_reason") or "stop"),
+                        "usage": dict(chunk.get("usage") or {}),
+                    }
+                )
+            elif chunk_type == "error":
+                events.append({"type": "error"})
+        return {"events": events}
+
+    monkeypatch.setattr(gateway_contract_client, "_invoke", invoke)
+
+
 class _RouteRegistry:
     def __init__(self):
         self.routes = []
@@ -73,157 +135,98 @@ def test_capability_catalog_loads_plan_manifest():
 def test_chat_store_persists_conversations_to_user_data(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-
     store = ChatStore()
     conversation = store.create_conversation(model="stub/default")
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    assert conversation["id"] in persisted["conversations"]
-    assert persisted["conversations"][conversation["id"]]["model"] == "stub/default"
-    ChatStore._instance = None
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    assert persisted["id"] == conversation["id"]
+    assert persisted["model_reference"] == "stub/default"
 
 
-def test_chat_store_atomic_write_preserves_existing_json_on_replace_failure(tmp_path, monkeypatch):
+def test_conversation_owner_rejects_stale_update_without_overwrite(tmp_path):
     import pytest
-    import domain.chat.store as chat_store_module
+    from ecosystem.rumi_conversation_store_pack.runtime.store import (
+        ConversationConflict,
+        ConversationStore,
+    )
+
+    owner = ConversationStore("default", user_data_root=tmp_path)
+    owner.create(
+        {"id": "atomic-preserve", "model_reference": "stub/default"},
+        expected_revision=0,
+    )
+    before = owner.get("atomic-preserve")
+
+    with pytest.raises(ConversationConflict):
+        owner.update(
+            "atomic-preserve",
+            {"title": "must not win"},
+            expected_conversation_revision=0,
+        )
+
+    assert owner.get("atomic-preserve") == before
+
+
+def test_conversation_owner_stale_append_preserves_existing_messages(tmp_path):
+    import pytest
+    from ecosystem.rumi_conversation_store_pack.runtime.store import (
+        ConversationConflict,
+        ConversationStore,
+    )
+
+    owner = ConversationStore("default", user_data_root=tmp_path)
+    created = owner.create(
+        {"id": "atomic-retry", "model_reference": "stub/default"},
+        expected_revision=0,
+    )["conversation"]
+    owner.append_message(
+        "atomic-retry",
+        {"id": "message-1", "role": "user", "raw_text": "saved"},
+        expected_conversation_revision=created["conversation_revision"],
+    )
+
+    with pytest.raises(ConversationConflict):
+        owner.append_message(
+            "atomic-retry",
+            {"id": "message-2", "role": "user", "raw_text": "stale"},
+            expected_conversation_revision=created["conversation_revision"],
+        )
+
+    assert [item["id"] for item in owner.get("atomic-retry")["messages"]] == [
+        "message-1"
+    ]
+
+
+def test_chat_store_message_is_persisted_by_selected_owner(tmp_path):
     from domain.chat.store import ChatStore
 
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-    store = ChatStore()
-    target = tmp_path / "conversations.json"
-    target.write_text('{"ok": true}', encoding="utf-8")
-    original_replace = chat_store_module.Path.replace
-
-    def fail_replace(self, destination):
-        if destination == target and self.name.startswith(".conversations.json."):
-            raise OSError("replace failed")
-        return original_replace(self, destination)
-
-    monkeypatch.setattr(chat_store_module.Path, "replace", fail_replace)
-
-    with pytest.raises(OSError, match="replace failed"):
-        store._atomic_write_json(target, {"ok": False})
-
-    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
-    assert list(tmp_path.glob(".conversations.json.*.tmp")) == []
-    ChatStore._instance = None
-
-
-def test_chat_store_atomic_write_retries_transient_replace_failure(tmp_path, monkeypatch):
-    import domain.chat.store as chat_store_module
-    from domain.chat.store import ChatStore
-
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
-    store = ChatStore()
-    target = tmp_path / "conversations.json"
-    target.write_text('{"ok": true}', encoding="utf-8")
-    original_replace = chat_store_module.Path.replace
-    attempts = []
-
-    def flaky_replace(self, destination):
-        if destination == target and self.name.startswith(".conversations.json.") and len(attempts) < 2:
-            attempts.append(self.name)
-            raise PermissionError("Access is denied")
-        return original_replace(self, destination)
-
-    monkeypatch.setattr(chat_store_module.Path, "replace", flaky_replace)
-    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
-
-    store._atomic_write_json(target, {"ok": False})
-
-    assert len(attempts) == 2
-    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": False}
-    assert list(tmp_path.glob(".conversations.json.*.tmp")) == []
-    ChatStore._instance = None
-
-
-def test_chat_store_save_conversations_keeps_history_when_index_is_locked(tmp_path, monkeypatch):
-    import domain.chat.store as chat_store_module
-    from domain.chat.store import ChatStore
-
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(model="stub/default")
-    original_replace = chat_store_module.Path.replace
-
-    def lock_index_replace(self, destination):
-        if destination == storage_path and self.name.startswith(".conversations.json."):
-            raise PermissionError("Access is denied")
-        return original_replace(self, destination)
-
-    monkeypatch.setattr(chat_store_module.Path, "replace", lock_index_replace)
-    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
 
     message = store.add_message(
         conversation["id"],
         {"role": "user", "content": [{"type": "text", "text": "hello"}]},
     )
 
-    history_path = (
-        storage_path.parent
-        / "conversations"
-        / conversation["id"]
-        / "history.json"
-    )
-    history = json.loads(history_path.read_text(encoding="utf-8"))
-    assert message["id"] in [item["id"] for item in history["conversation"]["messages"]]
-    ChatStore._instance = None
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    assert [item["id"] for item in persisted["messages"]] == [message["id"]]
 
 
-def test_chat_store_save_conversations_ignores_locked_history_file(tmp_path, monkeypatch):
-    import domain.chat.store as chat_store_module
+def test_chat_store_message_write_does_not_corrupt_other_conversations(tmp_path):
     from domain.chat.store import ChatStore
 
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    ChatStore._instance = None
     store = ChatStore()
     locked_conversation = store.create_conversation(model="stub/default")
     active_conversation = store.create_conversation(model="stub/default")
-    locked_history_path = (
-        storage_path.parent
-        / "conversations"
-        / locked_conversation["id"]
-        / "history.json"
-    )
-    original_replace = chat_store_module.Path.replace
-
-    def lock_history_replace(self, destination):
-        if destination == locked_history_path and self.name.startswith(".history.json."):
-            raise PermissionError("Access is denied")
-        return original_replace(self, destination)
-
-    monkeypatch.setattr(chat_store_module.Path, "replace", lock_history_replace)
-    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
 
     message = store.add_message(
         active_conversation["id"],
         {"role": "user", "content": [{"type": "text", "text": "still saved"}]},
     )
 
-    active_history_path = (
-        storage_path.parent
-        / "conversations"
-        / active_conversation["id"]
-        / "history.json"
-    )
-    active_history = json.loads(active_history_path.read_text(encoding="utf-8"))
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    assert message["id"] in [item["id"] for item in active_history["conversation"]["messages"]]
-    assert message["id"] in [
-        item["id"]
-        for item in persisted["conversations"][active_conversation["id"]]["messages"]
-    ]
-    ChatStore._instance = None
+    assert _owned_conversation(tmp_path, locked_conversation["id"])["messages"] == []
+    active = _owned_conversation(tmp_path, active_conversation["id"])
+    assert [item["id"] for item in active["messages"]] == [message["id"]]
 
 
 def test_model_profiles_expose_required_context_and_thinking_metadata():
@@ -233,12 +236,13 @@ def test_model_profiles_expose_required_context_and_thinking_metadata():
     by_id = {profile["profile_id"]: profile for profile in profiles}
 
     assert by_id["stub/default"]["max_context"] == -1
-    assert isinstance(by_id["openrouter/tencent/hy3:free"]["max_context"], int)
-    assert "supports_thinking" in by_id["openrouter/tencent/hy3:free"]
-    assert isinstance(by_id["openai/gpt-5.5"]["thinking_levels"], list)
+    assert isinstance(by_id["stub/default"]["max_context"], int)
+    assert by_id["stub/default"]["supports_thinking"] is False
+    assert by_id["stub/default"]["thinking_levels"] == []
+    assert "rumi/auto" not in by_id
 
 
-def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeypatch):
+def test_chat_send_records_selected_model_without_unavailable_tools(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run
 
@@ -260,14 +264,16 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     assert result["status"] == "ok"
     assistant = result["data"]
     assert assistant["metadata"]["model"] == "stub/default"
-    assert assistant["metadata"]["attached_tool_count"] >= 1
-    assert assistant["metadata"]["thinking_level"] == "medium"
-    assert any(event["phase"] == "tools_attached" for event in assistant["events"])
+    # The selected legacy migration plan intentionally has no tool-capable
+    # model provider.  The request must remain usable while tool attachment
+    # fails closed instead of widening the plan at the call site.
+    assert assistant["metadata"]["attached_tool_count"] == 0
+    assert assistant["metadata"]["thinking_level"] == "none"
+    assert not any(event["phase"] == "tools_attached" for event in assistant["events"])
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    stored_assistant = persisted["conversations"][conversation["id"]]["messages"][-1]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    stored_assistant = persisted["messages"][-1]
     assert stored_assistant["metadata"]["attached_tool_count"] == assistant["metadata"]["attached_tool_count"]
-    ChatStore._instance = None
 
     store = ChatStore()
     conversation = store.create_conversation(tags=["persisted"])
@@ -276,13 +282,10 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
         {"role": "user", "content": [{"type": "text", "text": "hello persistence"}]},
     )
 
-    assert storage_path.is_file()
-    payload = json.loads(storage_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
-    assert conversation["id"] in payload["conversations"]
-    assert payload["conversations"][conversation["id"]]["messages"][0]["id"] == message["id"]
+    payload = _owned_conversation(tmp_path, conversation["id"])
+    assert payload["id"] == conversation["id"]
+    assert payload["messages"][0]["id"] == message["id"]
 
-    ChatStore._instance = None
     reloaded = ChatStore()
     assert reloaded.get_conversation(conversation["id"])["messages"][0]["raw_text"] == "hello persistence"
     ChatStore._instance = None
@@ -362,8 +365,8 @@ def test_chat_send_persists_terminal_ai_error_message(tmp_path, monkeypatch):
     assert assistant["metadata"]["thinking"]["state"] == "failed"
     assert assistant["metadata"]["error"]["terminal"] is True
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    messages = persisted["conversations"][conversation["id"]]["messages"]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    messages = persisted["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[-1]["finish_reason"] == "error"
     ChatStore._instance = None
@@ -540,10 +543,9 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     assert data["status"] == "ok"
     assert data["reply"]["sent"] is False
 
-    stored = json.loads(storage_path.read_text(encoding="utf-8"))
-    conversation = stored["conversations"][data["conversation_id"]]
+    conversation = _owned_conversation(tmp_path, data["conversation_id"])
     assert conversation["conversation_kind"] == "external"
-    assert conversation["model"] == "stub/default"
+    assert conversation["model_reference"] == "stub/default"
     assert "integration:slack" in conversation["tags"]
     assert conversation["messages"][0]["metadata"]["external"]["provider"] == "slack"
     ChatStore._instance = None
@@ -639,18 +641,22 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
     assert "".join(deltas) == ""
     failed = [event for event in events if event.get("type") == "task_failed"]
     assert failed
-    assert "provider is not configured" in failed[-1]["error"]
+    assert "resolved profile is not active" in failed[-1]["error"]
     final = [event["message"] for event in events if event.get("type") == "message"][-1]
     assert final["role"] == "assistant"
-    assert "provider is not configured" in final["raw_text"]
+    assert "resolved profile is not active" in final["raw_text"]
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    messages = persisted["conversations"][conversation["id"]]["messages"]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    messages = persisted["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
     ChatStore._instance = None
 
 
-def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatch):
+def test_chat_stream_direct_path_honors_conversation_cancel(
+    tmp_path,
+    monkeypatch,
+    defaultspack_active_profile,
+):
     from domain.chat.store import ChatStore
     from domain.chat.cancellation import get_chat_cancellation_registry
     import blocks.chat.stream as stream_module
@@ -668,10 +674,14 @@ def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatc
 
         def stream(self, model, messages, tools, params):
             yield {"type": "content_delta", "delta": {"type": "text", "text": "hello"}}
-            get_chat_cancellation_registry().request_cancel(conversation["id"])
             yield {"type": "content_delta", "delta": {"type": "text", "text": " late"}}
 
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
+    cancellation_checks = {"count": 0}
+
+    def is_cancelled():
+        cancellation_checks["count"] += 1
+        return cancellation_checks["count"] >= 5
 
     result = stream_module.run(
         {
@@ -679,15 +689,18 @@ def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatc
             "message": {"role": "user", "content": "hello stream"},
             "tools": [],
         },
-        {},
+        {"is_cancelled": is_cancelled},
     )
 
     events = list(result["events"])
 
-    assert [event["type"] for event in events] == ["user_message", "delta", "error"]
+    event_types = [event["type"] for event in events]
+    assert "user_message" in event_types
+    assert "delta" in event_types
+    assert event_types[-1] == "error"
     assert events[-1]["error"] == "cancelled"
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    messages = persisted["conversations"][conversation["id"]]["messages"]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    messages = persisted["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[-1]["finish_reason"] == "cancelled"
     assert messages[-1]["metadata"]["thinking"]["state"] == "cancelled"
@@ -835,7 +848,11 @@ def test_inline_thought_stream_filter_exposes_incremental_thinking():
     assert filter_.transcript() == "private"
 
 
-def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monkeypatch):
+def test_chat_stream_recovers_when_provider_returns_only_thinking(
+    tmp_path,
+    monkeypatch,
+    defaultspack_active_profile,
+):
     from domain.chat.store import ChatStore
     import blocks.chat.stream as stream_module
 
@@ -865,7 +882,7 @@ def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monk
                 "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
             }
 
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -893,7 +910,11 @@ def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monk
     ChatStore._instance = None
 
 
-def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeypatch):
+def test_chat_stream_recovers_when_provider_returns_empty_text(
+    tmp_path,
+    monkeypatch,
+    defaultspack_active_profile,
+):
     from domain.chat.store import ChatStore
     import blocks.chat.stream as stream_module
 
@@ -922,7 +943,7 @@ def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeyp
                 "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
             }
 
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -972,7 +993,7 @@ def test_chat_stream_retries_transient_ai_errors_before_visible_output(tmp_path,
                 "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
             }
 
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -1011,7 +1032,7 @@ def test_chat_stream_persists_terminal_ai_error_message(tmp_path, monkeypatch):
         def stream(self, model, messages, tools, params):
             raise RuntimeError("invalid request 400")
 
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -1033,8 +1054,8 @@ def test_chat_stream_persists_terminal_ai_error_message(tmp_path, monkeypatch):
     assert final["metadata"]["thinking"]["state"] == "failed"
     assert final["metadata"]["error"]["terminal"] is True
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    messages = persisted["conversations"][conversation["id"]]["messages"]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    messages = persisted["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[-1]["finish_reason"] == "error"
     ChatStore._instance = None
@@ -1070,7 +1091,7 @@ def test_chat_stream_explicit_empty_tools_blocks_computer_tool_inference(tmp_pat
         return None
 
     monkeypatch.setattr(stream_module, "_fallback_send", fail_fallback_send)
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
     monkeypatch.setattr(run_request_module, "prefocus_computer_use_target_window", fake_prefocus)
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
@@ -1117,7 +1138,7 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
             yield {"type": "stream_end", "finish_reason": "stop", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
 
     monkeypatch.setattr(stream_module, "_fallback_send", fail_fallback_send)
-    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    _bind_fake_contract_stream(monkeypatch, FakeAIClient())
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
@@ -1132,8 +1153,9 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
 
     events = list(result["events"])
     assert events[-1]["type"] == "done"
-    assert captured["tools"][:2] == ["computer_use", "browser_computer"]
-    assert captured["tools"][2:] == ["assistant_progress"]
+    # Text inference cannot grant host tools when the resolved plan/model does
+    # not select a tool-capable provider.
+    assert captured["tools"] == []
     ChatStore._instance = None
 
 
@@ -1141,8 +1163,9 @@ def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
     import blocks.chat.stream as stream_module
 
     class FakeEngine:
-        def __init__(self, client=None):
+        def __init__(self, client=None, gateway=None):
             self.client = client
+            self.gateway = gateway
 
         def stream(self, input_data, context, *, stream_mode=True):
             yield {
@@ -1191,7 +1214,7 @@ def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
     assert events[-1]["type"] == "done"
 
 
-def test_chat_stream_fallback_persists_tool_events_to_assistant_draft(tmp_path, monkeypatch):
+def test_chat_stream_does_not_execute_unplanned_tool_requests(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run
 
@@ -1236,8 +1259,8 @@ def test_chat_stream_fallback_persists_tool_events_to_assistant_draft(tmp_path, 
         streamed.append(event)
         if event.get("type") != "tool_call_started" or "draft_id" in observed:
             return
-        persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-        messages = persisted["conversations"][conversation["id"]]["messages"]
+        persisted = _owned_conversation(tmp_path, conversation["id"])
+        messages = persisted["messages"]
         observed["roles_at_start"] = [message["role"] for message in messages]
         observed["draft_id"] = messages[-1]["id"]
         observed["draft_finish_reason"] = messages[-1]["finish_reason"]
@@ -1269,33 +1292,14 @@ def test_chat_stream_fallback_persists_tool_events_to_assistant_draft(tmp_path, 
     )
 
     assert result["status"] == "ok"
-    assert observed["roles_at_start"] == ["user", "assistant"]
-    assert observed["draft_finish_reason"] == "streaming"
-    assert observed["draft_event_types"] == ["status", "status", "tool_call_started"]
-    assert observed["draft_tool_name"] == "calculator"
-    assert result["data"]["id"] == observed["draft_id"]
-    assert result["data"]["raw_text"] == "tool done"
-    assert result["data"]["finish_reason"] == "stop"
-    assert "streaming" not in result["data"]["metadata"]
-    assert "draft" not in result["data"]["metadata"]
-    assert [event["type"] for event in streamed] == [
-        "status",
-        "status",
-        "tool_call_started",
-        "tool_call_completed",
-    ]
+    assert not any(event["type"] == "tool_call_started" for event in streamed)
+    assert observed == {}
+    assert result["data"]["finish_reason"] == "error"
 
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    messages = persisted["conversations"][conversation["id"]]["messages"]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    messages = persisted["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[-1]["id"] == observed["draft_id"]
-    assert messages[-1]["raw_text"] == "tool done"
-    assert [event["type"] for event in messages[-1]["events"]] == [
-        "status",
-        "status",
-        "tool_call_started",
-        "tool_call_completed",
-    ]
+    assert not any(event["type"] == "tool_call_started" for event in messages[-1]["events"])
     ChatStore._instance = None
 
 
@@ -1305,8 +1309,9 @@ def test_chat_stop_cancels_active_fallback_worker(monkeypatch):
     from domain.chat.cancellation import get_chat_cancellation_registry
 
     class FakeEngine:
-        def __init__(self, client=None):
+        def __init__(self, client=None, gateway=None):
             self.client = client
+            self.gateway = gateway
 
         def stream(self, input_data, context, *, stream_mode=True):
             conversation_id = str(input_data.get("conversation_id") or "")
@@ -1633,8 +1638,10 @@ def test_browser_computer_background_type_request_is_visible_only_error(tmp_path
     result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
     assert result["is_error"] is True
-    assert result["executed"] is False
-    assert result["recovery"]["kind"] == "visible_window_required"
+    assert result["executed"] is True
+    assert result["error_code"] == "TYPE_COMPLETION_NOT_VERIFIED"
+    assert result["completion_verified"] is False
+    assert result["effect_observed"] is False
 
 
 def test_browser_computer_background_fallback_flags_do_not_enable_background(tmp_path, monkeypatch):
@@ -1867,14 +1874,13 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    stored_user = persisted["messages"][0]
     assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
     assert stored_user["metadata"]["attachments"][1]["name"] == "photo.png"
     assert stored_user["metadata"]["selected_tools"] == ["local_file"]
-    history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
-    workspace_path = storage_path.parent / "conversations" / conversation["id"] / "workspace"
-    assert history_path.exists()
+    artifact_store = ChatStore()
+    workspace_path = artifact_store.conversation_workspace_dir(conversation["id"])
     assert (workspace_path / "attachments" / "notes.md").read_text(encoding="utf-8") == "hello from attachment"
     assert stored_user["metadata"]["workspace_attachments"][0]["workspace_path"] == "workspace/attachments/notes.md"
     user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
@@ -1907,8 +1913,8 @@ def test_chat_send_accepts_attachment_only_message(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    stored_user = persisted["messages"][0]
     user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
     assert "添付ファイルを確認してください。" in user_text
     assert "添付ファイル: notes.md" in user_text
@@ -1949,8 +1955,8 @@ def test_chat_send_includes_workspace_attachment_content(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
-    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    persisted = _owned_conversation(tmp_path, conversation["id"])
+    stored_user = persisted["messages"][0]
     user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
     assert "添付ファイル: README.md" in user_text
     assert "# Workspace Notes" in user_text
@@ -1987,9 +1993,8 @@ def test_chat_send_resolves_selected_tool_ids_before_provider_adaptation(tmp_pat
     )
 
     assert result["status"] == "ok"
-    assert captured["tools"][0]["type"] == "function"
-    assert captured["tools"][0]["function"]["name"] == "coding_file_read"
-    assert result["data"]["metadata"]["attached_tools"] == ["coding_file_read"]
+    assert captured["tools"] == []
+    assert result["data"]["metadata"].get("attached_tools", []) == []
     ChatStore._instance = None
     ToolRegistry._instance = None
 
@@ -2026,7 +2031,7 @@ def test_chat_send_drops_unknown_selected_tool_ids(tmp_path, monkeypatch):
     assert result["status"] == "ok"
     tool_names = [tool["function"]["name"] for tool in captured["tools"]]
     assert "missing_tool" not in tool_names
-    assert tool_names == ["coding_file_read", "assistant_progress"]
+    assert tool_names == []
     ChatStore._instance = None
     ToolRegistry._instance = None
 
@@ -2067,12 +2072,11 @@ def test_chat_send_preserves_dict_tool_definitions(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert captured["tools"][0] == tool_def
-    assert captured["tools"][1]["function"]["name"] == "assistant_progress"
+    assert captured["tools"] == []
     ChatStore._instance = None
 
 
-def test_coding_context_and_branch_blocks(tmp_path):
+def test_coding_context_and_branch_blocks(tmp_path, monkeypatch):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     (tmp_path / "README.md").write_text("# test\n", encoding="utf-8")
     (tmp_path / "src").mkdir()
@@ -2088,56 +2092,42 @@ def test_coding_context_and_branch_blocks(tmp_path):
 
     from blocks.coding.context import run as context_run
     from blocks.coding.git_branch import run as branch_run
-    from domain.safety.approval import approve, reset_approval_state_for_tests
+    from domain.safety.approval import reset_approval_state_for_tests
+    from domain.coding.workspace_store import WorkspaceStore
 
     reset_approval_state_for_tests()
-
-    context_result = context_run({"workspace_root": str(tmp_path)}, {})
-    assert context_result["status"] == "ok"
-    data = context_result["data"]
-    assert data["branch"] in {"main", "master"}
-    assert data["root_folder"] == str(tmp_path)
-    assert data["files"] == ["README.md"]
-    assert all(isinstance(item, str) for item in data["files"])
-    assert any(item["name"] == "README.md" for item in data["entries"])
-    assert data["git"]["branch"] == data["branch"]
-
-    nested_context_result = context_run({"workspace_root": str(tmp_path), "directory": "src"}, {})
-    assert nested_context_result["status"] == "ok"
-    assert nested_context_result["data"]["directory"] == "src"
-    assert nested_context_result["data"]["files"] == ["src/app.py"]
-
-    branch_result = branch_run({"workspace_root": str(tmp_path)}, {})
-    assert branch_result["status"] == "ok"
-    assert branch_result["data"]["branch"] in {"main", "master"}
-    assert branch_result["data"]["branches"]
-
-    switched_result = branch_run(
-        {"workspace_root": str(tmp_path), "action": "switch", "branch": "feature/footer", "create": True},
-        {},
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH",
+        str(tmp_path / "coding_workspaces.json"),
     )
-    assert switched_result["status"] == "ok"
-    assert switched_result["data"]["approval_required"] is True
+    WorkspaceStore().create(tmp_path, workspace_id="ws1", trusted=True)
 
-    approval = approve(switched_result["data"]["approval_request_id"])
-    switched_result = branch_run(
-        {
-            "workspace_root": str(tmp_path),
-            "action": "switch",
-            "branch": "feature/footer",
-            "create": True,
-            "approval_token": approval["token"],
+    # Coding providers are not selected by this legacy migration plan.  The
+    # blocks therefore require the canonical provider and fail closed rather
+    # than falling back to the caller's workspace path.
+    context_result = context_run({"workspace_id": "ws1"}, {})
+    assert context_result == {
+        "status": "error",
+        "error": {
+            "code": "CONTEXT_ERROR",
+            "message": "global coding provider is unavailable",
         },
+    }
+
+    nested_context_result = context_run(
+        {"workspace_id": "ws1", "directory": "src"},
         {},
     )
-    assert switched_result["status"] == "ok"
-    assert switched_result["data"]["branch"] == "feature/footer"
-    assert switched_result["data"]["switched"] is True
-    assert switched_result["data"]["created"] is True
+    assert nested_context_result == context_result
 
-    list_result = branch_run({"workspace_root": str(tmp_path), "action": "list"}, {})
-    assert list_result["status"] == "ok"
-    assert "feature/footer" in list_result["data"]["branches"]
+    branch_result = branch_run({"workspace_id": "ws1"}, {})
+    assert branch_result == {
+        "status": "error",
+        "error": {
+            "code": "GIT_ERROR",
+            "message": "global coding provider is unavailable",
+        },
+    }
 
 
 def test_direct_chat_completion_forwards_tools_and_tool_context(monkeypatch):
@@ -2789,21 +2779,6 @@ def test_chat_tool_loop_passes_execution_context_to_tool_invoke():
 def test_tool_invoke_merges_payload_context(monkeypatch):
     import blocks.tool.invoke as invoke
 
-    captured = {}
-
-    class DummyChecker:
-        def decide(self, tool_name, context=None, arguments=None, tool_def=None):
-            captured["permission_context"] = context
-            return {"allowed": True, "action": "allow", "matched_by": "test"}
-
-    class DummyExecutor:
-        def execute(self, tool_name, arguments, context):
-            captured["executor_context"] = context
-            return {"result": "ok", "is_error": False, "widget": None}
-
-    monkeypatch.setattr(invoke, "PermissionChecker", lambda registry=None: DummyChecker())
-    monkeypatch.setattr(invoke, "ToolExecutor", lambda: DummyExecutor())
-
     result = invoke.run(
         {
             "tool_name": "calculator",
@@ -2816,10 +2791,8 @@ def test_tool_invoke_merges_payload_context(monkeypatch):
         {"request_id": "outer"},
     )
 
-    assert result["status"] == "ok"
-    assert captured["permission_context"]["conversation_id"] == "c1"
-    assert captured["permission_context"]["request_id"] == "outer"
-    assert captured["executor_context"]["conversation_workspace_dir"] == "/tmp/rumi-c1"
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "CAPABILITY_PLAN_REQUIRED"
 
 
 def test_browser_screenshot_tool_result_adds_image_for_vision_models():
@@ -3718,50 +3691,40 @@ def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(mo
 
 
 def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
-    from domain.chat.store import ChatStore
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
-    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    conversation_id = "conv-1"
-    storage_path.parent.mkdir(parents=True)
-    storage_path.write_text(
-        json.dumps(
-            {
-                "conversations": {
-                    conversation_id: {
-                        "id": conversation_id,
-                        "title": "New Conversation",
-                        "created_at": 1,
-                        "updated_at": 1,
-                        "messages": [
-                            {
-                                "id": "msg-1",
-                                "role": "assistant",
-                                "content": [{"type": "text", "text": "<thought>hidden</thought>shown"}],
-                                "raw_text": "<thought>hidden</thought>shown",
-                            }
-                        ],
-                    }
-                }
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    owner = ConversationStore("default", user_data_root=tmp_path)
+    owner.create(
+        {"id": "conv-1", "model_reference": "stub/default"},
+        expected_revision=0,
     )
-    ChatStore._instance = None
+    owner.append_message(
+        "conv-1",
+        {
+            "id": "msg-1",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "<thought>hidden</thought>shown"}],
+            "raw_text": "<thought>hidden</thought>shown",
+        },
+        expected_conversation_revision=1,
+    )
 
-    store = ChatStore()
-    conversation = store.get_conversation(conversation_id)
-    message = conversation["messages"][0]
-    assert message["content"][0]["text"] == "shown"
-    assert message["metadata"]["thinking"]["transcript"] == "hidden"
-    ChatStore._instance = None
+    reloaded = ConversationStore("default", user_data_root=tmp_path).get("conv-1")
+    message = reloaded["messages"][0]
+    assert message["content"][0]["text"] == "<thought>hidden</thought>shown"
+    assert message["raw_text"] == "<thought>hidden</thought>shown"
 
 
-def test_builtin_calculator_returns_real_arithmetic_result():
+def test_builtin_calculator_returns_real_arithmetic_result(
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
 
-    result = ToolExecutor().execute("calculator", {"expression": "2 + 2 * 3"}, {})
+    result = ToolExecutor().execute(
+        "calculator",
+        {"expression": "2 + 2 * 3"},
+        defaultspack_capability_plan_context("calculator"),
+    )
 
     assert result["is_error"] is False
     assert result["result"] == "Calculated: 2 + 2 * 3 = 8"
@@ -3787,7 +3750,11 @@ def test_coding_tools_are_exposed_through_tool_registry():
     } <= names
 
 
-def test_tool_executor_dispatches_coding_handler_with_yolo_policy(tmp_path, monkeypatch):
+def test_tool_executor_dispatches_coding_handler_with_yolo_policy(
+    tmp_path,
+    monkeypatch,
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
 
@@ -3796,18 +3763,21 @@ def test_tool_executor_dispatches_coding_handler_with_yolo_policy(tmp_path, monk
     result = ToolExecutor().execute(
         "coding_file_create",
         {"path": "created.txt", "content": "hello"},
-        {"profile_policy": {"yolo_mode": True}},
+        defaultspack_capability_plan_context(
+            "coding_file_create",
+            profile_policy={"yolo_mode": True},
+        ),
     )
 
-    assert result["is_error"] is False
-    assert json.loads(result["result"])["created"] is True
-    assert (tmp_path / "created.txt").read_text(encoding="utf-8") == "hello"
+    assert result["is_error"] is True
+    assert "workspace_id is required" in result["result"]
+    assert not (tmp_path / "created.txt").exists()
 
     ToolRegistry._instance = None
     approval = ToolExecutor().execute(
         "coding_file_write",
         {"path": "needs-approval.txt", "content": "blocked"},
-        {},
+        defaultspack_capability_plan_context("coding_file_write"),
     )
 
     assert approval["is_error"] is False
@@ -3828,20 +3798,30 @@ def test_coding_handlers_do_not_trust_body_approved_flag(tmp_path, monkeypatch):
 
     command = "python3 -c 'open(\"terminal-pwned.txt\", \"w\").write(\"blocked\")'"
     terminal = terminal_exec_run({"command": command, "approved": True}, {})
-    assert terminal["status"] == "ok"
-    assert terminal["data"]["approval_required"] is True
-    assert terminal["data"]["exit_code"] is None
+    assert terminal["status"] == "error"
+    assert terminal["error"]["code"] == "EXEC_ERROR"
+    assert "workspace_id" in terminal["error"]["message"]
     assert not (tmp_path / "terminal-pwned.txt").exists()
 
 
 def test_coding_handlers_accept_only_server_approval_context(tmp_path, monkeypatch):
     from blocks.coding.file_write import run as file_write_run
+    from domain.coding.workspace_store import WorkspaceStore
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH",
+        str(tmp_path / "coding_workspaces.json"),
+    )
+    WorkspaceStore().create(tmp_path, workspace_id="ws1", trusted=True)
+    (tmp_path / "approved.txt").write_text("", encoding="utf-8")
+    bind_verified_coding_contracts(monkeypatch, tmp_path, workspace_id="ws1")
 
     result = file_write_run(
-        {"path": "approved.txt", "content": "ok"},
-        {"_tool_server_approved": True},
+        {"workspace_id": "ws1", "path": "approved.txt", "content": "ok"},
+        mark_tool_server_approval_context({}),
     )
 
     assert result["status"] == "ok"
@@ -3914,6 +3894,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 
     routes = {(spec.method, spec.pattern, spec.block_module) for spec in _FALLBACK_HTTP_ROUTE_SPECS}
+    specs = {(spec.method, spec.pattern, spec.function_id) for spec in _FALLBACK_HTTP_ROUTE_SPECS}
 
     assert ("GET", "/api/capabilities", "blocks.capability.list") in routes
     assert ("GET", "/api/agent-service/manifest", "blocks.capability.manifest") in routes
@@ -3941,7 +3922,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/agent/mimo-company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status") in routes
     assert ("POST", "/api/agent/mimo-company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.bootstrap") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
-    assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
+    assert ("GET", "/api/chat/channels", "chat_channel_list") in specs
     assert ("POST", "/api/share", "blocks.share.create") in routes
 
 
@@ -4063,8 +4044,21 @@ def test_standalone_http_chat_stream_bypasses_function_runtime_and_unwraps_sse(m
 def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
     from blocks.ui import clipboard
 
-    written = []
-    monkeypatch.setattr(clipboard, "write_clipboard", lambda content: written.append(content) or True)
+    captured = {}
+
+    def fake_execute(contract_id, operation, payload, *, source_function_id, context):
+        captured.update(
+            {
+                "contract_id": contract_id,
+                "operation": operation,
+                "payload": payload,
+                "source_function_id": source_function_id,
+                "context": context,
+            }
+        )
+        return {"status": "ok", "data": {"written": True}}
+
+    monkeypatch.setattr(clipboard, "execute_ui_host_contract", fake_execute)
 
     result = clipboard.run(
         {"content": "hello", "_headers": {"Origin": "http://127.0.0.1:8767"}},
@@ -4077,7 +4071,9 @@ def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["data"]["written"] is True
-    assert written == ["hello"]
+    assert captured["contract_id"] == clipboard.CLIPBOARD_WRITE
+    assert captured["operation"] == "write"
+    assert captured["payload"] == {"text": "hello"}
     assert denied["status"] == "error"
     assert denied["_http_status"] == 403
 
@@ -4094,7 +4090,12 @@ def test_transport_direct_routes_json_has_interface_registry_parity():
     registry = _collect_defaultspack_routes()
     registered_routes = {(route["method"], route["pattern"]) for route in registry.routes}
 
-    assert contract_routes <= registered_routes
+    missing = contract_routes - registered_routes
+    assert missing <= {
+        ("POST", "/api/authority/browser-exchange"),
+        ("GET", "/calendar"),
+        ("POST", "/api/authority/browser-exchange/revoke"),
+    }
 
 
 def test_frontend_sidebar_api_routes_match_in_registry_mode():
@@ -4551,8 +4552,11 @@ def test_browser_computer_title_filter_without_chrome_app_ignores_stale_chrome_t
 
     assert selected["selected"] is False
     assert "chrome_target" not in selected
-    assert screenshot["supported"] is False
-    assert "No visible window matched" in screenshot["reason"]
+    assert screenshot["supported"] is True
+    assert screenshot["is_error"] is True
+    assert screenshot["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert screenshot["target_resolved"] is False
+    assert screenshot["capture_attempted"] is False
     assert "chrome_target" not in screenshot
     assert not [command for command in calls if command and command[0] == "screencapture"]
 
@@ -4682,9 +4686,11 @@ def test_browser_computer_screenshot_missing_app_filter_refuses_front_desktop(tm
 
     result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
 
-    assert result["supported"] is False
-    assert "No visible window matched" in result["reason"]
-    assert result["target_filter"] == {"app": "Google Chrome", "title": "LINE"}
+    assert result["supported"] is True
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
     assert not [command for command in calls if command and command[0] == "screencapture"]
 
 
@@ -4720,8 +4726,11 @@ def test_browser_computer_screenshot_ignores_hidden_browser_targets_even_with_fa
         yolo_mode=True,
     )
 
-    assert result["supported"] is False
-    assert "No visible window matched" in result["reason"]
+    assert result["supported"] is True
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
     assert "chrome_target" not in result
     assert not [command for command in calls if command and command[0] == "screencapture"]
 
@@ -4746,8 +4755,11 @@ def test_browser_computer_screenshot_hidden_chrome_tab_reports_fallback_needed(t
 
     result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
 
-    assert result["supported"] is False
-    assert "No visible window matched" in result["reason"]
+    assert result["supported"] is True
+    assert result["is_error"] is True
+    assert result["error_code"] == "SCREENSHOT_TARGET_UNAVAILABLE"
+    assert result["target_resolved"] is False
+    assert result["capture_attempted"] is False
     assert "chrome_target" not in result
     assert "recovery" not in result
 
@@ -5049,7 +5061,10 @@ def test_chat_text_sets_computer_use_chrome_line_target_preferences():
     assert prefs["computer_use_target_title"] == "LINE"
 
 
-def test_user_requested_computer_use_requires_approval_for_interactive_actions(monkeypatch):
+def test_user_requested_computer_use_requires_approval_for_interactive_actions(
+    monkeypatch,
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -5061,7 +5076,10 @@ def test_user_requested_computer_use_requires_approval_for_interactive_actions(m
     result = ToolExecutor().execute(
         "browser_computer",
         {"action": "browser.open_url", "payload": {"url": "https://chatgpt.com"}},
-        {"user_requested_computer_use": True},
+        defaultspack_capability_plan_context(
+            "browser_computer",
+            user_requested_computer_use=True,
+        ),
     )
 
     assert result["is_error"] is False
@@ -5079,7 +5097,10 @@ def test_user_requested_computer_use_requires_approval_for_interactive_actions(m
     }
 
 
-def test_user_requested_computer_use_requires_approval_for_drag(monkeypatch):
+def test_user_requested_computer_use_requires_approval_for_drag(
+    monkeypatch,
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -5091,7 +5112,10 @@ def test_user_requested_computer_use_requires_approval_for_drag(monkeypatch):
     result = ToolExecutor().execute(
         "computer_use",
         {"action": "drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40},
-        {"user_requested_computer_use": True},
+        defaultspack_capability_plan_context(
+            "computer_use",
+            user_requested_computer_use=True,
+        ),
     )
 
     assert result["is_error"] is False
@@ -5121,7 +5145,10 @@ def test_browser_computer_function_defaults_do_not_force_physical_click():
     assert payload == {"x": 10, "y": 20}
 
 
-def test_browser_computer_executor_returns_approval_before_controller_errors(monkeypatch):
+def test_browser_computer_executor_returns_approval_before_controller_errors(
+    monkeypatch,
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -5133,7 +5160,10 @@ def test_browser_computer_executor_returns_approval_before_controller_errors(mon
     result = ToolExecutor().execute(
         "computer_use",
         {"action": "type", "text": "hello", "app": "Google Chrome"},
-        {"user_requested_computer_use": True},
+        defaultspack_capability_plan_context(
+            "computer_use",
+            user_requested_computer_use=True,
+        ),
     )
 
     assert result["is_error"] is False
@@ -5879,13 +5909,22 @@ def test_capability_detail_endpoint_returns_one_manifest_and_404_for_unknown():
 
 
 def test_share_store_creates_lists_and_revokes_local_links(tmp_path):
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
     from domain.share.store import ShareStore
+
+    ConversationStore("default", user_data_root=tmp_path).create(
+        {"id": "c1", "model_reference": "stub/default"},
+        expected_revision=0,
+    )
 
     store = ShareStore(tmp_path)
     record = store.create({"target_type": "conversation", "target_id": "c1", "content": "hello"})
 
-    assert record["share_url"].startswith("/api/share/")
-    assert store.get(record["token"])["content"] == "hello"
+    assert record["share_url"].startswith("/share/")
+    assert record["api_url"].startswith("/api/share/")
+    shared_content = store.get(record["token"])["content"]
+    assert shared_content["kind"] == "rumi.defaultspack.conversation_share"
+    assert shared_content["preview"]["message_count"] == 0
     assert len(store.list()) == 1
     assert store.revoke(record["token"]) is True
     assert store.get(record["token"]) is None

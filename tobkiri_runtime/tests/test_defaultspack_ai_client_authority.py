@@ -11,6 +11,10 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.usefixtures(
+    "wave7_owner_bindings", "provider_model_catalog_selected"
+)
+
 
 class _FakeProvider:
     def __init__(self):

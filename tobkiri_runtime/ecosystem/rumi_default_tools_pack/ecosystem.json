@@ -6,7 +6,13 @@
     "name": "Rumi Default Tools Pack",
     "description": "Concrete AI-facing default tools separated from defaultspack core.",
     "author": "Rumi AI Team",
-    "license": "MIT"
+    "license": "MIT",
+    "security_boundary": {
+      "host_execution": false,
+      "self_approval": false,
+      "client_approval_material": "discard",
+      "role": "finite_tool_compatibility_adapter"
+    }
   },
   "runtime": {
     "type": "python_host"
@@ -29,12 +35,6 @@
   },
   "vocabulary": {
     "types": ["tool"]
-  },
-  "security_boundary": {
-    "host_execution": false,
-    "self_approval": false,
-    "client_approval_material": "discard",
-    "role": "finite_tool_compatibility_adapter"
   },
   "components": {},
   "load_order": []

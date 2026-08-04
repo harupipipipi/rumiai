@@ -201,7 +201,11 @@ class ChatStore:
         }
         extras = {key: value for key, value in patch.items() if key not in supported}
         if extras:
-            metadata = dict(current.get("metadata") or {})
+            metadata = dict(
+                patch.get("metadata")
+                if isinstance(patch.get("metadata"), Mapping)
+                else current.get("metadata") or {}
+            )
             metadata.update(extras)
             patch["metadata"] = metadata
         patch["metadata"] = _set_metadata_icon(
@@ -297,7 +301,11 @@ class ChatStore:
         }
         extras = {key: value for key, value in patch.items() if key not in supported}
         if extras:
-            metadata = dict(current.get("metadata") or {})
+            metadata = dict(
+                patch.get("metadata")
+                if isinstance(patch.get("metadata"), Mapping)
+                else current.get("metadata") or {}
+            )
             metadata.update(extras)
             patch["metadata"] = metadata
         result = _invoke(

@@ -45,6 +45,12 @@ def canonical_mutation_guard(
 ) -> Mapping[str, Any] | None:
     """Apply the canonical adaptive lease before approval consume and receipt mint."""
 
+    # A new mount has no existing workspace binding to lease.  The mount
+    # action remains authority-gated below; only the pre-existing-workspace
+    # adaptive lease is inapplicable for this one operation.
+    if operation == "workspace.create":
+        return None
+
     request = dict(input_data)
     ctx = dict(context) if isinstance(context, Mapping) else {}
     try:

@@ -7,6 +7,8 @@ from .permission_resolver import ToolPermissionResolver
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .service_catalog import infer_action_class
 from .security import (
+    appears_write_or_execute_capable,
+    execution_type,
     is_sandbox_capability_tool,
     is_safe_first_party_memo_tool,
     is_trusted_pack_id,
@@ -130,24 +132,49 @@ def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def _capability_plan_tool_rejection(tool_name, tool_def, context):
-    """Fail closed when a compiled plan does not attach this exact Tool."""
+def _capability_plan_tool_rejection(
+    tool_name,
+    tool_def,
+    context,
+    *,
+    require_plan=False,
+):
+    """Fail closed unless a canonical plan attaches this exact Tool.
+
+    The public Capability API owns persisted approval and owner binding.  The
+    executor still validates the detached plan at the last non-core boundary,
+    so a direct adapter call cannot use a legacy alias or an unsigned plan to
+    reach a reviewed pack function.
+    """
 
     if not isinstance(context, dict):
-        return None
+        if not require_plan:
+            return None
+        return {
+            "result": "CapabilityPlan is required for tool execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_required",
+        }
     plan = context.get("capability_plan")
     if not isinstance(plan, dict):
-        return None
-    if plan.get("schema_version"):
-        try:
-            plan = validate_capability_plan(plan)
-        except CapabilityPlanValidationError:
-            return {
-                "result": "CapabilityPlan authority is invalid",
-                "is_error": True,
-                "widget": None,
-                "error_type": "capability_plan_invalid",
-            }
+        if not require_plan:
+            return None
+        return {
+            "result": "CapabilityPlan is required for tool execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_required",
+        }
+    try:
+        plan = validate_capability_plan(plan)
+    except (CapabilityPlanValidationError, TypeError, ValueError):
+        return {
+            "result": "CapabilityPlan authority is invalid",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_invalid",
+        }
     tools = plan.get("tools")
     if not isinstance(tools, dict):
         return {
@@ -167,7 +194,15 @@ def _capability_plan_tool_rejection(tool_name, tool_def, context):
         or tool_name
         or ""
     ).strip()
-    if canonical_name not in attached and str(tool_name) not in attached:
+    requested_name = str(tool_name or "").strip()
+    if requested_name != canonical_name:
+        return {
+            "result": "Legacy Tool aliases cannot authorize execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "legacy_tool_alias",
+        }
+    if canonical_name not in attached:
         return {
             "result": "Tool is not attached by the active CapabilityPlan",
             "is_error": True,
@@ -205,7 +240,47 @@ def _capability_plan_tool_rejection(tool_name, tool_def, context):
             "widget": None,
             "error_type": "tool_schema_revision_mismatch",
         }
+    plan_owner = plan.get("owner") or plan.get("authority_owner")
+    if plan_owner is not None:
+        if not isinstance(plan_owner, dict):
+            return {
+                "result": "CapabilityPlan owner binding is invalid",
+                "is_error": True,
+                "widget": None,
+                "error_type": "capability_plan_owner_mismatch",
+            }
+        context_owner = context.get("capability_plan_owner")
+        if not isinstance(context_owner, dict):
+            context_owner = context
+        for field in ("principal_id", "workspace_id", "conversation_id", "profile_id"):
+            expected = str(plan_owner.get(field) or "").strip()
+            actual = str(context_owner.get(field) or "").strip()
+            if expected and actual != expected:
+                return {
+                    "result": "CapabilityPlan owner does not match execution scope",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "capability_plan_owner_mismatch",
+                }
     return None
+
+
+def _tool_requires_capability_plan(tool_def):
+    """Return whether this executor path is an authority-bearing action."""
+
+    if not isinstance(tool_def, dict):
+        return True
+    exec_type = execution_type(tool_def)
+    if exec_type in {
+        "capability",
+        "global_contract",
+        "handler",
+        "mcp",
+        "rumi_function",
+        "dynamic",
+    }:
+        return True
+    return appears_write_or_execute_capable(tool_def)
 
 
 def _approval_module():
@@ -253,6 +328,7 @@ class ToolExecutor:
             tool_name,
             tool_def,
             context,
+            require_plan=_tool_requires_capability_plan(tool_def),
         )
         if plan_rejection is not None:
             return plan_rejection

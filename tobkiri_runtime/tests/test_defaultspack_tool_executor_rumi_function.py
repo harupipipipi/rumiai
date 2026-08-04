@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +57,7 @@ def test_capability_plan_rejects_unattached_and_schema_mismatched_tools():
     import hashlib
     import json
 
+    from core_runtime.capability_plan import canonical_capability_plan_digest
     from domain.tool.executor import _capability_plan_tool_rejection
 
     schema = {
@@ -66,14 +69,16 @@ def test_capability_plan_rejects_unattached_and_schema_mismatched_tools():
         "tool_id": "repository_context_prepare",
         "schema": schema,
     }
-    context = {
-        "capability_plan": {
-            "tools": {
-                "attached": [],
-                "schema_hashes": {},
-            }
-        }
+    plan = {
+        "schema_version": "tobkiri.capability-plan/v1",
+        "plan_id": "plan_test",
+        "registry_revision": "registry_test",
+        "effective_capabilities": [],
+        "provider_selections": {},
+        "tools": {"attached": [], "schema_hashes": {}},
     }
+    plan["digest"] = canonical_capability_plan_digest(plan)
+    context = {"capability_plan": plan}
     assert _capability_plan_tool_rejection(
         "repository_context_prepare",
         tool,
@@ -92,11 +97,73 @@ def test_capability_plan_rejects_unattached_and_schema_mismatched_tools():
             ).hexdigest()
         },
     }
+    context["capability_plan"]["digest"] = canonical_capability_plan_digest(
+        context["capability_plan"]
+    )
     assert _capability_plan_tool_rejection(
         "repository_context_prepare",
         tool,
         context,
     )["error_type"] == "tool_schema_revision_mismatch"
+
+
+def test_capability_plan_rejects_forged_alias_and_wrong_owner():
+    from core_runtime.capability_plan import canonical_capability_plan_digest
+    from domain.tool.executor import _capability_plan_tool_rejection
+
+    tool_id = "canonical_tool"
+    schema = {"type": "object", "properties": {}}
+    plan = {
+        "schema_version": "tobkiri.capability-plan/v1",
+        "plan_id": "plan_owner_test",
+        "registry_revision": "registry_test",
+        "effective_capabilities": [],
+        "provider_selections": {},
+        "tools": {
+            "attached": [tool_id],
+            "schema_hashes": {
+                tool_id: hashlib.sha256(
+                    json.dumps(
+                        schema,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            },
+        },
+    }
+    plan["digest"] = canonical_capability_plan_digest(plan)
+    tool = {"tool_id": tool_id, "name": tool_id, "schema": schema}
+
+    alias_result = _capability_plan_tool_rejection(
+        "legacy_tool_alias",
+        tool,
+        {"capability_plan": plan},
+        require_plan=True,
+    )
+    assert alias_result["error_type"] == "legacy_tool_alias"
+
+    owner_plan = {
+        **plan,
+        "owner": {
+            "principal_id": "alice",
+            "workspace_id": "workspace-a",
+        },
+    }
+    owner_plan["digest"] = canonical_capability_plan_digest(owner_plan)
+    owner_result = _capability_plan_tool_rejection(
+        tool_id,
+        tool,
+        {
+            "capability_plan": owner_plan,
+            "capability_plan_owner": {
+                "principal_id": "bob",
+                "workspace_id": "workspace-a",
+            },
+        },
+        require_plan=True,
+    )
+    assert owner_result["error_type"] == "capability_plan_owner_mismatch"
 
 
 def test_global_contract_tool_uses_host_registry_and_ignores_caller_model(
@@ -341,6 +408,48 @@ def _trusted_read_only_function_tool_def():
     }
 
 
+def _capability_plan_context(tool_id, **context):
+    """Build the canonical detached plan required by ToolExecutor.execute."""
+
+    from core_runtime.capability_plan import canonical_capability_plan_digest
+    from domain.tool.registry import ToolRegistry
+
+    tool = ToolRegistry().get(tool_id)
+    assert isinstance(tool, dict), tool_id
+    schema = tool.get("schema")
+    if not isinstance(schema, dict):
+        contract = tool.get("contract")
+        schema = (
+            contract.get("input_schema")
+            if isinstance(contract, dict)
+            and isinstance(contract.get("input_schema"), dict)
+            else {}
+        )
+    plan = {
+        "schema_version": "tobkiri.capability-plan/v1",
+        "plan_id": f"plan_test_{tool_id}",
+        "registry_revision": "registry_test",
+        "effective_capabilities": [],
+        "provider_selections": {},
+        "tools": {
+            "attached": [tool_id],
+            "schema_hashes": {
+                tool_id: hashlib.sha256(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest()
+            },
+        },
+    }
+    plan["digest"] = canonical_capability_plan_digest(plan)
+    return {"principal_id": "defaultspack", "capability_plan": plan, **context}
+
+
 def test_tool_executor_trusted_read_only_function_bypasses_pack_approval_gate(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
@@ -366,7 +475,7 @@ def test_tool_executor_trusted_read_only_function_bypasses_pack_approval_gate(mo
     capability_executor.execute.assert_called_once()
 
 
-def test_tool_executor_trusted_web_search_pack_not_approved_falls_back_locally(monkeypatch):
+def test_tool_executor_trusted_web_search_pack_not_approved_does_not_fallback_locally(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _pack_not_approved_executor()
@@ -385,10 +494,9 @@ def test_tool_executor_trusted_web_search_pack_not_approved_falls_back_locally(m
         {"principal_id": "defaultspack", "capability_executor": capability_executor},
     )
 
-    assert result["is_error"] is False
-    assert result["result"] == "local search ok"
-    assert captured["tool_name"] == "web_search"
-    assert captured["arguments"] == {"query": "today's news", "limit": 5}
+    assert result["is_error"] is True
+    assert "Pack not approved" in result["result"]
+    assert captured == {}
 
 
 def test_tool_executor_denied_browser_computer_without_approval_returns_approval_request(monkeypatch):
@@ -435,12 +543,15 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "computer_use"
     assert result["widget"]["operation"] == "computer.click"
-    assert result["widget"]["arguments"] == {"action": "click", "x": 10, "y": 20}
+    assert result["widget"]["arguments"] == {
+        "action": "computer.click",
+        "payload": {"x": 10, "y": 20},
+    }
     assert result["widget"]["payload"] == {"x": 10, "y": 20}
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
-def test_tool_executor_pack_not_approved_computer_use_without_approval_returns_pack_error(monkeypatch):
+def test_tool_executor_pack_not_approved_computer_use_without_approval_requests_approval(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _pack_not_approved_executor()
@@ -456,11 +567,9 @@ def test_tool_executor_pack_not_approved_computer_use_without_approval_returns_p
         {"principal_id": "defaultspack", "capability_executor": capability_executor},
     )
 
-    assert result["is_error"] is True
-    assert result["error_type"] == "pack_not_approved"
-    assert result["widget"]["type"] == "tool_execution_denied"
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "computer_use"
-    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_denied_coding_function_returns_actionable_approval_request():
@@ -498,7 +607,10 @@ def test_tool_executor_git_status_stays_read_only_without_approval():
     result = ToolExecutor().execute(
         "coding_git_status",
         {"workspace_root": "."},
-        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+        _capability_plan_context(
+            "coding_git_status",
+            capability_executor=capability_executor,
+        ),
     )
 
     assert result["is_error"] is False
@@ -692,7 +804,7 @@ def test_tool_executor_mimo_company_marks_safe_rumi_api_calls_server_approved():
     assert request["context"]["_tool_server_approved"] is True
 
 
-def test_tool_executor_mimo_company_rumi_api_denial_falls_back_to_direct_pack_call(monkeypatch):
+def test_tool_executor_mimo_company_rumi_api_denial_does_not_fallback_to_direct_pack_call(monkeypatch):
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
 
@@ -725,13 +837,12 @@ def test_tool_executor_mimo_company_rumi_api_denial_falls_back_to_direct_pack_ca
         },
     )
 
-    assert result["is_error"] is False
-    assert seen["pack_id"] == "rumi_default_tools_pack"
-    assert seen["function_id"] == "rumi_api"
-    assert seen["context"]["_tool_server_approved"] is True
+    assert result["is_error"] is True
+    assert result["widget"]["type"] == "tool_execution_denied"
+    assert seen == {}
 
 
-def test_tool_executor_mimo_company_rumi_api_permission_denied_falls_back_to_direct_pack_call(monkeypatch):
+def test_tool_executor_mimo_company_rumi_api_permission_denied_does_not_fallback_to_direct_pack_call(monkeypatch):
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
 
@@ -764,11 +875,9 @@ def test_tool_executor_mimo_company_rumi_api_permission_denied_falls_back_to_dir
         },
     )
 
-    assert result["is_error"] is False
-    assert seen["pack_id"] == "rumi_default_tools_pack"
-    assert seen["function_id"] == "rumi_api"
-    assert seen["args"] == {"action": "list_routes"}
-    assert seen["context"]["_tool_server_approved"] is True
+    assert result["is_error"] is True
+    assert result["result"] == "Permission denied: function.call"
+    assert seen == {}
 
 
 def test_tool_executor_rumi_api_permission_denied_without_internal_approval_does_not_fallback(monkeypatch):
@@ -816,7 +925,7 @@ def test_tool_executor_mimo_company_post_rumi_api_request_still_requires_approva
     assert result["widget"]["tool_name"] == "rumi_api"
 
 
-def test_tool_executor_mimo_company_todo_pack_not_approved_falls_back_locally(tmp_path):
+def test_tool_executor_mimo_company_todo_pack_not_approved_does_not_fallback_locally(tmp_path):
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
 
@@ -839,8 +948,8 @@ def test_tool_executor_mimo_company_todo_pack_not_approved_falls_back_locally(tm
         },
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "todo"
+    assert result["is_error"] is True
+    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_todo_pack_not_approved_without_autonomy_still_requires_approval(tmp_path):
@@ -870,7 +979,7 @@ def test_tool_executor_todo_pack_not_approved_without_autonomy_still_requires_ap
     assert result["widget"]["tool_name"] == "todo"
 
 
-def test_tool_executor_todo_permission_denied_with_server_approval_falls_back_locally(tmp_path, monkeypatch):
+def test_tool_executor_todo_permission_denied_with_server_approval_does_not_fallback_locally(tmp_path, monkeypatch):
     from domain.safety import approval
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
@@ -905,8 +1014,8 @@ def test_tool_executor_todo_permission_denied_with_server_approval_falls_back_lo
         },
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "todo"
+    assert result["is_error"] is True
+    assert result["widget"] is None
     assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
 
 
@@ -930,7 +1039,7 @@ def test_tool_executor_todo_permission_denied_without_server_approval_does_not_f
     assert result["widget"] is None
 
 
-def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval(monkeypatch):
+def test_tool_executor_does_not_fallback_to_local_browser_computer_with_server_approval(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _caller_requires_denied_executor()
@@ -954,9 +1063,9 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
         },
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "browser_computer"
-    assert captured["arguments"] == {"action": "computer.windows"}
+    assert result["is_error"] is True
+    assert result["widget"]["type"] == "tool_execution_denied"
+    assert captured == {}
 
 
 def test_tool_executor_pack_not_approved_computer_use_does_not_use_approved_local_fallback(monkeypatch):
@@ -985,13 +1094,11 @@ def test_tool_executor_pack_not_approved_computer_use_does_not_use_approved_loca
     )
 
     assert result["is_error"] is True
-    assert result["error_type"] == "pack_not_approved"
-    assert result["widget"]["type"] == "tool_execution_denied"
-    assert result["widget"]["tool_name"] == "computer_use"
+    assert result["widget"] is None
     assert "Pack not approved" in result["result"]
 
 
-def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeypatch):
+def test_tool_executor_does_not_fallback_to_local_computer_use_with_yolo_policy(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _caller_requires_denied_executor()
@@ -1015,30 +1122,35 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
         },
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "computer_use"
-    assert captured["arguments"] == {"action": "context"}
+    assert result["is_error"] is True
+    assert result["widget"]["type"] == "tool_execution_denied"
+    assert captured == {}
 
 
-def test_tool_file_reader_ignores_caller_supplied_workspace_root(tmp_path):
+def test_tool_file_reader_ignores_caller_supplied_workspace_root(
+    tmp_path,
+    monkeypatch,
+):
     from domain.function_runtime.dispatcher import run_defaultspack_function
+    from tests._coding_contract_fixture import bind_verified_coding_contracts
 
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside"
     workspace.mkdir()
     outside.mkdir()
     (outside / "secret.txt").write_text("SECRET", encoding="utf-8")
+    bind_verified_coding_contracts(monkeypatch, workspace)
 
     result = run_defaultspack_function(
         "tool_file_reader",
         {"path": "secret.txt", "workspace_root": str(outside)},
-        {"workspace_root": str(workspace)},
+        {"workspace_root": str(workspace), "workspace_id": "workspace-test"},
     )
 
     assert result["status"] == "ok"
     assert result["data"]["is_error"] is True
-    assert result["data"]["result"] == "File not found: secret.txt"
-    assert result["data"]["widget"]["error"]["code"] == "FILE_NOT_FOUND"
+    assert "workspace mount is unknown" in result["data"]["result"]
+    assert result["data"]["widget"]["error"]["code"] == "READ_ERROR"
     assert "SECRET" not in str(result)
 
 
@@ -1048,7 +1160,11 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     result = ToolExecutor().execute(
         "sandbox_exec",
         {"command": "pwd", "approved": True, "_tool_server_approved": True},
-        {"workspace_root": str(tmp_path), "_tool_server_approved": True},
+        _capability_plan_context(
+            "sandbox_exec",
+            workspace_root=str(tmp_path),
+            _tool_server_approved=True,
+        ),
     )
 
     assert result["is_error"] is False
@@ -1077,7 +1193,7 @@ def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_ru
     monkeypatch.setattr(Terminal, "execute", forbidden_host_terminal)
     monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: MissingRuntimeApi())
     context = seal_tool_context(
-        {"workspace_root": str(tmp_path)},
+        _capability_plan_context("sandbox_exec", workspace_root=str(tmp_path)),
         {"action": "allow", "allowed": True},
     )
 
@@ -1109,7 +1225,7 @@ def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, mon
     fake_api = FakeSandboxApi()
     monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
     context = seal_tool_context(
-        {"workspace_root": str(tmp_path)},
+        _capability_plan_context("sandbox_exec", workspace_root=str(tmp_path)),
         {"action": "allow", "allowed": True},
     )
 
@@ -1128,7 +1244,7 @@ def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_pat
     from domain.tool_policy.internal_context import seal_tool_context
 
     context = seal_tool_context(
-        {"workspace_root": str(tmp_path)},
+        _capability_plan_context("sandbox_exec", workspace_root=str(tmp_path)),
         {"action": "allow", "allowed": True},
     )
 
@@ -1744,7 +1860,7 @@ def test_connector_approval_request_redacts_secret_arguments(tmp_path):
     result = ToolExecutor().execute(
         "slack_send",
         {"text": "hello", "bot_token": "xoxb-secret", "nested": {"api_key": "secret-key"}},
-        {"workspace_root": str(tmp_path)},
+        _capability_plan_context("slack_send", workspace_root=str(tmp_path)),
     )
 
     assert result["is_error"] is False
@@ -1759,7 +1875,7 @@ def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(tmp_
     from domain.tool_policy.internal_context import seal_tool_context
 
     context = seal_tool_context(
-        {"workspace_root": str(tmp_path)},
+        _capability_plan_context("slack_send", workspace_root=str(tmp_path)),
         {"action": "allow", "allowed": True},
     )
 
@@ -1787,7 +1903,7 @@ def test_rumi_api_manifest_and_executor_require_approval():
     result = ToolExecutor().execute(
         "rumi_api",
         {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
-        {},
+        _capability_plan_context("rumi_api"),
     )
 
     assert result["is_error"] is False

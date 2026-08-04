@@ -15,7 +15,10 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-pytestmark = pytest.mark.contract
+pytestmark = [
+    pytest.mark.contract,
+    pytest.mark.usefixtures("defaultspack_conversation_owner"),
+]
 
 
 class _Manager:

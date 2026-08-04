@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List
 
+from .component_metadata import model_manifests_from_provider_components
 from .openai_compatible_provider import OpenAICompatibleProvider
 from ..oauth_store import get_provider_access_token
 from .profile_catalog import merge_curated_and_profiles, profile_dir_for
@@ -179,13 +180,14 @@ class GoogleProvider(OpenAICompatibleProvider):
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 
     def __init__(self):
+        catalog_models = model_manifests_from_provider_components("google")
         super().__init__(
             provider_id="google",
             display_name="Google",
             api_key_env=["GOOGLE_API_KEY", "GEMINI_API_KEY"],
             base_url_env="GOOGLE_BASE_URL",
             default_base_url=self.BASE_URL,
-            known_models=[],
+            known_models=catalog_models,
         )
         self._base_url = self._normalize_google_base_url(self._base_url)
         self.BASE_URL = self._base_url
@@ -236,7 +238,8 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     @classmethod
     def _load_profile_models(cls):
-        return merge_curated_and_profiles("google", [], cls.PROFILE_DIR)
+        catalog_models = model_manifests_from_provider_components("google")
+        return merge_curated_and_profiles("google", catalog_models, cls.PROFILE_DIR)
 
     def _native_models_base_url(self) -> str:
         parsed = urllib.parse.urlparse(str(self._base_url or ""))

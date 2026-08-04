@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -13,6 +16,142 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+pytestmark = pytest.mark.usefixtures("wave7_owner_bindings")
+
+
+@pytest.fixture
+def context_contract_bindings(monkeypatch):
+    """Install an explicit local context plan for materialization tests."""
+
+    from core_runtime.di_container import get_container
+    from core_runtime.global_contract_dispatch import (
+        persisted_resolved_profile,
+    )
+    from core_runtime.interface_registry import InterfaceRegistry
+    from ecosystem.rumi_context_runtime_pack.runtime.materializer import (
+        create_context_operation,
+    )
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+    from ecosystem.rumi_memory_store_pack.runtime.store import MemoryStore
+
+    class _ContextClient:
+        def invoke(self, contract_id, operation, payload):
+            if contract_id == "rumi.resource.conversation.v1":
+                raw_path = Path(os.environ["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"])
+                owner = ConversationStore("default", user_data_root=raw_path.parent)
+                owner.root = raw_path.parent
+                owner.path = raw_path
+                owner.backup_root = raw_path.parent / "migration_backups"
+                owner.lock_root = raw_path.parent / "locks"
+                return owner.get(payload.get("conversation_id", ""))
+            if contract_id == "rumi.resource.memory.v1":
+                raw_root = Path(
+                    os.environ.get(
+                        "RUMI_DEFAULTSPACK_MEMORY2_DIR",
+                        Path(os.environ["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"]).parent
+                        / "memory",
+                    )
+                )
+                owner = MemoryStore("default", user_data_root=raw_root)
+                owner.root = raw_root
+                owner.path = raw_root / "memories.json"
+                owner.backup_root = raw_root / "migration_backups"
+                owner.lock_root = raw_root / "locks"
+                return owner.search(
+                    str(payload.get("query") or ""),
+                    limit=int(payload.get("limit") or 8),
+                )
+            if contract_id == "rumi.resource.knowledge.v1":
+                return {"revision": 0, "items": []}
+            raise AssertionError(f"unexpected context contract: {contract_id}")
+
+    class _Plan:
+        profile_id = "default"
+        effective_pack_set = frozenset(
+            {
+                "rumi_context_runtime_pack",
+                "rumi_conversation_store_pack",
+                "rumi_memory_store_pack",
+                "rumi_knowledge_store_pack",
+            }
+        )
+        effective_permissions = frozenset({"context.materialize"})
+        providers = ()
+
+    plan = _Plan()
+    registry = InterfaceRegistry()
+    provider_specs = {
+        "rumi.service.context.v1": (
+            "rumi_context_runtime_pack",
+            "context-runtime.materialize",
+            create_context_operation(_ContextClient()),
+            {"context.materialize"},
+        ),
+            "rumi.resource.conversation.v1": (
+            "rumi_conversation_store_pack",
+            "conversation-store.resource",
+            lambda operation, payload: _ContextClient().invoke(
+                "rumi.resource.conversation.v1", operation, payload
+            ),
+            set(),
+        ),
+        "rumi.resource.memory.v1": (
+            "rumi_memory_store_pack",
+            "memory-store.resource",
+            lambda operation, payload: _ContextClient().invoke(
+                "rumi.resource.memory.v1", operation, payload
+            ),
+            set(),
+        ),
+        "rumi.resource.knowledge.v1": (
+            "rumi_knowledge_store_pack",
+            "knowledge-store.resource",
+            lambda operation, payload: _ContextClient().invoke(
+                "rumi.resource.knowledge.v1", operation, payload
+            ),
+            set(),
+        ),
+    }
+    for contract_id, (source_pack_id, instance_id, operation, capabilities) in provider_specs.items():
+        registry.register(
+            f"global_contract.provider.{contract_id}",
+            {
+                "contract_id": contract_id,
+                "source_pack_id": source_pack_id,
+                "provider_instance_id": instance_id,
+                "content_hash": f"test:{instance_id}",
+                "required_capabilities": sorted(capabilities),
+                "operation": operation,
+            },
+        )
+        plan.providers += (
+            SimpleNamespace(
+                contract_id=contract_id,
+                source_pack_id=source_pack_id,
+                provider_instance_id=instance_id,
+                content_hash=f"test:{instance_id}",
+            ),
+        )
+
+    container = get_container()
+    marker = object()
+    previous = container._instances.get("interface_registry", marker)
+    container.set_instance("interface_registry", registry)
+    monkeypatch.setattr(
+        "blocks.chat.materialize_context.active_resolved_profile", lambda: plan
+    )
+    monkeypatch.setattr(
+        "core_runtime.global_contract_dispatch.persisted_resolved_profile",
+        lambda: plan,
+    )
+    try:
+        yield
+    finally:
+        if previous is marker:
+            container._instances.pop("interface_registry", None)
+        else:
+            container._instances["interface_registry"] = previous
 
 
 def _create_conversation(tmp_path, monkeypatch):
@@ -33,6 +172,7 @@ def _create_conversation(tmp_path, monkeypatch):
     return conversation
 
 
+@pytest.mark.usefixtures("context_contract_bindings")
 def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatch):
     from blocks.chat import materialize_context
     from domain.chat.store import ChatStore
@@ -134,6 +274,7 @@ def test_context_txt_template_command_materializes_artifact(tmp_path, monkeypatc
     assert not content.lstrip().startswith("#")
 
 
+@pytest.mark.usefixtures("context_contract_bindings")
 def test_materialize_context_honors_text_aliases(tmp_path, monkeypatch):
     from blocks.chat import materialize_context
     from domain.chat.store import ChatStore
@@ -209,6 +350,7 @@ def test_chat_run_skips_audio_transcript_block_when_text_already_contains_transc
     assert blocks == []
 
 
+@pytest.mark.usefixtures("context_contract_bindings")
 def test_materialize_context_honors_markdown_alias_and_metadata(tmp_path, monkeypatch):
     from blocks.chat import materialize_context
     from domain.chat.store import ChatStore

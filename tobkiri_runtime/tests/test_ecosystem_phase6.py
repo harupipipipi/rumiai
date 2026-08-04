@@ -705,7 +705,18 @@ class TestGetAllAddons:
                 "targets": [
                     {
                         "pack_identity": "local:multi-pack",
-                        "apply": [{"kind": "manifest_json_patch", "patch": []}]
+                        "apply": [
+                            {
+                                "kind": "manifest_json_patch",
+                                "patch": [
+                                    {
+                                        "op": "test",
+                                        "path": "/id",
+                                        "value": "multi_v1",
+                                    }
+                                ],
+                            }
+                        ]
                     }
                 ]
             }

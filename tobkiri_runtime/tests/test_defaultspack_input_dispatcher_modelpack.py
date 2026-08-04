@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import pytest
 from pathlib import Path
 
 
@@ -10,6 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+pytestmark = pytest.mark.usefixtures("defaultspack_conversation_owner")
 
 from domain.chat.store import ChatStore  # noqa: E402
 from domain.chat.run_request import prepare_chat_run  # noqa: E402
@@ -25,6 +28,41 @@ from domain.ai_client.model_router import ModelRoutingDecision, ModelRoutingRequ
 from domain.ai_client.client import AIClient  # noqa: E402
 from domain.ai_client.model_pack import ModelPack  # noqa: E402
 from domain.ai_client.rumi_process import default_rumi_model_pack  # noqa: E402
+
+
+@pytest.fixture
+def steer_runtime(monkeypatch):
+    """Provide an explicit canonical turn owner for instruction delivery tests."""
+    from domain.chat import steer as steer_module
+    from ecosystem.rumi_turn_runtime_pack.runtime.turns import TurnRuntime
+
+    runtime = TurnRuntime()
+
+    def invoke(contract_id, operation, payload):
+        if contract_id == steer_module.CONVERSATION_RESOURCE:
+            assert operation == "get"
+            return {
+                "id": payload["conversation_id"],
+                "conversation_revision": 1,
+            }
+        if contract_id == steer_module.TURN_RESOURCE:
+            if operation == "get":
+                return runtime.get(payload["turn_id"])
+            assert operation == "list"
+            return {"turns": runtime.list(conversation_id=payload.get("conversation_id"))}
+        if contract_id == steer_module.TURN_ACTION:
+            if operation == "begin":
+                return runtime.begin(payload)
+            if operation == "steer":
+                return runtime.steer(
+                    payload["turn_id"],
+                    payload["guidance"],
+                    expected_revision=payload["expected_revision"],
+                )
+        raise AssertionError(f"unexpected turn contract call: {contract_id}/{operation}")
+
+    monkeypatch.setattr(steer_module, "_invoke", invoke)
+    return runtime
 
 
 def _configure_paths(monkeypatch, tmp_path: Path) -> None:
@@ -143,7 +181,8 @@ def test_generic_webhook_delivery_chat_message(monkeypatch, tmp_path):
     assert result["result"]["conversation_id"] == conversation["id"]
 
 
-def test_generic_webhook_delivery_run_instruction(monkeypatch, tmp_path):
+def test_generic_webhook_delivery_run_instruction(monkeypatch, tmp_path, steer_runtime):
+    del steer_runtime
     _configure_paths(monkeypatch, tmp_path)
     conversation = _conversation(tmp_path)
     WebhookEndpointStore().upsert(

@@ -584,6 +584,129 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _bind_legacy_chat_facade_to_test_owner(request, tmp_path, monkeypatch):
+    """Give legacy compatibility tests an explicit canonical conversation owner.
+
+    Production ``ChatStore`` must fail closed when the global owner is absent.
+    These older adapter tests exercise UI/tool behavior through the facade, so
+    bind them to an isolated owner rather than reviving the removed local
+    storage fallback.
+    """
+
+    supported_files = {
+        "test_defaultspack_coding_approval_followup_replay.py",
+        "test_defaultspack_progress_tool.py",
+        "test_defaultspack_tool_assist.py",
+        "test_defaultspack_tool_eligibility.py",
+        "test_defaultspack_browser_state_guardrails.py",
+        "test_defaultspack_ui_registry.py",
+    }
+    if request.path.name not in supported_files:
+        yield
+        return
+
+    from domain.chat import store as facade
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+    owner = ConversationStore("default", user_data_root=tmp_path / "conversation_owner")
+
+    def invoke(contract_id, operation, payload):
+        if contract_id == facade.CONVERSATION:
+            if operation == "list":
+                return owner.snapshot()
+            if operation == "get":
+                return owner.get(str(payload.get("conversation_id") or ""))
+        if contract_id == facade.MESSAGE and operation == "get":
+            conversation = owner.get(str(payload.get("conversation_id") or ""))
+            return next(
+                (
+                    message
+                    for message in (conversation or {}).get("messages", [])
+                    if message.get("id") == payload.get("message_id")
+                ),
+                None,
+            )
+        if contract_id == facade.CONVERSATION_MANAGE:
+            if operation == "create":
+                return owner.create(
+                    payload["conversation"],
+                    expected_revision=int(payload["expected_revision"]),
+                )
+            if operation == "update":
+                return owner.update(
+                    str(payload["conversation_id"]),
+                    payload["patch"],
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+            if operation == "delete":
+                return owner.delete(
+                    str(payload["conversation_id"]),
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+        if contract_id == facade.MESSAGE_MANAGE:
+            if operation == "append":
+                return owner.append_message(
+                    str(payload["conversation_id"]),
+                    payload["message"],
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                )
+            if operation in {"update", "delete"}:
+                return owner.mutate_message(
+                    str(payload["conversation_id"]),
+                    str(payload["message_id"]),
+                    expected_conversation_revision=int(
+                        payload["expected_conversation_revision"]
+                    ),
+                    patch=payload.get("patch"),
+                    delete=operation == "delete",
+                )
+        raise AssertionError(f"unexpected contract call: {contract_id}/{operation}")
+
+    # Several legacy tests import the facade before pytest restores the
+    # canonical package aliases.  Patch every loaded copy of the same source
+    # module so a stale module object cannot bypass the isolated owner.
+    facade_path = Path(facade.__file__).resolve()
+    bound_modules = []
+    for module in list(sys.modules.values()):
+        module_path = getattr(module, "__file__", None)
+        if not module_path:
+            continue
+        try:
+            same_source = Path(module_path).resolve() == facade_path
+        except OSError:
+            same_source = False
+        if same_source and hasattr(module, "_invoke"):
+            monkeypatch.setattr(module, "_invoke", invoke)
+            bound_modules.append(module)
+    if not bound_modules:
+        monkeypatch.setattr(facade, "_invoke", invoke)
+
+    # A few compatibility tests imported ``ChatStore`` before another test
+    # refreshed the ``domain`` package.  The class then retains its original
+    # function globals even when that module is no longer in sys.modules.
+    # Bind those detached method globals as well, without changing production
+    # fail-closed behavior.
+    for value in vars(request.module).values():
+        candidates = [value]
+        if isinstance(value, type):
+            candidates.extend(vars(value).values())
+        for candidate in candidates:
+            candidate_globals = getattr(candidate, "__globals__", None)
+            if not isinstance(candidate_globals, dict):
+                continue
+            if candidate_globals.get("CONVERSATION") != facade.CONVERSATION:
+                continue
+            monkeypatch.setitem(candidate_globals, "_invoke", invoke)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clean_env_vars(monkeypatch):
     """テスト間で環境変数が漏れないようにする"""
     for var in (
@@ -812,7 +935,7 @@ _WAVE7_OWNER_TEST_FILES = frozenset(
         "test_defaultspack_provider_trace.py",
     }
 )
-_CHAT_OWNER_TEST_FILES = frozenset({"test_defaultspack_chat_facade_v4.py"})
+_CHAT_OWNER_TEST_FILES = frozenset()
 _OWNER_BINDING_TEST_FILES = (
     _OWNER_MIGRATION_TEST_FILES | _WAVE7_OWNER_TEST_FILES | _CHAT_OWNER_TEST_FILES
 )
@@ -825,6 +948,14 @@ _LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS = frozenset(
         "rumi_default_tools_pack",
         "rumi_desktop_host_service_pack",
         "rumi_local_agent_pack",
+        "rumi_operations_company_pack",
+    }
+)
+
+_COMPANY_OWNER_MIGRATION_TEST_FILES = frozenset(
+    {
+        "test_defaultspack_operations_company.py",
+        "test_company_workspace.py",
     }
 )
 
@@ -923,6 +1054,206 @@ def _owner_contract_invoker(owner, facade, expected_profile_id=None):
     return invoke
 
 
+@pytest.fixture
+def defaultspack_conversation_owner(monkeypatch, tmp_path):
+    """Bind one test explicitly to an isolated canonical conversation owner."""
+    from types import SimpleNamespace
+
+    from core_runtime import resolved_profile_scope
+    from domain.chat import store as chat_store_module
+    from domain.tool.registry import ToolRegistry
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+    user_data_root = tmp_path / "user_data"
+    owner = ConversationStore("default", user_data_root=user_data_root)
+    plan = SimpleNamespace(
+        profile_id="default",
+        effective_pack_set=(
+            "defaultspack",
+            "rumi_conversation_store_pack",
+            "rumi_default_tools_pack",
+            "rumi_model_catalog_pack",
+        ),
+        providers=(),
+        effective_permissions=frozenset(),
+        plan_hash="test-default-profile",
+    )
+
+    monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(user_data_root))
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "persisted_resolved_profile",
+        lambda: plan,
+    )
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "active_resolved_profile",
+        lambda: plan,
+    )
+    monkeypatch.setattr(chat_store_module, "persisted_resolved_profile", lambda: plan)
+    monkeypatch.setattr(chat_store_module, "USER_DATA_DIR", user_data_root)
+    for module in tuple(sys.modules.values()):
+        if module is None:
+            continue
+        for name in ("persisted_resolved_profile", "active_resolved_profile"):
+            if not hasattr(module, name):
+                continue
+            try:
+                monkeypatch.setattr(
+                    module,
+                    name,
+                    (lambda: plan),
+                )
+            except (AttributeError, TypeError):
+                continue
+    ToolRegistry._instance = None
+
+    chat_invoke = _owner_contract_invoker(
+        owner,
+        chat_store_module,
+        expected_profile_id="default",
+    )
+    monkeypatch.setattr(chat_store_module, "_invoke", chat_invoke)
+    try:
+        yield owner
+    finally:
+        ToolRegistry._instance = None
+
+
+@pytest.fixture
+def defaultspack_capability_plan_context():
+    """Build a signed detached CapabilityPlan for selected tool-contract tests."""
+
+    from core_runtime.capability_plan import canonical_capability_plan_digest
+    from domain.tool.registry import ToolRegistry
+
+    def build(tool_id, **context):
+        registry = ToolRegistry()
+        tool = registry.get(tool_id)
+        if not isinstance(tool, dict):
+            raise AssertionError(f"missing selected tool definition: {tool_id}")
+        schema = tool.get("schema")
+        if not isinstance(schema, dict):
+            contract = tool.get("contract")
+            schema = (
+                contract.get("input_schema")
+                if isinstance(contract, dict)
+                and isinstance(contract.get("input_schema"), dict)
+                else {}
+            )
+        plan = {
+            "schema_version": "tobkiri.capability-plan/v1",
+            "plan_id": f"plan_test_{tool_id}",
+            "registry_revision": "registry_test",
+            "effective_capabilities": [],
+            "provider_selections": {},
+            "tools": {
+                "attached": [tool_id],
+                "schema_hashes": {
+                    tool_id: hashlib.sha256(
+                        json.dumps(
+                            schema,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ).encode("utf-8")
+                    ).hexdigest()
+                },
+            },
+        }
+        plan["digest"] = canonical_capability_plan_digest(plan)
+        return {"principal_id": "defaultspack", "capability_plan": plan, **context}
+
+    return build
+
+
+@pytest.fixture
+def defaultspack_active_profile(monkeypatch):
+    """Bind v4 gateway compatibility tests to one active selected profile."""
+
+    from types import SimpleNamespace
+
+    from core_runtime import resolved_profile_scope
+    from core_runtime.di_container import get_container
+    from ecosystem.rumi_turn_runtime_pack.runtime.turns import (
+        create_turn_action,
+        create_turn_resource,
+    )
+
+    registry = get_container().get_or_none("interface_registry")
+    if registry is None:
+        raise AssertionError("interface registry is required for v4 test context")
+    previous_store = {
+        key: list(values) for key, values in registry._store.items()
+    }
+    content_hash = "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed"
+    turn_resource = create_turn_resource(None)
+    turn_action = create_turn_action(None)
+    registry.register(
+        "global_contract.provider.rumi.resource.turn.v1",
+        {
+            "contract_id": "rumi.resource.turn.v1",
+            "provider_instance_id": "turn-runtime.resource",
+            "source_pack_id": "rumi_turn_runtime_pack",
+            "content_hash": content_hash,
+            "required_capabilities": ["turn.read"],
+            "operation": turn_resource,
+        },
+    )
+    registry.register(
+        "global_contract.provider.rumi.action.turn.lifecycle.v1",
+        {
+            "contract_id": "rumi.action.turn.lifecycle.v1",
+            "provider_instance_id": "turn-runtime.lifecycle",
+            "source_pack_id": "rumi_turn_runtime_pack",
+            "content_hash": content_hash,
+            "required_capabilities": ["turn.manage"],
+            "operation": turn_action,
+        },
+    )
+
+    plan = SimpleNamespace(
+        profile_id="default",
+        effective_pack_set=tuple(
+            sorted(_LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS | {"rumi_turn_runtime_pack"})
+        ),
+        providers=(
+            SimpleNamespace(
+                contract_id="rumi.resource.turn.v1",
+                provider_instance_id="turn-runtime.resource",
+                source_pack_id="rumi_turn_runtime_pack",
+                content_hash=content_hash,
+            ),
+            SimpleNamespace(
+                contract_id="rumi.action.turn.lifecycle.v1",
+                provider_instance_id="turn-runtime.lifecycle",
+                source_pack_id="rumi_turn_runtime_pack",
+                content_hash=content_hash,
+            ),
+        ),
+        effective_permissions=frozenset({"turn.read", "turn.manage"}),
+        plan_hash="test-default-profile",
+    )
+    monkeypatch.setattr(resolved_profile_scope, "persisted_resolved_profile", lambda: plan)
+    monkeypatch.setattr(resolved_profile_scope, "active_resolved_profile", lambda: plan)
+    for module in tuple(sys.modules.values()):
+        if module is None:
+            continue
+        for name in ("persisted_resolved_profile", "active_resolved_profile"):
+            if not hasattr(module, name):
+                continue
+            try:
+                monkeypatch.setattr(module, name, lambda: plan)
+            except (AttributeError, TypeError):
+                continue
+    try:
+        yield plan
+    finally:
+        registry._store.clear()
+        registry._store.update(previous_store)
+
+
 def _memory_contract_invoker(owner, facade):
     """Return the exact memory owner contract test adapter."""
 
@@ -983,6 +1314,39 @@ def _wave7_memory_owner():
     return owner
 
 
+@pytest.fixture
+def wave7_owner_bindings(monkeypatch):
+    """Bind explicit Wave 7 compatibility tests to their selected owners."""
+    from domain.chat import store as chat_facade
+    from domain.memory import store as memory_facade
+
+    original_chat_invoke = chat_facade._invoke
+    original_memory_invoke = memory_facade._invoke
+
+    def chat_invoke(contract_id, operation, payload):
+        owner = _wave7_conversation_owner()
+        if owner is None:
+            return original_chat_invoke(contract_id, operation, payload)
+        return _owner_contract_invoker(owner, chat_facade)(
+            contract_id,
+            operation,
+            payload,
+        )
+
+    def memory_invoke(contract_id, operation, payload):
+        owner = _wave7_memory_owner()
+        if owner is None:
+            return original_memory_invoke(contract_id, operation, payload)
+        return _memory_contract_invoker(owner, memory_facade)(
+            contract_id,
+            operation,
+            payload,
+        )
+
+    monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
+    monkeypatch.setattr(memory_facade, "_invoke", memory_invoke)
+
+
 def _patch_imported_facade_globals(
     test_module,
     monkeypatch,
@@ -1020,6 +1384,60 @@ def _patch_imported_facade_globals(
                 continue
             seen_globals.add(namespace_id)
             monkeypatch.setitem(global_namespace, "_invoke", replacement)
+
+
+def _install_company_owner_contract_test_double(tmp_path, monkeypatch):
+    """Bind legacy Company routes to the canonical profile-scoped owner."""
+    from ecosystem.rumi_company_state_store_pack.runtime.store import (
+        CompanyStateStore,
+        _arguments,
+    )
+    from domain.company import contract_facade
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    owner = CompanyStateStore("default", root=tmp_path)
+    receipts = set()
+
+    def invoke(contract_id, operation, payload):
+        if contract_id == contract_facade.AUTHORITY:
+            if operation in {"authorize", "redeem"}:
+                receipt = str(payload.get("receipt") or "")
+                if operation == "redeem" and receipt not in receipts:
+                    return {"authorized": False, "reason": "unknown test receipt"}
+                issued = "test-company-receipt"
+                receipts.add(issued)
+                return {"authorized": True, "receipt": issued}
+            raise AssertionError(f"unexpected company authority call: {operation}")
+        if contract_id == contract_facade.RESOURCE:
+            if operation == "list":
+                return owner.snapshot()
+            if operation == "get":
+                return owner.get(str(payload.get("company_id") or ""))
+            raise AssertionError(f"unexpected company resource call: {operation}")
+        if contract_id == contract_facade.ACTION:
+            receipt = str(payload.get("authority_receipt") or "")
+            if receipt not in receipts:
+                raise PermissionError("company owner receipt is unavailable")
+            return owner.apply(operation, _arguments(operation, payload))
+        raise AssertionError(f"unexpected company contract call: {contract_id}/{operation}")
+
+    monkeypatch.setattr(contract_facade, "_invoke", invoke)
+    monkeypatch.setattr(
+        contract_facade,
+        "_profile_id",
+        lambda: "default",
+    )
+    original_init = contract_facade.CompanyContractFacade.__init__
+
+    def init_with_server_context(self, input_data, context):
+        trusted_context = mark_tool_server_approval_context(dict(context or {}))
+        original_init(self, input_data, trusted_context)
+
+    monkeypatch.setattr(
+        contract_facade.CompanyContractFacade,
+        "__init__",
+        init_with_server_context,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -1095,6 +1513,11 @@ def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
                 monkeypatch.setattr(module, "effective_pack_ids", selected_pack_ids)
             except (AttributeError, TypeError):
                 continue
+        if file_name in _COMPANY_OWNER_MIGRATION_TEST_FILES:
+            _install_company_owner_contract_test_double(
+                tmp_path,
+                monkeypatch,
+            )
         yield owner
         return
 
@@ -1128,3 +1551,22 @@ def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
         memory_invoke=memory_invoke,
     )
     yield None
+
+
+@pytest.fixture
+def provider_model_catalog_selected(monkeypatch):
+    """Select the bundled model-catalog owner for provider compatibility tests."""
+
+    from core_runtime import resolved_profile_scope
+    from domain.components import registry as component_registry
+
+    selected = frozenset({"rumi_model_catalog_pack"})
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "effective_pack_ids",
+        lambda: selected,
+    )
+    monkeypatch.setattr(component_registry, "effective_pack_ids", lambda: selected)
+    component_registry.get_domain_component_registry(force_reload=True)
+    yield
+    component_registry.get_domain_component_registry(force_reload=True)

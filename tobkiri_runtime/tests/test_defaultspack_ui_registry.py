@@ -1577,7 +1577,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
         self.assertNotIn("model_api_routes", values["apis"])
 
-    def test_update_settings_stores_openrouter_key_as_secret(self):
+    def test_update_settings_does_not_store_openrouter_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
 
@@ -1596,13 +1596,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             store = SecretsStore(str(pack_root / "user_data" / "secrets"))
             has_secret = store.has_secret("OPENROUTER_API_KEY")
 
-        self.assertTrue(values["models"]["openrouter_api_key_configured"])
+        self.assertFalse(values["models"]["openrouter_api_key_configured"])
         self.assertEqual(values["models"]["openrouter_api_key"], "")
         self.assertEqual(reloaded["models"]["openrouter_api_key"], "")
         self.assertNotIn("or-secret", settings_text)
-        self.assertTrue(has_secret)
+        self.assertFalse(has_secret)
 
-    def test_update_settings_stores_google_key_as_secret(self):
+    def test_update_settings_does_not_store_google_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
 
@@ -1621,11 +1621,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             store = SecretsStore(str(pack_root / "user_data" / "secrets"))
             has_secret = store.has_secret("GOOGLE_API_KEY")
 
-        self.assertTrue(values["models"]["google_api_key_configured"])
+        self.assertFalse(values["models"]["google_api_key_configured"])
         self.assertEqual(values["models"]["google_api_key"], "")
         self.assertEqual(reloaded["models"]["google_api_key"], "")
         self.assertNotIn("google-secret", settings_text)
-        self.assertTrue(has_secret)
+        self.assertFalse(has_secret)
 
     def test_update_settings_external_tokens_are_not_secret_write_sink(self):
         from domain.external.token_store import read_external_token
@@ -1873,15 +1873,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         invoke_block.assert_called_once()
         invoke_function.assert_not_called()
 
-    def test_default_conversation_model_uses_stub_when_unconfigured(self):
-        from domain.chat import store as chat_store
+    def test_prepare_chat_run_uses_catalog_default_when_model_is_empty(self):
+        from domain.chat.run_request import prepare_chat_run
+        from domain.chat.store import ChatStore
 
-        self.assertEqual(
-            chat_store._default_conversation_model(
-                Path("/tmp/defaultspack-settings-does-not-exist.json")
-            ),
-            "stub/default",
+        store = ChatStore()
+        conversation = store.create_conversation(model="")
+        prepared = prepare_chat_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "hello"},
+            },
+            {},
         )
+
+        self.assertEqual(prepared.model, "rumi/rumi")
 
     def test_model_settings_are_editable_contracts(self):
         from domain.frontend.registry import FrontendRegistry
@@ -1917,11 +1923,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         model_option_values = {
             option["value"] for option in model_fields["preferred_model"]["options"]
         }
-        self.assertIn("google/gemini-2.5-flash", model_option_values)
-        self.assertIn("google/gemma-4-26b-a4b-it", model_option_values)
         self.assertIn("stub/default", model_option_values)
         self.assertNotIn("openrouter/openai/gpt-4o", model_option_values)
-        self.assertIn("ollama/llama3.1:8b", model_option_values)
+        self.assertEqual(len(model_option_values), len(model_fields["preferred_model"]["options"]))
         self.assertEqual(model_fields["thinking_level"]["type"], "select")
         self.assertIn(
             "xhigh",
@@ -2615,10 +2619,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
     def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
         from blocks.ui import commands as commands_block
-        from domain.frontend.command_registry import SlashCommandRegistry
+        from domain.frontend.command_protocol import CommandProtocolRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
+            (pack_root / "ecosystem.json").write_text("{}", encoding="utf-8")
+            schema_path = pack_root / "schemas" / "command-protocol-v1.schema.json"
+            schema_path.parent.mkdir(parents=True, exist_ok=True)
+            schema_path.write_text(
+                (DEFAULTSPACK_ROOT / "schemas" / "command-protocol-v1.schema.json").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
             defaults_path = pack_root / "commands" / "default_commands.json"
             user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
             defaults_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2643,7 +2656,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             )
 
             with patch.object(
-                commands_block, "SlashCommandRegistry", lambda: SlashCommandRegistry(pack_root)
+                commands_block,
+                "CommandProtocolRegistry",
+                lambda: CommandProtocolRegistry(pack_root),
             ):
                 result = commands_block.run({"_method": "GET"}, {})
 

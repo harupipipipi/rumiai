@@ -23,9 +23,9 @@ class ComponentDiscoveryResult:
 
 
 def _source_pack_id_for_domain_root(domain_root: Path) -> str:
-    pack_root = domain_root.parent
-    if domain_root.name != "domain":
+    if domain_root.name not in {"domain", "catalog"}:
         return ""
+    pack_root = domain_root.parent
     fallback_pack_id = pack_root.name
     ecosystem = pack_root / "ecosystem.json"
     if ecosystem.is_file():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .component_metadata import model_manifests_from_provider_components
 from .openai_compatible_provider import OpenAICompatibleProvider
 
 
@@ -154,6 +155,12 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         default_base_url: str,
         region: str,
     ) -> None:
+        catalog_models = model_manifests_from_provider_components(provider_id)
+        for model in catalog_models:
+            routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+            default_for = routing.get("default_for", [])
+            if isinstance(default_for, list) and "reasoning" in default_for:
+                model["type"] = "reasoning"
         super().__init__(
             provider_id=provider_id,
             display_name=display_name,
@@ -161,10 +168,8 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
             base_url_env=base_url_env,
             default_base_url=default_base_url,
             credential_required=True,
-            known_models=[],
+            known_models=catalog_models,
             remote_model_discovery=True,
-            remote_model_list_path="/models",
-            remote_model_cache_ttl_seconds=3600,
         )
         self.region = region
 
@@ -179,9 +184,20 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
             headers["Content-Type"] = content_type
         return headers
 
-    @classmethod
-    def _assert_supported_model(cls, model: str) -> None:
-        return None
+    def _assert_supported_model(self, model: str) -> None:
+        model_ref = str(model or "").strip()
+        prefix = f"{self.provider_id}/"
+        model_id = model_ref[len(prefix):] if model_ref.startswith(prefix) else model_ref
+        allowed = {
+            str(item.get("model_id") or "").strip()
+            for item in self.KNOWN_MODELS
+            if isinstance(item, dict)
+        }
+        if model_id not in allowed:
+            raise RuntimeError(
+                f"unsupported model for {self.provider_id}: {model}; "
+                f"allowed models: {', '.join(sorted(allowed))}"
+            )
 
     def _translate_model_params(self, model, params):
         translated = dict(params or {})
@@ -214,7 +230,7 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         return translated
 
     def list_models(self) -> List[Dict[str, Any]]:
-        models = self._merge_remote_models([])
+        models = self._merge_remote_models(self.KNOWN_MODELS)
         for model in models:
             metadata = dict(model.get("metadata") or {})
             metadata.update({"region": self.region, "token_plan_region_scoped": True})

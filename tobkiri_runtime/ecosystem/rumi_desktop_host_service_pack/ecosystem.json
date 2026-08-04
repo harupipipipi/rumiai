@@ -11,7 +11,7 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": false,
   "resources": [],
+  "vocabulary": {"types": ["host", "desktop", "service"]},
   "provenance": {"content_hash": "sha256:331df96aaafce1d1ff58ad94736467453e388c5f7610c9e9739cfbbd8e5a7a6c", "build_identity": "rumi-desktop-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {"authority_split": ["observe", "control"], "executor_owner": "rumi_viewer_host_broker", "operation_descriptor_owner": true, "tool_or_ui_registry_imports": false}
 }
-

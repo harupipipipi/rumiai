@@ -7,6 +7,7 @@ from domain.coding.contract_adapter import (
     GIT_READ,
     GIT_WRITE,
     authorize_legacy_coding_operation,
+    git_snapshot,
     invoke_coding_contract,
     service_payload,
     workspace_id,
@@ -59,7 +60,7 @@ def run(input_data, context=None):
         record_attempt(operation, "high", audit_args)
         service_name = "branch_create" if create else "branch_switch"
         service_operation = "git.branch_create" if create else "git.branch_switch"
-        arguments = {"branch": str(name)}
+        arguments = {"branch": str(name), **git_snapshot(selected_workspace_id)}
         authorization = authorize_legacy_coding_operation(
             legacy_operation=operation,
             service_pack_id="rumi_git_write_pack",

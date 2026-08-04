@@ -417,6 +417,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
             normalized["request_features"] = normalize_request_features(raw["request_features"])
         if isinstance(raw.get("thinking"), dict):
             normalized["thinking"] = dict(raw["thinking"])
+            thinking = raw["thinking"]
+            if "supports_thinking" not in normalized:
+                normalized["supports_thinking"] = bool(thinking.get("supported"))
+            if isinstance(thinking.get("levels"), list):
+                normalized["thinking_levels"] = list(thinking.get("levels") or [])
+            if "default_level" in thinking:
+                normalized["default_thinking_level"] = thinking.get("default_level")
         for key in (
             "context_window",
             "max_context",

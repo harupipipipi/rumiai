@@ -14,6 +14,7 @@
   "required_network": {"allowed_domains": [], "allowed_ports": []},
   "host_execution": true,
   "resources": [],
+  "vocabulary": {"types": ["host", "browser", "service"]},
   "provenance": {"content_hash": "sha256:ccf0f8e44377928fed1062529582ca2824b7f173ba60bf35d0f44304b1fec995", "build_identity": "rumi-browser-host-service-pack:1.0.0", "trust_class": "local", "signature": null},
   "metadata": {
     "authority_split": ["observe", "control"],
@@ -23,4 +24,3 @@
     "tool_or_ui_registry_imports": false
   }
 }
-

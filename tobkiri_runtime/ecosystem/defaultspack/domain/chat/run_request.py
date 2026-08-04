@@ -3895,6 +3895,10 @@ def _available_tools(
         resolved_context["caller_provider_tool_ids"] = caller_provider_tool_ids
     agent_id = input_data.get("agent_id") or resolved_context.get("agent_id")
     requested_tool_ids = _requested_tool_ids_from_selection(selection)
+    if caller_provider_tool_ids:
+        requested_tool_ids = list(
+            dict.fromkeys([*requested_tool_ids, *caller_provider_tool_ids])
+        )
     runtime_profile, agent_id = _runtime_profile_with_policy_connected_tools(
         resolved_context.get("runtime_profile"),
         profile_id=resolved_context.get("profile_id"),

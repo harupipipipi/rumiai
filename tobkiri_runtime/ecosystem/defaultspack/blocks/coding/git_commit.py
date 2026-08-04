@@ -6,6 +6,7 @@ from blocks.coding._workspace import canonical_mutation_guard
 from domain.coding.contract_adapter import (
     GIT_WRITE,
     authorize_legacy_coding_operation,
+    git_snapshot,
     invoke_coding_contract,
     service_payload,
     workspace_id,
@@ -46,7 +47,32 @@ def run(input_data, context=None):
             "message": str(message),
             "paths": [str(item) for item in (paths or [])],
             "all_tracked": all_tracked,
+            **git_snapshot(selected_workspace_id),
         }
+        for key in (
+            "expected_head",
+            "expected_tree",
+            "expected_status_hash",
+            "expected_mount_revision",
+        ):
+            if key in input_data:
+                arguments[key] = input_data[key]
+        missing_snapshot = [
+            key
+            for key in (
+                "expected_head",
+                "expected_tree",
+                "expected_status_hash",
+                "expected_mount_revision",
+            )
+            if str(arguments.get(key) or "").strip() == ""
+        ]
+        if missing_snapshot:
+            return error(
+                "Git commit requires an explicit repository snapshot: "
+                + ", ".join(missing_snapshot),
+                code="INVALID_INPUT",
+            )
         authorization = authorize_legacy_coding_operation(
             legacy_operation=operation,
             service_pack_id="rumi_git_write_pack",

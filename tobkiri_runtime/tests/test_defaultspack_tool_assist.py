@@ -473,7 +473,7 @@ def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
-        {},
+        {"principal_capabilities": ["developer"]},
         updated,
         user_text="open Chrome",
     )
@@ -553,10 +553,13 @@ def test_run_request_tool_selection_must_use_requires_tool_choice(tmp_path, monk
                 "tool_selection": {"mode": "manual", "include": ["calculator"], "must_use": True}
             },
         },
-        {},
+        {"principal_capabilities": ["developer"]},
     )
 
-    assert prepared.params["tool_choice"] == "required"
+    assert prepared.params["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "calculator"},
+    }
     ChatStore._instance = None
 
 
@@ -654,7 +657,7 @@ def test_run_request_tool_selection_exclude_wins_over_include(monkeypatch):
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, tool_context = run_request._available_tools(
-        {},
+        {"principal_capabilities": ["developer"]},
         {
             "params": {
                 "tool_selection": {
@@ -687,7 +690,7 @@ def test_run_request_tool_selection_takes_priority_over_legacy_tools(monkeypatch
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
-        {},
+        {"principal_capabilities": ["developer"]},
         {
             "tools": ["web_search"],
             "params": {
@@ -706,6 +709,7 @@ def test_run_request_selected_shell_tool_respects_profile_policy_yolo():
 
     raw_tools, provider_tools, _tool_context = run_request._available_tools(
         {
+            "principal_capabilities": ["developer"],
             "profile_policy": {
                 "yolo_mode": True,
                 "allow_shell": True,

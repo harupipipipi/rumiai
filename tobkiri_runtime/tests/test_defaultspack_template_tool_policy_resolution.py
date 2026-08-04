@@ -128,7 +128,10 @@ def test_resolved_template_policy_filters_requested_tools_in_backend_pipeline():
     )
 
     raw_tools, _provider_tools, _tool_context = _available_tools(
-        {"profile_policy": resolution.policy},
+        {
+            "profile_policy": resolution.policy,
+            "principal_capabilities": ["developer"],
+        },
         {
             "tools": ["web_search", "coding_terminal_exec"],
             "params": {"tool_policy": resolution.policy},

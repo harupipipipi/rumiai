@@ -3206,6 +3206,20 @@ class ChatRunEngine:
             return (yield from self._model_turn_with_run_seal(prepared, messages, draft, seal_policy))
         if not self._stream_mode:
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
+        if (
+            isinstance(prepared.tool_context, dict)
+            and prepared.tool_context.get("approval_replayed")
+            and not _scheduled_mimo_approval_followup(prepared)
+            and not bool(
+                isinstance(prepared.request_context, dict)
+                and prepared.request_context.get("user_requested_computer_use")
+            )
+        ):
+            # The approval replay has already completed the side effect and
+            # deliberately removed provider tools. Use the ordinary complete
+            # path for the token-free summary turn so a streaming provider
+            # cannot re-enter a provider-specific tool loop.
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
         if prepared.provider_tools and not self._provider_supports_stream_tool_calls(prepared.model):
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
 
@@ -4149,8 +4163,6 @@ class ChatRunEngine:
             return None
 
         stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
-        if stored_args is None:
-            return None
         if not operation:
             return None
         if not _approval_replay_operation_allowed(operation, tool_name):

@@ -13,6 +13,8 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.usefixtures("provider_model_catalog_selected")
+
 
 ALL_MODELS = [
     "glm-5.1",

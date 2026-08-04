@@ -15,6 +15,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+pytestmark = pytest.mark.usefixtures("provider_model_catalog_selected")
+
+
 OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
@@ -193,15 +196,14 @@ def test_opengateway_omni_declares_verified_vision():
     assert omni["metadata"]["vision_verified"] is True
 
 
-def test_opengateway_rejects_non_allowlisted_models():
+def test_opengateway_does_not_client_filter_newly_provisioned_models():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
     )
 
-    provider = GitlawbOpengatewayProvider()
-
-    with pytest.raises(RuntimeError, match="unsupported model"):
-        provider.complete("openai/gpt-4o", [{"role": "user", "content": "hi"}], [], {})
+    with patch.dict(os.environ, {"GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token"}, clear=True):
+        provider = GitlawbOpengatewayProvider()
+        provider._assert_supported_model("newly-provisioned-model")
 
 
 def test_opengateway_translates_max_tokens_to_max_completion_tokens():

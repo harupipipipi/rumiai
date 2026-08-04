@@ -9,12 +9,15 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+pytestmark = pytest.mark.usefixtures("defaultspack_conversation_owner")
 
 from domain.external.adapters import line as line_adapter_module  # noqa: E402
 from domain.external.adapters.line import LineResponseAdapter  # noqa: E402

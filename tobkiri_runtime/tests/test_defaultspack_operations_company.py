@@ -1706,17 +1706,16 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
     )
     chat_store.update_conversation(child["id"], {"title": "Subagent capability probe"})
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
     chat_store.add_message(
         child["id"],
         {
             "role": "user",
             "content": [{"type": "text", "text": "Simple test: List 3 things you can do as a subagent."}],
+            "created_at": old_timestamp,
+            "updated_at": old_timestamp,
         },
     )
-    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
-    chat_store._conversations[child["id"]]["created_at"] = old_timestamp
-    chat_store._conversations[child["id"]]["updated_at"] = old_timestamp
-    chat_store._save_conversations()
     recent_child = chat_store.create_conversation(
         model="stub/default",
         system_prompt_id="mimo_coding_company",
@@ -1734,10 +1733,15 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
             "content": [{"type": "text", "text": "This subagent was just started and may still be running."}],
         },
     )
-    future_timestamp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp() * 1000)
-    chat_store._conversations[recent_child["id"]]["created_at"] = future_timestamp
-    chat_store._conversations[recent_child["id"]]["updated_at"] = future_timestamp
-    chat_store._save_conversations()
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_conversation_age_seconds",
+        staticmethod(
+            lambda conversation: 600
+            if conversation.get("id") == child["id"]
+            else 0
+        ),
+    )
 
     observed = runtime.status(sync_observability=True, include_desktop_monitoring=True)
     observability = observed["harness"]["observability"]
@@ -1866,122 +1870,48 @@ def test_mimo_company_status_reports_scheduler_subagent_blocker_signals(tmp_path
     _reset_defaultspack_singletons()
 
 
-def test_mimo_company_workspace_channels_sync_schedule_history(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
-        DEFAULT_FAST_MODEL,
-        DEFAULT_MAIN_MODEL,
-        DEFAULT_VISION_MODEL,
-        MimoCodingCompanyRuntime,
-    )
-    from blocks.company import channels, messages
-    from domain.agent.schedule_store import append_history
-    from domain.agent.scheduler import Scheduler
-    from domain.chat.store import ChatStore
-    from domain.company import mimo_sync
-    from domain.company.runtime_store import CompanyRuntimeStore
+def test_mimo_company_workspace_channels_use_selected_state_without_schedule_sync(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, channels, messages
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
-    monkeypatch.setattr(mimo_sync, "_last_sync_at", 0.0)
-    monkeypatch.setattr(
-        MimoCodingCompanyRuntime,
-        "_desktop_monitoring_observation",
-        staticmethod(lambda: {
-            "surface": "desktops",
-            "expected_api": "GET /api/desktops",
-            "status": "ok",
-            "desktop_count": 1,
-        }),
-    )
 
-    parent = ChatStore().create_conversation(
-        model=DEFAULT_MAIN_MODEL,
-        system_prompt_id="mimo_coding_company",
-        conversation_kind="mimo_coding_company",
-        agent_id="client_manager",
-        group_id="company:mimo-coding-company",
-        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
-    )
-    scheduler = Scheduler()
-    schedule = scheduler.create_schedule(
-        "once",
+    company_id = bootstrap.run(
+        {"metadata": {"name": "MiMo Coding Company"}},
+        {},
+    )["data"]["company"]["id"]
+    channel = channels.run(
         {
-            "message": "Run MiMo heartbeat.",
-            "model": DEFAULT_MAIN_MODEL,
-            "conversation_id": parent["id"],
-            "profile_id": "defaultspack.mimo_coding_company",
-            "agent_id": "scheduler",
-            "metadata": {
-                "profile_id": "defaultspack.mimo_coding_company",
-                "company_id": "mimo-coding-company",
-                "conversation_id": parent["id"],
-                "conversation_group_id": "company:mimo-coding-company",
-                "loop_key": "heartbeat",
-            },
+            "action": "upsert",
+            "company_id": company_id,
+            "channel": {"id": "ops-company", "name": "Operations"},
         },
-        {"run_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")},
-        name="MiMo Coding Company heartbeat",
+        {},
     )
-    state_path = tmp_path / "mimo" / "state.json"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "conversation_id": parent["id"],
-                "conversation_group_id": "company:mimo-coding-company",
-                "main_model": DEFAULT_MAIN_MODEL,
-                "vision_model": DEFAULT_VISION_MODEL,
-                "fast_model": DEFAULT_FAST_MODEL,
-                "schedule_ids": {"heartbeat": schedule["id"]},
-                "loop_conversation_ids": {"heartbeat": parent["id"]},
-            }
-        ),
-        encoding="utf-8",
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "scheduler",
+            "content": "Selected Company state message.",
+            "metadata": {"sync_source": "explicit_test"},
+        },
+        {},
     )
-    for index in range(6):
-        append_history(
-            schedule["id"],
-            {
-                "schedule_id": schedule["id"],
-                "execution_id": f"exec_after_workspace_stale_{index}",
-                "trigger": "scheduled",
-                "status": "completed",
-                "started_at": f"2026-06-30T17:{10 + index:02d}:00Z",
-                "completed_at": f"2026-06-30T17:{11 + index:02d}:00Z",
-                "result": "MiMo schedule continued after the Team Workspace count last refreshed.",
-            },
-        )
+    listed = channels.run({"company_id": company_id}, {})
+    listed_messages = messages.run(
+        {"company_id": company_id, "channel_id": "ops-company"},
+        {},
+    )
 
-    _existing, total_before = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=5, offset=0)
-    listed = channels.run({"company_id": "mimo-coding-company"}, {})
-    listed_messages = messages.run({"company_id": "mimo-coding-company", "order": "desc"}, {})
-
-    assert total_before == 0
-    assert listed["status"] == "ok"
-    ops_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "ops-company")
-    assert ops_channel["message_count"] == 6
-    assert ops_channel["last_message_at"]
-    assert listed_messages["data"]["total"] == 6
-    synced_execution_ids = {
-        message["metadata"]["execution_id"]
-        for message in listed_messages["data"]["messages"]
-        if isinstance(message.get("metadata"), dict)
-    }
-    assert synced_execution_ids == {f"exec_after_workspace_stale_{index}" for index in range(6)}
-    assert {
-        message["metadata"]["sync_source"]
-        for message in listed_messages["data"]["messages"]
-        if isinstance(message.get("metadata"), dict)
-    } == {"mimo_schedule_history"}
-
-    scheduler.delete_schedule(schedule["id"])
-    _reset_defaultspack_singletons()
+    assert channel["status"] == "ok"
+    assert created["status"] == "ok"
+    assert [item["id"] for item in listed["data"]["channels"]] == ["ops-company"]
+    assert listed_messages["data"]["total"] == 1
+    assert listed_messages["data"]["messages"][0]["text"] == "Selected Company state message."
+    assert "message_count" not in listed["data"]["channels"][0]
 
 
 def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_path, monkeypatch):
@@ -2039,6 +1969,7 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_pat
             "metadata": {"source": "scheduler"},
         },
     )
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
     draft = chat_store.add_message(
         loop["id"],
         {
@@ -2052,12 +1983,10 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_pat
                 "streaming": True,
                 "thinking": {"state": "running"},
             },
+            "created_at": old_timestamp,
+            "updated_at": old_timestamp,
         },
     )
-    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
-    chat_store._conversations[loop["id"]]["messages"][-1]["created_at"] = old_timestamp
-    chat_store._conversations[loop["id"]]["messages"][-1]["updated_at"] = old_timestamp
-    chat_store._save_conversations()
 
     scheduler = Scheduler()
     run_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
@@ -2181,6 +2110,7 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(
         name="MiMo Coding Company qa loop",
     )
 
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
     user = chat_store.add_message(
         loop["id"],
         {
@@ -2194,12 +2124,10 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(
                 "company_id": "mimo-coding-company",
                 "profile_id": "defaultspack.mimo_coding_company",
             },
+            "created_at": old_timestamp,
+            "updated_at": old_timestamp,
         },
     )
-    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
-    chat_store._conversations[loop["id"]]["messages"][-1]["created_at"] = old_timestamp
-    chat_store._conversations[loop["id"]]["messages"][-1]["updated_at"] = old_timestamp
-    chat_store._save_conversations()
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
     summary = runtime._sync_company_observability(
@@ -2231,116 +2159,69 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(
     _reset_defaultspack_singletons()
 
 
-def test_mimo_coding_company_scheduled_user_gaps_reads_history_snapshot_without_chatstore_load(tmp_path, monkeypatch):
+def test_mimo_coding_company_scheduled_user_gaps_uses_selected_conversation_owner(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.chat.store import ChatStore
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
-    storage_path = tmp_path / "chat" / "conversations.json"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
 
-    parent_id = "mimo-parent-history-only"
-    loop_id = "mimo-loop-history-only"
-    schedule_id = "sched-history-only"
-    user_id = "scheduled-user-history-only"
     old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
-    storage_path.parent.mkdir(parents=True, exist_ok=True)
-    storage_path.write_text(json.dumps({"schema_version": 1, "updated_at": 0, "conversations": {}}), encoding="utf-8")
-
-    def write_history(conversation):
-        history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        history_path.write_text(
-            json.dumps({"schema_version": 1, "updated_at": 1, "conversation": conversation}),
-            encoding="utf-8",
-        )
-        return history_path
-
-    write_history(
-        {
-            "id": parent_id,
-            "title": "MiMo parent",
-            "created_at": old_timestamp,
-            "updated_at": old_timestamp,
-            "model": "stub/default",
-            "conversation_kind": "mimo_coding_company",
-            "current_node_id": None,
-            "child_conversation_ids": [],
-            "messages": [],
-        }
+    schedule_id = "sched-owner-history"
+    chat_store = ChatStore()
+    parent = chat_store.create_conversation(
+        model="stub/default",
+        conversation_kind="mimo_coding_company",
     )
-    loop_history_path = write_history(
+    loop = chat_store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="mimo_coding_company_loop",
+        metadata={
+            "company_id": "mimo-coding-company",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "parent_conversation_id": parent["id"],
+            "loop_key": "qa_loop",
+        },
+    )
+    user = chat_store.add_message(
+        loop["id"],
         {
-            "id": loop_id,
-            "title": "MiMo QA loop",
+            "role": "user",
+            "content": [{"type": "text", "text": "Continue this approved scheduled task."}],
             "created_at": old_timestamp,
             "updated_at": old_timestamp,
-            "model": "stub/default",
-            "conversation_kind": "mimo_coding_company_loop",
-            "parent_conversation_id": parent_id,
-            "current_node_id": user_id,
-            "child_conversation_ids": [],
             "metadata": {
-                "company_id": "mimo-coding-company",
-                "profile_id": "defaultspack.mimo_coding_company",
-                "parent_conversation_id": parent_id,
+                "source": "scheduler_approval_followup",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": "sexec-owner-history",
                 "loop_key": "qa_loop",
             },
-            "messages": [
-                {
-                    "id": user_id,
-                    "conversation_id": loop_id,
-                    "role": "user",
-                    "parent_id": None,
-                    "children_ids": [],
-                    "content": [{"type": "text", "text": "Continue this approved scheduled task."}],
-                    "raw_text": "Continue this approved scheduled task.",
-                    "created_at": old_timestamp,
-                    "updated_at": old_timestamp,
-                    "metadata": {
-                        "source": "scheduler_approval_followup",
-                        "schedule_id": schedule_id,
-                        "schedule_execution_id": "sexec-history-only",
-                        "loop_key": "qa_loop",
-                        "company_id": "mimo-coding-company",
-                        "profile_id": "defaultspack.mimo_coding_company",
-                    },
-                }
-            ],
-        }
+        },
     )
-
-    chat_loads = []
-
-    def fail_if_chat_loaded(self, requested_conversation_id):
-        del self
-        chat_loads.append(requested_conversation_id)
-        raise AssertionError("scheduled user gap scan should use history.json snapshots")
 
     class NoRunningSchedules:
         def get_schedule(self, requested_schedule_id):
             assert requested_schedule_id == schedule_id
             return None
 
-    monkeypatch.setattr(ChatStore, "get_conversation", fail_if_chat_loaded)
     summary = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")._scheduled_user_gaps(
         {
-            "conversation_id": parent_id,
-            "loop_conversation_ids": {"qa_loop": loop_id},
+            "conversation_id": parent["id"],
+            "loop_conversation_ids": {"qa_loop": loop["id"]},
             "schedule_ids": {"qa_loop": schedule_id},
         },
         scheduler=NoRunningSchedules(),
     )
-    repaired_loop = json.loads(loop_history_path.read_text(encoding="utf-8"))["conversation"]
+    repaired_loop = ChatStore().get_conversation(loop["id"])
     repaired = repaired_loop["messages"][-1]
 
-    assert chat_loads == []
     assert summary["checked"] == 1
     assert summary["repaired"] == [repaired["id"]]
     assert repaired["role"] == "assistant"
-    assert repaired["parent_id"] == user_id
+    assert repaired["parent_id"] == user["id"]
     assert repaired["metadata"]["error_code"] == "SCHEDULED_MIMO_USER_ORPHANED"
     assert repaired_loop["current_node_id"] == repaired["id"]
     _reset_defaultspack_singletons()
@@ -3089,10 +2970,11 @@ def test_mimo_coding_company_observability_resolves_stale_subagent_unanswered_me
             "content": [{"type": "text", "text": "Please answer once the child runner resumes."}],
         },
     )
-    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
-    chat_store._conversations[child["id"]]["created_at"] = old_timestamp
-    chat_store._conversations[child["id"]]["updated_at"] = old_timestamp
-    chat_store._save_conversations()
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_conversation_age_seconds",
+        staticmethod(lambda conversation: 600 if conversation.get("id") == child["id"] else 0),
+    )
 
     runtime_store = CompanyRuntimeStore()
     runtime_store.add_message(
@@ -3276,8 +3158,10 @@ def test_operations_heartbeat_trigger_persists_into_single_client_conversation(t
     assert conversation["messages"][0]["metadata"]["source"] == "scheduler"
     assert conversation["messages"][0]["metadata"]["profile_id"] == "defaultspack.operations_company"
 
-    persisted = json.loads((tmp_path / "chat" / "conversations.json").read_text(encoding="utf-8"))
-    assert persisted["conversations"][conversation_id]["messages"][0]["metadata"]["schedule_id"] == schedule_id
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+    persisted = ConversationStore("default", user_data_root=tmp_path).get(conversation_id)
+    assert persisted["messages"][0]["metadata"]["schedule_id"] == schedule_id
 
     Scheduler().delete_schedule(schedule_id)
     _reset_defaultspack_singletons()

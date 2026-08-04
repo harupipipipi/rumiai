@@ -10,7 +10,8 @@ PACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
 
 
 @pytest.fixture()
-def isolated_stores(tmp_path, monkeypatch):
+def isolated_stores(tmp_path, monkeypatch, defaultspack_conversation_owner):
+    del defaultspack_conversation_owner
     monkeypatch.syspath_prepend(str(PACK_ROOT))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SHARE_STORE_PATH", str(tmp_path / "shares"))
@@ -148,9 +149,16 @@ def test_share_api_create_read_import_and_reject_revoked(isolated_stores):
     assert rejected["error"]["code"] == "NOT_FOUND"
 
 
-def test_raw_history_import_and_model_notice(isolated_stores):
+def test_raw_history_import_and_model_notice(isolated_stores, monkeypatch):
+    from blocks.chat import _context_helpers
     from blocks.chat._context_helpers import enrich_messages
     from blocks.share.import_bundle import run
+
+    monkeypatch.setattr(
+        _context_helpers,
+        "_materialize_context",
+        lambda *_args: {"sections": [], "digest": "test-context"},
+    )
 
     history = {"schema_version": 1, "updated_at": 100, "conversation": _source_conversation()}
     response = run({"history": history})

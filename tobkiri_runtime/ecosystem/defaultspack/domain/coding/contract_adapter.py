@@ -66,6 +66,37 @@ def workspace_id(input_data: Mapping[str, Any]) -> str:
     return value
 
 
+def git_snapshot(selected_workspace_id: str) -> dict[str, Any]:
+    """Read the exact Git and mount snapshot required by a write provider."""
+
+    workspace = invoke_coding_contract(
+        WORKSPACE_RESOURCE,
+        "get",
+        {"workspace_id": selected_workspace_id},
+    )
+    mount_revision = int(workspace.get("mount_revision") or 0)
+    if mount_revision < 1:
+        raise RuntimeError("workspace mount revision is unavailable")
+    snapshot = invoke_coding_contract(
+        GIT_READ,
+        "snapshot",
+        {"workspace_id": selected_workspace_id},
+    )
+    required = {
+        "expected_head",
+        "expected_tree",
+        "expected_status_hash",
+    }
+    if not required.issubset(snapshot):
+        raise RuntimeError("Git snapshot is incomplete")
+    return {
+        "expected_head": str(snapshot["expected_head"]),
+        "expected_tree": str(snapshot["expected_tree"]),
+        "expected_status_hash": str(snapshot["expected_status_hash"]),
+        "expected_mount_revision": mount_revision,
+    }
+
+
 def authorize_legacy_coding_operation(
     *,
     legacy_operation: str,

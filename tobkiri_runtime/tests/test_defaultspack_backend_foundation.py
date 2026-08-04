@@ -174,35 +174,56 @@ def test_tool_permissions_run_dispatches_http_method_handlers(tmp_path, monkeypa
     assert check_result["data"]["decision"]["allowed"] is True
 
 
-def test_provider_catalog_hides_external_static_inventory_and_keeps_builtin_metadata():
-    providers = list_provider_catalog()
-    provider_ids = {provider["provider_id"] for provider in providers}
-    assert {"openai", "anthropic", "ollama", "lmstudio", "vllm", "openrouter"} <= provider_ids
+def test_provider_catalog_hides_external_static_inventory_and_keeps_builtin_metadata(
+    monkeypatch,
+):
+    from core_runtime import resolved_profile_scope
+    from domain.capability import catalog as capability_catalog
+    from domain.components import registry as component_registry
+    from domain.components.registry import get_domain_component_registry
 
-    stub_models = list_model_catalog(provider="stub")
-    assert [model["qualified_model_id"] for model in stub_models] == [
-        "stub/default",
-        "stub/fast",
-        "stub/large",
-    ]
+    # The module fixture selects the catalog owner for the other provider
+    # tests. This case explicitly exercises the defaultspack-only view, where
+    # external checked-in inventory must remain hidden.
+    with monkeypatch.context() as local:
+        local.setattr(resolved_profile_scope, "effective_pack_ids", lambda: frozenset())
+        local.setattr(capability_catalog, "effective_pack_ids", lambda: frozenset())
+        local.setattr(component_registry, "effective_pack_ids", lambda: frozenset())
+        get_domain_component_registry(force_reload=True)
 
-    models = list_model_catalog()
-    # The provider program owns external identities and inventory strategies,
-    # not checked-in model snapshots.  Until a provider is configured or its
-    # live adapter is active, external inventory must stay out of this view.
-    assert {model["provider_id"] for model in models} <= {"rumi", "stub"}
-    assert not [
-        model
-        for model in models
-        if model["same_model_across_providers_key"] == "gpt-4o"
-    ]
+        providers = list_provider_catalog()
+        provider_ids = {provider["provider_id"] for provider in providers}
+        assert {"openai", "anthropic", "ollama", "lmstudio", "vllm", "openrouter"} <= provider_ids
 
-    profiles = list_profile_catalog()
-    assert not [
-        profile
-        for profile in profiles
-        if profile["same_model_across_providers_key"] == "gpt-4o"
-    ]
+        stub_models = list_model_catalog(provider="stub")
+        assert [model["qualified_model_id"] for model in stub_models] == [
+            "stub/default",
+            "stub/fast",
+            "stub/large",
+        ]
+
+        models = list_model_catalog()
+        # The provider program owns external identities and inventory
+        # strategies, not checked-in model snapshots. Until a provider is
+        # configured or its live adapter is active, external inventory stays
+        # out of this view.
+        assert {model["provider_id"] for model in models} <= {"rumi", "stub"}
+        assert not [
+            model
+            for model in models
+            if model["same_model_across_providers_key"] == "gpt-4o"
+        ]
+
+        profiles = list_profile_catalog()
+        assert not [
+            profile
+            for profile in profiles
+            if profile["same_model_across_providers_key"] == "gpt-4o"
+        ]
+
+    # Restore the selected-owner component snapshot for later tests in this
+    # module before pytest restores the fixture's monkeypatches.
+    get_domain_component_registry(force_reload=True)
 
 
 def test_catalog_and_profiles_include_live_models_from_an_active_provider():
@@ -606,9 +627,12 @@ def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):
 
     listed = list_tools({}, {})
     calculator_entries = [tool for tool in listed["data"]["tools"] if tool["tool_id"] == "calculator"]
-    # Direct-only legacy tools are not exposed by the compatibility listing;
-    # the Capability Plan compiler is the authoritative tool surface.
-    assert calculator_entries == []
+    # Listing remains a discoverability surface, while the persisted deny
+    # decision stays fail-closed for the legacy direct invoke route.
+    assert calculator_entries
+    assert all(
+        entry["permission"]["allowed"] is False for entry in calculator_entries
+    )
 
     denied = invoke_tool({"tool_name": "calculator", "arguments": {"expression": "1+1"}}, {})
     assert denied["status"] == "error"

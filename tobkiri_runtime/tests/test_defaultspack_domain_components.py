@@ -55,7 +55,14 @@ def test_component_discovery_fails_soft_on_bad_manifest(tmp_path):
     assert "manifest.category is required" in result.issues[0].message
 
 
-def test_component_roots_include_sibling_ecosystem_packs(tmp_path, monkeypatch):
+def test_component_roots_include_selected_sibling_ecosystem_packs(tmp_path, monkeypatch):
+    from domain.components import registry as component_registry
+
+    monkeypatch.setattr(
+        component_registry,
+        "effective_pack_ids",
+        lambda: frozenset({"rumi_model_catalog_pack"}),
+    )
     ecosystem = tmp_path / "ecosystem"
     defaultspack = ecosystem / "defaultspack"
     catalog = ecosystem / "rumi_model_catalog_pack"
@@ -74,6 +81,13 @@ def test_component_roots_include_sibling_ecosystem_packs(tmp_path, monkeypatch):
 
 
 def test_component_roots_skip_unreadable_sibling_pack_candidates(tmp_path, monkeypatch):
+    from domain.components import registry as component_registry
+
+    monkeypatch.setattr(
+        component_registry,
+        "effective_pack_ids",
+        lambda: frozenset({"rumi_model_catalog_pack", "restricted"}),
+    )
     ecosystem = tmp_path / "ecosystem"
     defaultspack = ecosystem / "defaultspack"
     catalog = ecosystem / "rumi_model_catalog_pack"

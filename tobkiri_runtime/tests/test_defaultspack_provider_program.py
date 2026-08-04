@@ -752,18 +752,15 @@ def test_external_provider_catalog_never_uses_curated_model_fallbacks(monkeypatc
 
 def test_external_provider_catalog_ignores_pack_model_manifests(monkeypatch):
     from domain.ai_client import providers
+    from core_runtime import resolved_profile_scope
 
     monkeypatch.setattr(providers, "_load_model_manifests", lambda _provider_id: [{"model_id": "stale"}])
-    monkeypatch.setattr(
-        providers,
-        "model_manifests_from_provider_components",
-        lambda _provider_id: [{"model_id": "also-stale"}],
-    )
     monkeypatch.setattr(
         providers,
         "_load_known_models_from_entry",
         lambda _entrypoint: [{"model_id": "still-stale"}],
     )
+    monkeypatch.setattr(resolved_profile_scope, "effective_pack_ids", lambda: frozenset())
 
     assert providers._load_models_for_provider({"provider_id": "openrouter", "entrypoint": "ignored"}) == []
 

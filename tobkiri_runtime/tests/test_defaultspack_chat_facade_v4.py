@@ -13,10 +13,12 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-pytestmark = pytest.mark.usefixtures("defaultspack_owner_bindings")
+pytestmark = pytest.mark.usefixtures("defaultspack_conversation_owner")
 
 
-def test_chat_facade_bounds_conflict_retries(defaultspack_owner_bindings, monkeypatch):
+def test_chat_facade_bounds_conflict_retries(
+    defaultspack_conversation_owner, monkeypatch
+):
     """A perpetually stale owner cannot turn append into an unbounded loop."""
     from domain.chat import store as facade
     from domain.chat.store import ChatStore, MAX_APPEND_RETRIES
@@ -45,11 +47,11 @@ def test_chat_facade_bounds_conflict_retries(defaultspack_owner_bindings, monkey
         )
 
     assert attempts == MAX_APPEND_RETRIES
-    assert defaultspack_owner_bindings.get(conversation["id"])["messages"] == []
+    assert defaultspack_conversation_owner.get(conversation["id"])["messages"] == []
 
 
 def test_chat_facade_rejects_all_message_mutations_for_shared_read_only_owner(
-    defaultspack_owner_bindings,
+    defaultspack_conversation_owner,
 ):
     """Shared read-only metadata is enforced at every message mutation seam."""
     from domain.chat.store import ChatStore
@@ -60,8 +62,8 @@ def test_chat_facade_rejects_all_message_mutations_for_shared_read_only_owner(
         conversation["id"],
         {"id": "read-only-message", "role": "user", "content": "keep me"},
     )
-    current = defaultspack_owner_bindings.get(conversation["id"])
-    defaultspack_owner_bindings.update(
+    current = defaultspack_conversation_owner.get(conversation["id"])
+    defaultspack_conversation_owner.update(
         conversation["id"],
         {"metadata": {"shared_read_only": True}},
         expected_conversation_revision=current["conversation_revision"],
@@ -82,13 +84,47 @@ def test_chat_facade_rejects_all_message_mutations_for_shared_read_only_owner(
         position_index=0,
     ) is None
 
-    persisted = defaultspack_owner_bindings.get(conversation["id"])
+    persisted = defaultspack_conversation_owner.get(conversation["id"])
     assert [item["id"] for item in persisted["messages"]] == [message["id"]]
     assert persisted["messages"][0]["raw_text"] == "keep me"
 
 
+def test_chat_facade_preserves_supplied_metadata_when_merging_compatibility_extras(
+    defaultspack_conversation_owner,
+):
+    """Compatibility fields must not overwrite canonical v4 metadata."""
+    from domain.chat.store import ChatStore
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    message = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": "draft",
+            "metadata": {"phase": "draft", "stale": True},
+        },
+    )
+
+    updated = store.update_message(
+        conversation["id"],
+        message["id"],
+        {
+            "raw_text": "final",
+            "metadata": {"phase": "final"},
+            "tool_status": "complete",
+        },
+    )
+
+    assert updated["raw_text"] == "final"
+    assert updated["metadata"] == {
+        "phase": "final",
+        "tool_status": "complete",
+    }
+
+
 def test_chat_facade_persists_only_non_ephemeral_attachment_records(
-    defaultspack_owner_bindings,
+    defaultspack_conversation_owner,
 ):
     """The v2 manifest records durable attachments and excludes model-only data."""
     from domain.chat.attachments.store import manifest_path
@@ -130,7 +166,7 @@ def test_chat_facade_persists_only_non_ephemeral_attachment_records(
 
 
 def test_chat_facade_search_excludes_message_text_until_requested(
-    defaultspack_owner_bindings,
+    defaultspack_conversation_owner,
 ):
     """List search and exact message search keep their distinct scopes."""
     from domain.chat.store import ChatStore
@@ -160,7 +196,7 @@ def test_chat_facade_search_excludes_message_text_until_requested(
 
 
 def test_chat_facade_retries_stale_order_without_duplicate_sequences(
-    defaultspack_owner_bindings,
+    defaultspack_conversation_owner,
 ):
     """Concurrent appenders preserve owner order even with the same stale hint."""
     from domain.chat.store import ChatStore
@@ -187,7 +223,7 @@ def test_chat_facade_retries_stale_order_without_duplicate_sequences(
         appended = list(executor.map(append, range(16)))
 
     stored = store.get_conversation(conversation["id"])
-    owner_stored = defaultspack_owner_bindings.get(conversation["id"])
+    owner_stored = defaultspack_conversation_owner.get(conversation["id"])
     sequences = [item["sequence_number"] for item in stored["messages"]]
     assert all(item is not None for item in appended)
     assert sequences == list(range(1, 18))

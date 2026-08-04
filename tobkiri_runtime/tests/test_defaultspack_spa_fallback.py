@@ -12,7 +12,7 @@ def test_direct_spa_route_serves_shell_after_route_miss() -> None:
     assert path_params == {}
     assert source == "fallback"
     assert path_inject == {}
-    assert pattern == ""
+    assert pattern == "/share/{token}"
 
 
 def test_api_desktops_remains_api_route() -> None:
