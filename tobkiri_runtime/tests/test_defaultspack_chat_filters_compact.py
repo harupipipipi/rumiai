@@ -31,7 +31,7 @@ def _owner_storage_path(tmp_path):
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
     return ConversationStore(
-        "default",
+        "defaults",
         user_data_root=Path(os.environ["RUMI_TEST_CONVERSATION_OWNER_ROOT"]),
     ).path
 

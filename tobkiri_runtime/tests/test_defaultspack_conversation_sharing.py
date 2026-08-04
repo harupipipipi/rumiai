@@ -213,9 +213,27 @@ def test_untrusted_wrapper_is_resanitized_and_source_auth_is_not_persisted(isola
 
 
 def test_share_landing_and_import_routes_are_in_standalone_transport(isolated_stores):
-    from transport.registry import canonical_http_route_specs
+    from blocks.share.setup import run
+    from transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
 
-    routes = {(spec.method, spec.pattern) for spec in canonical_http_route_specs(include_always_available=True)}
+    class Registry:
+        def __init__(self):
+            self.entries = []
+
+        def register(self, key, value, meta=None):
+            self.entries.append((key, value, meta))
+
+    registry = Registry()
+    run({"interface_registry": registry})
+    routes = {
+        (entry["method"], entry["pattern"])
+        for key, entry, _meta in registry.entries
+        if key == "io.http.route"
+    }
+    routes.update(
+        (spec.method, spec.pattern)
+        for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+    )
     assert ("GET", "/share/{token}") in routes
     assert ("POST", "/api/share/{token}/import") in routes
     assert ("POST", "/api/share/{token}/export") in routes

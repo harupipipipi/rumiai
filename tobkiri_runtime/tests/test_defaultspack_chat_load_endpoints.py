@@ -242,7 +242,6 @@ def test_chat_get_conversation_marks_stale_mimo_company_chat_for_redirect(tmp_pa
 
 def test_http_safe_get_chat_ui_routes_use_block_fallback(monkeypatch):
     import transport.http as transport_http
-    from domain.function_runtime import bridge
 
     server = transport_http.DefaultsHttpServer.__new__(transport_http.DefaultsHttpServer)
     server.facade = object()
@@ -252,11 +251,7 @@ def test_http_safe_get_chat_ui_routes_use_block_fallback(monkeypatch):
         calls.append((module_name, dict(payload), dict(context)))
         return {"status": "ok", "data": {"module": module_name}}
 
-    def fail_invoke_function(*args, **kwargs):
-        pytest.fail("safe GET chat UI routes should not invoke the function bridge")
-
     monkeypatch.setattr(transport_http, "invoke_block", fake_invoke_block)
-    monkeypatch.setattr(bridge, "invoke_function", fail_invoke_function)
 
     detail = server._invoke_function_route(
         "defaultspack:chat_get_conversation",

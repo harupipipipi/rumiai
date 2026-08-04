@@ -39,7 +39,6 @@ class _Manager:
 
 
 def _setup_store(tmp_path, monkeypatch):
-    import core_runtime.resolved_profile_scope as profile_scope
     from domain.chat import store as facade
     from domain.chat import run_request
     from domain.chat.store import ChatStore
@@ -55,18 +54,6 @@ def _setup_store(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "user_data" / "shared" / "chat" / "conversations.json"))
     ChatStore._instance = None
     ToolRegistry._instance = None
-    verified_plan = SimpleNamespace(
-        effective_pack_set=(
-            "defaultspack",
-            "rumi_default_tools_pack",
-            "rumi_operations_company_pack",
-        )
-    )
-    monkeypatch.setattr(
-        profile_scope,
-        "persisted_resolved_profile",
-        lambda: verified_plan,
-    )
     run_request._profile_snapshot.cache_clear()
     resolve_runtime_profile_context = run_request.resolve_runtime_profile_context
 
@@ -82,7 +69,7 @@ def _setup_store(tmp_path, monkeypatch):
         "resolve_runtime_profile_context",
         resolve_verified_developer_context,
     )
-    owner = ConversationStore("default", user_data_root=tmp_path / "user_data")
+    owner = ConversationStore("defaults", user_data_root=tmp_path / "user_data")
 
     def invoke(contract_id: str, operation: str, payload: dict[str, Any]) -> Any:
         if contract_id == facade.CONVERSATION:

@@ -25,10 +25,6 @@ def context_contract_bindings(monkeypatch):
     """Install an explicit local context plan for materialization tests."""
 
     from core_runtime.di_container import get_container
-    from core_runtime.global_contract_dispatch import (
-        persisted_resolved_profile,
-    )
-    from core_runtime.interface_registry import InterfaceRegistry
     from ecosystem.rumi_context_runtime_pack.runtime.materializer import (
         create_context_operation,
     )
@@ -39,7 +35,7 @@ def context_contract_bindings(monkeypatch):
         def invoke(self, contract_id, operation, payload):
             if contract_id == "rumi.resource.conversation.v1":
                 raw_path = Path(os.environ["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"])
-                owner = ConversationStore("default", user_data_root=raw_path.parent)
+                owner = ConversationStore("defaults", user_data_root=raw_path.parent)
                 owner.root = raw_path.parent
                 owner.path = raw_path
                 owner.backup_root = raw_path.parent / "migration_backups"
@@ -67,7 +63,7 @@ def context_contract_bindings(monkeypatch):
             raise AssertionError(f"unexpected context contract: {contract_id}")
 
     class _Plan:
-        profile_id = "default"
+        profile_id = "defaults"
         effective_pack_set = frozenset(
             {
                 "rumi_context_runtime_pack",
@@ -80,7 +76,19 @@ def context_contract_bindings(monkeypatch):
         providers = ()
 
     plan = _Plan()
-    registry = InterfaceRegistry()
+    class _ContextInterfaceRegistry:
+        def __init__(self):
+            self._store = {}
+
+        def register(self, key, value, meta=None):
+            del meta
+            self._store.setdefault(key, []).append(value)
+
+        def get(self, key, strategy="last"):
+            values = list(self._store.get(key, ()))
+            return values if strategy == "all" else (values[-1] if values else None)
+
+    registry = _ContextInterfaceRegistry()
     provider_specs = {
         "rumi.service.context.v1": (
             "rumi_context_runtime_pack",
@@ -134,24 +142,54 @@ def context_contract_bindings(monkeypatch):
             ),
         )
 
+    class _ContextDispatchSession:
+        profile_id = plan.profile_id
+        plan_digest = "sha256:" + "8" * 64
+
+        def invoke(self, contract_id, operation_name, payload):
+            return provider_specs[contract_id][2](operation_name, payload)
+
+        def provider_metadata(self, contract_id):
+            source_pack_id, instance_id, _operation, _capabilities = provider_specs[
+                contract_id
+            ]
+            return (
+                {
+                    "contract_id": contract_id,
+                    "source_pack_id": source_pack_id,
+                    "provider_instance_id": instance_id,
+                    "content_hash": f"test:{instance_id}",
+                },
+            )
+
     container = get_container()
     marker = object()
-    previous = container._instances.get("interface_registry", marker)
+    previous = {
+        "interface_registry": container._instances.get("interface_registry", marker),
+        "v4_dispatch_session": container._instances.get(
+            "v4_dispatch_session", marker
+        ),
+    }
     container.set_instance("interface_registry", registry)
+    container.set_instance("v4_dispatch_session", _ContextDispatchSession())
     monkeypatch.setattr(
         "blocks.chat.materialize_context.active_resolved_profile", lambda: plan
-    )
-    monkeypatch.setattr(
-        "core_runtime.global_contract_dispatch.persisted_resolved_profile",
-        lambda: plan,
     )
     try:
         yield
     finally:
-        if previous is marker:
+        if previous["interface_registry"] is marker:
             container._instances.pop("interface_registry", None)
         else:
-            container._instances["interface_registry"] = previous
+            container._instances["interface_registry"] = previous[
+                "interface_registry"
+            ]
+        if previous["v4_dispatch_session"] is marker:
+            container._instances.pop("v4_dispatch_session", None)
+        else:
+            container._instances["v4_dispatch_session"] = previous[
+                "v4_dispatch_session"
+            ]
 
 
 def _create_conversation(tmp_path, monkeypatch):

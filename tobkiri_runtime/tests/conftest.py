@@ -13,6 +13,7 @@ import json
 import sys
 import types
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -608,7 +609,16 @@ def _bind_legacy_chat_facade_to_test_owner(request, tmp_path, monkeypatch):
     from domain.chat import store as facade
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
-    owner = ConversationStore("default", user_data_root=tmp_path / "conversation_owner")
+    user_data_root = tmp_path / "conversation_owner"
+    snapshot = _defaultspack_v4_snapshot()
+    owner = ConversationStore(snapshot.profile_id, user_data_root=user_data_root)
+    _bind_v4_snapshot(
+        snapshot,
+        monkeypatch,
+        request,
+        user_data_root,
+        facade,
+    )
 
     def invoke(contract_id, operation, payload):
         if contract_id == facade.CONVERSATION:
@@ -979,6 +989,176 @@ _COMPANY_OWNER_MIGRATION_TEST_FILES = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class _V4TestResolvedSnapshot:
+    """Expose one verified v4 snapshot to legacy test adapters.
+
+    The runtime's v4 resolver returns protocol documents, while a few
+    compatibility consumers still read the small attribute-shaped projection
+    that was formerly supplied by the profile fixture.  Keeping that
+    projection backed by the resolved v4 documents lets the tests exercise the
+    current profile boundary without recreating the removed global owner API.
+    """
+
+    resolved: object
+    profile_id: str
+    effective_pack_set: tuple[str, ...]
+    providers: tuple[object, ...]
+    effective_permissions: frozenset[str]
+    plan_hash: str
+
+    @property
+    def profile(self):
+        """Return the protocol Profile document captured by the resolver."""
+        return self.resolved.profile
+
+    @property
+    def lock(self):
+        """Return the protocol ProfileLock document captured by the resolver."""
+        return self.resolved.lock
+
+    @property
+    def plan(self):
+        """Return the protocol ResolvedPlan document captured by the resolver."""
+        return self.resolved.plan
+
+    def __getattr__(self, name: str):
+        """Expose only fields present in the captured v4 documents."""
+        for document in (self.resolved.plan, self.resolved.profile, self.resolved.lock):
+            if name in document:
+                return document[name]
+        raise AttributeError(name)
+
+
+class _V4TestInterfaceRegistry:
+    """Minimal test-owned registry for compatibility provider registration."""
+
+    def __init__(self) -> None:
+        self._store: dict[str, list[object]] = {}
+
+    def register(self, key: str, value: object, meta=None) -> None:
+        """Append one provider record under its interface key."""
+        del meta
+        self._store.setdefault(key, []).append(value)
+
+    def get(self, key: str, strategy: str = "last"):
+        """Return one or all records using the historical test contract."""
+        values = list(self._store.get(key, ()))
+        if strategy == "all":
+            return values
+        return values[-1] if values else None
+
+    def list(self) -> dict[str, list[object]]:
+        """Return the current test registry projection."""
+        return {key: list(values) for key, values in self._store.items()}
+
+
+@lru_cache(maxsize=1)
+def _defaultspack_v4_snapshot() -> _V4TestResolvedSnapshot:
+    """Resolve the checked-in Defaults Profile with the Tauri shell binding."""
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        BundledCatalog,
+        resolve_default_profile,
+    )
+
+    bundle_root = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
+    catalog = BundledCatalog.load(bundle_root)
+    source = catalog.profiles["defaults"]
+    authority_bindings = {
+        "|".join(
+            str(edge.get(field) or "")
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        ): f"authority-ref:test.default.{index}"
+        for index, edge in enumerate(source["requested_edges"])
+    }
+    resolved = resolve_default_profile(
+        catalog,
+        "defaults",
+        approved_artifact_digests={
+            str(manifest["pack"]["artifact_digest"])
+            for manifest in catalog.packs.values()
+        },
+        authority_snapshot_digest="sha256:" + "9" * 64,
+        authority_bindings=authority_bindings,
+        security_epoch=1,
+    )
+    assert resolved.profile["shell"]["provider_id"] == "shell.tauri.default"
+    assert resolved.profile["requested_edges"][0]["caller_function_id"] == (
+        "shell.tauri.default"
+    )
+    return _V4TestResolvedSnapshot(
+        resolved=resolved,
+        profile_id=str(resolved.profile["profile_id"]),
+        effective_pack_set=tuple(
+            item["identity"] for item in resolved.lock["effective_set"]
+        ),
+        providers=(),
+        effective_permissions=frozenset(),
+        plan_hash=str(resolved.plan["plan_digest"]),
+    )
+
+
+def _bind_v4_snapshot(
+    snapshot: _V4TestResolvedSnapshot,
+    monkeypatch,
+    request,
+    user_data_root: Path,
+    chat_store_module=None,
+) -> None:
+    """Bind active v4 identity and one profile-scoped facade artifact root."""
+    from core_runtime import resolved_profile_scope
+
+    token = resolved_profile_scope.activate_resolved_profile(snapshot)
+    request.addfinalizer(lambda: resolved_profile_scope.restore_resolved_profile(token))
+    monkeypatch.setattr(resolved_profile_scope, "USER_DATA_DIR", user_data_root)
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_root))
+    compatibility_pack_ids = frozenset(
+        set(snapshot.effective_pack_set) | _LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS
+    )
+    monkeypatch.setattr(
+        resolved_profile_scope,
+        "effective_pack_ids",
+        lambda: compatibility_pack_ids,
+    )
+    if chat_store_module is not None:
+        artifact_root = (
+            user_data_root
+            / "compatibility"
+            / "conversation_artifacts"
+            / snapshot.profile_id
+        )
+        monkeypatch.setattr(chat_store_module, "USER_DATA_DIR", user_data_root)
+        monkeypatch.setattr(
+            chat_store_module.ChatStore,
+            "_artifact_root",
+            staticmethod(lambda root=artifact_root: root),
+        )
+
+    for module in tuple(sys.modules.values()):
+        if module is None:
+            continue
+        try:
+            if hasattr(module, "active_resolved_profile"):
+                monkeypatch.setattr(
+                    module,
+                    "active_resolved_profile",
+                    lambda: snapshot,
+                )
+            if hasattr(module, "effective_pack_ids"):
+                monkeypatch.setattr(
+                    module,
+                    "effective_pack_ids",
+                    lambda: compatibility_pack_ids,
+                )
+        except (AttributeError, TypeError):
+            continue
+
+
 def _owner_contract_invoker(owner, facade, expected_profile_id=None):
     """Return the exact conversation owner contract test adapter."""
 
@@ -1074,63 +1254,30 @@ def _owner_contract_invoker(owner, facade, expected_profile_id=None):
 
 
 @pytest.fixture
-def defaultspack_conversation_owner(monkeypatch, tmp_path):
+def defaultspack_conversation_owner(request, monkeypatch, tmp_path):
     """Bind one test explicitly to an isolated canonical conversation owner."""
-    from types import SimpleNamespace
-
-    from core_runtime import resolved_profile_scope
     from domain.chat import store as chat_store_module
     from domain.tool.registry import ToolRegistry
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
     user_data_root = tmp_path / "user_data"
-    owner = ConversationStore("default", user_data_root=user_data_root)
-    plan = SimpleNamespace(
-        profile_id="default",
-        effective_pack_set=(
-            "defaultspack",
-            "rumi_conversation_store_pack",
-            "rumi_default_tools_pack",
-            "rumi_model_catalog_pack",
-        ),
-        providers=(),
-        effective_permissions=frozenset(),
-        plan_hash="test-default-profile",
-    )
+    snapshot = _defaultspack_v4_snapshot()
+    owner = ConversationStore(snapshot.profile_id, user_data_root=user_data_root)
 
     monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(user_data_root))
-    monkeypatch.setattr(
-        resolved_profile_scope,
-        "persisted_resolved_profile",
-        lambda: plan,
+    _bind_v4_snapshot(
+        snapshot,
+        monkeypatch,
+        request,
+        user_data_root,
+        chat_store_module,
     )
-    monkeypatch.setattr(
-        resolved_profile_scope,
-        "active_resolved_profile",
-        lambda: plan,
-    )
-    monkeypatch.setattr(chat_store_module, "persisted_resolved_profile", lambda: plan)
-    monkeypatch.setattr(chat_store_module, "USER_DATA_DIR", user_data_root)
-    for module in tuple(sys.modules.values()):
-        if module is None:
-            continue
-        for name in ("persisted_resolved_profile", "active_resolved_profile"):
-            if not hasattr(module, name):
-                continue
-            try:
-                monkeypatch.setattr(
-                    module,
-                    name,
-                    (lambda: plan),
-                )
-            except (AttributeError, TypeError):
-                continue
     ToolRegistry._instance = None
 
     chat_invoke = _owner_contract_invoker(
         owner,
         chat_store_module,
-        expected_profile_id="default",
+        expected_profile_id=snapshot.profile_id,
     )
     monkeypatch.setattr(chat_store_module, "_invoke", chat_invoke)
     try:
@@ -1194,21 +1341,30 @@ def defaultspack_capability_plan_context():
 
 
 @pytest.fixture
-def defaultspack_active_profile(monkeypatch):
+def defaultspack_active_profile(request, monkeypatch, tmp_path):
     """Bind v4 gateway compatibility tests to one active selected profile."""
 
     from types import SimpleNamespace
 
-    from core_runtime import resolved_profile_scope
     from core_runtime.di_container import get_container
+    from domain.chat import store as chat_store_module
+    from domain.tool.registry import ToolRegistry
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
     from ecosystem.rumi_turn_runtime_pack.runtime.turns import (
         create_turn_action,
         create_turn_resource,
     )
 
-    registry = get_container().get_or_none("interface_registry")
-    if registry is None:
-        raise AssertionError("interface registry is required for v4 test context")
+    container = get_container()
+    marker = object()
+    previous_registry = container._instances.get("interface_registry", marker)
+    registry = (
+        previous_registry
+        if previous_registry is not marker
+        else _V4TestInterfaceRegistry()
+    )
+    if previous_registry is marker:
+        container.set_instance("interface_registry", registry)
     previous_store = {
         key: list(values) for key, values in registry._store.items()
     }
@@ -1238,10 +1394,12 @@ def defaultspack_active_profile(monkeypatch):
         },
     )
 
-    plan = SimpleNamespace(
-        profile_id="default",
+    base = _defaultspack_v4_snapshot()
+    plan = _V4TestResolvedSnapshot(
+        resolved=base.resolved,
+        profile_id=base.profile_id,
         effective_pack_set=tuple(
-            sorted(_LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS | {"rumi_turn_runtime_pack"})
+            sorted(set(base.effective_pack_set) | {"rumi_turn_runtime_pack"})
         ),
         providers=(
             SimpleNamespace(
@@ -1258,25 +1416,29 @@ def defaultspack_active_profile(monkeypatch):
             ),
         ),
         effective_permissions=frozenset({"turn.read", "turn.manage"}),
-        plan_hash="test-default-profile",
+        plan_hash=base.plan_hash,
     )
-    monkeypatch.setattr(resolved_profile_scope, "persisted_resolved_profile", lambda: plan)
-    monkeypatch.setattr(resolved_profile_scope, "active_resolved_profile", lambda: plan)
-    for module in tuple(sys.modules.values()):
-        if module is None:
-            continue
-        for name in ("persisted_resolved_profile", "active_resolved_profile"):
-            if not hasattr(module, name):
-                continue
-            try:
-                monkeypatch.setattr(module, name, lambda: plan)
-            except (AttributeError, TypeError):
-                continue
+    owner = ConversationStore(plan.profile_id, user_data_root=tmp_path)
+    monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(tmp_path))
+    _bind_v4_snapshot(plan, monkeypatch, request, tmp_path, chat_store_module)
+    monkeypatch.setattr(
+        chat_store_module,
+        "_invoke",
+        _owner_contract_invoker(
+            owner,
+            chat_store_module,
+            expected_profile_id=plan.profile_id,
+        ),
+    )
+    ToolRegistry._instance = None
     try:
         yield plan
     finally:
         registry._store.clear()
         registry._store.update(previous_store)
+        if previous_registry is marker:
+            container._instances.pop("interface_registry", None)
+        ToolRegistry._instance = None
 
 
 def _memory_contract_invoker(owner, facade):
@@ -1315,7 +1477,10 @@ def _wave7_conversation_owner():
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
     path = Path(raw_path).expanduser()
-    owner = ConversationStore("default", user_data_root=path.parent)
+    owner = ConversationStore(
+        _defaultspack_v4_snapshot().profile_id,
+        user_data_root=path.parent,
+    )
     owner.root = path.parent
     owner.path = path
     owner.backup_root = path.parent / "migration_backups"
@@ -1340,10 +1505,18 @@ def _wave7_memory_owner():
 
 
 @pytest.fixture
-def wave7_owner_bindings(monkeypatch):
+def wave7_owner_bindings(request, monkeypatch, tmp_path):
     """Bind explicit Wave 7 compatibility tests to their selected owners."""
     from domain.chat import store as chat_facade
     from domain.memory import store as memory_facade
+
+    _bind_v4_snapshot(
+        _defaultspack_v4_snapshot(),
+        monkeypatch,
+        request,
+        tmp_path / "wave7_user_data",
+        chat_facade,
+    )
 
     original_chat_invoke = chat_facade._invoke
     original_memory_invoke = memory_facade._invoke
@@ -1481,28 +1654,23 @@ def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
     from domain.chat import store as chat_facade
 
     if file_name in _CHAT_OWNER_TEST_FILES:
-        from types import SimpleNamespace
-
-        from core_runtime import resolved_profile_scope
         from ecosystem.rumi_conversation_store_pack.runtime.store import (
             ConversationStore,
         )
 
         user_data_root = tmp_path / "user_data"
-        owner = ConversationStore("default", user_data_root=user_data_root)
-        plan = SimpleNamespace(
-            profile_id="default",
-            effective_pack_set=("defaultspack", "rumi_conversation_store_pack"),
-            providers=(),
-            effective_permissions=frozenset(),
-            plan_hash="test-default-profile",
-        )
+        snapshot = _defaultspack_v4_snapshot()
+        owner = ConversationStore(snapshot.profile_id, user_data_root=user_data_root)
         monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(user_data_root))
-        monkeypatch.setattr(resolved_profile_scope, "persisted_resolved_profile", lambda: plan)
-        monkeypatch.setattr(chat_facade, "persisted_resolved_profile", lambda: plan)
-        monkeypatch.setattr(chat_facade, "USER_DATA_DIR", user_data_root)
+        _bind_v4_snapshot(
+            snapshot,
+            monkeypatch,
+            request,
+            user_data_root,
+            chat_facade,
+        )
         chat_invoke = _owner_contract_invoker(
-            owner, chat_facade, expected_profile_id="default"
+            owner, chat_facade, expected_profile_id=snapshot.profile_id
         )
         monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
         _patch_imported_facade_globals(
@@ -1516,8 +1684,15 @@ def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
     if file_name in _OWNER_MIGRATION_TEST_FILES:
         from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
-        owner = ConversationStore("default", user_data_root=tmp_path)
-        chat_invoke = _owner_contract_invoker(owner, chat_facade)
+        snapshot = _defaultspack_v4_snapshot()
+        owner = ConversationStore(snapshot.profile_id, user_data_root=tmp_path)
+        monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(tmp_path))
+        _bind_v4_snapshot(snapshot, monkeypatch, request, tmp_path, chat_facade)
+        chat_invoke = _owner_contract_invoker(
+            owner,
+            chat_facade,
+            expected_profile_id=snapshot.profile_id,
+        )
         monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
         _patch_imported_facade_globals(
             request.module,
@@ -1550,12 +1725,14 @@ def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
     from domain.memory import store as memory_facade
 
     original_memory_invoke = memory_facade._invoke
+    snapshot = _defaultspack_v4_snapshot()
+    _bind_v4_snapshot(snapshot, monkeypatch, request, tmp_path, chat_facade)
 
     def chat_invoke(contract_id, operation, payload):
         owner = _wave7_conversation_owner()
         if owner is None:
             return original_chat_invoke(contract_id, operation, payload)
-        return _owner_contract_invoker(owner, chat_facade)(
+        return _owner_contract_invoker(owner, chat_facade, snapshot.profile_id)(
             contract_id, operation, payload
         )
 

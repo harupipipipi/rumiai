@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,7 +28,11 @@ def test_chat_facade_does_not_bypass_missing_owner_with_legacy_storage(
         encoding="utf-8",
     )
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(legacy_path))
-    monkeypatch.setattr(facade, "persisted_resolved_profile", lambda: None)
+    monkeypatch.setattr(
+        facade,
+        "get_container",
+        lambda: SimpleNamespace(get_or_none=lambda _name: None),
+    )
 
     with pytest.raises(RuntimeError, match="global conversation owner is unavailable"):
         ChatStore().list_conversations()

@@ -25,8 +25,8 @@ def test_coding_contract_recovers_persisted_profile_for_request_workers(
     registry = object()
     monkeypatch.setattr(
         contract_adapter,
-        "persisted_resolved_profile",
-        lambda: SimpleNamespace(profile_id="profile-1"),
+        "captured_profile_id",
+        lambda current_registry: "profile-1",
     )
     monkeypatch.setattr(
         contract_adapter,

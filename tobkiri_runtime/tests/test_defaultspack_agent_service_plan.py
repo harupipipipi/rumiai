@@ -19,7 +19,7 @@ def _owned_conversation(tmp_path, conversation_id):
     """Read a conversation from the selected profile-scoped owner."""
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
-    return ConversationStore("default", user_data_root=tmp_path).get(conversation_id)
+    return ConversationStore("defaults", user_data_root=tmp_path).get(conversation_id)
 
 
 def _bind_fake_contract_stream(monkeypatch, client):
@@ -150,7 +150,7 @@ def test_conversation_owner_rejects_stale_update_without_overwrite(tmp_path):
         ConversationStore,
     )
 
-    owner = ConversationStore("default", user_data_root=tmp_path)
+    owner = ConversationStore("defaults", user_data_root=tmp_path)
     owner.create(
         {"id": "atomic-preserve", "model_reference": "stub/default"},
         expected_revision=0,
@@ -174,7 +174,7 @@ def test_conversation_owner_stale_append_preserves_existing_messages(tmp_path):
         ConversationStore,
     )
 
-    owner = ConversationStore("default", user_data_root=tmp_path)
+    owner = ConversationStore("defaults", user_data_root=tmp_path)
     created = owner.create(
         {"id": "atomic-retry", "model_reference": "stub/default"},
         expected_revision=0,
@@ -619,14 +619,14 @@ def test_agent_engine_extracts_text_from_thinking_content_blocks():
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run
-    from core_runtime import global_contract_dispatch
+    import core_runtime.resolved_profile_scope as profile_scope
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    # This negative-path test requires the request worker to have no resolved
-    # profile.  The repository's developer user-data directory may contain a
-    # persisted startup profile, so make that boundary explicit per test.
-    monkeypatch.setattr(global_contract_dispatch, "persisted_resolved_profile", lambda: None)
+    # This negative-path test requires the request worker to have no active
+    # v4 snapshot.  The owner fixture remains installed for conversation
+    # persistence, while the request boundary is explicitly fail-closed.
+    monkeypatch.setattr(profile_scope, "active_resolved_profile", lambda: None)
     ChatStore._instance = None
 
     store = ChatStore()
@@ -646,10 +646,10 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
     assert "".join(deltas) == ""
     failed = [event for event in events if event.get("type") == "task_failed"]
     assert failed
-    assert "resolved profile is not active" in failed[-1]["error"]
+    assert "interface registry is unavailable" in failed[-1]["error"]
     final = [event["message"] for event in events if event.get("type") == "message"][-1]
     assert final["role"] == "assistant"
-    assert "resolved profile is not active" in final["raw_text"]
+    assert "interface registry is unavailable" in final["raw_text"]
 
     persisted = _owned_conversation(tmp_path, conversation["id"])
     messages = persisted["messages"]
@@ -2131,19 +2131,6 @@ def test_coding_context_and_branch_blocks(tmp_path, monkeypatch):
     # tests may leave a persisted Defaults Profile available in the worker;
     # make the provider absence explicit so this assertion remains isolated
     # without reviving the legacy workspace-path fallback.
-    provider_unavailable = lambda: None
-    adapter_source = Path(contract_adapter.__file__).resolve()
-    for module in tuple(sys.modules.values()):
-        module_path = getattr(module, "__file__", None)
-        if not module_path:
-            continue
-        try:
-            same_adapter = Path(module_path).resolve() == adapter_source
-        except OSError:
-            same_adapter = False
-        if same_adapter and hasattr(module, "persisted_resolved_profile"):
-            monkeypatch.setattr(module, "persisted_resolved_profile", provider_unavailable)
-
     def invoke_without_provider(*args, **kwargs):
         del args, kwargs
         raise RuntimeError("global coding provider is unavailable")
@@ -3751,7 +3738,7 @@ def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(mo
 def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
 
-    owner = ConversationStore("default", user_data_root=tmp_path)
+    owner = ConversationStore("defaults", user_data_root=tmp_path)
     owner.create(
         {"id": "conv-1", "model_reference": "stub/default"},
         expected_revision=0,
@@ -3767,7 +3754,7 @@ def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
         expected_conversation_revision=1,
     )
 
-    reloaded = ConversationStore("default", user_data_root=tmp_path).get("conv-1")
+    reloaded = ConversationStore("defaults", user_data_root=tmp_path).get("conv-1")
     message = reloaded["messages"][0]
     assert message["content"][0]["text"] == "<thought>hidden</thought>shown"
     assert message["raw_text"] == "<thought>hidden</thought>shown"
@@ -5970,7 +5957,7 @@ def test_share_store_creates_lists_and_revokes_local_links(tmp_path):
     from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
     from domain.share.store import ShareStore
 
-    ConversationStore("default", user_data_root=tmp_path).create(
+    ConversationStore("defaults", user_data_root=tmp_path).create(
         {"id": "c1", "model_reference": "stub/default"},
         expected_revision=0,
     )

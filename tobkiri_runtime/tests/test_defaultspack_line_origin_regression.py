@@ -61,7 +61,20 @@ def _install_line_endpoint(
     monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTERNAL_SOURCES_PATH", str(tmp_path / "external_sources.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", str(tmp_path / "frontend_settings.json"))
-    monkeypatch.setenv("LINE_CHANNEL_SECRET", SECRET)
+    from domain.external.token_store import set_external_token
+
+    assert set_external_token(
+        "line",
+        SECRET,
+        token_id="channel-secret",
+        kind="channel_secret",
+    )["success"]
+    assert set_external_token(
+        "line",
+        "line-access-token",
+        token_id="channel-access",
+        kind="channel_access_token",
+    )["success"]
     store = WebhookEndpointStore(endpoint_path)
     store.upsert(
         {
