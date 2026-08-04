@@ -46,6 +46,7 @@ SCHEMA_ALIASES = {
     "inventory": "inventory_v1.schema.json",
     "pack_artifact_index": "pack_artifact_index_v4.schema.json",
     "pack_contract_catalog": "pack_contract_catalog_v4.schema.json",
+    "executable_catalog": "executable_catalog_v4.schema.json",
 }
 
 _ID_FIELDS = {

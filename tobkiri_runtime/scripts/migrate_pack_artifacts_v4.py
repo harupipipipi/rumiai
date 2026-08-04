@@ -27,6 +27,7 @@ from tobkiri_protocol.validation import validate_document  # noqa: E402
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 AUTHORITY = ROOT / "schemas" / "manifest_authority.v1.json"
+EXECUTABLE_SOURCES = ROOT / "schemas" / "executable_sources.v1.json"
 EXCLUDED_PACKS: frozenset[str] = frozenset()
 GENERATOR = "tobkiri.scripts.migrate_pack_artifacts_v4"
 GENERATOR_VERSION = "1.0.0"
@@ -272,6 +273,25 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
                 },
             }
         )
+    executable_sources = json.loads(
+        EXECUTABLE_SOURCES.read_text(encoding="utf-8")
+    )["packs"]
+    executable_source = executable_sources.get(pack_root.name)
+    if executable_source is not None:
+        matches = [
+            item
+            for item in provided
+            if item["contract_id"] == executable_source["contract_id"]
+        ]
+        if len(matches) != 1:
+            raise PackV4MigrationError(
+                f"canonical executable Contract mismatch: {pack_root.name}"
+            )
+        matches[0]["schemas"] = {
+            "input": executable_source["input_schema"],
+            "output": executable_source["output_schema"],
+            "error": executable_source["error_schema"],
+        }
     required = []
     for item in contracts.get("requires", []):
         required.append(
@@ -340,7 +360,15 @@ def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
     source = json.loads(source_path.read_text(encoding="utf-8"))
     pack = source["pack"]
     provided: list[dict[str, Any]] = []
+    executable_source: dict[str, Any] | None = None
+    implementation_digest: str | None = None
     if pack_id == "defaultspack":
+        executable_source = json.loads(
+            EXECUTABLE_SOURCES.read_text(encoding="utf-8")
+        )["packs"][pack_id]
+        implementation_digest = _file_digest(
+            ECOSYSTEM / pack_id / executable_source["implementation_path"]
+        )
         function = source["functions"][0]
         contract = source["contracts"][0]
         provided.append(
@@ -352,13 +380,15 @@ def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
                     {
                         "id": operation_id,
                         "entrypoint_id": operation_id,
-                        "implementation_digest": function[
-                            "implementation_digest"
-                        ],
+                        "implementation_digest": implementation_digest,
                     }
                     for operation_id in function["operations"]
                 ],
-                "schemas": {},
+                "schemas": {
+                    "input": executable_source["input_schema"],
+                    "output": executable_source["output_schema"],
+                    "error": executable_source["error_schema"],
+                },
                 "cardinality": "one",
                 "security": "restricted",
                 "failure": "fail_closed",
@@ -389,7 +419,17 @@ def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
         "workspace_boundary": "pack_local",
         "provided_contracts": provided,
         "legacy_operations": [],
-        "runtime_artifacts": [],
+        "runtime_artifacts": (
+            [
+                {
+                    "path": executable_source["implementation_path"],
+                    "digest": implementation_digest,
+                    "kind": "executable",
+                }
+            ]
+            if executable_source is not None and implementation_digest is not None
+            else []
+        ),
         "legacy_ids": [],
         "migration": {
             "compatibility": "none",
@@ -475,7 +515,7 @@ def _contract_document(
     schemas = source["schemas"]
     input_schema = schemas.get("input", EMPTY_SCHEMA)
     output_schema = schemas.get("output", schemas.get("event", EMPTY_SCHEMA))
-    error_schema = EMPTY_SCHEMA
+    error_schema = schemas.get("error", EMPTY_SCHEMA)
     schema_catalog = {
         _digest(value): value for value in (input_schema, output_schema, error_schema)
     }

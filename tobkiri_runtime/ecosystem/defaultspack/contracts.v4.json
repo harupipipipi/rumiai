@@ -7,11 +7,11 @@
       "operations": [
         {
           "effect_ceiling": [],
-          "error_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
           "idempotency": {
             "mode": "none"
           },
-          "input_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "input_schema_digest": "sha256:bef8e7369d362483cb966f08a4d30bdb2ebe393298f2fc508636680d637e9bef",
           "operation_id": "complete",
           "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "scope_semantics": "declarative"
@@ -21,7 +21,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:435a7431c4083daff66ea69fdeaff382fb306329a63787dbf83a27806a1836ce",
+            "digest": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -32,7 +32,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:435a7431c4083daff66ea69fdeaff382fb306329a63787dbf83a27806a1836ce",
+        "source_digest": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/defaultspack"
       },
@@ -48,9 +48,62 @@
         "required_capabilities": [],
         "security": "restricted"
       },
-      "revision_digest": "sha256:7ec86365dfae40dcfbe4c988f3798735335642259c1b00b44d6034a693380af7",
+      "revision_digest": "sha256:4ab185713b507f4cece1a3fadadcd9b8ed0918f66570d9d6d7b3b22f0ebca59a",
       "schema_catalog": {
         "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0": {
+          "type": "object"
+        },
+        "sha256:bef8e7369d362483cb966f08a4d30bdb2ebe393298f2fc508636680d637e9bef": {
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "type": "object"
+            },
+            "messages": {
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "model": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object"
+            },
+            "runtime_context": {
+              "type": "object"
+            },
+            "timezone": {
+              "type": "string"
+            },
+            "tools": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "messages"
+          ],
+          "type": "object"
+        },
+        "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
           "type": "object"
         }
       },
@@ -59,5 +112,5 @@
     }
   ],
   "pack_id": "defaultspack",
-  "source_identity": "sha256:435a7431c4083daff66ea69fdeaff382fb306329a63787dbf83a27806a1836ce"
+  "source_identity": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded"
 }

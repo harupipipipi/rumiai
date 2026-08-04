@@ -1,0 +1,89 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:f84bd00e11a7a1af8d49f00a9440f6dc51db2bf2dca754556d39590f41753ec3",
+  "pack_id": "defaultspack",
+  "source_identity": "sha256:e2730a6ce5e82847a8ac76f2f3bc556581c0177fdfbc0f157820262f8f39eded",
+  "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-pack-v4",
+      "execution_domain_profile": "sandbox.defaultspack.conversation.v1",
+      "execution_kind": "pack_vm",
+      "function_id": "defaultspack.conversation",
+      "implementation_digest": "sha256:785ca39d7e2094252e5440dc93a835578569fbd4492d339fa4151a6cd1b4b317",
+      "implementation_path": "runtime/conversation.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "conversation.turn.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "external_effect",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "context": {
+                "type": "object"
+              },
+              "messages": {
+                "items": {
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "model": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object"
+              },
+              "runtime_context": {
+                "type": "object"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "tools": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "messages"
+            ],
+            "type": "object"
+          },
+          "operation_id": "complete",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:4ab185713b507f4cece1a3fadadcd9b8ed0918f66570d9d6d7b3b22f0ebca59a",
+          "timeout_default_ms": 120000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "defaultspack.conversation.python"
+    }
+  ]
+}
