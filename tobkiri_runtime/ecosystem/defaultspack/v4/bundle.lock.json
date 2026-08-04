@@ -14,7 +14,7 @@
     {
       "path": "packs/rumi-file-inspect.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:69bd538ce066a67c31678d819c4dea8b6117e83b9c259daaa9ef2531144758fa"
+      "digest": "sha256:c2d1efe882f26efe32f733d546a57178c7b4eba615e9ac87a1c90da6f5d54bce"
     },
     {
       "path": "packs/rumi-host-authority-bridge.pack.v4.json",

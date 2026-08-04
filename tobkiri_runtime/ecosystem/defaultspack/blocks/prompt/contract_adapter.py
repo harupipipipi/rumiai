@@ -70,7 +70,7 @@ def run(input_data: dict, context: dict) -> dict:
         elif operation == "preview_toggle":
             operation = "edge.preview"
     contract_id = _OPERATION_CONTRACT.get(operation)
-    registry = context.get("interface_registry") if isinstance(context, dict) else None
+    registry = context.get("v4_dispatch_session") if isinstance(context, dict) else None
     plan = active_resolved_profile()
     if not contract_id or registry is None or plan is None:
         return error("Prompt Studio contract is unavailable", "PROMPT_STUDIO_UNAVAILABLE")

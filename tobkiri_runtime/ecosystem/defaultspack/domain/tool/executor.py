@@ -546,10 +546,10 @@ class ToolExecutor:
         from core_runtime.global_contract_dispatch import (
             GlobalContractInvocationError,
             GlobalContractUnavailable,
+            captured_profile_id,
             invoke_global_contract,
             invoke_selected_global_provider,
         )
-        from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
         execution = (
             tool_def.get("execution", {})
@@ -583,12 +583,11 @@ class ToolExecutor:
                 "widget": None,
             }
         registry = (
-            context.get("interface_registry")
+            context.get("v4_dispatch_session")
             if isinstance(context, dict)
             else None
-        ) or get_container().get_or_none("interface_registry")
-        plan = persisted_resolved_profile()
-        if registry is None or plan is None:
+        ) or get_container().get_or_none("v4_dispatch_session")
+        if registry is None:
             return {
                 "result": "Global contract runtime is unavailable",
                 "is_error": True,
@@ -596,7 +595,8 @@ class ToolExecutor:
             }
         arguments = dict(arguments or {})
         requested_profile = str(arguments.get("profile_id") or "").strip()
-        if requested_profile and requested_profile != plan.profile_id:
+        profile_id = captured_profile_id(registry)
+        if requested_profile and requested_profile != profile_id:
             return {
                 "result": "Tool requested an inactive profile",
                 "is_error": True,
@@ -645,7 +645,7 @@ class ToolExecutor:
                     registry,
                     "rumi.resource.workspace.v1",
                     "list",
-                    {"profile_id": plan.profile_id},
+                    {"profile_id": profile_id},
                 )
                 selected_workspace_id = (
                     str(workspace_snapshot.get("selected_workspace_id") or "").strip()
@@ -666,7 +666,7 @@ class ToolExecutor:
                     "rumi.resource.workspace.v1",
                     "get",
                     {
-                        "profile_id": plan.profile_id,
+                        "profile_id": profile_id,
                         "workspace_id": context_workspace_id,
                     },
                 )
@@ -712,7 +712,7 @@ class ToolExecutor:
                     }
         payload = {
             **arguments,
-            "profile_id": plan.profile_id,
+            "profile_id": profile_id,
             "_contract_consumer_pack_id": source_pack_id,
             "_contract_consumer_function_id": str(
                 tool_def.get("tool_id") or tool_def.get("name") or ""
@@ -730,8 +730,7 @@ class ToolExecutor:
                     if isinstance(capability_plan, dict)
                     else ""
                 )
-                or getattr(plan, "catalog_revision", "")
-                or getattr(plan, "registry_revision", "")
+                or getattr(registry, "plan_digest", "")
                 or ""
             )
             if not payload["registry_revision"]:
@@ -854,7 +853,7 @@ class ToolExecutor:
             payload["_invocation_key"] = hashlib.sha256(
                 json.dumps(
                     {
-                        "profile_id": plan.profile_id,
+                        "profile_id": profile_id,
                         "tool_id": tool_def.get("tool_id")
                         or tool_def.get("name"),
                         "arguments": arguments,
@@ -956,14 +955,14 @@ class ToolExecutor:
                     "service_pack_id": source_pack_id,
                     "operation": "repository.context.prepare",
                     "authority": "repository.content.external_share",
-                    "caller_id": f"tool-executor:{plan.profile_id}",
+                    "caller_id": f"tool-executor:{profile_id}",
                     "caller_pack_id": source_pack_id,
                     "caller_function_id": str(
                         tool_def.get("tool_id")
                         or tool_def.get("name")
                         or ""
                     ),
-                    "profile_id": plan.profile_id,
+                    "profile_id": profile_id,
                     "workspace_id": context_workspace_id,
                     "session_id": str(
                         context.get("conversation_id")
@@ -990,12 +989,12 @@ class ToolExecutor:
                 "service_pack_id": source_pack_id,
                 "operation": "repository.context.prepare",
                 "authority": "repository.content.external_share",
-                "caller_id": f"tool-executor:{plan.profile_id}",
+                "caller_id": f"tool-executor:{profile_id}",
                 "caller_pack_id": source_pack_id,
                 "caller_function_id": str(
                     tool_def.get("tool_id") or tool_def.get("name") or ""
                 ),
-                "profile_id": plan.profile_id,
+                "profile_id": profile_id,
                 "workspace_id": context_workspace_id,
                 "session_id": str(
                     context.get("conversation_id")

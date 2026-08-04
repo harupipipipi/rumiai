@@ -107,7 +107,7 @@ def run_host_contract_action(
             "error_type": "legacy_host_action_not_migrated",
             "action": normalized_action,
         }
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     plan = active_resolved_profile()
     if registry is None or plan is None:
         return {

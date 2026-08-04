@@ -292,6 +292,11 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
             "output": executable_source["output_schema"],
             "error": executable_source["error_schema"],
         }
+        implementation_digest = _file_digest(
+            pack_root / executable_source["implementation_path"]
+        )
+        for operation in matches[0]["operations"]:
+            operation["implementation_digest"] = implementation_digest
     required = []
     for item in contracts.get("requires", []):
         required.append(

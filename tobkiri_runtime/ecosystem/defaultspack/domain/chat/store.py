@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from core_runtime.di_container import get_container
-from core_runtime.global_contract_dispatch import invoke_global_contract
+from core_runtime.global_contract_dispatch import (
+    captured_profile_id,
+    invoke_global_contract,
+)
 from core_runtime.paths import USER_DATA_DIR
-from core_runtime.resolved_profile_scope import persisted_resolved_profile
-from domain.ai_client.model_runtime_settings import DEFAULT_MODEL as DEFAULT_CHAT_MODEL
 from domain.chat.attachments.store import upsert_attachment_records
 from domain.chat.icon_matcher import match_icon
 
@@ -568,18 +569,22 @@ class ChatStore:
 
     @staticmethod
     def _artifact_root() -> Path:
-        plan = persisted_resolved_profile()
-        profile_id = plan.profile_id if plan is not None else "default"
+        session = get_container().get_or_none("v4_dispatch_session")
+        if session is None:
+            raise RuntimeError("global conversation owner is unavailable")
+        profile_id = captured_profile_id(session)
         return Path(USER_DATA_DIR) / "compatibility" / "conversation_artifacts" / profile_id
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
-    registry = get_container().get_or_none("interface_registry")
-    plan = persisted_resolved_profile()
-    if registry is None or plan is None:
+    registry = get_container().get_or_none("v4_dispatch_session")
+    if registry is None:
         raise RuntimeError("global conversation owner is unavailable")
     return invoke_global_contract(
-        registry, contract_id, operation, {"profile_id": plan.profile_id, **dict(payload)}
+        registry,
+        contract_id,
+        operation,
+        {"profile_id": captured_profile_id(registry), **dict(payload)},
     )
 
 

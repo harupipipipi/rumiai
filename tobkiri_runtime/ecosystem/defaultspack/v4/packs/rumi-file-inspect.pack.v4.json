@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:d055c25ba8c455a431cb2976e21f26a99bf27fcc27ee0c87b1a369aceb15d3c8",
+      "digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd",
       "kind": "executable",
       "path": "runtime/inspect.py"
     }
@@ -19,7 +19,7 @@
     {
       "contract_revision_digest": "sha256:020a5171ab05ff6459c6d5d506281b620ff54418e9482d5e049e9a7bf23280cb",
       "id": "rumi_file_inspect_pack.file-inspect.service",
-      "implementation_digest": "sha256:d055c25ba8c455a431cb2976e21f26a99bf27fcc27ee0c87b1a369aceb15d3c8",
+      "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd",
       "isolation": "dedicated_process",
       "operations": [
         "rumi_file_inspect_pack.file-inspect"
@@ -28,9 +28,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:368246dc69604304ac50ef88d083a24c96eb544368a51a5431652904383f38ba",
-    "contract_catalog_digest": "sha256:1d5b7d4ce4ef5307034d2ac15165a3cfc99c8d1f5371327f5a9f2ecd993de024",
-    "source_identity": "sha256:801094a92b90e02ac1ef7e574e8b9f5a0d54c3f24c83622c4a0cbd06622bd7f0"
+    "artifact_set_digest": "sha256:b2ae2191789ff05bc019e96e30e8155afdb83d5c726230089722c9b14d9a89ed",
+    "contract_catalog_digest": "sha256:6bfaacc5ec0b8c4a71fe4bbbf328890877e9bffcee81788fe7a1b8397b1391f0",
+    "source_identity": "sha256:d9346435aa8e9e20bbaf267c15ff05846a197a5581eaa25ede4d1bcfe0025c5b"
   },
   "migration": {
     "compatibility": "read_only",
@@ -56,7 +56,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:368246dc69604304ac50ef88d083a24c96eb544368a51a5431652904383f38ba",
+    "artifact_digest": "sha256:b2ae2191789ff05bc019e96e30e8155afdb83d5c726230089722c9b14d9a89ed",
     "display_name": "Rumi File Inspect",
     "id": "rumi_file_inspect_pack",
     "kind": "host_extension",
@@ -66,7 +66,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:801094a92b90e02ac1ef7e574e8b9f5a0d54c3f24c83622c4a0cbd06622bd7f0",
+        "digest": "sha256:d9346435aa8e9e20bbaf267c15ff05846a197a5581eaa25ede4d1bcfe0025c5b",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -77,7 +77,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:801094a92b90e02ac1ef7e574e8b9f5a0d54c3f24c83622c4a0cbd06622bd7f0",
+    "source_digest": "sha256:d9346435aa8e9e20bbaf267c15ff05846a197a5581eaa25ede4d1bcfe0025c5b",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_file_inspect_pack"
   },

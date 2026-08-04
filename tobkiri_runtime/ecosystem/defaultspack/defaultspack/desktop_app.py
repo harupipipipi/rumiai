@@ -267,42 +267,16 @@ def _surface_url(url: str) -> str:
 
 
 def _restore_active_profile_contracts() -> None:
-    """Activate only verified contracts selected by the active profile.
-
-    The desktop chat server is intentionally a separate local process from the
-    launcher kernel.  It therefore needs its own interface registry populated
-    before handlers such as the AI credential and gateway routes can run.
-    """
+    """Require the Launcher-captured Pack v4 dispatch snapshot."""
     try:
-        from app import (
-            _active_startup_profile_pack_ids,
-            _enable_approved_profile_host_execution,
-        )
-        from core_runtime.approval_manager import get_approval_manager
-        from core_runtime.capability_binding_registration import (
-            register_pack_binding_handlers,
-        )
         from core_runtime.di_container import get_container
-        from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
-        pack_ids = _active_startup_profile_pack_ids()
-        _enable_approved_profile_host_execution(pack_ids)
-        plan = persisted_resolved_profile()
-        if plan is None:
-            _write_launch_event("profile_contract_restore_skipped", reason="no_plan")
-            return
-        interface_registry = get_container().get("interface_registry")
-        result = register_pack_binding_handlers(
-            interface_registry=interface_registry,
-            approval_manager=get_approval_manager(),
-            effective_pack_ids=plan.effective_pack_set,
-        )
+        session = get_container().get_or_none("v4_dispatch_session")
+        if session is None:
+            raise RuntimeError("Pack v4 dispatch snapshot was not injected")
         _write_launch_event(
             "profile_contract_restore_complete",
-            profile_id=plan.profile_id,
-            registered=result.registered,
-            skipped=result.skipped,
-            ok=result.ok,
+            snapshot_type=type(session).__name__,
         )
     except Exception as exc:
         _write_launch_event("profile_contract_restore_failed", error=repr(exc))

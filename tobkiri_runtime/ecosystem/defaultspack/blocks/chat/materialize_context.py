@@ -41,7 +41,7 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None):
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         return error("Conversation not found", "NOT_FOUND")
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     plan = active_resolved_profile()
     if registry is None or plan is None:
         return error("Context runtime unavailable", "CONTEXT_UNAVAILABLE")

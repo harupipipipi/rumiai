@@ -31,21 +31,14 @@ def _require_active_chat_profile() -> None:
 
     from core_runtime.di_container import get_container
     from core_runtime.global_contract_dispatch import selected_global_providers
-    from core_runtime.resolved_profile_scope import persisted_resolved_profile
-
-    plan = persisted_resolved_profile()
-    if plan is None:
-        raise RuntimeError(
-            "No active startup profile is available. Complete setup in Tobkiri Launcher."
-        )
-    interface_registry = get_container().get_or_none("interface_registry")
-    if interface_registry is None:
-        raise RuntimeError("The active profile registry could not be restored.")
+    dispatch_session = get_container().get_or_none("v4_dispatch_session")
+    if dispatch_session is None:
+        raise RuntimeError("The active Pack v4 snapshot is unavailable.")
 
     unavailable: list[str] = []
     for contract_id in REQUIRED_CHAT_CONTRACTS:
         try:
-            providers = selected_global_providers(interface_registry, contract_id)
+            providers = selected_global_providers(dispatch_session, contract_id)
         except RuntimeError:
             providers = ()
         if len(providers) != 1:

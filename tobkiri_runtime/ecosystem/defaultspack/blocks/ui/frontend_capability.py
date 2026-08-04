@@ -56,7 +56,7 @@ def run(input_data: dict, context: dict) -> dict:
     """Invoke only a contract declared by the current verified contribution."""
     data = dict(input_data) if isinstance(input_data, dict) else {}
     plan = persisted_resolved_profile()
-    registry = context.get("interface_registry") if isinstance(context, dict) else None
+    registry = context.get("v4_dispatch_session") if isinstance(context, dict) else None
     if plan is None or registry is None:
         return error("Frontend capability is unavailable", "CAPABILITY_UNAVAILABLE")
 

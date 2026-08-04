@@ -13,6 +13,11 @@ from .models import (
 from .authority_v4 import AuthorityV4Adapter
 from .artifact_compiler import CompiledPack, compile_pack_root, routes_for_plan
 from .composition import AuthorityCeilings, HostV4Composition
+from .runtime import (
+    ProductionRuntimeV4,
+    V4DispatchSession,
+    install_dispatch_session,
+)
 
 __all__ = [
     "ArtifactVariant",
@@ -26,7 +31,10 @@ __all__ = [
     "HostV4Composition",
     "OpaqueAuthorityRef",
     "PackArtifact",
+    "ProductionRuntimeV4",
     "RequestContext",
+    "V4DispatchSession",
+    "install_dispatch_session",
     "compile_pack_root",
     "routes_for_plan",
 ]

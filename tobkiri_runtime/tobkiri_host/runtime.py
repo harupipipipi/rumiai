@@ -1,0 +1,177 @@
+"""Production Pack v4 runtime assembled from one active immutable snapshot."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Mapping, Protocol, Sequence
+
+from core_runtime.authority.v4 import AuthorityStore
+
+from .artifact_compiler import CompiledPack, compile_pack_root, routes_for_plan
+from .backends import BackendRegistry
+from .broker import RequestAdmissionPort, RequestBroker
+from .composition import AuthorityCeilings, HostV4Composition
+from .contracts import AdapterExecutor, AdapterPlanner
+from .effects import ReconciliationStore
+from .materialization import MaterializationCoordinator
+from .models import InvocationFrame, PackArtifact, RequestContext
+
+
+@dataclass(frozen=True)
+class ProductionRuntimeV4:
+    """One activation-scoped runtime; it has no mutable provider discovery."""
+
+    composition: HostV4Composition
+
+    @classmethod
+    def capture(
+        cls,
+        *,
+        profile: Mapping[str, Any],
+        lock: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        activation: Mapping[str, Any],
+        pack_roots: Mapping[str, Path],
+        supporting_artifacts: Sequence[PackArtifact],
+        verified_effective_artifacts: Mapping[str, str],
+        authority_ceilings: Mapping[tuple[str, str], AuthorityCeilings],
+    ) -> "ProductionRuntimeV4":
+        """Compile only exact plan Pack roots and capture the active graph."""
+        binding_pack_ids = {item["pack_id"] for item in plan["bindings"]}
+        if set(pack_roots) != binding_pack_ids:
+            raise ValueError("Pack roots must exactly equal ResolvedPlan binding Packs")
+        compiled: tuple[CompiledPack, ...] = tuple(
+            compile_pack_root(pack_roots[pack_id])
+            for pack_id in sorted(binding_pack_ids)
+        )
+        artifacts = tuple(item.artifact for item in compiled) + tuple(
+            supporting_artifacts
+        )
+        routes = routes_for_plan(plan, compiled)
+        composition = HostV4Composition.capture(
+            profile=profile,
+            lock=lock,
+            plan=plan,
+            activation=activation,
+            artifacts=artifacts,
+            routes=routes,
+            authority_ceilings=authority_ceilings,
+            effective_artifacts=verified_effective_artifacts,
+        )
+        return cls(composition=composition)
+
+    def broker(
+        self,
+        *,
+        authority_store: AuthorityStore,
+        adapters: AdapterPlanner,
+        adapter_executor: AdapterExecutor,
+        backends: BackendRegistry,
+        materialization: MaterializationCoordinator,
+        admission: RequestAdmissionPort,
+        reconciliation: ReconciliationStore,
+        terminate_domain: Callable[[str], None] | None = None,
+    ) -> RequestBroker:
+        """Build the sole request Broker using this captured authority adapter."""
+        authority = self.composition.authority_adapter(
+            authority_store, terminate_domain=terminate_domain
+        )
+        return RequestBroker(
+            catalog=self.composition.catalog,
+            adapters=adapters,
+            adapter_executor=adapter_executor,
+            backends=backends,
+            materialization=materialization,
+            admission=admission,
+            authority=authority,
+            audit=authority,
+            reconciliation=reconciliation,
+        )
+
+    def dispatch_session(
+        self,
+        *,
+        broker: RequestBroker,
+        context_for: Callable[[str, str], RequestContext],
+        effect_scope_for: Callable[
+            [str, str, Mapping[str, Any]], Mapping[str, Any]
+        ],
+        providers: Mapping[str, tuple[Mapping[str, Any], ...]],
+    ) -> "V4DispatchSession":
+        """Bind request ports to identities from this captured composition."""
+        return V4DispatchSession(
+            broker=broker,
+            context_for=context_for,
+            effect_scope_for=effect_scope_for,
+            providers=providers,
+            profile_id=str(self.composition.profile["profile_id"]),
+            plan_digest=str(self.composition.plan["plan_digest"]),
+        )
+
+
+@dataclass(frozen=True)
+class V4DispatchSession:
+    """Authenticated request adapter shared by worker, HTTP, and chat surfaces."""
+
+    broker: RequestBroker
+    context_for: Callable[[str, str], RequestContext]
+    effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]]
+    providers: Mapping[str, tuple[Mapping[str, Any], ...]]
+    profile_id: str
+    plan_digest: str
+
+    def provider_metadata(
+        self, contract_id: str
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return metadata pinned when this session was constructed."""
+        return self.providers.get(contract_id, ())
+
+    def invoke(
+        self,
+        contract_id: str,
+        operation_id: str,
+        payload: Mapping[str, Any],
+        *,
+        version_range: str = ">=1,<2",
+    ) -> Mapping[str, Any]:
+        """Dispatch through the captured Broker without identity from payload."""
+        context = self.context_for(contract_id, operation_id)
+        return self.broker.invoke(
+            InvocationFrame(
+                contract_id=contract_id,
+                version_range=version_range,
+                operation_id=operation_id,
+                payload=dict(payload),
+            ),
+            context,
+            effect_scope=self.effect_scope_for(
+                contract_id, operation_id, payload
+            ),
+        )
+
+
+class DispatchContainer(Protocol):
+    """Minimal composition-root port used to publish one captured session."""
+
+    def set_instance(self, name: str, instance: Any) -> None:
+        """Install an already-constructed immutable service instance."""
+
+
+def install_dispatch_session(
+    container: DispatchContainer, session: V4DispatchSession
+) -> None:
+    """Publish the exact captured activation to worker, HTTP, and chat code."""
+    if not session.profile_id.strip():
+        raise ValueError("v4 dispatch session profile_id must be non-empty")
+    if not session.plan_digest.startswith("sha256:"):
+        raise ValueError("v4 dispatch session plan_digest must be canonical")
+    container.set_instance("v4_dispatch_session", session)
+
+
+__all__ = [
+    "DispatchContainer",
+    "ProductionRuntimeV4",
+    "V4DispatchSession",
+    "install_dispatch_session",
+]

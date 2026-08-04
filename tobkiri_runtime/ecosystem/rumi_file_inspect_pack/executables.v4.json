@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:76d5332ac9f099d6726c69a6df8c94ba2e01128ee29eb1813ced5c023c2fb580",
+  "catalog_digest": "sha256:41b52517d6023b0a904fe854b6c73b7f162286d617f6fe5895d876346b81bcbc",
   "pack_id": "rumi_file_inspect_pack",
-  "source_identity": "sha256:801094a92b90e02ac1ef7e574e8b9f5a0d54c3f24c83622c4a0cbd06622bd7f0",
+  "source_identity": "sha256:d9346435aa8e9e20bbaf267c15ff05846a197a5581eaa25ede4d1bcfe0025c5b",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.file-inspect.read-only.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_file_inspect_pack.file-inspect.service",
-      "implementation_digest": "sha256:d055c25ba8c455a431cb2976e21f26a99bf27fcc27ee0c87b1a369aceb15d3c8",
+      "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd",
       "implementation_path": "runtime/inspect.py",
       "materialization_mode": "on_demand",
       "operations": [

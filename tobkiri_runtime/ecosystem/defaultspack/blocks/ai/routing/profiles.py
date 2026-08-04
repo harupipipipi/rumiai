@@ -107,7 +107,7 @@ def _invoke(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Invoke the selected model-profile owner through the global registry."""
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     if registry is None:
         raise RuntimeError("model profile owner is unavailable")
     value = invoke_global_contract(registry, contract_id, operation, dict(payload))

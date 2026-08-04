@@ -121,7 +121,7 @@ def stream(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     if registry is None:
         raise GlobalContractUnavailable("interface registry is unavailable")
     request = dict(payload)

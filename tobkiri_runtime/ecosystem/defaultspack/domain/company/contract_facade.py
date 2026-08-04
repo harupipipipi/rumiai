@@ -8,8 +8,10 @@ import uuid
 from typing import Any, Mapping
 
 from core_runtime.di_container import get_container
-from core_runtime.global_contract_dispatch import invoke_global_contract
-from core_runtime.resolved_profile_scope import persisted_resolved_profile
+from core_runtime.global_contract_dispatch import (
+    captured_profile_id,
+    invoke_global_contract,
+)
 from domain.safety import approval
 from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
@@ -1182,14 +1184,14 @@ def _nonnegative_int(value: Any, default: int) -> int:
 
 
 def _profile_id() -> str:
-    plan = persisted_resolved_profile()
-    if plan is None:
+    session = get_container().get_or_none("v4_dispatch_session")
+    if session is None:
         raise CompanyFacadeError(
             "COMPANY_OWNER_UNAVAILABLE",
             "resolved profile is unavailable",
             503,
         )
-    return plan.profile_id
+    return captured_profile_id(session)
 
 
 def _conversation_employee_model(
@@ -1215,7 +1217,7 @@ def _conversation_employee_model(
 
 
 def _invoke(contract: str, operation: str, payload: Mapping[str, Any]) -> Any:
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     if registry is None:
         raise CompanyFacadeError(
             "COMPANY_OWNER_UNAVAILABLE",
