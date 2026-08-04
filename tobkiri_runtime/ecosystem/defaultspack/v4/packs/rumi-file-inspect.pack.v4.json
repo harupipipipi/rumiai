@@ -1,0 +1,46 @@
+{
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "pack": {
+    "id": "rumi-file-inspect",
+    "version": "4.0.0",
+    "kind": "normal_sandbox",
+    "artifact_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "display_name": "Tobkiri Workspace File Inspect"
+  },
+  "functions": [
+    {
+      "id": "defaultspack.file.inspect",
+      "implementation_digest": "sha256:e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+      "contract_revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "operations": ["inspect"],
+      "role": "brokered",
+      "isolation": "pack_vm"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "workspace.file.inspect.v1",
+      "revision_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "operations": ["inspect"]
+    }
+  ],
+  "artifacts": [],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json",
+    "source_digest": "sha256:e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
+    "repository_commit": "working-tree",
+    "repository_tree": "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "evidence": []
+  },
+  "migration": {
+    "compatibility": "none",
+    "legacy_ids": [],
+    "removal_wave": 0,
+    "sunset_at": "2026-08-05"
+  }
+}

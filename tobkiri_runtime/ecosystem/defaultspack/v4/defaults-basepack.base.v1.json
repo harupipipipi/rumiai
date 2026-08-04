@@ -1,0 +1,34 @@
+{
+  "base_api_version": "io.tobkiri.base.v1",
+  "pack_id": "defaults-basepack",
+  "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "required_shell_capabilities": [
+    "commands",
+    "interactive_prompt",
+    "navigation",
+    "notifications",
+    "rich_text"
+  ],
+  "presentation_families": ["terminal"],
+  "backend_contracts": [
+    "conversation.turn.v1",
+    "workspace.file.inspect.v1"
+  ],
+  "contribution_contracts": [],
+  "state_owners": [
+    "defaultspack.conversation",
+    "defaultspack.settings"
+  ],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
+    "source_digest": "sha256:a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+    "repository_commit": "working-tree",
+    "repository_tree": "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "evidence": []
+  }
+}

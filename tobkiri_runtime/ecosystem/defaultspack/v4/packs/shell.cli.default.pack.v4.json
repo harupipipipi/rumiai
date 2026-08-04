@@ -1,0 +1,46 @@
+{
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "pack": {
+    "id": "shell.cli.default",
+    "version": "1.0.0",
+    "kind": "shell",
+    "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "display_name": "Tobkiri CLI Shell"
+  },
+  "functions": [
+    {
+      "id": "shell.cli.default",
+      "implementation_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "contract_revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "operations": ["present"],
+      "role": "brokered",
+      "isolation": "dedicated_process"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "app.shell.v1",
+      "revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "operations": ["present"]
+    }
+  ],
+  "artifacts": [],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
+    "source_digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "repository_commit": "working-tree",
+    "repository_tree": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "evidence": []
+  },
+  "migration": {
+    "compatibility": "none",
+    "legacy_ids": [],
+    "removal_wave": 0,
+    "sunset_at": "2026-08-05"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema": "io.tobkiri.defaultspack-bundle-lock.v1",
+  "entries": [
+    {
+      "path": "packs/defaults-basepack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:9570f4635880b774fc101195e663f34ca1f212002ec2e5cf01960befbcc380e4"
+    },
+    {
+      "path": "packs/defaultspack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:65d04e57d8d4b923e8a65da66ad0142accb0599d3c115732145e97825e1b485a"
+    },
+    {
+      "path": "packs/rumi-file-inspect.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:ee5c82a5debffc6a56b9d160b1e92b2f7b1db75fa26cd2af603d8f2d6f3d9dd1"
+    },
+    {
+      "path": "packs/shell.cli.default.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:29321321119d9c8c5a4500d75da679f7bef87db7fb9e9e04a62b44e1d19f0c3b"
+    },
+    {
+      "path": "defaults-basepack.base.v1.json",
+      "kind": "base",
+      "digest": "sha256:31c018e78d5f424c72c9e72ee78cd692231e4fc7c044e33677c2b90b12c1a557"
+    },
+    {
+      "path": "shell.cli.default.shell.v1.json",
+      "kind": "shell",
+      "digest": "sha256:0b1eb7d28e6b8a71e0e940c34c07daac68ef1dc7ecd03be7282e11b9dd5b3cb5"
+    },
+    {
+      "path": "defaults.profile.v4.json",
+      "kind": "profile",
+      "digest": "sha256:efe88dacb9503d9cc8fd61e42119eb4d26b10d8936e753b3af6ccf8120457002"
+    }
+  ]
+}

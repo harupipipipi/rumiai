@@ -1,0 +1,32 @@
+{
+  "shell_api_version": "io.tobkiri.shell.v1",
+  "provider_id": "shell.cli.default",
+  "pack_id": "shell.cli.default",
+  "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "contract_id": "app.shell.v1",
+  "experience_role": "shell",
+  "presentation_kind": "terminal_stdio",
+  "technology": "cli",
+  "consumes_contribution_contracts": [],
+  "required_capabilities": [
+    "commands",
+    "interactive_prompt",
+    "navigation",
+    "notifications",
+    "rich_text",
+    "structured_stdio"
+  ],
+  "artifact_variants": [],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
+    "source_digest": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "repository_commit": "working-tree",
+    "repository_tree": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "evidence": []
+  }
+}
