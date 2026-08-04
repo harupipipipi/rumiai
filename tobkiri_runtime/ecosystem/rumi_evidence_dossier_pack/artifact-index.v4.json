@@ -1,0 +1,22 @@
+{
+  "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "artifacts": [
+    {
+      "digest": "sha256:a596ebd719fdf5aec5ee92c2dad8a1f225599c782cfa17dac034807628f944de",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:3b8b0975384dad7f6d390b0a763ddfaf5bc457a00f86d8521909170ce5572719",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:55e5d215d68931135f7911b0548ad31af39feea55c681d8cd9eef8d111517309"
+  },
+  "pack_id": "rumi_evidence_dossier_pack",
+  "source_identity": "sha256:c1c5fe55c7a3b739c3dede26913f82854154f43b2dd65a95d2812f8cb3d20c15"
+}

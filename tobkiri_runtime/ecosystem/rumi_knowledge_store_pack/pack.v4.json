@@ -1,0 +1,185 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:1adc7542788dbf49e2ec9a6fdbf4b219913ef53e70c24d4c8a325d2ae929f41e",
+      "kind": "executable",
+      "path": "runtime/store.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.action.knowledge.manage.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-manage"
+      ],
+      "revision_digest": "sha256:6b2e3a2286cedcc8605a26d46ddec501e173bc3395935b01a7cc87b1afcbc41a"
+    },
+    {
+      "contract_id": "tobkiri.action.knowledge.migrate.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-migrate"
+      ],
+      "revision_digest": "sha256:a04930705b519cb41bf9eb6d40c5e89b5286ac962a9f9cc513dae61b9dc85655"
+    },
+    {
+      "contract_id": "tobkiri.resource.knowledge.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-resource"
+      ],
+      "revision_digest": "sha256:f95330eb0cea0caedb83d16fb138ecbfb1dd13144a4c65bc9c94188aacba373e"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:6b2e3a2286cedcc8605a26d46ddec501e173bc3395935b01a7cc87b1afcbc41a",
+      "id": "rumi_knowledge_store_pack.knowledge-store.manage",
+      "implementation_digest": "sha256:1adc7542788dbf49e2ec9a6fdbf4b219913ef53e70c24d4c8a325d2ae929f41e",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-manage"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:a04930705b519cb41bf9eb6d40c5e89b5286ac962a9f9cc513dae61b9dc85655",
+      "id": "rumi_knowledge_store_pack.knowledge-store.migrate",
+      "implementation_digest": "sha256:1adc7542788dbf49e2ec9a6fdbf4b219913ef53e70c24d4c8a325d2ae929f41e",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-migrate"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:f95330eb0cea0caedb83d16fb138ecbfb1dd13144a4c65bc9c94188aacba373e",
+      "id": "rumi_knowledge_store_pack.knowledge-store.resource",
+      "implementation_digest": "sha256:1adc7542788dbf49e2ec9a6fdbf4b219913ef53e70c24d4c8a325d2ae929f41e",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-resource"
+      ],
+      "role": "host_capability_provider"
+    }
+  ],
+  "integrity": {
+    "artifact_set_digest": "sha256:8901242ec3d90aa0e7be9d145855901a15cac0657cc4af8909ef9054ca578450",
+    "contract_catalog_digest": "sha256:1fc6374f7c0b262889a47721db579a33d4f65ede252e58c0fcfff270a2222dba",
+    "source_identity": "sha256:61d92e91f0cc64e76109fa4df4e98a9d782b88b92503b07855773ec06852c14d"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi.action.knowledge.manage.v1",
+      "rumi.action.knowledge.migrate.v1",
+      "rumi.resource.knowledge.v1",
+      "rumi:ecosystem/rumi_knowledge_store_pack",
+      "rumi_knowledge_store_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "contract_reference": "tobkiri.action.knowledge.manage.v1",
+      "effect_ceiling": [
+        "capability:knowledge.manage",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_knowledge_store_pack.knowledge-manage",
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.manage",
+      "source_kind": "v3_contract"
+    },
+    {
+      "contract_reference": "tobkiri.action.knowledge.migrate.v1",
+      "effect_ceiling": [
+        "capability:knowledge.migrate",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_knowledge_store_pack.knowledge-migrate",
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.migrate",
+      "source_kind": "v3_contract"
+    },
+    {
+      "contract_reference": "tobkiri.resource.knowledge.v1",
+      "effect_ceiling": [
+        "capability:knowledge.read",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_knowledge_store_pack.knowledge-resource",
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.resource",
+      "source_kind": "v3_contract"
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:8901242ec3d90aa0e7be9d145855901a15cac0657cc4af8909ef9054ca578450",
+    "display_name": "Rumi Knowledge Store",
+    "id": "rumi_knowledge_store_pack",
+    "kind": "host_extension",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:61d92e91f0cc64e76109fa4df4e98a9d782b88b92503b07855773ec06852c14d",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:61d92e91f0cc64e76109fa4df4e98a9d782b88b92503b07855773ec06852c14d",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_knowledge_store_pack"
+  },
+  "provider_catalog": [
+    {
+      "contract_reference": "tobkiri.action.knowledge.manage.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-manage"
+      ],
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.manage"
+    },
+    {
+      "contract_reference": "tobkiri.action.knowledge.migrate.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-migrate"
+      ],
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.migrate"
+    },
+    {
+      "contract_reference": "tobkiri.resource.knowledge.v1",
+      "operations": [
+        "rumi_knowledge_store_pack.knowledge-resource"
+      ],
+      "owner": "rumi_knowledge_store_pack",
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.resource"
+    }
+  ],
+  "requirements": {
+    "approval_policy": "capability_gated",
+    "capabilities": [
+      "knowledge.manage",
+      "knowledge.migrate",
+      "knowledge.read"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "host_brokered",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "host_brokered"
+  }
+}

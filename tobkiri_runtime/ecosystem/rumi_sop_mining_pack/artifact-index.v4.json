@@ -1,0 +1,22 @@
+{
+  "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "artifacts": [
+    {
+      "digest": "sha256:641625a6799bd59b38f9cbb1b1aa371426d6f306edae0f8ae97bdae1d7ff8503",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:853bc4718be86f89f8a6320d69eb3d852fc3eff1aa83272fdf771db2898d9f71",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:d525df94d77c98323665030247026fbdb8417590593c574dd3e649b457e19d4f"
+  },
+  "pack_id": "rumi_sop_mining_pack",
+  "source_identity": "sha256:53cbb2ff1842cefd6f46b367e4d9dfb24a36421d30af1335008e20a89cbdfd3b"
+}

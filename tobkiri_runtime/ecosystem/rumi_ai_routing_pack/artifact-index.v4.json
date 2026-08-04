@@ -1,0 +1,32 @@
+{
+  "artifact_set_digest": "sha256:27c99a7bd9d7ce76eed8a2964cc1bb10bc568543a670459606d51f5f417b7b9f",
+  "artifacts": [
+    {
+      "digest": "sha256:f1cc0e3a0ae29a4eaf99e568625a93db4ec21146301979ddfa871c8bbe7ab444",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:7d245d10967d553bcfb400c9c25e00d1f38d6fbb8df300257d5343bd9ac3c958",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:e2540c5e7ab8f04f3cc89bdc65b092e8e6c6336180107a1dc93770b0e102005e",
+      "path": "runtime/__init__.py",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:3cf865a705af10d35702981ec38e8f838320a31530096dedd570df2218d2b220",
+      "path": "runtime/router.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:68e4edadfac1306272331db3ee7667ac6ae64201c03411dd5b7460a529ac52cb"
+  },
+  "pack_id": "rumi_ai_routing_pack",
+  "source_identity": "sha256:cf170bbb335d8aa045580297d248505612596c677f29377a56e21cde189bbe34"
+}

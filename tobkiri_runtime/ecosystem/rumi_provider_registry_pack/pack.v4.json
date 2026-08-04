@@ -1,0 +1,205 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:a4772ae69d4ed2171ac32ca418afc9c2245bf3d8dc0100137cc71afb90435472",
+      "kind": "executable",
+      "path": "runtime/__init__.py"
+    },
+    {
+      "digest": "sha256:f2e3464ed467b6e85dae562a81fa3c0d5ac1c0fd338b96ff3159736f0320d537",
+      "kind": "executable",
+      "path": "runtime/health_process.py"
+    },
+    {
+      "digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f",
+      "kind": "executable",
+      "path": "runtime/process.py"
+    },
+    {
+      "digest": "sha256:158458df2b9d81fdbcf79f53d30a1d896fc7c2787f2c6a17fa3c890cf1e9a23d",
+      "kind": "executable",
+      "path": "runtime/registry.py"
+    },
+    {
+      "digest": "sha256:137b40681ea7d23cf171a4176b3f2e5978721a124a4e19825e28a5b79c69d787",
+      "kind": "executable",
+      "path": "runtime/service.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.action.ai.provider.registry.manage.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-manage"
+      ],
+      "revision_digest": "sha256:7eac676bffbf63fba0b70ba49917d6fa818e9b64a084f304ae512a6fc23e678b"
+    },
+    {
+      "contract_id": "tobkiri.resource.ai.provider.health.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-health"
+      ],
+      "revision_digest": "sha256:a81ca07b769ea4dfa715076ee0389778db91707fb3b4db1e410a9e0f9f7ecceb"
+    },
+    {
+      "contract_id": "tobkiri.resource.ai.provider.registry.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-resource"
+      ],
+      "revision_digest": "sha256:a00d0411539cf9f1f7514a54331c1a746f47a0d8ca1c4c88a5123f8f74f0d682"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:a81ca07b769ea4dfa715076ee0389778db91707fb3b4db1e410a9e0f9f7ecceb",
+      "id": "rumi_provider_registry_pack.provider-registry.health",
+      "implementation_digest": "sha256:f2e3464ed467b6e85dae562a81fa3c0d5ac1c0fd338b96ff3159736f0320d537",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-health"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:7eac676bffbf63fba0b70ba49917d6fa818e9b64a084f304ae512a6fc23e678b",
+      "id": "rumi_provider_registry_pack.provider-registry.manage",
+      "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-manage"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:a00d0411539cf9f1f7514a54331c1a746f47a0d8ca1c4c88a5123f8f74f0d682",
+      "id": "rumi_provider_registry_pack.provider-registry.resource",
+      "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-resource"
+      ],
+      "role": "host_capability_provider"
+    }
+  ],
+  "integrity": {
+    "artifact_set_digest": "sha256:6874cb67793180ca15ede072072c72fa8bccff75d80bfc97ad790e308d529d1a",
+    "contract_catalog_digest": "sha256:56f317a051171789e77f5467acaa4fe37c06f3c3aaad49cfeb539b5e19f35f95",
+    "source_identity": "sha256:f7543bb947ade4dcee8b8cddc95d3fc0ea6a06167709d82a4574abfe36c8739e"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi.action.ai.provider.registry.manage.v1",
+      "rumi.resource.ai.provider.health.v1",
+      "rumi.resource.ai.provider.registry.v1",
+      "rumi:ecosystem/rumi_provider_registry_pack",
+      "rumi_provider_registry_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "contract_reference": "tobkiri.resource.ai.provider.health.v1",
+      "effect_ceiling": [
+        "capability:ai.provider.health.read",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_provider_registry_pack.provider-registry-health",
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.health",
+      "source_kind": "v3_contract"
+    },
+    {
+      "contract_reference": "tobkiri.action.ai.provider.registry.manage.v1",
+      "effect_ceiling": [
+        "capability:ai.provider.registry.manage",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_provider_registry_pack.provider-registry-manage",
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.manage",
+      "source_kind": "v3_contract"
+    },
+    {
+      "contract_reference": "tobkiri.resource.ai.provider.registry.v1",
+      "effect_ceiling": [
+        "capability:ai.provider.registry.read",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_provider_registry_pack.provider-registry-resource",
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.resource",
+      "source_kind": "v3_contract"
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:6874cb67793180ca15ede072072c72fa8bccff75d80bfc97ad790e308d529d1a",
+    "display_name": "Rumi Provider Registry",
+    "id": "rumi_provider_registry_pack",
+    "kind": "host_extension",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:f7543bb947ade4dcee8b8cddc95d3fc0ea6a06167709d82a4574abfe36c8739e",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:f7543bb947ade4dcee8b8cddc95d3fc0ea6a06167709d82a4574abfe36c8739e",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_provider_registry_pack"
+  },
+  "provider_catalog": [
+    {
+      "contract_reference": "tobkiri.resource.ai.provider.health.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-health"
+      ],
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.health"
+    },
+    {
+      "contract_reference": "tobkiri.action.ai.provider.registry.manage.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-manage"
+      ],
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.manage"
+    },
+    {
+      "contract_reference": "tobkiri.resource.ai.provider.registry.v1",
+      "operations": [
+        "rumi_provider_registry_pack.provider-registry-resource"
+      ],
+      "owner": "rumi_provider_registry_pack",
+      "provider_id": "rumi_provider_registry_pack.provider-registry.resource"
+    }
+  ],
+  "requirements": {
+    "approval_policy": "capability_gated",
+    "capabilities": [
+      "ai.provider.health.read",
+      "ai.provider.registry.manage",
+      "ai.provider.registry.read"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "host_brokered",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "host_brokered"
+  }
+}

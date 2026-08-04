@@ -1,0 +1,97 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:fa8c19cbc42474a90474f4879873b285698936dbedea75b70667220f18c35784",
+      "kind": "sidecar",
+      "path": "frontend/contributions/connections-route.json"
+    },
+    {
+      "digest": "sha256:f8e70d99a69db1bbe03ef0bb298ce4bc86abb34965092965e22d98997327e9fe",
+      "kind": "sidecar",
+      "path": "frontend/contributions/connections-settings.json"
+    },
+    {
+      "digest": "sha256:a011c47573faf147dc79a7bb6ef9bb92f18a07eb27dc24b680055638302255db",
+      "kind": "sidecar",
+      "path": "ui/app.js"
+    },
+    {
+      "digest": "sha256:754ae26aa606582d574f9993d49d10742358d6b344331443078db828e3bb41f0",
+      "kind": "sidecar",
+      "path": "ui/index.html"
+    },
+    {
+      "digest": "sha256:b9d378f1c75cd3ff6977660deb62c9de5bc23100968de08d91daf46a8a0ad3d2",
+      "kind": "sidecar",
+      "path": "ui/style.css"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "artifact_set_digest": "sha256:8b285caa982848f52dffa12b2a6439bf96bce014506079c9cb04daa0ee012460",
+    "contract_catalog_digest": "sha256:66aa6bdfd16eb194d212b95bae8d86865e638bcbfb96a9f59456ecaa24073250",
+    "source_identity": "sha256:c730e80eecb3fe797c575e63dac967d7d884733f9721867f6bc2a350a538fa6b"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_connector_settings_surface_pack",
+      "rumi_connector_settings_surface_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:8b285caa982848f52dffa12b2a6439bf96bce014506079c9cb04daa0ee012460",
+    "display_name": "Rumi Connector Settings Surface",
+    "id": "rumi_connector_settings_surface_pack",
+    "kind": "application",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:c730e80eecb3fe797c575e63dac967d7d884733f9721867f6bc2a350a538fa6b",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:c730e80eecb3fe797c575e63dac967d7d884733f9721867f6bc2a350a538fa6b",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_connector_settings_surface_pack"
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [
+      "connector.gateway.read"
+    ],
+    "contract_dependencies": [
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.resource.connector.gateway.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      }
+    ],
+    "execution_boundary": "sandbox",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {
+      "rumi_connector_transport_gateway_pack": ">=1.0.0,<2.0.0"
+    },
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

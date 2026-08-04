@@ -1,0 +1,68 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:083b6a99b7b5cd6c59dbc1fa2af992d6cef024b34a641f592ea2d269910ee224",
+      "kind": "sidecar",
+      "path": "frontend/contributions/customer-research.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "artifact_set_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+    "contract_catalog_digest": "sha256:41949fec70b191a58b0b86a8827a8ccea09400a5fa5283c12fb6f4fe26a70894",
+    "source_identity": "sha256:c39beae899f99186fac7d3e5c12c806960c2ca8f3df8f346f46935fedad57ada"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_customer_research_pack",
+      "rumi_customer_research_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+    "display_name": "Rumi Customer Research Content",
+    "id": "rumi_customer_research_pack",
+    "kind": "application",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:c39beae899f99186fac7d3e5c12c806960c2ca8f3df8f346f46935fedad57ada",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:c39beae899f99186fac7d3e5c12c806960c2ca8f3df8f346f46935fedad57ada",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_customer_research_pack"
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "sandbox",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {
+      "defaultspack": ">=2.0.0"
+    },
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

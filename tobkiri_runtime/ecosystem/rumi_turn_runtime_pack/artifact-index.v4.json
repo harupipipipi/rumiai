@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:1e9c62b183322d75641a7ee15d0fee7b6b072c950275193fbe26885549d5d32a",
+  "artifacts": [
+    {
+      "digest": "sha256:7731b537379110732153b54904c2e4808c441974470672976e3a23d0d3c5661c",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:86b600fe59e72bd10cbd6638371a2254bea8b4fc8ccd82669ab9a2ccd28775be",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed",
+      "path": "runtime/turns.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:e5de911780d3c49b97cded78adbf3601f424961de4c952cd66d454fb9ab29010"
+  },
+  "pack_id": "rumi_turn_runtime_pack",
+  "source_identity": "sha256:3f50cfef76bff25e4a5bfd987921e8bedaad6367c93c659723a6082d479d3658"
+}

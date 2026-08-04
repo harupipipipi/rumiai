@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:9d92d6a33c8b009d4f8a705cf910d34787ca86b2d7e99137d99f0bda68caa347",
+  "artifacts": [
+    {
+      "digest": "sha256:fbe6bf58c9f69d321fadd0fa9ee7fe3e97409b5e9614e08859621f3d5b767898",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:7dc9631743c4259a354a9cb28fcaa99ede7a159eb3ace508f1ff6d3cbecca5a9",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:741ba3bb0e01cbd0a485cb63baa3c5ba5b5635a85ede9289d214ea71a73711ac",
+      "path": "runtime/broker.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:1745c6179fb8c553385393f4f10563679bcc552b5db77ca8fe58106abeb5af1e"
+  },
+  "pack_id": "rumi_job_action_broker_pack",
+  "source_identity": "sha256:2bfecee2a7c02406e5b62b9e796104d7af5f905a3c7cd21bee7db8f314bb932a"
+}

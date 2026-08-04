@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:08828f6e19468433b0f1194f823db1d83d8c6dd9931962f8a4f6e90fc2ea37bf",
+  "artifacts": [
+    {
+      "digest": "sha256:a3f749ea898ec405075b00e7216fb9f95a23da5bfb67c10317b0c13ae38212a7",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:8fcd4418db18e1e1fdc7a9c9872e207b68bc7cb29192282b19c3d94badd42576",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:0fd8053263f22aefba603ba378966177239a6fe72a817b6ce6addc42e6176fe0",
+      "path": "runtime/adapter.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:3bbb7d6102d00098a34e99fc251843ce0b1dd3fcfc87640386351da31058ac21"
+  },
+  "pack_id": "rumi_discord_connector_pack",
+  "source_identity": "sha256:3cb3ca1b84f86666de1faf632405970149393576c425b012c45ebd0882b348c5"
+}

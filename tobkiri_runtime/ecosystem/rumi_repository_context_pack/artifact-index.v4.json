@@ -1,0 +1,62 @@
+{
+  "artifact_set_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+  "artifacts": [
+    {
+      "digest": "sha256:dacd6c5343a2b24a7f672872363f76a02eb5dbaa3b95fadd0b70d9f15f3d7988",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:a8628bb69bf956e0a03b261946c0aeaf6e64bb8a63dc782703d0f9a583f7bb09",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:3bde466cc00a8432cfcb99871074eb174d6fdac8b6147a33984df395857db4ae",
+      "path": "extensions/activities/repository_context/manifest.json",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:f616680365e0325ea03e3804d991634030c34b81f16a4804d2dfda4e008db33e",
+      "path": "extensions/skills/repository_context_preparation/SKILL.md",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:fd6980883c27bfa1807b48134a5aa321fe0ef777b4402143b55d00c5f3c9136f",
+      "path": "extensions/skills/repository_context_preparation/manifest.json",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:2a49d171a139a7adc656d39f4e785cc62a0016130021a89bf37ef782bc1ab13e",
+      "path": "extensions/tools/repository_context_prepare/manifest.json",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:bf31649318cd2291d4d92ef7e828d14b8365d1f46ef98cc29aff391a4f44ad45",
+      "path": "placements/repository-context.placement.json",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:e7cdc94d7694c7dd23bdb55e21714d76afcbdb6da5c178a2d92f725e9c2e2071",
+      "path": "prompts/repository-context.system.md",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
+      "path": "runtime/context.py",
+      "role": "runtime"
+    },
+    {
+      "digest": "sha256:c1da0d6b75bd404f473d5c91d660dbfaf2ae1bd1a467b7e4a50c80a2ba48c44e",
+      "path": "subagents/repository-context-subagent.json",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:dfa44dc03558f19ba4f6723417f858fa0f72590a4579a21c98f2b4abee4eebf0"
+  },
+  "pack_id": "rumi_repository_context_pack",
+  "source_identity": "sha256:7ecda2d3ae94c06cb29a5152142ac9ad54b0652f7fbd66a50a68b0dd3628e8de"
+}

@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:b0e4bc7425b53eb68570c5f9059b2c9cff0dc62efdf50e79e48655f870c99512",
+  "artifacts": [
+    {
+      "digest": "sha256:249e51d0b88c072e72fb498506b599088e9668d310a3b05864d9512ff69c9613",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:71ce33aae9de90d25bdff2f0041815e46f9151e36336531f8ce05b6515904d79",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:1e41994994c9f2e3385d954d5a262ab7922ead75b9f08850ac4105518697bceb",
+      "path": "runtime/adapter.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:14018a641ad4b399753508980c0e014a2df9561344fac2a3bbe5117ee55212b7"
+  },
+  "pack_id": "rumi_email_connector_pack",
+  "source_identity": "sha256:de014105454b8d270380c6116b5deba2645fbf2da982c8fe1d44de16cfe2a178"
+}

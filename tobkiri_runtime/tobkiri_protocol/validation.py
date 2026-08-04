@@ -44,6 +44,8 @@ SCHEMA_ALIASES = {
     "activation": "activation_record_v1.schema.json",
     "distribution": "distribution_v1.schema.json",
     "inventory": "inventory_v1.schema.json",
+    "pack_artifact_index": "pack_artifact_index_v4.schema.json",
+    "pack_contract_catalog": "pack_contract_catalog_v4.schema.json",
 }
 
 _ID_FIELDS = {
@@ -57,7 +59,6 @@ _ID_FIELDS = {
     "distribution_id",
     "caller_function_id",
     "target_provider_id",
-    "owner",
 }
 _REFERENCE_FIELDS = {
     "authority_reference",

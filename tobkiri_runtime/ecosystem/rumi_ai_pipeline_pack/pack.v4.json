@@ -1,0 +1,152 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:3b90542d6c8242fc8a73d34fc9b5a7a683f5a724e2eb7c6099f6fe6f2d4df3b4",
+      "kind": "executable",
+      "path": "runtime/__init__.py"
+    },
+    {
+      "digest": "sha256:44c8ecdd1be42cfb3fe0ee07a7f3bf1c9c0651f64313f4a6fe29f5c3c806330a",
+      "kind": "executable",
+      "path": "runtime/pipeline.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.service.ai.failover.decide.v1",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-failover-decide"
+      ],
+      "revision_digest": "sha256:49367974156c5735b8e38708a71d87c406f800d9f24d1c291cf4050e1629abe5"
+    },
+    {
+      "contract_id": "tobkiri.service.ai.request.prepare.v1",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-request-prepare"
+      ],
+      "revision_digest": "sha256:1ca3405981b27fae8ee2fb10510695855a6317c41c93d22e3fd2aafd6c9c96c7"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:49367974156c5735b8e38708a71d87c406f800d9f24d1c291cf4050e1629abe5",
+      "id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
+      "implementation_digest": "sha256:44c8ecdd1be42cfb3fe0ee07a7f3bf1c9c0651f64313f4a6fe29f5c3c806330a",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-failover-decide"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:1ca3405981b27fae8ee2fb10510695855a6317c41c93d22e3fd2aafd6c9c96c7",
+      "id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
+      "implementation_digest": "sha256:44c8ecdd1be42cfb3fe0ee07a7f3bf1c9c0651f64313f4a6fe29f5c3c806330a",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-request-prepare"
+      ],
+      "role": "host_capability_provider"
+    }
+  ],
+  "integrity": {
+    "artifact_set_digest": "sha256:0fed333aaac8abbfd94b5f7d3c1fbfec4bb52b33728671009021c68097169b22",
+    "contract_catalog_digest": "sha256:2116904ef1a332ce89fd350f437aaf36d79b0a93b83b30c1bc8097160a830ab1",
+    "source_identity": "sha256:028c3ef449cb3e8733db769f7e13d9baf221a13ad34873db571db7a23127965d"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi.service.ai.failover.decide.v1",
+      "rumi.service.ai.request.prepare.v1",
+      "rumi:ecosystem/rumi_ai_pipeline_pack",
+      "rumi_ai_pipeline_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "contract_reference": "tobkiri.service.ai.failover.decide.v1",
+      "effect_ceiling": [
+        "capability:ai.failover.decide",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_pipeline_pack.ai-failover-decide",
+      "owner": "rumi_ai_pipeline_pack",
+      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
+      "source_kind": "v3_contract"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.request.prepare.v1",
+      "effect_ceiling": [
+        "capability:ai.request.prepare",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_pipeline_pack.ai-request-prepare",
+      "owner": "rumi_ai_pipeline_pack",
+      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
+      "source_kind": "v3_contract"
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:0fed333aaac8abbfd94b5f7d3c1fbfec4bb52b33728671009021c68097169b22",
+    "display_name": "Rumi AI Pipeline",
+    "id": "rumi_ai_pipeline_pack",
+    "kind": "host_extension",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:028c3ef449cb3e8733db769f7e13d9baf221a13ad34873db571db7a23127965d",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:028c3ef449cb3e8733db769f7e13d9baf221a13ad34873db571db7a23127965d",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_pipeline_pack"
+  },
+  "provider_catalog": [
+    {
+      "contract_reference": "tobkiri.service.ai.failover.decide.v1",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-failover-decide"
+      ],
+      "owner": "rumi_ai_pipeline_pack",
+      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.request.prepare.v1",
+      "operations": [
+        "rumi_ai_pipeline_pack.ai-request-prepare"
+      ],
+      "owner": "rumi_ai_pipeline_pack",
+      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare"
+    }
+  ],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [
+      "ai.failover.decide",
+      "ai.request.prepare"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "host_brokered",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "host_brokered"
+  }
+}

@@ -32,6 +32,39 @@
       "platform": "wasm32-wasi"
     }
   ],
+  "requirements": {
+    "pack_dependencies": {},
+    "contract_dependencies": [],
+    "capabilities": [],
+    "network": {"allowed_domains": [], "allowed_ports": []},
+    "secrets": [],
+    "execution_boundary": "sandbox",
+    "approval_policy": "none",
+    "workspace_boundary": "pack_local"
+  },
+  "operation_catalog": [
+    {
+      "operation_id": "run",
+      "owner": "example-worker",
+      "contract_reference": "example.worker.v1",
+      "provider_id": "worker",
+      "source_kind": "v3_contract",
+      "effect_ceiling": []
+    }
+  ],
+  "provider_catalog": [
+    {
+      "provider_id": "worker",
+      "owner": "example-worker",
+      "contract_reference": "example.worker.v1",
+      "operations": ["run"]
+    }
+  ],
+  "integrity": {
+    "source_identity": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "artifact_set_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "contract_catalog_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+  },
   "provenance": {
     "schema": "io.tobkiri.provenance.v1",
     "source_kind": "repository",

@@ -1,0 +1,22 @@
+{
+  "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "artifacts": [
+    {
+      "digest": "sha256:fe65b64fc86c608d307dc2620f227909449ffb8084b4f70004a00e775271aef8",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:5b7bd524c349228888a7c5930a8c82d400e051e2b9868ce6df40e1e5427361e6",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:1ece7bcb9384d93193428fc7dcdc23657191997fed87eea4832f74b3d11b8938"
+  },
+  "pack_id": "rumi_voice_mobile_pack",
+  "source_identity": "sha256:8201126d702f42e03b5850740e9dce0f7ab5901aa7b735b6c0952451c866da29"
+}

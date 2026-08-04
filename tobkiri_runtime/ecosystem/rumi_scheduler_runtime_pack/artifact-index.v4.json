@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:19e3002d64b9b8cc0959feecd45fa5e3adba8ebaeb2b6efe76d61b0bc2781c6a",
+  "artifacts": [
+    {
+      "digest": "sha256:1616ecbd85d03d97d55e5ae557e8578969f3fd10b4ed803bc6873f97b652a4de",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:7a39dfabf2bfbed0da363fbe8a7226601dd68f17b76fca3eadcd6d409a5e20c9",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:986d9cc2de014ad4f54a37c767a1772d849e615a3fd2cfa77ef1caa57d98e4a9",
+      "path": "runtime/scheduler.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:8d3665598ca977b7787d2d4eed9f7f310797c80092d14e75ab4a45f947ae8e68"
+  },
+  "pack_id": "rumi_scheduler_runtime_pack",
+  "source_identity": "sha256:e949fa151b5166495259d6708a1cdf47f685f83b9fab108bce2878e32706af7b"
+}

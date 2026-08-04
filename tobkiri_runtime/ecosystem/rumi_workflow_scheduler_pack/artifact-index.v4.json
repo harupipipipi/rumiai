@@ -1,0 +1,22 @@
+{
+  "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "artifacts": [
+    {
+      "digest": "sha256:7d454a207c5df51b7344098278aabb9cecb419bf413821de85617022d54aef70",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:8be8c1281dc88769b2dcf96944742dd1c2fabad57089448e0058846f1a872da1",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:3486dc40188fa032cbdcf64624a284e89c9cb6193404e77cf55c23ef6a6a4df0"
+  },
+  "pack_id": "rumi_workflow_scheduler_pack",
+  "source_identity": "sha256:12658056907a738d60eb2d152bbdaf5abb23c408f5e9056400b1f5f1b769db79"
+}

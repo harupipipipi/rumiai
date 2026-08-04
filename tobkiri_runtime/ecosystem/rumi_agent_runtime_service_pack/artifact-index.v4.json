@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:a7e3304a1b77d047bb5457dab99c5640357d7d7226540bdac1079b186c6e1958",
+  "artifacts": [
+    {
+      "digest": "sha256:86d4615055b8bb1826cf6f6278ff1805b008149a40e853e63782931b4010b4b0",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:ea77c230b9f9051d549ec5d08cbf1cfc2896e102bf41b92bdb3913e118a5bcdc",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:e0d97b9e55724486c67d2a9cb37ab64e78e5ad4c9f34563143355765b77490da",
+      "path": "runtime/runtime.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:d81d773610f23e432e96fd9e979b3d3719ae1f37067d4bde2cd7737a82148e9e"
+  },
+  "pack_id": "rumi_agent_runtime_service_pack",
+  "source_identity": "sha256:8083748bcd9e862e05a8934a48a91af8b7ae6866c61f7299740d1a2aa2b63a9b"
+}

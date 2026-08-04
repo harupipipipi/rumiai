@@ -1,0 +1,27 @@
+{
+  "artifact_set_digest": "sha256:78c2328acd211cc1611f925efc7004f50f9dfd161cb74a3927d3e31eebebd391",
+  "artifacts": [
+    {
+      "digest": "sha256:d1963114756c59e1559e55f564e66bfba9fb000dc04b00faadfa4fde2ae0a5d8",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
+    },
+    {
+      "digest": "sha256:547f95bfc57827d70a4a63afc2ee59e97b5750866b63f031b55b14b2d9f6a7c6",
+      "path": "contracts.v4.json",
+      "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:e2fbf8c21fdd892a500e9ffa5bf27835da0590103a517bdc92b14b60d7b3f860",
+      "path": "runtime/authoring.py",
+      "role": "runtime"
+    }
+  ],
+  "index_api_version": "io.tobkiri.pack-artifact-index.v4",
+  "integrity_seal": {
+    "algorithm": "sha256-canonical-v1",
+    "signed_digest": "sha256:1772e646bf500a8b101ec6b04e8ceb23a9f58cd5f48c66a5c8ae892741fd5cc9"
+  },
+  "pack_id": "rumi_tool_authoring_pack",
+  "source_identity": "sha256:1291df186488e6ca08e26d33f48e3c39ad69ca3b3917d78081a2d8bb37cdc785"
+}

@@ -4,7 +4,7 @@
   "title": "Tobkiri Contract v4",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_api_version", "contract_id", "version", "revision_digest", "status", "operations", "provenance"],
+  "required": ["contract_api_version", "contract_id", "version", "revision_digest", "owner", "status", "operations", "schema_catalog", "provider_semantics", "provenance"],
   "properties": {
     "contract_api_version": {"const": "io.tobkiri.contract.v4"},
     "contract_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"},
@@ -42,6 +42,30 @@
           "timeout_default_ms": {"type": "integer", "minimum": 1},
           "timeout_hard_max_ms": {"type": "integer", "minimum": 1}
         }
+      }
+    },
+    "schema_catalog": {
+      "type": "object",
+      "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"},
+      "additionalProperties": {"type": "object"}
+    },
+    "provider_semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_id", "cardinality", "security", "failure", "isolation", "required_capabilities", "lifecycle"],
+      "properties": {
+        "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+        "cardinality": {"enum": ["one", "many", "keyed", "chain", "fanout", "optional"]},
+        "security": {"enum": ["public", "internal", "sensitive", "restricted"]},
+        "failure": {"enum": ["fail_closed", "isolate", "continue_chain", "best_effort"]},
+        "isolation": {"enum": ["in_process", "process", "sandbox", "remote", "declarative"]},
+        "required_capabilities": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "lifecycle": {"type": "object"},
+        "routing_keys": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "instance_key": {"type": "string", "minLength": 1},
+        "priority": {"type": "integer"},
+        "before": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "after": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     },
     "provenance": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/provenance"}
