@@ -110,10 +110,13 @@ def migrate_legacy_profile(
         "profile_api_version": "io.tobkiri.profile.v4",
         "profile_id": profile_id,
         "state": "needs_resolution",
+        "mode": "headless" if command_kind == "headless" else "interactive",
+        "catalog_revision": None,
         "display_name": _display_name(document, profile_id),
         "base": {
             "pack_id": migrated_base,
             "artifact_digest": None,
+            "definition_revision": None,
             "resolution": "verified_exact_artifact_required",
         },
         "shell": None,
@@ -124,6 +127,7 @@ def migrate_legacy_profile(
                 "role": "base" if pack_id == migrated_base else "backend",
             }
             for pack_id in migrated_pack_ids
+            if pack_id != migrated_base
         ],
         "requested_edges": [],
         "authority_references": [],

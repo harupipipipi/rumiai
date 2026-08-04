@@ -4,31 +4,37 @@
   "title": "Tobkiri Profile v4",
   "type": "object",
   "additionalProperties": false,
-  "required": ["profile_api_version", "profile_id", "state", "base", "packs", "requested_edges", "authority_references", "profile_authority_snapshot_digest", "provenance"],
+  "required": ["profile_api_version", "profile_id", "state", "mode", "catalog_revision", "base", "shell", "packs", "requested_edges", "authority_references", "profile_authority_snapshot_digest", "provenance"],
   "properties": {
     "profile_api_version": {"const": "io.tobkiri.profile.v4"},
     "profile_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
     "state": {"enum": ["needs_resolution", "resolved", "retired"]},
+    "mode": {"enum": ["interactive", "headless"]},
+    "catalog_revision": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
     "display_name": {"type": "string"},
     "base": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pack_id", "artifact_digest"],
+      "required": ["pack_id", "artifact_digest", "definition_revision"],
       "properties": {
         "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
         "artifact_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "definition_revision": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
         "resolution": {"enum": ["verified_exact_artifact_required", "verified"]}
       }
     },
     "shell": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["provider_id", "pack_id", "artifact_digest", "contract_id"],
+      "required": ["provider_id", "pack_id", "artifact_digest", "definition_revision", "contract_id", "platform", "architecture"],
       "properties": {
         "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
         "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
         "artifact_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
-        "contract_id": {"const": "app.shell.v1"}
+        "definition_revision": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "contract_id": {"const": "app.shell.v1"},
+        "platform": {"enum": ["macos", "windows", "linux"]},
+        "architecture": {"enum": ["arm64", "x86_64"]}
       }
     },
     "packs": {
@@ -40,7 +46,7 @@
         "properties": {
           "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
           "artifact_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
-          "role": {"enum": ["base", "backend", "contribution", "provider", "application"]}
+          "role": {"enum": ["backend", "contribution", "provider", "application"]}
         }
       }
     },
@@ -83,9 +89,34 @@
       "if": {"properties": {"state": {"const": "resolved"}}},
       "then": {
         "properties": {
-          "base": {"properties": {"artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}
+          "catalog_revision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "base": {"properties": {"artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "definition_revision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {"const": "resolved"},
+          "mode": {"const": "interactive"}
+        },
+        "required": ["state", "mode"]
+      },
+      "then": {
+        "properties": {
+          "shell": {
+            "type": "object",
+            "properties": {
+              "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "definition_revision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"mode": {"const": "headless"}}, "required": ["mode"]},
+      "then": {"properties": {"shell": {"type": "null"}}}
     }
   ]
 }

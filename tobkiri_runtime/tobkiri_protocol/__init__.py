@@ -20,6 +20,16 @@ from .errors import (
     ProtocolError,
     SchemaValidationError,
 )
+from .composition import (
+    CompositionError,
+    RuntimeProfileBinding,
+    VerifiedCatalog,
+    catalog_payload,
+    compose_runtime_profile,
+    definition_revision,
+    load_verified_catalog,
+    verify_profile_lock,
+)
 from .ids import (
     validate_artifact_digest,
     validate_canonical_id,
@@ -36,17 +46,24 @@ from .validation import validate_document
 
 __all__ = [
     "CanonicalizationError",
+    "CompositionError",
     "MAX_CANONICAL_JSON_BYTES",
     "MigrationBlockedError",
     "MigrationError",
     "ProtocolError",
     "SchemaValidationError",
+    "RuntimeProfileBinding",
+    "VerifiedCatalog",
     "canonical_bytes",
     "canonical_digest",
     "canonical_json",
+    "catalog_payload",
+    "compose_runtime_profile",
+    "definition_revision",
     "load_and_migrate_legacy_profile",
     "migrate_legacy_profile",
     "migrate_legacy_profile_or_raise",
+    "load_verified_catalog",
     "strict_loads",
     "validate_artifact_digest",
     "validate_canonical_id",
@@ -54,4 +71,5 @@ __all__ = [
     "validate_document",
     "validate_opaque_reference",
     "validate_semver",
+    "verify_profile_lock",
 ]

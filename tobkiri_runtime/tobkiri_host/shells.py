@@ -20,37 +20,56 @@ class PresentationFamily(str, Enum):
 
 @dataclass(frozen=True)
 class BaseDefinition:
-    """Profile composition root independent of presentation technology."""
+    """Capability, policy, and dependency foundation for Profile v4."""
 
     pack_id: str
     artifact_digest: str
+    definition_revision: str
+    policy_digest: str
+    dependency_artifacts: tuple[tuple[str, str], ...]
     required_shell_capabilities: frozenset[str]
-    optional_shell_capabilities: frozenset[str] = frozenset()
-    permitted_families: frozenset[PresentationFamily] = frozenset(
-        {PresentationFamily.GRAPHICAL}
-    )
+    permitted_families: frozenset[PresentationFamily] = frozenset({PresentationFamily.GRAPHICAL})
 
     def __post_init__(self) -> None:
         require_identifier(self.pack_id, "base pack_id")
         require_digest(self.artifact_digest, "base artifact")
+        require_digest(self.definition_revision, "base definition revision")
+        require_digest(self.policy_digest, "base policy")
+        dependency_ids: set[str] = set()
+        for pack_id, artifact_digest in self.dependency_artifacts:
+            require_identifier(pack_id, "base dependency pack_id")
+            require_digest(artifact_digest, "base dependency artifact")
+            if pack_id in dependency_ids:
+                raise ResolutionError("Base dependencies contain a duplicate Pack")
+            dependency_ids.add(pack_id)
 
 
 @dataclass(frozen=True)
 class ShellDefinition:
-    """Exact ``app.shell.v1`` Provider request and capabilities."""
+    """Exact presentation-only ``app.shell.v1`` Provider binding."""
 
     provider_id: str
+    pack_id: str
     artifact_digest: str
+    definition_revision: str
     contract_id: str
     family: PresentationFamily
     capabilities: frozenset[str]
+    local_auth_protocol: str
+    local_auth_audience: str
     technology: str | None = None
 
     def __post_init__(self) -> None:
         require_identifier(self.provider_id, "shell provider_id")
+        require_identifier(self.pack_id, "shell pack_id")
         require_digest(self.artifact_digest, "shell artifact")
+        require_digest(self.definition_revision, "shell definition revision")
         if self.contract_id != "app.shell.v1":
             raise ResolutionError("Shell must implement app.shell.v1")
+        if self.local_auth_protocol != "io.tobkiri.local-auth.v1":
+            raise ResolutionError("Shell must use the local-auth v1 handoff")
+        if self.local_auth_audience != "runtime-profile":
+            raise ResolutionError("Shell local-auth audience must be runtime-profile")
 
 
 @dataclass(frozen=True)
@@ -70,6 +89,7 @@ class BaseShellBinding:
     base: BaseDefinition
     shell: ShellDefinition
     contributions: tuple[PresentationContribution, ...]
+    binding_revision: str
 
 
 class BaseShellResolver:
@@ -97,4 +117,34 @@ class BaseShellResolver:
                 key=lambda contribution: contribution.contribution_id,
             )
         )
-        return BaseShellBinding(base=base, shell=shell, contributions=selected)
+        from tobkiri_protocol.canonical import canonical_digest
+
+        binding_revision = canonical_digest(
+            {
+                "base": {
+                    "pack_id": base.pack_id,
+                    "artifact_digest": base.artifact_digest,
+                    "definition_revision": base.definition_revision,
+                },
+                "shell": {
+                    "provider_id": shell.provider_id,
+                    "pack_id": shell.pack_id,
+                    "artifact_digest": shell.artifact_digest,
+                    "definition_revision": shell.definition_revision,
+                    "contract_id": shell.contract_id,
+                },
+                "contributions": [
+                    {
+                        "contribution_id": item.contribution_id,
+                        "artifact_digest": item.artifact_digest,
+                    }
+                    for item in selected
+                ],
+            }
+        )
+        return BaseShellBinding(
+            base=base,
+            shell=shell,
+            contributions=selected,
+            binding_revision=binding_revision,
+        )

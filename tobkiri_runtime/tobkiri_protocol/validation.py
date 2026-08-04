@@ -33,10 +33,11 @@ SCHEMA_ALIASES = {
     "request_frame": "request_frame_v1.schema.json",
     "request_envelope": "request_envelope_v1.schema.json",
     "profile": "profile_v4.schema.json",
-    "profile_lock": "profile_lock_v1.schema.json",
+    "profile_lock": "profile_lock_v4.schema.json",
+    "composition_catalog": "composition_catalog_v4.schema.json",
     "resolved_plan": "resolved_plan_v1.schema.json",
-    "base": "base_definition_v1.schema.json",
-    "shell": "shell_definition_v1.schema.json",
+    "base": "base_definition_v4.schema.json",
+    "shell": "shell_definition_v4.schema.json",
     "cli_io": "cli_io_v1.schema.json",
     "function_principal": "function_principal_v1.schema.json",
     "provenance": "provenance_v1.schema.json",
@@ -216,6 +217,8 @@ def _semantic_diagnostics(
         diagnostics.extend(_duplicate_identity_diagnostics(document))
     if schema_name in {"profile", "profile_v4.schema.json"}:
         diagnostics.extend(_profile_security_diagnostics(document))
+    if schema_name in {"shell", "shell_definition_v4.schema.json"}:
+        diagnostics.extend(_shell_security_diagnostics(document))
     if schema_name in {"function_principal", "function_principal_v1.schema.json"}:
         diagnostics.extend(_principal_digest_diagnostics(document))
     return diagnostics
@@ -253,6 +256,12 @@ def _profile_security_diagnostics(document: Mapping[str, Any]) -> list[str]:
         base = document.get("base")
         if not isinstance(base, Mapping) or not isinstance(base.get("artifact_digest"), str):
             diagnostics.append("$.base.artifact_digest: resolved profile requires an exact digest")
+        if not isinstance(base, Mapping) or not isinstance(base.get("definition_revision"), str):
+            diagnostics.append(
+                "$.base.definition_revision: resolved profile requires an exact revision"
+            )
+        if not isinstance(document.get("catalog_revision"), str):
+            diagnostics.append("$.catalog_revision: resolved profile requires a pinned catalog")
         if document.get("profile_authority_snapshot_digest") is None:
             diagnostics.append(
                 "$.profile_authority_snapshot_digest: resolved profile requires a pinned snapshot"
@@ -275,6 +284,25 @@ def _profile_security_diagnostics(document: Mapping[str, Any]) -> list[str]:
     for path, key, value in _walk(document.get("requested_edges", [])):
         if key == "authority_reference" and value is not None and value not in references:
             diagnostics.append(f"{path}: edge reference is not listed in authority_references")
+    return diagnostics
+
+
+def _shell_security_diagnostics(document: Mapping[str, Any]) -> list[str]:
+    """Reject any Shell field that attempts to carry execution authority."""
+    diagnostics: list[str] = []
+    forbidden_fragments = {
+        "authority",
+        "grant",
+        "permission",
+        "policy",
+        "host_effect",
+        "host_execution",
+        "pack_execution",
+    }
+    for path, key, _value in _walk(document):
+        normalized = key.lower().replace("-", "_")
+        if any(fragment in normalized for fragment in forbidden_fragments):
+            diagnostics.append(f"{path}: Shell definitions cannot confer authority: {key}")
     return diagnostics
 
 

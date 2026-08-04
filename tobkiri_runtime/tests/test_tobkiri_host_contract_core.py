@@ -240,17 +240,22 @@ def test_base_shell_resolution_is_capability_not_technology_based() -> None:
     base = BaseDefinition(
         pack_id="defaults.base",
         artifact_digest=digest("1"),
+        definition_revision=digest("b"),
+        policy_digest=digest("p"),
+        dependency_artifacts=(),
         required_shell_capabilities=frozenset({"navigation", "commands"}),
-        permitted_families=frozenset(
-            {PresentationFamily.GRAPHICAL, PresentationFamily.TERMINAL}
-        ),
+        permitted_families=frozenset({PresentationFamily.GRAPHICAL, PresentationFamily.TERMINAL}),
     )
     shell = ShellDefinition(
         provider_id="shell.cli.default",
+        pack_id="shell.cli.pack",
         artifact_digest=digest("2"),
+        definition_revision=digest("s"),
         contract_id="app.shell.v1",
         family=PresentationFamily.TERMINAL,
         capabilities=frozenset({"navigation", "commands", "table"}),
+        local_auth_protocol="io.tobkiri.local-auth.v1",
+        local_auth_audience="runtime-profile",
         technology="rust",
     )
     contributions = (
@@ -269,21 +274,29 @@ def test_base_shell_resolution_is_capability_not_technology_based() -> None:
     )
     binding = BaseShellResolver().resolve(base, shell, contributions)
     assert [item.contribution_id for item in binding.contributions] == ["settings.cli"]
+    assert binding.binding_revision.startswith("sha256:")
 
 
 def test_base_shell_resolution_does_not_silently_change_family() -> None:
     base = BaseDefinition(
         pack_id="headless.base",
         artifact_digest=digest("5"),
+        definition_revision=digest("b"),
+        policy_digest=digest("p"),
+        dependency_artifacts=(),
         required_shell_capabilities=frozenset(),
         permitted_families=frozenset({PresentationFamily.HEADLESS}),
     )
     shell = ShellDefinition(
         provider_id="shell.gui",
+        pack_id="shell.gui.pack",
         artifact_digest=digest("6"),
+        definition_revision=digest("s"),
         contract_id="app.shell.v1",
         family=PresentationFamily.GRAPHICAL,
         capabilities=frozenset(),
+        local_auth_protocol="io.tobkiri.local-auth.v1",
+        local_auth_audience="runtime-profile",
     )
     with pytest.raises(ResolutionError, match="not permitted"):
         BaseShellResolver().resolve(base, shell, ())

@@ -1,7 +1,8 @@
 # Tobkiri Protocol v4 tooling
 
-This package is a data-only boundary for the Pack Architecture v4 migration.
-It does not load Packs, dispatch Requests, resolve authority, or mint Grants.
+This package owns the serialized Pack Architecture v4 boundary. It validates
+documents and performs deterministic, signature-verified Base/Shell/Profile
+composition. It does not dispatch Requests, resolve authority, or mint Grants.
 
 Handwritten inputs are the JSON Schemas under `schemas/`, the strict parser,
 canonical ID/provenance helpers, migration code, scanners, and fixtures.
@@ -22,6 +23,31 @@ The migration output is always review-only and cannot activate a profile or
 carry authority references. The security/runtime core owns runtime dataclasses
 and enforcement types; it should consume validated documents rather than
 importing execution behavior from this package.
+
+## Base/Shell/Profile v4 launch contract
+
+`base_definition_v4.schema.json` describes capability, policy, dependency, and
+state foundations only. It has no presentation technology or launch fields.
+`shell_definition_v4.schema.json` describes `app.shell.v1` presentation and
+prebuilt launch artifacts only. Its closed schema has no policy, Grant,
+permission, Pack execution, or Host authority fields.
+
+`composition_catalog_v4.schema.json` is authenticated with an Ed25519 key from
+the local trust store. `load_verified_catalog` rejects an unknown key, invalid
+signature, digest mismatch, duplicate identity, or tampered definition revision.
+There is no default catalog, directory search, environment override, or missing
+resource fallback.
+
+`compose_runtime_profile` accepts only a resolved Profile whose catalog revision
+and exact Base/Shell/Pack revisions match that verified catalog. It hashes every
+selected local artifact, rejects path escapes and symlinks, checks approval and
+Base/Shell compatibility, and produces `profile_lock_v4` with a deterministic
+effective set, profile revision, plan digest, and lock digest. Interactive Shell
+handoff is always `io.tobkiri.local-auth.v1` for the `runtime-profile` audience.
+
+The only legacy entrypoint is `migration.py`. It produces a non-activatable,
+review-only document with null revisions and no authority; no runtime loader
+accepts legacy fields or applies implicit defaults.
 
 The `cli_io` schema alias validates the newline-delimited structured protocol
 used by the `tobkiri-cli --structured-stdio` Shell entrypoint. Its command set
