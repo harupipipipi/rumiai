@@ -88,10 +88,12 @@ class _CryptoBackend:
 
     def _load_or_generate_key(self) -> bytes:
         """暗号化キーをロード、なければ生成して保存"""
-        # 1. 環境変数から取得
-        env_key = os.environ.get("RUMI_SECRETS_KEY")
+        # 1. Explicit host contract (never ambient process environment)
+        from .host_contract import host_contract_value
+
+        env_key = host_contract_value("secrets_store_key")
         if env_key:
-            logger.debug("Using encryption key from RUMI_SECRETS_KEY env var.")
+            logger.debug("Using encryption key from the host credential contract.")
             return env_key.encode("utf-8")
 
         # 2. ファイルから取得

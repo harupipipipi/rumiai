@@ -23,6 +23,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 from .panel_auth import get_panel_auth_manager, PanelAuthManager
+from .host_contract import host_contract_value
 from .runtime_port import resolve_runtime_port
 
 from .validation import (
@@ -1323,7 +1324,7 @@ class PackAPIHandler(
                 if headers is not None
                 else ""
             )
-            bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
+            bootstrap_secret = host_contract_value("panel_bootstrap_secret")
             if challenge and bootstrap_secret:
                 health["desktop_challenge_response"] = hmac.new(
                     bootstrap_secret.encode("utf-8"),

@@ -54,7 +54,7 @@ MAX_CONTEXT_PAYLOAD_SIZE = 1 * 1024 * 1024  # 1 MB
 MAX_CONTEXT_DEPTH = 10
 
 # SEC-1 Wave 4: ホスト実行タイムアウト
-MAX_HOST_EXECUTION_TIMEOUT = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
+MAX_HOST_EXECUTION_TIMEOUT = int(os.getenv("RUMI_HOST_EXEC_TIMEOUT", "120"))
 
 
 def get_secrets_grant_manager():

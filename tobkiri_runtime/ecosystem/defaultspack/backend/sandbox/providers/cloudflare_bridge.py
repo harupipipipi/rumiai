@@ -28,6 +28,7 @@ from ..models import (
     model_to_dict,
 )
 from ..policy import validate_workspace_relative_path
+from core_runtime.host_contract import host_contract_value
 from .base import ProgressSink
 
 
@@ -431,11 +432,11 @@ class CloudflareSandboxBridgeProvider:
         )
 
     def _base_url(self) -> str | None:
-        value = self._configured_base_url if self._configured_base_url is not None else os.environ.get("RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL")
+        value = self._configured_base_url if self._configured_base_url is not None else host_contract_value("cloudflare_sandbox_bridge_url", provider_id="cloudflare")
         return _normalize_base_url(value)
 
     def _api_key(self) -> str | None:
-        value = self._configured_api_key if self._configured_api_key is not None else os.environ.get("RUMI_CLOUDFLARE_SANDBOX_API_KEY")
+        value = self._configured_api_key if self._configured_api_key is not None else host_contract_value("cloudflare_sandbox_bridge_token", provider_id="cloudflare")
         clean = str(value or "").strip()
         return clean or None
 

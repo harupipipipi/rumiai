@@ -19,7 +19,7 @@ class CredentialBrokerService:
         data = dict(payload)
         consumer = str(data.pop("_contract_consumer_pack_id", "")).strip()
         if operation == "create":
-            return self.store.create(
+            result = self.store.create(
                 secret_material=(
                     data.get("secret_material")
                     if isinstance(data.get("secret_material"), Mapping)
@@ -29,10 +29,20 @@ class CredentialBrokerService:
                 provider_instance_id=str(
                     data.get("provider_instance_id") or ""
                 ),
+                profile_id=str(data.get("profile_id") or "default"),
                 scopes=[str(item) for item in data.get("scopes", [])],
+                purpose=str(data.get("purpose") or "provider.invoke"),
                 label=str(data.get("label") or ""),
                 expires_at=_optional_float(data.get("expires_at")),
             )
+            result["credential_ref"] = {
+                "profile_id": result.get("profile_id", "default"),
+                "provider_id": result.get("provider_instance_id", ""),
+                "credential_id": result.get("handle", ""),
+                "key_version": result.get("key_version", ""),
+                "purpose": str(data.get("purpose") or "provider.invoke"),
+            }
+            return result
         if operation == "revoke":
             return self.store.revoke(str(data.get("handle") or ""))
         if operation == "list":
@@ -61,7 +71,10 @@ class CredentialBrokerService:
                     provider_instance_id=str(
                         data.get("provider_instance_id") or ""
                     ),
+                    profile_id=str(data.get("profile_id") or "default"),
                     scope=str(data.get("scope") or ""),
+                    key_version=str(data.get("key_version") or ""),
+                    purpose=str(data.get("purpose") or "provider.invoke"),
                 )
             }
         raise ValueError(f"unknown credential operation: {operation}")
@@ -72,4 +85,3 @@ def _optional_float(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         raise ValueError("expires_at is invalid") from None
-

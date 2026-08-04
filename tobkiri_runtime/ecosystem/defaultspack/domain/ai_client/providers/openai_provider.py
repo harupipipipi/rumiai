@@ -13,6 +13,7 @@ import base64
 import ssl
 
 from ..base_provider import BaseProvider
+from ..api_key_store import read_provider_api_key
 
 
 class OpenAIProvider(BaseProvider):
@@ -26,8 +27,8 @@ class OpenAIProvider(BaseProvider):
     _MODEL_INVENTORY_CACHE = {}
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 
-    def __init__(self):
-        self._api_key = os.environ.get("OPENAI_API_KEY", "")
+    def __init__(self, api_key: str | None = None):
+        self._api_key = str(api_key or read_provider_api_key("openai", "legacy") or "").strip()
         # Provider discovery must not disappear merely because a minimal host
         # environment lacks Windows certificate-location variables.  Requests
         # still use urllib's verified default context when this construction is

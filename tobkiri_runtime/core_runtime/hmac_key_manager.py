@@ -92,9 +92,11 @@ def generate_or_load_signing_key(
     Returns:
         鍵データ (bytes)
     """
-    # 1. 環境変数
+    # 1. Explicit host contract; ambient process environment is not authority.
     if env_var:
-        env_val = os.environ.get(env_var)
+        from .host_contract import host_contract_value
+
+        env_val = host_contract_value(env_var)
         if env_val and len(env_val) >= 32:
             return env_val.encode("utf-8")
 

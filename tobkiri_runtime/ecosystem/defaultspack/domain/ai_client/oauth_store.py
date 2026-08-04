@@ -304,13 +304,11 @@ def _env_value(name: str, *, pack_root: Path | None = None) -> str:
     name = str(name or "").strip()
     if not name:
         return ""
-    value = os.environ.get(name, "").strip()
+    from core_runtime.host_contract import host_contract_value
+
+    value = host_contract_value(name)
     if value:
         return value
-    for path in _dotenv_candidates(pack_root):
-        value = str(_parse_dotenv_file(path).get(name) or "").strip()
-        if value:
-            return value
     return ""
 
 
@@ -377,9 +375,18 @@ def _provider_context_from_env(provider_id: str, *, pack_root: Path | None = Non
 
 
 def _secrets_dir(pack_root: Path | None = None) -> Path:
-    override = _env_value("RUMI_DEFAULTSPACK_SECRETS_DIR", pack_root=pack_root).strip()
+    # A path override only selects the persistent store.  It is intentionally
+    # separate from _env_value(), which resolves credential material solely
+    # through the explicit host contract.
+    override = ""
+    if pack_root is None:
+        override = os.getenv("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
     if override:
         return Path(override)
+    if pack_root is None:
+        configured_user_data = os.getenv("RUMI_USER_DATA", "").strip()
+        if configured_user_data:
+            return Path(configured_user_data).expanduser() / "secrets"
     return (pack_root or _pack_root()) / "user_data" / "secrets"
 
 

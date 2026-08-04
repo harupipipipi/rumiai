@@ -99,15 +99,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
         except (TypeError, ValueError):
             self._remote_model_cache_ttl_seconds = 21600
 
-        env_api_key = ""
-        for env_name in self._api_key_envs:
-            env_api_key = str(os.environ.get(env_name, "") or "").strip()
-            if env_api_key:
-                break
-        env_base_url = os.environ.get(self._base_url_env, "") if self._base_url_env else ""
-
-        self._api_key = str(api_key or env_api_key or "").strip()
-        resolved_base_url = str(base_url or env_base_url or self._default_base_url or "").strip()
+        self._api_key = str(api_key or "").strip()
+        resolved_base_url = str(base_url or self._default_base_url or "").strip()
         self._base_url = resolved_base_url.rstrip("/") if resolved_base_url else ""
         self.BASE_URL = self._base_url
         seed_models = known_models
@@ -225,6 +218,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         cls,
         manifest: Dict[str, Any],
         *,
+        api_key: str = "",
         model_manifests: Optional[List[Dict[str, Any]]] = None,
         allow_declared_models: bool = True,
     ) -> "OpenAICompatibleProvider":
@@ -286,6 +280,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return cls(
             provider_id=provider_id,
             display_name=str(manifest.get("display_name", provider_id)),
+            api_key=api_key,
             api_key_env=manifest.get("api_key_env", ""),
             base_url_env=str(manifest.get("base_url_env", "")),
             default_base_url=str(manifest.get("default_base_url", "https://api.openai.com/v1")),

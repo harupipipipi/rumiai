@@ -166,6 +166,11 @@ impl KernelManager {
         );
 
         let dev_environment = cfg!(debug_assertions) || self.config.is_dev_workspace();
+        let host_contract_path = crate::host_contract::write_contract(
+            &self.config,
+            crate::host_contract::DEFAULT_PROFILE_ID,
+            [("panel_bootstrap_secret", self.panel_bootstrap_secret.clone())],
+        )?;
 
         let mut command = process_utils::command(&venv_python);
         command
@@ -189,7 +194,7 @@ impl KernelManager {
             )
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
-            .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
+            .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
             .env(
                 "RUMI_VIEWER_HOST_BROKER_CONNECTION",
                 self.config.host_broker_connection_path(),

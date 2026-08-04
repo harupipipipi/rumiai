@@ -1304,10 +1304,6 @@ def _custom_openai_provider_manifests() -> Dict[str, Dict[str, Any]]:
     return manifests
 
 
-def _truthy_env(env_name: str) -> bool:
-    return bool(str(os.environ.get(env_name, "") or "").strip())
-
-
 def _manifest_env_list(*values: Any) -> List[str]:
     envs: List[str] = []
     for value in values:
@@ -1546,13 +1542,6 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
         return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
         return True, "defaultspack_secret"
-    for env_name in entry.get("env_vars", []):
-        if _truthy_env(env_name):
-            return True, env_name
-    if not credential_required:
-        for env_name in entry.get("base_url_envs", []):
-            if _truthy_env(env_name):
-                return True, env_name
     if not credential_required and default_base_url.startswith("local://"):
         return True, "builtin_local_provider"
     if entry.get("kind") == "local" and default_base_url:
@@ -1991,13 +1980,13 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
 
 def _load_legacy_providers() -> Dict[str, Any]:
     available = {}
-    for env_vars, provider_id, module_path, class_name in _LEGACY_PROVIDER_REGISTRY:
-        if not any(_truthy_env(env_var) for env_var in env_vars):
+    for _env_vars, provider_id, module_path, class_name in _LEGACY_PROVIDER_REGISTRY:
+        if not provider_has_api_key(provider_id):
             continue
         try:
             module = importlib.import_module(module_path)
             provider_cls = getattr(module, class_name)
-            available[provider_id] = provider_cls()
+            available[provider_id] = provider_cls(api_key=_manifest_credential(provider_id))
         except Exception:
             continue
     return available
@@ -2017,29 +2006,26 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
         manifest.get("base_url_env"),
         _CURATED_PROVIDER_METADATA.get(provider_id, {}).get("base_url_envs", []),
     )
-    explicit_api_envs = [name for name in api_envs if name != "MIMO_API_KEY"]
-    if any(_truthy_env(name) for name in explicit_api_envs):
-        return True
     # The unqualified Xiaomi key is an explicit SGP token-plan opt-in.  It
     # must not implicitly enable the global account inventory or another
     # region, whose endpoint and trust record are independently selected.
     if "MIMO_API_KEY" in api_envs and provider_id != "xiaomi-token-plan-sgp":
         return False
-    if any(_truthy_env(name) for name in api_envs):
-        return True
     if provider_has_oauth_connection(provider_id):
         return True
     if provider_has_api_key(provider_id):
         return True
     if not credential_required:
-        if any(_truthy_env(name) for name in base_url_envs):
-            return True
         return not base_url_envs or bool(str(manifest.get("default_base_url", "")).strip())
     return False
 
 
 def _cloud_runtime_enabled() -> bool:
-    return str(os.environ.get("RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS", "")).strip().lower() in {
+    # Cloud execution is a profile/host decision.  An ambient process flag
+    # must never grant authority or make a missing credential appear ready.
+    from core_runtime.host_contract import host_contract_value
+
+    return host_contract_value("cloud_providers_enabled").lower() in {
         "1",
         "true",
         "yes",
@@ -2087,6 +2073,7 @@ def _instantiate_manifest_provider(
         program_provider = provider_id in provider_program_manifests()
         return provider_cls.from_manifest(
             manifest,
+            api_key=str(injected_api_key or _manifest_credential(provider_id) or ""),
             # The provider program forbids static inventory snapshots: its
             # authenticated /models response is the sole runtime source.
             # Independently installed custom extensions may still explicitly
@@ -2100,6 +2087,23 @@ def _instantiate_manifest_provider(
             return provider_cls(api_key=str(injected_api_key or "").strip())
         return provider_cls()
     return None
+
+
+def _manifest_credential(provider_id: str) -> str:
+    """Resolve a selected connection without consulting process globals."""
+
+    value = read_provider_api_key(provider_id, "legacy")
+    if value:
+        return str(value).strip()
+    for connection in provider_named_api_keys(provider_id):
+        if not connection.get("configured"):
+            continue
+        api_id = str(connection.get("api_id") or "").strip()
+        if api_id:
+            value = read_provider_api_key(provider_id, api_id)
+            if value:
+                return str(value).strip()
+    return ""
 
 
 def _import_provider_entrypoint(entrypoint: str):

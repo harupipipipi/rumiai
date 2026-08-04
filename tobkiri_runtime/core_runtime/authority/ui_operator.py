@@ -9,6 +9,8 @@ import secrets
 import time
 from typing import Any
 
+from ..host_contract import host_contract_value
+
 
 UI_OPERATOR_ORIGIN = "tauri_webview_window"
 UI_OPERATOR_WINDOW_LABEL = "authority-approval"
@@ -42,7 +44,7 @@ def _operator_message(payload: dict[str, Any]) -> bytes:
 
 
 def _signing_secret() -> bytes:
-    return os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "").encode("utf-8")
+    return host_contract_value("panel_bootstrap_secret").encode("utf-8")
 
 
 def sign_ui_operator(

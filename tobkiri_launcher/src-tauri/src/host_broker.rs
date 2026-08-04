@@ -2189,11 +2189,8 @@ fn decode_approval_token(
 fn approval_runtime_secret(
     config: &AppConfig,
 ) -> std::result::Result<String, ApprovalValidationError> {
-    if let Ok(value) = std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
+    if let Some(value) = crate::host_contract::read_value(config, "approval_runtime_secret") {
+        return Ok(value);
     }
     let path = approval_runtime_secret_path(config)?;
     fs::read_to_string(&path)
@@ -2215,9 +2212,7 @@ fn approval_runtime_secret_path(
     approval_runtime_secret_path_for_values(
         config,
         crate::debug_defaultspack_approval_secret_path_from_env(),
-        std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH")
-            .ok()
-            .map(PathBuf::from),
+        None,
     )
 }
 

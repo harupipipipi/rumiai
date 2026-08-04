@@ -353,7 +353,6 @@ def main():
     # 明示的 opt-in / lockfile ガードを必ず通す。
     requested_permissive = (
         args.permissive
-        or os.environ.get("RUMI_SECURITY_MODE", "").lower() == "permissive"
     )
     if requested_permissive:
         # VULN-C01: production 環境および lockfile なしの permissive 化を拒否

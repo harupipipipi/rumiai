@@ -316,8 +316,6 @@ fn xml_escape(value: &str) -> String {
 
 fn build_launch_script(
     pack_shell: &Path,
-    token_file: &Path,
-    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -354,8 +352,7 @@ RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH={defaultspack_frontend_settings_path}
 RUMI_LOG_DIR={log_dir}
 VENV_DIR={venv_dir}
 PACK_SHELL={pack_shell}
-TOKEN_FILE={token_file}
-PANEL_BOOTSTRAP_SECRET_FILE={panel_bootstrap_secret_file}
+HOST_CONTRACT_FILE={host_contract_file}
 APP_WORKING_DIR={app_working_dir}
 DESKTOP_COMMAND={command}
 KERNEL_COMMAND={kernel_command}
@@ -368,17 +365,11 @@ export RUMI_USER_DATA
 export RUMI_DEFAULTSPACK_SECRETS_DIR
 export RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH
 export RUMI_LOG_DIR
+export TOBKIRI_HOST_CONTRACT_PATH="$HOST_CONTRACT_FILE"
 {env_exports}
 # Desktop metadata is pack-owned and must not be able to re-enable bytecode
 # writes inside the signed Launcher bundle.
 export PYTHONDONTWRITEBYTECODE=1
-
-RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
-export RUMI_API_TOKEN
-RUMI_DEFAULTSPACK_LOCAL_TOKEN="$RUMI_API_TOKEN"
-export RUMI_DEFAULTSPACK_LOCAL_TOKEN
-RUMI_PANEL_BOOTSTRAP_SECRET=$(cat "$PANEL_BOOTSTRAP_SECRET_FILE" 2>/dev/null | tr -d '\n')
-export RUMI_PANEL_BOOTSTRAP_SECRET
 
 exec "$PACK_SHELL" run "defaultspack" \
   --command "$DESKTOP_COMMAND" \
@@ -400,8 +391,7 @@ exec "$PACK_SHELL" run "defaultspack" \
         log_dir = shell_quote_path(log_dir),
         venv_dir = shell_quote_path(venv_dir),
         pack_shell = shell_quote_path(pack_shell),
-        token_file = shell_quote_path(token_file),
-        panel_bootstrap_secret_file = shell_quote_path(panel_bootstrap_secret_file),
+        host_contract_file = shell_quote_path(&user_data_dir.join("host_contract.json")),
         app_working_dir = shell_quote_path(app_working_dir),
         command = shell_quote(command),
         kernel_command = shell_quote(&kernel_command),
@@ -487,8 +477,6 @@ fn cleanup_legacy_defaultspack_app_bundles(apps_base: &Path, current_bundle_dir:
 fn create_macos_app_bundle(
     app_name: &str,
     pack_shell: &Path,
-    token_file: &Path,
-    panel_bootstrap_secret_file: &Path,
     rumi_home: &Path,
     app_dir: &Path,
     user_data_dir: &Path,
@@ -543,8 +531,6 @@ fn create_macos_app_bundle(
     let launch_path = macos_dir.join("launch");
     let launch_script = build_launch_script(
         pack_shell,
-        token_file,
-        panel_bootstrap_secret_file,
         rumi_home,
         app_dir,
         user_data_dir,
@@ -832,6 +818,15 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
     info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {base_url}");
     let api_token = read_desktop_api_token_from_config(config)
         .context("failed to read Viewer local auth token for Defaultspack launch")?;
+    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
+    crate::host_contract::write_contract(
+        config,
+        crate::host_contract::DEFAULT_PROFILE_ID,
+        [
+            ("desktop_api_token", api_token.clone()),
+            ("panel_bootstrap_secret", panel_bootstrap_secret),
+        ],
+    )?;
 
     let managed_process = manager
         .has_managed_process()
@@ -1210,6 +1205,14 @@ pub(crate) fn spawn_defaultspack_local_server(
 ) -> AnyResult<Child> {
     let api_token = read_desktop_api_token_from_config(config)?;
     let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
+    let host_contract_path = crate::host_contract::write_contract(
+        config,
+        crate::host_contract::DEFAULT_PROFILE_ID,
+        [
+            ("desktop_api_token", api_token.clone()),
+            ("panel_bootstrap_secret", panel_bootstrap_secret),
+        ],
+    )?;
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
     let python_path = python_path_with_runtime(&config.app_dir, std::env::var_os("PYTHONPATH"))?;
     let command_parts =
@@ -1274,9 +1277,7 @@ pub(crate) fn spawn_defaultspack_local_server(
             broker_attestation.instance_nonce(),
         )
         .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
-        .env("RUMI_API_TOKEN", &api_token)
-        .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
-        .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
+        .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1346,15 +1347,21 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     let metadata = read_defaultspack_desktop_metadata(config)?;
 
     let api_token = read_desktop_api_token_from_config(config)?;
-    let token_path = persist_desktop_api_token(config, &api_token)?;
-    let panel_bootstrap_secret_path = config.panel_bootstrap_secret_path();
+    let _token_path = persist_desktop_api_token(config, &api_token)?;
+    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
+    crate::host_contract::write_contract(
+        config,
+        crate::host_contract::DEFAULT_PROFILE_ID,
+        [
+            ("desktop_api_token", api_token.clone()),
+            ("panel_bootstrap_secret", panel_bootstrap_secret),
+        ],
+    )?;
 
     let app_name = "Tobkiri";
     let app_dir = create_macos_app_bundle(
         app_name,
         &pack_shell,
-        &token_path,
-        &panel_bootstrap_secret_path,
         &config.rumi_home,
         &config.app_dir,
         &config.user_data_dir,
@@ -1656,8 +1663,6 @@ exec "$PACK_SHELL" run "defaultspack" \
     fn launch_script_sets_rumi_app_dir_and_user_data() {
         let script = build_launch_script(
             Path::new("/tmp/Rumi's bin/pack-shell"),
-            Path::new("/tmp/token file"),
-            Path::new("/tmp/panel secret file"),
             Path::new("/tmp/rumi home"),
             Path::new("/tmp/app dir"),
             Path::new("/tmp/user data"),
@@ -1674,8 +1679,8 @@ exec "$PACK_SHELL" run "defaultspack" \
         assert!(script.contains("export PYTHONPATH=\"$RUMI_APP_DIR${PYTHONPATH:+:$PYTHONPATH}\""));
         assert!(script.contains("RUMI_USER_DATA='/tmp/user data'"));
         assert!(script.contains("RUMI_LOG_DIR='/tmp/log dir'"));
-        assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
-        assert!(script.contains("PANEL_BOOTSTRAP_SECRET_FILE='/tmp/panel secret file'"));
+        assert!(script.contains("HOST_CONTRACT_FILE='/tmp/user data/host_contract.json'"));
+        assert!(script.contains("export TOBKIRI_HOST_CONTRACT_PATH=\"$HOST_CONTRACT_FILE\""));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
         assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
@@ -1688,7 +1693,8 @@ exec "$PACK_SHELL" run "defaultspack" \
                     .rfind("export RUMI_DEFAULTSPACK_SURFACE='webview'")
                     .unwrap()
         );
-        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
+        assert!(!script.contains("RUMI_API_TOKEN"));
+        assert!(!script.contains("RUMI_PANEL_BOOTSTRAP_SECRET"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
     }
@@ -1698,8 +1704,6 @@ exec "$PACK_SHELL" run "defaultspack" \
     fn launch_script_includes_env_exports() {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
-            Path::new("/tmp/token"),
-            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),
@@ -1716,8 +1720,7 @@ exec "$PACK_SHELL" run "defaultspack" \
 
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
-        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
-        assert!(script.contains("export RUMI_PANEL_BOOTSTRAP_SECRET"));
+        assert!(script.contains("export TOBKIRI_HOST_CONTRACT_PATH=\"$HOST_CONTRACT_FILE\""));
     }
 
     #[test]
@@ -1725,8 +1728,6 @@ exec "$PACK_SHELL" run "defaultspack" \
     fn launch_script_uses_direct_defaultspack_identity_only() {
         let script = build_launch_script(
             Path::new("/tmp/pack-shell"),
-            Path::new("/tmp/token"),
-            Path::new("/tmp/panel-secret"),
             Path::new("/tmp/rumi-home"),
             Path::new("/tmp/app-dir"),
             Path::new("/tmp/user-data"),

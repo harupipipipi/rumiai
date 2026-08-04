@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -164,7 +163,9 @@ class AuthorityService:
 
     @property
     def mode(self) -> str:
-        value = str(os.environ.get("RUMI_AUTHORITY_MODE") or "enforce").strip().lower()
+        from ..host_contract import host_contract_value
+
+        value = host_contract_value("authority_mode").strip().lower() or "enforce"
         return value if value in {"off", "observe", "enforce"} else "enforce"
 
     def check(

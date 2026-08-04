@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import hmac
 import os
 import time
 import uuid
@@ -16,6 +17,7 @@ from core_runtime.paths import USER_DATA_DIR
 from core_runtime.runtime_locks import NamedLock
 
 STORE_VERSION = "rumi.credential-broker.store.v1"
+KEY_VERSION = "rumi.credential-broker.key.v1"
 
 
 class CredentialBrokerStore:
@@ -36,6 +38,8 @@ class CredentialBrokerStore:
         consumer_pack_id: str,
         provider_instance_id: str,
         scopes: list[str],
+        profile_id: str = "default",
+        purpose: str = "provider.invoke",
         label: str = "",
         expires_at: float | None = None,
     ) -> dict[str, Any]:
@@ -45,6 +49,8 @@ class CredentialBrokerStore:
             provider_instance_id,
             "provider_instance_id",
         )
+        profile_id = _identifier(profile_id, "profile_id")
+        purpose = _identifier(purpose, "purpose")
         normalized_scopes = _scopes(scopes)
         if not normalized_scopes:
             raise ValueError("at least one credential scope is required")
@@ -53,10 +59,13 @@ class CredentialBrokerStore:
         handle = f"credential:{uuid.uuid4().hex}"
         with NamedLock(self.lock_root, "credential-broker"):
             state = self._read()
-            state["credentials"][handle] = {
+            record = {
                 "handle": handle,
                 "consumer_pack_id": consumer_pack_id,
                 "provider_instance_id": provider_instance_id,
+                "profile_id": profile_id,
+                "key_version": KEY_VERSION,
+                "purpose": purpose,
                 "scopes": normalized_scopes,
                 "label": str(label)[:160],
                 "expires_at": expires_at,
@@ -70,6 +79,8 @@ class CredentialBrokerStore:
                     ).encode("utf-8")
                 ).decode("ascii"),
             }
+            record["record_mac"] = self._record_mac(record)
+            state["credentials"][handle] = record
             state["revision"] += 1
             self._write(state)
         return self._public(state["credentials"][handle])
@@ -81,6 +92,9 @@ class CredentialBrokerStore:
         consumer_pack_id: str,
         provider_instance_id: str,
         scope: str,
+        profile_id: str = "default",
+        key_version: str = "",
+        purpose: str = "provider.invoke",
     ) -> dict[str, Any]:
         """Decrypt only when caller, provider, scope, and expiry all match."""
         with NamedLock(self.lock_root, "credential-broker"):
@@ -88,7 +102,10 @@ class CredentialBrokerStore:
                 handle,
                 consumer_pack_id=consumer_pack_id,
                 provider_instance_id=provider_instance_id,
+                profile_id=profile_id,
                 scope=scope,
+                key_version=key_version,
+                purpose=purpose,
             )
 
     def _resolve_unlocked(
@@ -97,16 +114,29 @@ class CredentialBrokerStore:
         *,
         consumer_pack_id: str,
         provider_instance_id: str,
+        profile_id: str,
         scope: str,
+        key_version: str,
+        purpose: str,
     ) -> dict[str, Any]:
         state = self._read()
         record = state["credentials"].get(str(handle))
         if not isinstance(record, dict):
             raise KeyError("credential handle is unknown")
+        if not hmac.compare_digest(
+            str(record.get("record_mac") or ""), self._record_mac(record)
+        ):
+            raise PermissionError("credential record integrity check failed")
         if str(record.get("consumer_pack_id")) != consumer_pack_id:
             raise PermissionError("credential consumer is not bound")
         if str(record.get("provider_instance_id")) != provider_instance_id:
             raise PermissionError("credential provider is not bound")
+        if str(record.get("profile_id")) != profile_id:
+            raise PermissionError("credential profile is not bound")
+        if key_version and str(record.get("key_version")) != key_version:
+            raise PermissionError("credential key version is not bound")
+        if str(record.get("purpose") or "provider.invoke") != purpose:
+            raise PermissionError("credential purpose is not bound")
         if scope not in set(record.get("scopes") or []):
             raise PermissionError("credential scope is denied")
         expires_at = record.get("expires_at")
@@ -172,15 +202,19 @@ class CredentialBrokerStore:
                 provider_instance_id = _identifier(
                     item.get("provider_instance_id"), "provider_instance_id"
                 )
+                profile_id = _identifier(item.get("profile_id") or "default", "profile_id")
                 scopes = _scopes([str(value) for value in item.get("scopes", [])])
                 material = item.get("secret_material")
                 if not scopes or not isinstance(material, Mapping) or not material:
                     raise ValueError("credential migration record is invalid")
                 handle = f"credential:{uuid.uuid4().hex}"
-                state["credentials"][handle] = {
+                record = {
                     "handle": handle,
                     "consumer_pack_id": consumer_pack_id,
                     "provider_instance_id": provider_instance_id,
+                    "profile_id": profile_id,
+                    "key_version": KEY_VERSION,
+                    "purpose": str(item.get("purpose") or "provider.invoke"),
                     "scopes": scopes,
                     "label": str(item.get("label") or "legacy migration")[:160],
                     "expires_at": item.get("expires_at"),
@@ -194,6 +228,8 @@ class CredentialBrokerStore:
                         ).encode("utf-8")
                     ).decode("ascii"),
                 }
+                record["record_mac"] = self._record_mac(record)
+                state["credentials"][handle] = record
                 handles.append(handle)
             state["revision"] += 1
             state["migration"] = {
@@ -251,6 +287,22 @@ class CredentialBrokerStore:
         os.chmod(self.key_path, 0o600)
         return Fernet(key)
 
+    def _record_mac(self, record: Mapping[str, Any]) -> str:
+        """Authenticate handle metadata so profile tampering fails closed."""
+
+        unsigned = {
+            key: value
+            for key, value in record.items()
+            if key != "record_mac"
+        }
+        raw = json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hmac.new(self._fernet()._signing_key, raw, hashlib.sha256).hexdigest()
+
     def _read(self) -> dict[str, Any]:
         if not self.path.is_file():
             return {
@@ -295,6 +347,9 @@ class CredentialBrokerStore:
             "handle": record.get("handle"),
             "consumer_pack_id": record.get("consumer_pack_id"),
             "provider_instance_id": record.get("provider_instance_id"),
+            "profile_id": record.get("profile_id"),
+            "key_version": record.get("key_version", KEY_VERSION),
+            "purpose": record.get("purpose", "provider.invoke"),
             "scopes": list(record.get("scopes") or []),
             "label": record.get("label"),
             "expires_at": record.get("expires_at"),
@@ -335,4 +390,3 @@ def _hash(value: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(raw).hexdigest()
-

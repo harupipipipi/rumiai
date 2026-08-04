@@ -24,6 +24,7 @@ from core_runtime.host_broker.computer_delivery import (
     safe_type_diagnostic_facts,
     safe_window_selection_facts,
 )
+from core_runtime.host_contract import host_contract_value
 from core_runtime.global_contracts.computer_trace import (
     computer_action_trace,
     emit_computer_trace,
@@ -59,16 +60,12 @@ class ViewerBrokerClient:
             configured_port = _configured_broker_port()
         except ValueError:
             return cls()
-        pinned_public_key = str(
-            os.environ.get("RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY") or ""
-        ).strip()
-        pinned_instance_nonce = str(
-            os.environ.get("RUMI_VIEWER_BROKER_INSTANCE_NONCE") or ""
-        ).strip()
+        pinned_public_key = host_contract_value("viewer_broker_attestation_public_key")
+        pinned_instance_nonce = host_contract_value("viewer_broker_instance_nonce")
         if bool(pinned_public_key) != bool(pinned_instance_nonce):
             return cls()
-        env_url = str(os.environ.get("RUMI_VIEWER_HOST_BROKER_URL") or "").strip()
-        env_token = str(os.environ.get("RUMI_VIEWER_HOST_BROKER_TOKEN") or "").strip()
+        env_url = host_contract_value("viewer_broker_url")
+        env_token = host_contract_value("viewer_broker_token")
         if bool(env_url) != bool(env_token):
             return cls()
         if env_url and env_token:

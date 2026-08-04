@@ -19,12 +19,13 @@ from .approval_state_json import (
 )
 from .approval_store import get_approval_store, persist_runtime_secret_for_broker
 from ..host_bridge.viewer_broker_client import ViewerBrokerClient
+from core_runtime.host_contract import host_contract_value
 
 
 _TOKEN_VERSION = "v1"
 _DEFAULT_EXPIRES_IN_SECONDS = 300
 _RUNTIME_SECRET = (
-    os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET")
+    host_contract_value("approval_runtime_secret")
     or get_approval_store().get_or_create_runtime_secret()
 )
 persist_runtime_secret_for_broker(_RUNTIME_SECRET)

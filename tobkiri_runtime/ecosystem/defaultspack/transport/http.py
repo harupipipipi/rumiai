@@ -23,6 +23,7 @@ from core_runtime.api.safe_headers import (
     sanitized_forwarded_headers,
     strip_reserved_request_context,
 )
+from core_runtime.host_contract import host_contract_value
 
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
@@ -1172,7 +1173,9 @@ class DefaultsHttpServer:
 
     def _handle_authority_test_request(self, request_data, path_params):
         del path_params
-        if str(os.environ.get("RUMI_AUTHORITY_TEST_ENDPOINT") or "").strip().lower() not in {
+        from core_runtime.host_contract import host_contract_value
+
+        if host_contract_value("authority_test_endpoint").strip().lower() not in {
             "1",
             "true",
             "yes",
@@ -1707,9 +1710,7 @@ def _configured_local_auth_tokens():
             seen.add(token)
             tokens.append(token)
 
-    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
-        value = os.environ.get(key, "").strip()
-        add_token(value)
+    add_token(host_contract_value("desktop_api_token"))
     for path in _local_auth_token_file_candidates():
         try:
             add_token(path.read_text(encoding="utf-8"))

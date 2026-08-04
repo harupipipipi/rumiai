@@ -56,12 +56,7 @@ def _configure_persistent_user_state() -> None:
         str(agent_runtime_dir / "transcripts"),
     )
 
-    configured_secrets = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
-    secrets_dir = (
-        Path(configured_secrets).expanduser()
-        if configured_secrets
-        else persistent_root / "secrets"
-    )
+    secrets_dir = persistent_root / "secrets"
     legacy_secrets_dir = legacy_root / "secrets"
     if legacy_secrets_dir.exists() and not secrets_dir.exists():
         secrets_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -70,8 +65,6 @@ def _configure_persistent_user_state() -> None:
         persistent_key = secrets_dir.parent / ".secrets_key"
         if legacy_key.exists() and not persistent_key.exists():
             shutil.copy2(legacy_key, persistent_key)
-    if not configured_secrets:
-        os.environ["RUMI_DEFAULTSPACK_SECRETS_DIR"] = str(secrets_dir)
 
     configured_settings = os.environ.get(
         "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", ""
@@ -238,10 +231,11 @@ def _parse_cli_args(argv: list[str]) -> None:
 
 def _local_auth_token() -> str:
     """Read the launcher-issued local token without exposing it to logs."""
-    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
-        token = os.environ.get(key, "").strip()
-        if token:
-            return token
+    from core_runtime.host_contract import host_contract_value
+
+    token = host_contract_value("desktop_api_token")
+    if token:
+        return token
     user_data = os.environ.get("RUMI_USER_DATA", "").strip()
     if not user_data:
         return ""
@@ -306,7 +300,7 @@ def _safe_cwd() -> str:
 
 
 def _diagnostic_env() -> dict[str, str]:
-    return {key: value for key in _DIAGNOSTIC_ENV_KEYS if (value := os.environ.get(key))}
+    return {key: value for key in _DIAGNOSTIC_ENV_KEYS if (value := os.getenv(key))}
 
 
 def _write_launch_event(event: str, **fields: object) -> None:

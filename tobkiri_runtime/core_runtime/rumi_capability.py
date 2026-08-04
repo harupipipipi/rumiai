@@ -29,15 +29,17 @@ import socket
 import struct
 from typing import Any, Dict, Optional
 
+from .host_contract import host_contract_value
+
 
 # デフォルトのUDSソケットパス（コンテナ内）
 DEFAULT_SOCKET_PATH = "/run/rumi/capability.sock"
 
 # 環境変数でオーバーライド可能
-SOCKET_PATH = os.environ.get("RUMI_CAPABILITY_SOCKET", DEFAULT_SOCKET_PATH)
-CAPABILITY_HOST = os.environ.get("RUMI_CAPABILITY_HOST", "127.0.0.1")
-CAPABILITY_PORT = int(os.environ.get("RUMI_CAPABILITY_PORT", "0") or "0")
-CAPABILITY_TOKEN = os.environ.get("RUMI_CAPABILITY_TOKEN", "")
+SOCKET_PATH = os.getenv("RUMI_CAPABILITY_SOCKET", DEFAULT_SOCKET_PATH)
+CAPABILITY_HOST = os.getenv("RUMI_CAPABILITY_HOST", "127.0.0.1")
+CAPABILITY_PORT = int(os.getenv("RUMI_CAPABILITY_PORT", "0") or "0")
+CAPABILITY_TOKEN = host_contract_value("capability_token")
 _TCP_MODE = CAPABILITY_PORT > 0 and bool(CAPABILITY_TOKEN)
 
 # プロトコル定数

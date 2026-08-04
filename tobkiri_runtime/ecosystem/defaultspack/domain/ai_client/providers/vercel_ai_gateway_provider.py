@@ -22,13 +22,14 @@ class VercelAIGatewayProvider(OpenAICompatibleProvider):
         cls,
         manifest: Dict[str, Any],
         *,
+        api_key: str = "",
         model_manifests: List[Dict[str, Any]] | None = None,
         allow_declared_models: bool = True,
     ) -> "VercelAIGatewayProvider":
         """Build the dedicated adapter while preserving manifest model overlays."""
         del manifest
         del allow_declared_models
-        return cls(known_models=model_manifests)
+        return cls(api_key=api_key, known_models=model_manifests)
 
     def __init__(
         self,

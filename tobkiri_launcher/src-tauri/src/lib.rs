@@ -11,6 +11,7 @@ mod health_check;
 mod host_audit;
 mod host_broker;
 mod host_broker_types;
+mod host_contract;
 mod kernel_manager;
 mod presentation;
 mod process_utils;
