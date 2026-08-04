@@ -210,34 +210,65 @@ def _normalize_artifact_index(
     ecosystem: dict[str, Any],
     *,
     check: bool,
+    include_unreferenced_sidecar: bool = False,
 ) -> str | None:
+    """Refresh a declared index, or an orphan v3 artifact sidecar.
+
+    Older v3-authoritative Packs shipped ``artifact-manifest.json`` without
+    linking it from the compatibility projection.  It is still a generated
+    integrity sidecar and must track the declared bytes, but it must not
+    become a second authority or change projection provenance semantics.
+    """
+
     metadata = ecosystem.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     integrity = metadata.get("integrity")
     integrity = integrity if isinstance(integrity, dict) else {}
     relative = str(integrity.get("artifact_manifest") or "").strip()
+    referenced = bool(relative)
+    if not relative and include_unreferenced_sidecar:
+        sidecar = pack_root / "artifact-manifest.json"
+        if sidecar.is_file():
+            relative = sidecar.name
     if not relative:
         return None
     index_path = (pack_root / relative).resolve()
     index_path.relative_to(pack_root.resolve())
-    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    original = index_path.read_text(encoding="utf-8")
+    payload = json.loads(original)
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, list):
         raise SystemExit(f"artifact index has no artifacts: {index_path}")
+    expected = original
     for item in artifacts:
         if not isinstance(item, dict) or not item.get("path"):
             raise SystemExit(f"invalid artifact entry: {index_path}")
         candidate = (pack_root / str(item["path"])).resolve()
         candidate.relative_to(pack_root.resolve())
-        item["sha256"] = _sha256(candidate)
-    expected = json.dumps(
-        payload, ensure_ascii=False, indent=2, sort_keys=True
-    ) + "\n"
+        actual = _sha256(candidate)
+        declared = str(item.get("sha256") or "")
+        if declared.removeprefix("sha256:") != actual.removeprefix("sha256:"):
+            replacement = (
+                actual
+                if declared.startswith("sha256:")
+                else actual.removeprefix("sha256:")
+            )
+            token = json.dumps(declared, ensure_ascii=False)
+            replacement_token = json.dumps(replacement, ensure_ascii=False)
+            if token not in expected:
+                raise SystemExit(f"artifact hash field is not writable: {index_path}")
+            expected = expected.replace(token, replacement_token, 1)
+    if referenced:
+        expected = json.dumps(
+            payload, ensure_ascii=False, indent=2, sort_keys=True
+        ) + "\n"
     if check:
         if index_path.read_text(encoding="utf-8") != expected:
             raise SystemExit(f"artifact index drift: {index_path}")
     else:
         index_path.write_text(expected, encoding="utf-8")
+    if not referenced:
+        return None
     return "sha256:" + hashlib.sha256(expected.encode("utf-8")).hexdigest()
 
 
@@ -357,11 +388,14 @@ def migrate(*, check: bool) -> None:
         ecosystem = _normalize_legacy(
             json.loads(ecosystem_path.read_text(encoding="utf-8"))
         )
+        v3_path = root / "rumi.pack.v3.json"
         artifact_index_hash = _normalize_artifact_index(
-            root, ecosystem, check=check
+            root,
+            ecosystem,
+            check=check,
+            include_unreferenced_sidecar=v3_path.is_file(),
         )
         _pin_v4_projection(ecosystem, v4)
-        v3_path = root / "rumi.pack.v3.json"
         if v3_path.is_file():
             manifest = _normalize_v3(
                 json.loads(v3_path.read_text(encoding="utf-8")), root, v4

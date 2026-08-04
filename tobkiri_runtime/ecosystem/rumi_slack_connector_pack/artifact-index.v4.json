@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:85a4e117988a8815a5d5e978a1ba505c47af617d959bf84513d34e1f979cada4",
   "artifacts": [
     {
-      "digest": "sha256:366b08629356fed4fa310a0ca4136bddb3ba4f3f62bb1b5e3c46004724d1487a",
+      "digest": "sha256:451085383b3e648b952ee145bf194a166ca2b182ff25b945d906c39bf3318574",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:e9a310a75467280d39f3058258b6f4f494240306f790f281835df73f08712919",
+      "digest": "sha256:970dc623afd514ece761b900b29d28b978b02a855b4a08f6901e2db38e213c34",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -20,8 +20,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:48479cc0bbf38c77e918df5ef853b6009b1b190b64409fa66f401dacf3cd08cf"
+    "signed_digest": "sha256:c8903969e3f5079eb7b5b381e73f750f6cc69e9dbfa4cf19745fb6c5d5dd3b86"
   },
   "pack_id": "rumi_slack_connector_pack",
-  "source_identity": "sha256:f8f612d58f5ae79d2e07f8c54178382f5a96a5f4bb2d5188f7cdc9f3430dd42c"
+  "source_identity": "sha256:f4a7b062a3733036abade22452d16d220f8c5c003aa023d9afd7c737458af653"
 }

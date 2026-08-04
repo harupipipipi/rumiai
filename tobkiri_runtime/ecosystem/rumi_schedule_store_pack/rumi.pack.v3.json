@@ -107,7 +107,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:193eb9d6fc587294870e2ef6b27a0e8a9a45ce293f666b0bee889d2799071504",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:38e70e427b67cc9de97f41e9f25f2056a218a7657b18d16395fd5a8aa5467908"
+            "source_identity": "sha256:4f177b066c9a044648fdec39c65ec134a2b9f4ec15ee84ed954e5898de0aa51c"
           },
           "owner_surfaces": [
             "schedules",

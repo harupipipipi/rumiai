@@ -95,7 +95,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:05ea2e905be01008966960de6dfe69994fc888d698673bc10febafb894364ec6",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:dd5aae335287d9924458baddcc04ffc28c1d5bc9ddb288cfe4c4d21586b2716c"
+            "source_identity": "sha256:f62c565f7fc7d7b082acd18aebc50f02e9209df6a46d027f36d43c25323d90a2"
           },
           "owner_surfaces": []
         },

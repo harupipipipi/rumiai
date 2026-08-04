@@ -25,7 +25,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:df343c6684bf3450690cdbd8630132212d0b1cbc3c091e60356582cd6d977791"
+      "source_identity": "sha256:894511c95939ffc29c3e8ed1b7eb40a9a6eabcc2afdaa43d3785b4b295778fd3"
     },
     "description": "Operations Company and MiMo Coding Company profiles, routes, prompts, and UI extensions.",
     "license": "MIT",

@@ -31,7 +31,7 @@ def _approved(catalog: BundledCatalog) -> set[str]:
 
 def _bindings() -> dict[str, str]:
     return {
-        "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
         ),
         (

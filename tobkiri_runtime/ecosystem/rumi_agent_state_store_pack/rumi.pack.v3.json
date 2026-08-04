@@ -118,7 +118,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:7f26f41ebd6091b56f646c2d8f28292f083c5348418aad78adf8953bcbb55e68",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:2fb541d339e3a4086cb273b49afe917abed2f3120e1426530bc958e947e6ead4"
+            "source_identity": "sha256:41c29da45dbf326b2b3d16f00e7ae477680ea68fe5bf7195b9ca3e0fa9bce92a"
           },
           "owner_surfaces": [
             "agent_profiles",

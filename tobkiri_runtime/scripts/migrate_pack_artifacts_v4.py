@@ -193,12 +193,49 @@ def _runtime_artifacts(pack_root: Path) -> list[dict[str, str]]:
     return sorted(result, key=lambda item: item["path"])
 
 
+def _migration_source_view(path: Path) -> dict[str, Any]:
+    """Return the immutable semantic view used by the one-way importer.
+
+    Legacy and v3 documents are compatibility projections.  Their authority
+    generator rewrites provenance and canonical-v4 pointers whenever the v4
+    artifact set changes.  Hashing those generated envelopes made
+    ``--import-legacy --check`` feed v4 output back into its own source
+    identity, so authority → v4 → authority never reached a fixed point.
+    Keep the source evidence bound to the semantic input and exclude only the
+    projection-owned fields.  Runtime entrypoint/artifact bytes remain in the
+    view and therefore still cause an intentional migration when they change.
+    """
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise PackV4MigrationError(f"migration source must be an object: {path}")
+    payload = copy.deepcopy(payload)
+    if path.name == "ecosystem.json":
+        payload.pop("provenance", None)
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            for key in (
+                "canonical_v4",
+                "format",
+                "generated",
+                "generated_from",
+                "manifest_authority",
+                "read_only_projection",
+            ):
+                metadata.pop(key, None)
+    elif path.name == "rumi.pack.v3.json":
+        payload.pop("provenance", None)
+        extensions = payload.get("extensions")
+        if isinstance(extensions, dict):
+            extensions.pop("rumi.legacy_projection", None)
+    return payload
+
+
 def _source_evidence(pack_root: Path, paths: Iterable[Path]) -> list[dict[str, str]]:
     return [
         {
             "path": path.relative_to(ROOT).as_posix(),
             "rule_id": "pack-v4-one-way-migration-input",
-            "digest": _file_digest(path),
+            "digest": _digest(_migration_source_view(path)),
         }
         for path in paths
         if path.is_file() and path.is_relative_to(pack_root)

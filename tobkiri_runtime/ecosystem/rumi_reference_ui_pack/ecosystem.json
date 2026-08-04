@@ -7,7 +7,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:542ce419c2bc89b59d4b28a156f2c905c699545e88ed6be4b36086a8951b310c"
+      "source_identity": "sha256:2f3e2b104de6ef3a5b9fb7ad04ac601c531200458dd6fbea1962fb0d1dee29a5"
     },
     "description": "Reference shell/sidebar/settings UI declarations for default Rumi installs.",
     "license": "MIT",

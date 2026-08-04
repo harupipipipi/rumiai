@@ -29,8 +29,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:6cd76560192a26c3d0ba24fc0a653ed5f49c7400bd80fa137bd922966a1040bc",
-    "contract_catalog_digest": "sha256:55df416ef426e4fdeae1bf5ffc8a02dce4c2df82dc98f95a6ebc59ab11fd82a5",
-    "source_identity": "sha256:3871ad9144a2477e87b684e29b4d841d754de91425bcd55aa0a80553a600fc37"
+    "contract_catalog_digest": "sha256:9a2bb983120e2b4805a52a95b88ef832b83284ba6ea6e459079601cf02915eee",
+    "source_identity": "sha256:39ac47dfebabfcc4f4f1f258840e1d6589ef4ed80195f6e71d433ce29d48ba05"
   },
   "migration": {
     "compatibility": "read_only",
@@ -66,7 +66,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:3871ad9144a2477e87b684e29b4d841d754de91425bcd55aa0a80553a600fc37",
+        "digest": "sha256:39ac47dfebabfcc4f4f1f258840e1d6589ef4ed80195f6e71d433ce29d48ba05",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -77,7 +77,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:3871ad9144a2477e87b684e29b4d841d754de91425bcd55aa0a80553a600fc37",
+    "source_digest": "sha256:39ac47dfebabfcc4f4f1f258840e1d6589ef4ed80195f6e71d433ce29d48ba05",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_host_authority_bridge_pack"
   },

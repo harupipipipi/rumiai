@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 BINDINGS = {
-    "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
         "authority-ref:conversation.default"
     ),
     (

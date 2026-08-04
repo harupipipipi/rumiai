@@ -26,6 +26,7 @@ def test_v4_catalog_is_the_single_function_inventory() -> None:
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
         "shell.cli.default",
+        "shell.tauri.default",
     }
 
 

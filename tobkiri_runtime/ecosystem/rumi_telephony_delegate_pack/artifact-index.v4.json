@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "artifacts": [
     {
-      "digest": "sha256:06c934ad9916ad864684932187b1f3db7b6b0eac3214573735afd8e74abaa779",
+      "digest": "sha256:82aec0afe804fd8c3768a99ce3fdaa6f7b4596c8c9b27d975c89c45886343a79",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:bec969d094e81d7ee2a59606b21822dcf99c49ac9f57dd5f1085c3c7c303dab0",
+      "digest": "sha256:94bc8b0763afde6ce898ff1ef7ea3c703806c7e4873f92264451cea4bec1387e",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     }
@@ -15,8 +15,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:9402c45d987d8d2d181dc68fc45066a3e6f134a91084685ba7286efde2312925"
+    "signed_digest": "sha256:669e9f3690b675c16670a123fd1af9894f3c5a773fc8415c4726f1366c2039bc"
   },
   "pack_id": "rumi_telephony_delegate_pack",
-  "source_identity": "sha256:e90d8cd7888644852114201f833c57af3b5b6288a58bae26464fc409e4cdc540"
+  "source_identity": "sha256:e5ba10a60a59d6e806970773994dc5e6c1d8b507fd8d5d16b4d20463e075253e"
 }

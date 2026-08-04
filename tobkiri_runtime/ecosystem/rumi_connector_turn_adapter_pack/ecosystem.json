@@ -23,14 +23,14 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:9d1dfd5f15939743eaef9728162cbe04a55bad9fb43a59a177367357884a4c0b",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:ae1a16f00bfe395489d60c45640035bcb8429b73834c9976923955b39f0ec7ee"
+      "source_identity": "sha256:1bda0b12e4376e1a0ba571ef04b0861c6509d6797fd28ce4b3f9e61990811e18"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:b1a3e2fd467dd0cd0becf5526dcaca5c6c7c2ae7d9401149254bb1d8623e253b"
+      "source_content_hash": "sha256:5c955ea9ad63dc86fb7ef265a712e79815568e9588612e9d330f7f27c6e089e5"
     },
     "manifest_authority": "v3-authoritative",
     "owner_surfaces": [],

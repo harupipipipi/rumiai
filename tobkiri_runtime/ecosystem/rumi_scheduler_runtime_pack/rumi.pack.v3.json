@@ -132,7 +132,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:19e3002d64b9b8cc0959feecd45fa5e3adba8ebaeb2b6efe76d61b0bc2781c6a",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:e949fa151b5166495259d6708a1cdf47f685f83b9fab108bce2878e32706af7b"
+            "source_identity": "sha256:ab0f626e8a31ca7d6a0dc29bad13959c3f1fd7cc7568d279a340ec8766e122a8"
           },
           "owner_surfaces": [
             "scheduler_clock_process_state"

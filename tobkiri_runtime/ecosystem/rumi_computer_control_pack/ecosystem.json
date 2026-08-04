@@ -54,7 +54,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:cce73431c6e2898fb5ff1f11f636246a7def2b7bb36289282b986b7f0d86504d"
+      "source_identity": "sha256:8bf0553f8f83ae5d014450c0f91f96e3ab9c9943555b38aab10680243d9419a2"
     },
     "dependency_notes": {
       "defaultspack": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, and core tool routing.",

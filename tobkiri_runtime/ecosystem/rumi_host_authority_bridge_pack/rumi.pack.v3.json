@@ -77,7 +77,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:6cd76560192a26c3d0ba24fc0a653ed5f49c7400bd80fa137bd922966a1040bc",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:3871ad9144a2477e87b684e29b4d841d754de91425bcd55aa0a80553a600fc37"
+            "source_identity": "sha256:39ac47dfebabfcc4f4f1f258840e1d6589ef4ed80195f6e71d433ce29d48ba05"
           },
           "receipt": {
             "replay": "redeem_once",

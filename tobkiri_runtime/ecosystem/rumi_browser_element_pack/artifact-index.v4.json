@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "artifacts": [
     {
-      "digest": "sha256:06b0a1a46093498629a81b179e94967b6218ab629ce089dcb3747d87e132a577",
+      "digest": "sha256:14bfcc58757d150f03d399eca2b286b25ceaccb20e8dd65ac2db1d7ed848df82",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:7ebbed689bb021d03903d7ea9ba5d316be536c12df8aa260331ce5bc734b560f",
+      "digest": "sha256:5f89abb798b9288d0272b0296c8bc48bf718b5715cc0711f6ecfd098696ad82f",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     }
@@ -15,8 +15,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:e646e4bc7073ccf32c76ffbfe81138307cd0faa8febc469befc1de17686bccf2"
+    "signed_digest": "sha256:ca737bd5903da932cd5ccf2babe7017a9b95b95130768d0295e73ed5df44bd70"
   },
   "pack_id": "rumi_browser_element_pack",
-  "source_identity": "sha256:60f2f6abb4866bc0b2d7d4554284f530be32f9a8152721c366a55d6aad56c8c1"
+  "source_identity": "sha256:558f0c5c1f47fdd2b14f9203d8d925b6c16f75c458fd0d2439872025e2641dac"
 }

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import hashlib
+import json
 import shutil
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from scripts.offline_legacy_projection import (
     project_legacy_ecosystem,
     source_manifest_identity,
 )
+from scripts.migrate_manifest_authority import _normalize_artifact_index
 from core_runtime.pack_artifact_integrity import verify_declared_artifacts
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 
@@ -142,6 +144,43 @@ def test_projection_and_artifact_tamper_fail_closed(
     )
     assert integrity_ok is False
     assert "artifact manifest hash does not match provenance" in diagnostics
+
+
+def test_v3_artifact_sidecar_generator_refreshes_hash_without_projection_rebind(
+    tmp_path: Path,
+) -> None:
+    """The authority generator refreshes orphan v3 sidecars deterministically."""
+    pack_root = tmp_path / "rumi_file_inspect_pack"
+    runtime = pack_root / "runtime"
+    runtime.mkdir(parents=True)
+    source = runtime / "inspect.py"
+    source.write_text("print('current')\n", encoding="utf-8")
+    artifact_index = pack_root / "artifact-manifest.json"
+    artifact_index.write_text(
+        '{"schema_version":"rumi.artifact-manifest.v1",'
+        '"artifacts":[{"path":"runtime/inspect.py",'
+        '"sha256":"' + "0" * 64 + '","role":"runtime"}]}\n',
+        encoding="utf-8",
+    )
+
+    assert _normalize_artifact_index(
+        pack_root,
+        {},
+        check=False,
+        include_unreferenced_sidecar=True,
+    ) is None
+    first = artifact_index.read_bytes()
+    assert str(json.loads(first)["artifacts"][0]["sha256"]) == hashlib.sha256(
+        source.read_bytes()
+    ).hexdigest()
+
+    assert _normalize_artifact_index(
+        pack_root,
+        {},
+        check=True,
+        include_unreferenced_sidecar=True,
+    ) is None
+    assert artifact_index.read_bytes() == first
 
 
 def test_removed_registry_rejects_runtime_discovery(tmp_path: Path) -> None:

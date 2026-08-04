@@ -118,7 +118,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:7f13877865c775fc752ad5d175d6b9903f9b4172e982bc6a33a817e3bd88bc24",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:4f80c168c87676e60ec2363d0bf2e42861fcf21efbf32de34f23d4c4ae2c51cd"
+            "source_identity": "sha256:ffe513e3203ae89a115515f2f27922921734c1531b4111c4607dd321b840b306"
           },
           "executor_owner": "rumi_viewer_host_broker",
           "operation_descriptor_owner": true,

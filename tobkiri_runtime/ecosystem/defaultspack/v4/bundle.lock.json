@@ -9,22 +9,22 @@
     {
       "path": "packs/defaultspack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:bf8fceb85f9d162099959a9964dea3296791b57f5a48028a1537d02240eca908"
+      "digest": "sha256:78d0727d0dbf8178ffaa9a7f985261c94faac734d291425dc74cca01e465b08d"
     },
     {
       "path": "packs/rumi-file-inspect.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:c2d1efe882f26efe32f733d546a57178c7b4eba615e9ac87a1c90da6f5d54bce"
+      "digest": "sha256:97ebb5bdc6a9f8c8b661580945f9b01dfbbeace15fa20e1f4624602d84f33391"
     },
     {
       "path": "packs/rumi-host-authority-bridge.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:241bae40d644bdfddd5bfe0445c60499d0909032779f2e9257210363e7f2fa98"
+      "digest": "sha256:ca0eca715c3a680cd4af9550ee5997263b8435c5a75c6ce1063746dbee708a7c"
     },
     {
       "path": "packs/rumi-workspace-mount.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:2f672e8479c4d1cba2b92ef9b06c3cf3ad66d50860906a2f6897c9d1803cda25"
+      "digest": "sha256:a008d6e93f872fecc5954bfa22f2605a1ada132a11c91852965d04473671605f"
     },
     {
       "path": "packs/shell.cli.default.pack.v4.json",

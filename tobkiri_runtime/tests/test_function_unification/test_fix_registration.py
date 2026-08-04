@@ -22,6 +22,7 @@ def test_v4_registration_is_catalog_backed() -> None:
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
         "shell.cli.default",
+        "shell.tauri.default",
     }
     assert all(
         manifest["functions"]

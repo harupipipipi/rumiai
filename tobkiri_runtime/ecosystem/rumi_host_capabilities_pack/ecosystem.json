@@ -10,7 +10,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:ab53f5a65dc0e2bbbdba67dc8f99707ed91cc753aaf69ff6f03b8e728b37f14b"
+      "source_identity": "sha256:0e040aa050a227455c5922d6b708f6d8cf35aa65e7fbab74a763e2d4cf8ab3b1"
     },
     "description": "Typed local host capability broker for OS-facing Rumi operations.",
     "legacy_annotations": {

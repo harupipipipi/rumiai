@@ -57,7 +57,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:41c650c166ce785c367b90ae961c7b6b84a878588eef00514014005631b9ed50"
+            "source_identity": "sha256:530611c0460668470c28ceb86dcc91b4cb6c72e350b1bea9a04f1eec8265df2e"
           },
           "declarative_only": true,
           "description": "Declarative local-first deep research, evidence, source quality, and citation workflow pack for Rumi-native research agents.",

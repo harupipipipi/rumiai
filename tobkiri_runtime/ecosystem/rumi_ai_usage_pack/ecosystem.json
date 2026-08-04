@@ -16,14 +16,14 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:3ba808fdc876c4bd4d2be91e6943c749153c0cc77c5ea70b405d96da3bcde3ae",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:609a39824873c90351246fa951f938b3f0ad6375e93f3ca7db93d31b521663d2"
+      "source_identity": "sha256:99b4e906ddc10bde9adfbc30bd746a8e3b2bf77bc0e30c1524830c6377d160a4"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:830ac1dc344f773f7010e217d669a6204f7e625d76b49155f2382c1546259378"
+      "source_content_hash": "sha256:2ade08f101a99a98b55c02496fae857d03eba14c2287beae084c290cdcc7dafb"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"

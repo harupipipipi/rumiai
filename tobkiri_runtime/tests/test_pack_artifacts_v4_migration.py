@@ -12,6 +12,7 @@ from scripts.migrate_pack_artifacts_v4 import (
     CATALOG,
     EXCLUDED_PACKS,
     PackV4MigrationError,
+    _migration_source_view,
     _render_record,
     _validate_catalog_payload,
     generate,
@@ -22,6 +23,75 @@ from tobkiri_protocol.errors import SchemaValidationError
 
 def _catalog() -> dict[str, object]:
     return json.loads(CATALOG.read_text(encoding="utf-8"))
+
+
+def test_migration_source_view_excludes_generated_projection_envelopes(
+    tmp_path: Path,
+) -> None:
+    """Authority metadata must not churn one-way source evidence hashes."""
+    ecosystem = tmp_path / "ecosystem.json"
+    ecosystem.write_text(
+        json.dumps(
+            {
+                "dependencies": {"workspace": ">=1.0.0"},
+                "metadata": {
+                    "canonical_v4": {
+                        "artifact_digest": "sha256:" + "a" * 64,
+                        "source_identity": "sha256:" + "b" * 64,
+                    },
+                    "format": "rumi.ecosystem.v1",
+                    "generated": True,
+                    "generated_from": {"source_content_hash": "generated"},
+                    "manifest_authority": "v3-authoritative",
+                    "owner": "source",
+                    "read_only_projection": True,
+                },
+                "provenance": {
+                    "content_hash": "sha256:" + "c" * 64,
+                },
+                "runtime": {"implementation": "runtime.py"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    v3 = tmp_path / "rumi.pack.v3.json"
+    v3.write_text(
+        json.dumps(
+            {
+                "entrypoints": [
+                    {
+                        "module": "ecosystem.example.runtime",
+                        "artifact_hash": "sha256:" + "d" * 64,
+                    }
+                ],
+                "extensions": {
+                    "rumi.legacy_projection": {
+                        "manifest": {"provenance": {"content_hash": "generated"}}
+                    },
+                    "source_extension": {"stable": True},
+                },
+                "provenance": {"content_hash": "sha256:" + "e" * 64},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    legacy_view = _migration_source_view(ecosystem)
+    v3_view = _migration_source_view(v3)
+
+    legacy_payload = json.loads(ecosystem.read_text(encoding="utf-8"))
+    legacy_payload["metadata"]["canonical_v4"]["artifact_digest"] = "sha256:" + "f" * 64
+    legacy_payload["provenance"]["content_hash"] = "sha256:" + "0" * 64
+    ecosystem.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    v3_payload = json.loads(v3.read_text(encoding="utf-8"))
+    v3_payload["extensions"]["rumi.legacy_projection"]["manifest"] = {
+        "provenance": {"content_hash": "changed"}
+    }
+    v3_payload["provenance"]["content_hash"] = "sha256:" + "1" * 64
+    v3.write_text(json.dumps(v3_payload), encoding="utf-8")
+
+    assert _migration_source_view(ecosystem) == legacy_view
+    assert _migration_source_view(v3) == v3_view
 
 
 def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:

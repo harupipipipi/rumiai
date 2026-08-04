@@ -59,7 +59,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:727dc1d5c541d566a5505a9801e538dddadba110506a2eee6d2b78bfd9a817de",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:c690bf1dc81db11bc8a777c4e8f0195e4d7800fbbc9104c3b4c42f234fc33805"
+            "source_identity": "sha256:ed040a80ac2cfefd1be8a0c1308e9efed35ee20c93732c14f2aa3569f0f1661b"
           }
         },
         "pack_id": "rumi_shell_policy_pack",

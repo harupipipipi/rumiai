@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:46a70d0905db576cb416ae4aa1e76538b443caedec4db00638a7bb53f4b9e3d2",
   "artifacts": [
     {
-      "digest": "sha256:c8ef4433c484e6171b117cae02bfeef10b56dd81d1c502da3fc27b59699382e2",
+      "digest": "sha256:bb2e56a21f0a97d9974013cfda8bd2addcc0a22de410b1e5298cf2ff2a21473f",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:7af5e24cee011a57580545e71d589a348597a55ef08b5e4fa81e8945db0f4d9d",
+      "digest": "sha256:7773e227a49126994894e5b9f8264e3383a106a2b1cfc44a7598f08fc5c9671e",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -20,8 +20,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:4d2c8c4d1269d2809f39774f0697fe9159707e9aa2231e0739a8517f4f044231"
+    "signed_digest": "sha256:c14fc012a7065f1b1d3c88ad3d13453faedc8a507e6f6a7f3d77e15a393e6f9f"
   },
   "pack_id": "rumi_mobile_pairing_connector_pack",
-  "source_identity": "sha256:ebe6c31454f5a9f97e367051b53d3d041448db6a57133398cac6c2e14f5e19e7"
+  "source_identity": "sha256:0b9b2bd087f2e6bfe11fd3f77952d53098f541a6c543bd442aea671d12af8580"
 }

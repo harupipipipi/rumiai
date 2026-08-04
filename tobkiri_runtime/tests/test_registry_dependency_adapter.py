@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 BINDINGS = {
-    "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
+    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
     "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
 }
 
@@ -48,7 +48,7 @@ def test_profile_resolver_delegates_dependency_order_to_effective_set() -> None:
     resolved = _resolve(_catalog())
     assert [item["identity"] for item in resolved.lock["effective_set"]] == [
         "defaults-basepack",
-        "shell.cli.default",
+        "shell.tauri.default",
         "defaultspack",
         "rumi_file_inspect_pack",
         "rumi_workspace_mount_pack",

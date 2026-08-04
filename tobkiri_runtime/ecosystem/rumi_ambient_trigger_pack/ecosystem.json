@@ -11,7 +11,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:32ff15e5b7966d00d56d77654f98568cb255633afa6c590a6e54e0ffb2ead205"
+      "source_identity": "sha256:f86a8092b8f9eb779d83270de1c930005d32645f0bf866623531f998c8cf32f7"
     },
     "description": "Voice wake, camera pinch, 2/3/4 gesture replies, and approval gesture extension for defaultspack input.",
     "legacy_annotations": {

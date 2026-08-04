@@ -123,7 +123,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:72b92977a2d49cf4f95300051ca08c0e2f78a723c086569d0af3086cc8d54e13",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:18364a608752b202bedcbba282dbaccc2e79ea749c22e646855100c6b234c6e4"
+      "source_identity": "sha256:6facf9d0d4613b73417f0990dbf0111ecba9e05260a6e373a433770df0dc0e86"
     },
     "description": "Declarative, local-first model evaluation and routing evidence pack for provider smoke tests, pass@k, flakiness, fit matrices, and promotion gates.",
     "format": "rumi.ecosystem.v1",
@@ -131,7 +131,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:59a9fcecf314fb623a959a53a33d00e1f480b5445eb149224303f4e48016ffa1"
+      "source_content_hash": "sha256:819539d13d3bfa29085f21be9010a2f2280c9943a16ec7567f5065f1a464b0f9"
     },
     "legacy_annotations": {
       "runtime": {

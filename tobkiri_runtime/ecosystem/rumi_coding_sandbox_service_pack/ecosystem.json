@@ -25,7 +25,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:eeaeb9ed727aa1d52757eb210136ffa63f804cbdcc2952b3a7cd39b88479e1a8",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:53366842a59a320c1041900d903c9e29a56b4e09aa10e1689f2beadf774b84f8"
+      "source_identity": "sha256:ba84a4e51cfc917e85b6622c5be68becee82a2df8cb4434f741af020bac3848b"
     },
     "docker": {
       "digest_pinned": true,
@@ -38,7 +38,7 @@
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v2",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:31f934a67447f732bb68122051be47b84ae955e28f3a9e3fca43b8dff5d79cc5"
+      "source_content_hash": "sha256:a5082a10b5480d4fff58ba9ac1199020fa887f23a2a80007fb5c14b1e5cdb5e6"
     },
     "host_apply": false,
     "manifest_authority": "v3-authoritative",

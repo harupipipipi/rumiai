@@ -7,7 +7,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:60f2f6abb4866bc0b2d7d4554284f530be32f9a8152721c366a55d6aad56c8c1"
+      "source_identity": "sha256:558f0c5c1f47fdd2b14f9203d8d925b6c16f75c458fd0d2439872025e2641dac"
     },
     "description": "Semantic DOM and browser-use style element recognition profiles for the Rumi Browser Companion extension.",
     "license": "MIT",

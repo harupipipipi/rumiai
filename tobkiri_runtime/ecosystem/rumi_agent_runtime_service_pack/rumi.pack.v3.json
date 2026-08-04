@@ -229,7 +229,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:a7e3304a1b77d047bb5457dab99c5640357d7d7226540bdac1079b186c6e1958",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:8083748bcd9e862e05a8934a48a91af8b7ae6866c61f7299740d1a2aa2b63a9b"
+            "source_identity": "sha256:74e9523ddcff92097a5fb8c30ac27b7ed24f185a8fc0aa68210137f24ae6674a"
           },
           "owner_surfaces": [
             "agent_runtime_process_state"

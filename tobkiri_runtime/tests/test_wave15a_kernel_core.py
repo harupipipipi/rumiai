@@ -121,7 +121,7 @@ def test_profile_resolver_uses_exact_v4_manifest_inventory() -> None:
         for manifest in catalog.packs.values()
     }
     bindings = {
-        "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
         ),
         (
@@ -149,7 +149,7 @@ def test_profile_resolver_rejects_artifact_not_in_approval_snapshot() -> None:
     }
     approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
     bindings = {
-        "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
         ),
         (

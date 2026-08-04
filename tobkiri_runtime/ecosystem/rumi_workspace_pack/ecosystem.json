@@ -39,7 +39,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:a1204decb768f603703d8f918d0b3f6bf587bda227da93dcbe38d1fe96b440c8"
+      "source_identity": "sha256:cc258cc8f97372433e570268f564f9a0c9c1f5fc28de0c4494b1a62d3e4fb808"
     },
     "declarative_only": true,
     "description": "Declarative workspace artifact profiles, catalogs, presets, prompts, examples, exports, and background job recipes for document-oriented agent work.",

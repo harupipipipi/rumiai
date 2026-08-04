@@ -80,7 +80,7 @@ def assert_profile_resolver_rejects_unapproved_artifact() -> None:
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
     bindings = {
-        "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
         ),
         (

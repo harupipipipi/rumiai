@@ -124,7 +124,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:2a314400051ac12857ed61415998a4c2d628a70853e966d27f1f43b97f96c210",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:a7bb5f90461b001222f81e9697d21d159d210964585492954a82e4164a30a537"
+            "source_identity": "sha256:10209884d6b03a3c0c5c34bbb449db039e89c7a6ad45cb2e54485e9cabf12b80"
           },
           "description": "Declarative, local-first data analysis profiles, prompts, presets, catalogs, and reproducible recipe specs.",
           "integrity": {

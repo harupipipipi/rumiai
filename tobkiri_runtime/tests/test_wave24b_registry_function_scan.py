@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 BINDINGS = {
-    "shell.cli.default|defaultspack.conversation|conversation.turn.v1|complete": (
+    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
         "authority-ref:conversation.default"
     ),
     (
@@ -70,7 +70,7 @@ def test_v4_profile_resolves_exact_effective_set() -> None:
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
-        "shell.cli.default",
+        "shell.tauri.default",
     }
 
 

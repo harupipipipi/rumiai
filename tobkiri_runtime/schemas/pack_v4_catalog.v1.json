@@ -156,7 +156,7 @@
       "kind": "base",
       "legacy_ids": [],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
+      "migrated_from": "modern-only",
       "migration": {
         "compatibility": "none",
         "removal_wave": 0,
@@ -191,7 +191,7 @@
       "kind": "normal_sandbox",
       "legacy_ids": [],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
+      "migrated_from": "modern-only",
       "migration": {
         "compatibility": "none",
         "removal_wave": 0,
@@ -313,9 +313,7 @@
         "rumi_agent_continuity_pack.restart_evidence_packet",
         "rumi_agent_continuity_pack.run_summary_for_resume"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative continuity packets for long-running agent restarts, compaction handoffs, attention drift recovery, and resume evidence.",
       "display_name": "Rumi Agent Continuity Pack",
       "execution_boundary": "declarative_only",
@@ -341,7 +339,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:26862f498f060e235f5afef3b380b94ccd45082263045e78843006d71e93bdad",
+          "digest": "sha256:9ba143a8f1f8dffbab0ebd574385bd6a97eaadbf4f04a52ff1490ba2489d1b98",
           "path": "ecosystem/rumi_agent_continuity_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -570,12 +568,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:1c4105650139161612e837bd27b2484fe2edd80bd76fcf5a0a87f8ff3bedd780",
+          "digest": "sha256:0335db4d4cc49e8d68f3dc0a8e38e3208cd5a0a4717ea0db7e63bc76cfd9692c",
           "path": "ecosystem/rumi_agent_runtime_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:de2d551e4206f36fa227937abc06b1f6d9a429a66e376d973470994154a82e6e",
+          "digest": "sha256:b57616262bf2c517e10dce3f8e14539981146c2d94f6805b69f6de67d7090dc7",
           "path": "ecosystem/rumi_agent_runtime_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -653,7 +651,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:0715a8a0c885edeabc4d1b29a4619cdf854f1b20d3110e6e80a3060ef352d982",
+          "digest": "sha256:3fe30493af829e0891d2f0891476c7a002473c152290e6819b7680d4e001c581",
           "path": "ecosystem/rumi_agent_services_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -778,12 +776,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2571785cc09ed053ff95fcdc957e0f17227c7ab6d52acffb1da60c8ff74500a3",
+          "digest": "sha256:cddd9b74b4c024f372e4abb77aa8b79d4def8dd324dbc8758d6f65056aab1686",
           "path": "ecosystem/rumi_agent_state_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:d86a846d86b84124b81773573eb71f65fe93a1c2dec7af9772067eedafe90ab9",
+          "digest": "sha256:75d8f1a9e1c9a540691e0558d12b982ed7f05f3bbe16be8716779c461e597b28",
           "path": "ecosystem/rumi_agent_state_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -794,9 +792,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative async agent workroom contracts for run state, plans, progress events, checkpoint/resume, intervention, replay, and run-board review.",
       "display_name": "Rumi Agent Workroom Pack",
       "execution_boundary": "declarative_only",
@@ -822,7 +818,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:184bb4304707cb6542df6071a277e7ad18e49437be71008dbf960f491eb7b1f6",
+          "digest": "sha256:98d1c4f55d735690547f870aaf54f916510ea3bc8fa3a5a7b575a5b8c75712bf",
           "path": "ecosystem/rumi_agent_workroom_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -833,9 +829,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative end-to-end agent QA, scenario replay, acceptance, and regression triage pack.",
       "display_name": "Rumi Agentic QA Pack",
       "execution_boundary": "declarative_only",
@@ -861,7 +855,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:7d975bb8fdc38e60ba7687fbcacbb82d68471178f7b1f3cfc4e37c41b3e4c6f2",
+          "digest": "sha256:c220075b1d972b9879cb80c9f0e06d326702a4ea9175e450838b5e387877e54f",
           "path": "ecosystem/rumi_agentic_qa_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1083,12 +1077,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:d4744c0dd3be064482ec1cd9f43429ea3cae9b70535049c376e95a9010b1fbad",
+          "digest": "sha256:84718b2f439167d5d42bade5fd2ada512e72f19e1d74dabf5361d115e1ab1021",
           "path": "ecosystem/rumi_ai_gateway_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:a307097c96e8f04ad1c086e2dc41dd24ac86639b37833085c4f567c4379b3e37",
+          "digest": "sha256:2f4cefb6bee613233be46f66ad937e6cbdcb915b06568d76f931d68a4aebc5cb",
           "path": "ecosystem/rumi_ai_gateway_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1303,12 +1297,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:39c3a35ed7fae76010e2a772e25578a8de9724879105459cc5d1d0dacd0f6da7",
+          "digest": "sha256:65b39feeabf532f79919af9fc3cdaf5d0c603a974a0c7866e1cafbdc7e57d834",
           "path": "ecosystem/rumi_ai_modality_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:ce90dbb06ad7e19709a55e3c102ddf33bee9730f66652ee2b38d8c7bb709f95a",
+          "digest": "sha256:4874478b74cb77073344aa19b878bfc2354c5df733e89fc980799cd959ac3acb",
           "path": "ecosystem/rumi_ai_modality_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1428,12 +1422,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b585776630049477919fae289d41a6925066f0710ab912f3470391a7d47939b8",
+          "digest": "sha256:e8265ad7705551f216200fe457e713350a7385df729eb1e5b5c30f659702ca01",
           "path": "ecosystem/rumi_ai_pipeline_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:305b3d2041f85b05e6a7e18abed2447e45dd1f4f31c27fb0b12f027b4277ff33",
+          "digest": "sha256:a4096dd1904f2fbe0e78cae8b5e0609f6d74936fb5fb07d13a83ee9dd88c6446",
           "path": "ecosystem/rumi_ai_pipeline_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1518,12 +1512,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:29e166fab1bb22141f1c9813ede92f5e102e4788ec54ca55d828fe373877a0e3",
+          "digest": "sha256:be93573f66bdf6a1db8b97ab86326442e9b1a3f075c4c1846bd573fabc5cfaa4",
           "path": "ecosystem/rumi_ai_routing_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:45ed589b20fd4bef6180ebe5e57ebd553ee154adfe415201f6e9eb2aa9d527ba",
+          "digest": "sha256:aad0c650042cc05713bbdf32fdc354f2d17b255fad94fa0fc0a2ad3b85733be4",
           "path": "ecosystem/rumi_ai_routing_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1608,12 +1602,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:6e5d4e211ddcfb590bbdeff5c0d1194cf6505b43f9d295bb88b8d2ffb811effa",
+          "digest": "sha256:d12a59582c499b64d0fd6608af3e6fe0d00267c25039967bd7e27637fd437ae4",
           "path": "ecosystem/rumi_ai_stream_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:ca00e9af2352003d385ac516aaec7be7116bc2f6518e003b6e6b7ab264886102",
+          "digest": "sha256:5323b52db280fae10b1ec641afc927479e39d8a5c8cd324e71aeb5c97ef2fc69",
           "path": "ecosystem/rumi_ai_stream_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1698,12 +1692,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:1bbf9426f211afb45839f17959922e7f463634eac13a0e725acc47a105685710",
+          "digest": "sha256:dff9045fe83ad3b9089ba31fcd10dd0f5a337ae365c18e4b0bc0fda62565ad4e",
           "path": "ecosystem/rumi_ai_tool_bridge_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:640141602f5583160b4a2a852db66949c5abbb9ab2328f6e54f7c3be57131c58",
+          "digest": "sha256:d26178c90d03cad953fd220f9e848838989b8b39240c49dba3e9a8fcd73fce40",
           "path": "ecosystem/rumi_ai_tool_bridge_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1823,12 +1817,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:476c6ec25f85b691adbbba29191274e7be6e286781c0b3d514d723c8b669ef7b",
+          "digest": "sha256:d022b5f3159d404df5782f487a516b36a3b9ed5faafa67822c1901a381f7ecc5",
           "path": "ecosystem/rumi_ai_usage_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b3baa8860867314252be6aeebf5776153e9e0729d4165fbd9e38d154c29b5548",
+          "digest": "sha256:13d04073da8624b3c6b144746f4d62c3b9f43745ff8f638a0dc8aeb63216f797",
           "path": "ecosystem/rumi_ai_usage_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1843,9 +1837,7 @@
         "host.camera.capture",
         "host.microphone.capture"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "",
       "display_name": "rumi_ambient_trigger_pack",
       "execution_boundary": "declarative_only",
@@ -1871,7 +1863,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2f63e40aad7e637d38cc4baff9591f5d805c61541becd7941f6636f45738f5bc",
+          "digest": "sha256:83c4097f1312826b53f9015d3a56e0b3d2ad9ac9beaed018a1e675dd03a2acee",
           "path": "ecosystem/rumi_ambient_trigger_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1882,9 +1874,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative API, OpenAPI, GraphQL, webhook, and tool-schema review workflow pack.",
       "display_name": "Rumi API Toolsmith Pack",
       "execution_boundary": "declarative_only",
@@ -1910,7 +1900,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e9d9285796f17521407007efb4d7f5fc8e86be046d8eca84f9508c8a55698e64",
+          "digest": "sha256:c9d377e990981260aa0079e57628b59fbd16086cc4284c8e013cb3280c4deff7",
           "path": "ecosystem/rumi_api_toolsmith_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1921,9 +1911,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Artifact application workflow and UI content without host authority.",
       "display_name": "Rumi Artifact App Runtime Content",
       "execution_boundary": "sandbox",
@@ -1955,12 +1943,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:22c00ed0dd791463df2b61487e7c401653f3058a350c2063bbbac6e1d3d4714f",
+          "digest": "sha256:e79eaf18a7022abe86e20752e3243166486d3f010b787b24b0369e79b58bdfdb",
           "path": "ecosystem/rumi_artifact_app_runtime_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b2e6e5cfba00544940d9ad854f44339962049fb85ff24bab83037849e012d6b7",
+          "digest": "sha256:f3ee4e36bb7fe5ad6673570425a07a2a3ca61d4e400fc061e8081b5d53f837db",
           "path": "ecosystem/rumi_artifact_app_runtime_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1972,7 +1960,6 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
-        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -2000,7 +1987,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:60fbb3b8b5c11e10a719a59b8f3e4b3101d983793ec1cc8d14dd5018503d8e12",
+          "digest": "sha256:74d80d6e9e0de4ed4d69e2b815c67bc59047bc967a3f0002b03088494830554a",
           "path": "ecosystem/rumi_browser_automation_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2037,7 +2024,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:963ca221ee33e1581a42bad55208152e14ec8a3c84481811a6146729e70858a3",
+          "digest": "sha256:5493fdc1cfdf9c5447f40003ca32eea8710aad7c7a6f73ee81dc43773d410732",
           "path": "ecosystem/rumi_browser_element_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2048,9 +2035,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative browser form recognition, field mapping, action staging, risk review, and submission safety pack.",
       "display_name": "Rumi Browser Form Operator Pack",
       "execution_boundary": "declarative_only",
@@ -2076,7 +2061,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5df8841eb0a31d981fda0e0ce48f3a76bec33987497f28439c371e9ce4b75be4",
+          "digest": "sha256:ac1cfa65a0ff39fce4af07570e545c1b9917fd80c18b92a03e41128dcf65ab97",
           "path": "ecosystem/rumi_browser_form_operator_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2206,12 +2191,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:9eaf8161e97da1d7f4a344e8e00070431cdcc811acdc44483fe7e52bb8ecb2c5",
+          "digest": "sha256:bbae2ff196cf26de469038431ad69034c596f62bb6bb068c5dfd6d8110b2bfbe",
           "path": "ecosystem/rumi_browser_host_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:44c16886cdf5d5c4032d65c651bf273da7715ec9d1aca5e7d895aaa515c9095e",
+          "digest": "sha256:c3c91fe4a056b6b99bb2acc270b99730253137b63f0a6708adeb2adc88c036ab",
           "path": "ecosystem/rumi_browser_host_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2229,9 +2214,7 @@
         "rumi_browser_session_replay_pack.screenshot_evidence_bundle",
         "rumi_browser_session_replay_pack.selector_drift_report"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative browser session trace, evidence bundle, replay manifest, selector drift, and redaction contracts.",
       "display_name": "Rumi Browser Session Replay Pack",
       "execution_boundary": "declarative_only",
@@ -2257,7 +2240,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f0dc0d184d3062a09bcb402a41f8592c1df60c6918fdaa18d790d01f5e0f331d",
+          "digest": "sha256:c5c7bafc13c67d5035e78a9f28eafe9d12aecccc2ee8f4f46a8967eb888211fd",
           "path": "ecosystem/rumi_browser_session_replay_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2268,9 +2251,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative business operations pack for sales, support, marketing, procurement, CRM hygiene, and admin workflows.",
       "display_name": "Rumi Business Ops Pack",
       "execution_boundary": "declarative_only",
@@ -2296,7 +2277,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c44672de98660119e56559a8cf1f51c19cfedc0836c459bf84ef5b4b22ea19f4",
+          "digest": "sha256:1998e513edd43968ccc570020e256e48572b0eaeb8d5e8bb1f4230f3d9cac685",
           "path": "ecosystem/rumi_business_ops_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2437,12 +2418,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:94f7ece801536ddf5b938ce77790c29fcaa12b118327bd46453c388f648fd6a0",
+          "digest": "sha256:da7a3e74f33d93dd849a2019a4bc206e1d047f28a3c76c76a115ad619fcbcd41",
           "path": "ecosystem/rumi_clipboard_host_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6f7e9a753be2305c12b639d680640161cdfad3ebaa14d7337a53da703d11c98d",
+          "digest": "sha256:77b11d09dd381acf5838965f2c40e41a97b2b8f9d8cacef9a56dfffbf7a1277e",
           "path": "ecosystem/rumi_clipboard_host_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2454,7 +2435,6 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
-        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -2482,7 +2462,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:08b88b4a1f78f94195681399f02f34047bb39a4d49e382e24d162e2da8be7b71",
+          "digest": "sha256:12fe2daa50d89cd40e257ed112b1718294416ae75aa4b821be63df20fff3b86e",
           "path": "ecosystem/rumi_code_ide_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2500,9 +2480,7 @@
         "rumi_code_migration_pack.repo_inventory",
         "rumi_code_migration_pack.risk_ledger"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative planning contracts for large codebase migrations, codemod plans, PR shards, risk gates, and rollback handoffs.",
       "display_name": "Rumi Code Migration Pack",
       "execution_boundary": "declarative_only",
@@ -2528,7 +2506,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2f073363757edd88d64bb0b861bafbbb774d597997b2072d7e1163a0ed089e36",
+          "digest": "sha256:f13ceda7240ff73640a79ab1454c2185558fb46366dc7bae0b018768ec2ba8b8",
           "path": "ecosystem/rumi_code_migration_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2661,12 +2639,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:026ed258c02b6c1b2a268190a68f9fa9258ddc30aa5cab8a8e06f949c7c95420",
+          "digest": "sha256:98190f8569bc4fa3cfe9a6e12ef54a491ddbe3710b38033cfc15df3ee1aec52b",
           "path": "ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:502201b03b5f9a110e4c791ff6878d78fc67877c0343dee4f4a252dfc047915c",
+          "digest": "sha256:b71f625f51f8a91a0d8cf850fc2a5e9ffcb529bf63cc1b4fc3066d5efa06d5f0",
           "path": "ecosystem/rumi_coding_sandbox_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2779,12 +2757,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a73165a0901844f76487cf689388afca83c35f8c54fc64070e71fd36eaaec70e",
+          "digest": "sha256:ce275836c5033d953d0206a93134bd45a9411ff22ab037be0ec4059be9420fe8",
           "path": "ecosystem/rumi_company_agent_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:1333ce94b7cff81fff731d46316cbb81384e66ad60f7791d1fe8ddd433c928a6",
+          "digest": "sha256:da8961566d098dd091d90ad899b5aa34037a1fa56dc5a2e3fb6ed05789e6619f",
           "path": "ecosystem/rumi_company_agent_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2967,12 +2945,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:461f86c443ccbeb4e2ef22d3949b2903d5a64281ff7e9b5cb065549efedb822c",
+          "digest": "sha256:e23f64cb668d439ab6dc76a98e68dc1ae20b8328591a23bf1f3d4aafbe6743d9",
           "path": "ecosystem/rumi_company_coordinator_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:3f360ca4ef088f79f41ad897f1cee54b1ef31c15b8a6dff4afc02a7d79ec59f9",
+          "digest": "sha256:916441349d288d45c8e339fd86dd885fc54b82a00a6c12305600a2dd9803d8ea",
           "path": "ecosystem/rumi_company_coordinator_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3097,12 +3075,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e7c8048d82f92ab43f3c4953a441a053561eae4937e092f9c82d03807e04ec5b",
+          "digest": "sha256:2328367239d9fbe5133778baade41e7bf3c4e1d6caefea671767ca047c02f48a",
           "path": "ecosystem/rumi_company_state_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b1ba0ddcf43ac8f509427dabad72f0281d65d0a6b50f3fbfe2f2777d4ac8152c",
+          "digest": "sha256:0bc989a6cc2986feec272b6abaa0ebc8aa23cea170dca344dfd64824f4b66e1b",
           "path": "ecosystem/rumi_company_state_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3179,12 +3157,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:489853dadc8561139d7a54ac403bab355004439717ee34593f1dd373bb8fcc70",
+          "digest": "sha256:0b286ae018c2a7773f75f7e215e2068650399195c10f5a59cb77580783bfd8ac",
           "path": "ecosystem/rumi_company_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:ec171c077d11ba1118707d7e9a30753c4e96366759f8e4f5d7725725f2428872",
+          "digest": "sha256:69a1b3b94d185a6795666f3d7ecb430b22222dda56dfa4ff85b8f4a0f3e29777",
           "path": "ecosystem/rumi_company_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3196,7 +3174,6 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
-        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -3224,7 +3201,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:d7dfc0b41fd826ed809535cfad2aa808a6dc5e2e6e51cf5fee7ff251be6918f4",
+          "digest": "sha256:cfa43c9e5d75b3cb1f7b5ae02f8710ae1c1ddaafc423cea8d940df875302fe13",
           "path": "ecosystem/rumi_computer_control_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3338,12 +3315,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b42fe5adaf67809680a840712ebcca15289de16dbcf8ebccfc6f3c085ff19bee",
+          "digest": "sha256:d5d293b5bb10fe5d65974300dfa0acc2d60b3ea0c2dd81b5b4193b982527f2f3",
           "path": "ecosystem/rumi_connector_company_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:98f341f59d88c75cfa6a58f7717d9625510b33909909399a6280f2fd293e79a1",
+          "digest": "sha256:414db0f3b3521875c5ee99d1faab8cab7b0f9db8f519ea4250d2cbc3722afb3f",
           "path": "ecosystem/rumi_connector_company_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3354,9 +3331,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "",
       "display_name": "Rumi Connector Gateway Pack",
       "execution_boundary": "declarative_only",
@@ -3382,7 +3357,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:729a1390fc4ce9b4c4203f7dbe351432320d2a924af3710de34034ebdca86959",
+          "digest": "sha256:f10683c30db3b02a02c7a727f4ff059d59350e805772566920ec4df26ac12e4d",
           "path": "ecosystem/rumi_connector_gateway_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3486,12 +3461,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e82ab8b9b80f72a72128f1864802a5e2be705f0949b799fc7736c8560d40180a",
+          "digest": "sha256:063f83a4b36447915b21b0d2a71e76121149b37eb7a3c3012888193060958740",
           "path": "ecosystem/rumi_connector_inbound_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:bd99a413017135e0c53f9b65f1685d116db7e6c154f4b16d4c6b11c3634641d7",
+          "digest": "sha256:290fa9f471e91ec23d36d94a3d9db5f857113474c0b364d767b96fabfda1f33a",
           "path": "ecosystem/rumi_connector_inbound_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3680,12 +3655,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:db99d864761977f1fc4d68989a058d45d70708ff7870c8400f181034d12bed28",
+          "digest": "sha256:d75f8de6fd9b98df5d7e986e223e02505205dcf778173bf6cf3753111303480b",
           "path": "ecosystem/rumi_connector_oauth_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:4514dbbfe05da71804a0e4524b89b26e7c89c447cca07a8b2dd20f8f18d01a1f",
+          "digest": "sha256:8edce43ae35d653ef632d88489cfbbda86db262b9192dffdcab9ac320411e4b0",
           "path": "ecosystem/rumi_connector_oauth_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3825,12 +3800,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:550e89a93613c8434e2a48ca8b3849d538a97f2df1d9792171e9958511bf767c",
+          "digest": "sha256:9c6e32fe6b3945499192a0badddc4a7ad3103d19a1e48fab2d48e1046a0b0415",
           "path": "ecosystem/rumi_connector_outbound_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:813d9db782777647ee884185a29b5362795014e83fbf64eff8b6753b68369f4e",
+          "digest": "sha256:5bfed31e6f52e95c39fe6cd1fe932894644937aea6167810746aa597d40bce73",
           "path": "ecosystem/rumi_connector_outbound_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3955,12 +3930,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:431bcc2361e92f80b57ec2c251e340b5ab6264ed04ec0f9e7ab92a0b2a7e9730",
+          "digest": "sha256:785b664609eed0c786eab489d9c2e2587c9ebef4870dce91d3366dfbd7abc22b",
           "path": "ecosystem/rumi_connector_registry_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:315cf675aa45ee2c48bcecca07daf85f0ba20d86b6a7c9c0dd4fa99aaeef83fc",
+          "digest": "sha256:2c6c5124a3270341c2098cb2511c209964c48553c1a5204b8ed17903da30924b",
           "path": "ecosystem/rumi_connector_registry_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4034,12 +4009,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:76085e7f18fa4b10fb4f7cb95431de52c15ac7eea8571c75a8c213a7b3a96a18",
+          "digest": "sha256:1c8ddfafa49d3ad50caf5fcb6b96b97c83a06dd3b9a068de95bac667d71d5294",
           "path": "ecosystem/rumi_connector_settings_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:15a4abb1e381218d5846121402adc08c3f859bfcf2f66d38cee60ccbf0ec36f4",
+          "digest": "sha256:c77ec8ab7f7d967d751d46823451f78e844375e8c5f3f4c52594bc0c434cc5b9",
           "path": "ecosystem/rumi_connector_settings_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4227,12 +4202,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:7c98b75a7728fff394269c114066bd5976babe2c485f1c1d75130949e6c84686",
+          "digest": "sha256:16cb9ecb54939dff6a039acc76f66c8752fd544ad966f9bf7bbdaa5600e707f9",
           "path": "ecosystem/rumi_connector_transport_gateway_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:415da777cbb54126353404e7ca5ad52389dc514667fb406be14b35539d803802",
+          "digest": "sha256:b3906029bcdbabfa8100b90ea373f22c232f9c759212b7414734c58e7d6eb4fc",
           "path": "ecosystem/rumi_connector_transport_gateway_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4345,12 +4320,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e322b896ae2f7a545e809ad22ad161d46d382d2f8b1d9ad764baa5c00f5f9b4e",
+          "digest": "sha256:a630754793796a5af5a6f1b8e2a535c8270d5ebaaa9ecb8b7249c038b77ca5e8",
           "path": "ecosystem/rumi_connector_turn_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:a5b3079e43743a6167dfb9a57d0e34e0b0063c126b6400ea727eb69796f188c8",
+          "digest": "sha256:99b0081f5e026b8ef5565af1dc556da61458c299c6d50280e16122f1ccfe607e",
           "path": "ecosystem/rumi_connector_turn_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4452,12 +4427,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:ed6fb05096d170f0d2ec3c1a1e36bb5e690d7fd8fba3a4279f71f6ad1b38c025",
+          "digest": "sha256:0f39c2c592c447bbef88191106403ca1c63018c70cca15afe14d58401782493b",
           "path": "ecosystem/rumi_context_runtime_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c18b7fb2a72e446c8e0bece3bfa8e44cb06b4764589f567886ee9b3919c4dcd5",
+          "digest": "sha256:8d3f58c35d4f3fbabc007c667a894f5c7a327e634ca49e8e99e95fa9a989a0f5",
           "path": "ecosystem/rumi_context_runtime_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4687,12 +4662,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:992ab1b413ec412915ac4e1f2c93fb85868303bb8250e93f78042d5109bb3923",
+          "digest": "sha256:a5ca91a3019d121134e061a8e5373ccb1948eead4b976c2fa2a74da4f0a88824",
           "path": "ecosystem/rumi_conversation_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b59e966b47c8946ee21d672373ea478bf98b3962e5cf51e09e685c3637670e3a",
+          "digest": "sha256:0dddfb30274b6567979b10646962af1cddaa3ef364cde7c0494c67f109139c8f",
           "path": "ecosystem/rumi_conversation_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4898,12 +4873,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c586349e387a698aefe796cd59da8ca74a9d68c52f6dd981b28636c6a9a15e49",
+          "digest": "sha256:e2becfc4b4a7608771b4cc24432c76c05164ecfe5ccd8e69e452a7616730bef4",
           "path": "ecosystem/rumi_credential_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:fe0f17b4b90d057bbbaa5ad753090fc5e69d47e6ae0c81c6c59d9692608aba36",
+          "digest": "sha256:72ff962c79b466a512c93e455469704be8ffdcc5298c4545a62fc02e0a7e4851",
           "path": "ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4914,9 +4889,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Customer research workflow and UI content without host authority.",
       "display_name": "Rumi Customer Research Content",
       "execution_boundary": "sandbox",
@@ -4948,12 +4921,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:8f81f191ed2a138ed270b3cb0f5d1eb2a36673f4180cf479f645dee9e4328efe",
+          "digest": "sha256:f54c573ba5e549fd6453b340413a4ec566308db956a91b10a3fa83af22ab87a5",
           "path": "ecosystem/rumi_customer_research_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:39c288c22717f62480b9dc6ae8c16a48be09eff221392438fef389a3ca4058f5",
+          "digest": "sha256:34548f183c78a231dfd20cbc116c429570367b6091938c84d185d985468b6661",
           "path": "ecosystem/rumi_customer_research_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4996,12 +4969,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:06bc1bafb8d3ec2db7bad79c9f5765c424698a487c2d764f2db80584099449b7",
+          "digest": "sha256:690184ef3836113a914a1c00633ff790971c7a814c42f0a45832a608e0079581",
           "path": "ecosystem/rumi_data_analysis_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:8edb259ef787341a07bb3431390033ef96be656214cc964d173ebca9b71bf372",
+          "digest": "sha256:3f17b44ef6b25d7293d67cf6aecb18f995c36a2c1a8592d83d1bbe7cb584ccb6",
           "path": "ecosystem/rumi_data_analysis_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5017,9 +4990,7 @@
         "tool.local.operation",
         "tool.migration.source.read"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Finite legacy definition migration source and local execution compatibility projection.",
       "display_name": "Rumi Default Tool Projection",
       "execution_boundary": "host_brokered",
@@ -5127,12 +5098,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a5cb54e7a89bf8d2004ac4b455bbf792626d3a3854f27d72b8e7dd67d1978984",
+          "digest": "sha256:ef74de1fa95074e3cf5203feb95cc2b3ebe994fd4ddacb3cdab2b2de5821b741",
           "path": "ecosystem/rumi_default_tool_projection_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:04e516aeb960d8d68b838217c08f33e7306863388666fcfd1cffaf47af2ef185",
+          "digest": "sha256:a6676ce8701703d260765f1d7c4bb67a932a99e9b1f447a251049705105b9bcb",
           "path": "ecosystem/rumi_default_tool_projection_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5173,7 +5144,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:540a1a2be2dd3766ac40765fb2e4b8646af0074723225abeeb17f9cd863e69a2",
+          "digest": "sha256:1d6950ce96540d1031390df4038862e30846b6214f96e3cee499e9bfe25b5c0d",
           "path": "ecosystem/rumi_default_tools_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5298,12 +5269,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e9af7ef5627505779915c376d2bca1be294537978c1432914589289e42e38cbe",
+          "digest": "sha256:749e18e6454b6e31d703d4e324896020061a351d920a989c2c2197f601265ce0",
           "path": "ecosystem/rumi_desktop_host_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:26456703c39eae64965f520be6df81c46dfe6cb2288d792af992cda1535be748",
+          "digest": "sha256:4de73fc665f9eaef1af7383b400c821ac7e83ce23e6095e761ffc381ffd9fe11",
           "path": "ecosystem/rumi_desktop_host_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5315,7 +5286,6 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
-        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -5343,7 +5313,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:74acb8ca53dd5ad03592ceba6cbc084f02fa8a404c386b870b261aab09efc76e",
+          "digest": "sha256:3af8a6d98b6c15410534ae55bb1d628956f23535526a9ffc0fc9171f5107ba4c",
           "path": "ecosystem/rumi_devops_release_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5443,12 +5413,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:22f9fe1f098856078575efb61fb94228c96761fd5c3b9e470018f2a28f44a29a",
+          "digest": "sha256:cedc2adfa2f6ab8bf0bd35733dd10c9ad90ef9c0329c6a2d63602742dd625a49",
           "path": "ecosystem/rumi_discord_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c70fb624daf11e73cc8ae6ab5a58ee357e8fdebe5a63c6ecac82d478d059effb",
+          "digest": "sha256:22849b9c86e48db86d0fd0506ce4303d97f3ef36d2a43c3c77a5c06fee65a42c",
           "path": "ecosystem/rumi_discord_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5459,9 +5429,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative PDF, contract, citation, redline, page-span, and privacy-aware document review workflow pack.",
       "display_name": "Rumi Document Intelligence Pack",
       "execution_boundary": "declarative_only",
@@ -5487,7 +5455,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:bfd2c3c57c14d4366af8b4eccc282f483eeefc363cff7054d951a9ba2dff50eb",
+          "digest": "sha256:0b5cf0193567f99fa1b3c22e44c8593dcd65d2dcc4e31693fef106a58eb1c933",
           "path": "ecosystem/rumi_document_intelligence_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5587,12 +5555,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:8ce384d0621ca7b733b26ffc8d81d5c419914c5aa74e0b0aa59047fe94f051dc",
+          "digest": "sha256:0ee1b2226703b9a06147c3c3c22c0bba8a66cc5deb4530c93f96dc58e395e0dd",
           "path": "ecosystem/rumi_email_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b6a569f143e91941223c6ae683f6fb0b024ae25d679af9af489062c6ee6bf2d8",
+          "digest": "sha256:d46f465dd1b3fb99ce142d9fac74682ffb4bcfc807d3eeeee111514b0b981bff",
           "path": "ecosystem/rumi_email_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5603,9 +5571,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative evidence dossier contracts for source registry, claim graphs, evidence links, contradiction review, citation ledgers, reviewer queues, quality labels, and export manifests.",
       "display_name": "Rumi Evidence Dossier Pack",
       "execution_boundary": "declarative_only",
@@ -5631,7 +5597,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:fb9f8b26ea007b828eed39bd290c72535964cf18e8d9286e365e99f650fff278",
+          "digest": "sha256:659c4a2345c9ea9ac4960853284b71669df7c611a9c9925ed223169be9d6ba77",
           "path": "ecosystem/rumi_evidence_dossier_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5642,9 +5608,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative hypothesis, metric, sample-size, assignment, guardrail, instrumentation, and decision-record design pack.",
       "display_name": "Rumi Experiment Design Pack",
       "execution_boundary": "declarative_only",
@@ -5670,7 +5634,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:427ef82771875d64028ca8043d0906695820544641d1323d99d5cd6620b883b1",
+          "digest": "sha256:9b68a7932b5b6dacaa576557d490abb302bcab75dc62951407e79f675f7d88ba",
           "path": "ecosystem/rumi_experiment_design_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5834,12 +5798,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:0ed8598998dc9cbb6e22f730a88d46e26cba40c8fd8616c185915a7d524d23b5",
+          "digest": "sha256:6804104598adda7a64a0f6b40f7be536b20f711a78543564da66256285d592c0",
           "path": "ecosystem/rumi_file_inspect_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:5762e975099430781da95778f7087c81509cd30960626019f35e2aad08120e93",
+          "digest": "sha256:f80b00845ec4a5d6b0401b1d01517b5f2a58c6f5c43c46dfa8f3ef6afcb51c63",
           "path": "ecosystem/rumi_file_inspect_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -5937,12 +5901,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e4cb904fea9d182f994420bd0062466f1e0dd0e7bf7c0fd0690a3f0a35279e07",
+          "digest": "sha256:55623f54a0b5dbaf65a6d5037273742dbceb01c294bf2a6b31e55ce2aa82afb5",
           "path": "ecosystem/rumi_file_mutation_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:805308d534e07c140f7f7ff988b0dddae68123d2981720ccee261e023fe5566c",
+          "digest": "sha256:f2bf4fdc591ad9af4b3bc38192adcca2483523faf000179ee0e433e6127cd6e3",
           "path": "ecosystem/rumi_file_mutation_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6039,12 +6003,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:3866cde9914bad841b9df8778a0c9f63d05c2d56dfecf06efdba197daa378e58",
+          "digest": "sha256:c5ec058c1bf7be0580a8f5ac47135fa950449d679278ac8829933b77af2437b9",
           "path": "ecosystem/rumi_file_patch_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:1054a3f8592d17f2a2287c34f32226814eb39e345cf08d08ee6a9fbd085126c8",
+          "digest": "sha256:39bd42c0883b3ac18af2070b06bd2f683f82dd72c476e415822fe29a4157f689",
           "path": "ecosystem/rumi_file_patch_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6055,9 +6019,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative frontend, UI design, responsive QA, and component acceptance workflow pack.",
       "display_name": "Rumi Frontend Design Pack",
       "execution_boundary": "declarative_only",
@@ -6083,7 +6045,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5977ac02585bda55f8a79ed892205cc8b6e19d7e11b02ee247cb93051cd9865c",
+          "digest": "sha256:29404a1ad9c22be05b2ae3c94694d058bbef4891e1451cb0917051038c659c0b",
           "path": "ecosystem/rumi_frontend_design_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6183,12 +6145,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e44fe314ace3b8cc9a9f393b47a92aa68be2460c29780d8303f076fa244afca4",
+          "digest": "sha256:14ab64b2a9fe1ec75e30e1f97e58d6bbb9eee55d85a6197d7841d80c3933c817",
           "path": "ecosystem/rumi_generic_webhook_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:dbcb8d26cfb2d2ddb6047d2d289d0785777a4dac5a29a998bb1f094ef9a32846",
+          "digest": "sha256:8a3927f0daa87583e54f16f3520d01906cd72b28f9e2ccc21eab72fdb42c4a5b",
           "path": "ecosystem/rumi_generic_webhook_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6293,12 +6255,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a3180a2fa11f91a57706e40a0c02e58502ff2bfd761bd83480707a62bb05a9c3",
+          "digest": "sha256:1e709a27e7966855f16322e9fe5f4f5df3147615e12453b2254a4946c73aa1d8",
           "path": "ecosystem/rumi_git_publish_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:8beaf93a8140989c71b7ea6100126892caf1cc97a5299fffe9a86f608039f47d",
+          "digest": "sha256:c71c0f5772a22b099678a4c8daeda80bc1cc7aa38e9d72862dc391bed0649542",
           "path": "ecosystem/rumi_git_publish_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6387,12 +6349,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:803aa38a4ff4e650f43a17d6a068f3d4f85bb2825fcc419b772b9f1dcfcc8f22",
+          "digest": "sha256:0f96c4ccb50290e456205a3a904b846729e91fb2eb163c3f6a3da0827857012b",
           "path": "ecosystem/rumi_git_read_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:780b57e0908b83d7d9ec80b38a5412e7c45a0a1ff626baa577fcbdaf7a621cf5",
+          "digest": "sha256:6dacbd44a3dff410f599139efa90aa8771ccafba0f9df7d6997ed5f0699e80e0",
           "path": "ecosystem/rumi_git_read_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6497,12 +6459,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2e827b10e53f9a8a20be16ff738649498f669a67b066f382374fb486733633bd",
+          "digest": "sha256:d3f1b2dd18e6743210f24f9f20a94b71b9916ad562afb3701cdf40f28a06b865",
           "path": "ecosystem/rumi_git_write_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:a839f8db11fafd496c2db14dc265697ca8661bfbc5aea5c16f7cff6600abf8ac",
+          "digest": "sha256:cf2573240ca5976a9d832d8ea18987d2fe2bba303e7c180ac085b3268eea3818",
           "path": "ecosystem/rumi_git_write_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6582,12 +6544,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f6dcdc6cc8526b72e5c2132741108ceb1a570b4950a12d4ef4d0524e8b9ee13a",
+          "digest": "sha256:b31155c757583e936015b18c2c3d85731abdefff87d303c1a084788368c320cc",
           "path": "ecosystem/rumi_host_authority_bridge_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:354fd121e59079f04e28b23a5e70097df648b4c0770f61b836e88290be70fbd9",
+          "digest": "sha256:454a762698975471a39c6598f5eb7b8b0f1baccf85729bc5eee99d62fc0ff7a9",
           "path": "ecosystem/rumi_host_authority_bridge_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6601,9 +6563,7 @@
         "host.permission.open_settings",
         "host.permission.status"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "",
       "display_name": "rumi_host_capabilities_pack",
       "execution_boundary": "declarative_only",
@@ -6629,7 +6589,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c4bf18b9f462f175cd9f9545211a4b021b0336ba8a42e4e009e3a42a2dd0090c",
+          "digest": "sha256:a325c3dfb3bde0b330dd99205c5739a1e6844673127405b1abdae3b6636dcaca",
           "path": "ecosystem/rumi_host_capabilities_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6729,12 +6689,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e537b9dfa3ea6744e73cfc66fd52c9f779d310705774e8200d79ac2590c94284",
+          "digest": "sha256:3604b9e2bd27bc97e3f17a5ad7fe0adda698a349692f612893c1f8aa8123290e",
           "path": "ecosystem/rumi_http_api_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:3857f5ee8670caf272f4720f8406a2d70bbf7f07dc91dbac84081898845a13d3",
+          "digest": "sha256:fa5355589b82e00bd3730a51225991b2d9c2d70870190115606a8cf8710276bb",
           "path": "ecosystem/rumi_http_api_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6859,12 +6819,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:cd46b66591eeae354d1f84b6ab086f69d89d7d7d4ff542a93054d6ddaa47886a",
+          "digest": "sha256:d4fa4b002b87290c5b254be64ca023c02c7e6a4abb44367d182fad54c68ea701",
           "path": "ecosystem/rumi_human_operator_provider_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:4ed374f08592f5a598b1cdf30872971f616854b0fbb165e6611b64a825fc2185",
+          "digest": "sha256:0b901958079430fac776b5455cf8088b258727b6f66431e2f783225f252d3052",
           "path": "ecosystem/rumi_human_operator_provider_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6997,12 +6957,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f865b5ef86e656ef3a939e02294b09946d71c61f14f3a53dc7e9f6db0ae01bdd",
+          "digest": "sha256:80a7b2a185291e4ccea5246db6e8ba73597e9e31020f2fdb3c346c891c328551",
           "path": "ecosystem/rumi_ide_bridge_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:506ac4a1952609f85069bdfd13d52003e6bd800a3f07348834253855c92a9ee6",
+          "digest": "sha256:b0e6aa46a148e253a3cb1e5ed4f7ca6983a6e2c3e84b4dec2131ff336a04036d",
           "path": "ecosystem/rumi_ide_bridge_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7090,12 +7050,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c6ee3b06f55583ff5ebba48605299d01da445aea1dd8512e9206b04308bf684d",
+          "digest": "sha256:3e4dd2759fe62dddc27bde880a995052f536fc42d87a38ffb2d992dbb7d62f1d",
           "path": "ecosystem/rumi_job_action_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:338f5a36c1e5cd3544d93bed7d585ea37775b1c82531979428c448198e3415e6",
+          "digest": "sha256:fb5c9fa6c19fe34303701aff1b67072c1805559c5767fd470ddb8971d5e46313",
           "path": "ecosystem/rumi_job_action_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7208,12 +7168,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:8dda874b407a04fed351bfc23f6870443ff6a254bd380dfc4d94b574f2f3fd15",
+          "digest": "sha256:0d3a6ee31d22bedffbcefad724b340b550aae0cbebc30ba280296b0c4f64de47",
           "path": "ecosystem/rumi_kanban_conversation_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6afd1f25b0e7c1d1266f47dcc804539fa9b5b0f11d2527301b3640ee4b55ecaf",
+          "digest": "sha256:b36ea9f8b8d9c9e25ca50f45df496f6cf7e47496f3cfc63b46261c870adf914d",
           "path": "ecosystem/rumi_kanban_conversation_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7338,12 +7298,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:6d10adf96da35d87b36936919b3ac0ad530280cb0b9309bd95ebacce81dc1785",
+          "digest": "sha256:8b5671d990bbfdd3d1f8ea8933a04bf2db67b250143c488917f5874e6ef0e54c",
           "path": "ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:9642367a90a3993746045b3fab22b84b49fa509b9e0db9c0152e142fb982be1d",
+          "digest": "sha256:6dcab5ed123fa4c38ab953bfd1a2bff426a12e2544714b3de8e9b223f699d0bc",
           "path": "ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7412,12 +7372,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:54149255dee7788bc4e51eec266776e9db0e6383947083fec5640a478a5c2e06",
+          "digest": "sha256:a65da1321f77016406e82117333a8bbdba381188418d79cf0e76e1d3e410ba1b",
           "path": "ecosystem/rumi_kanban_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:7103cf0a8acdba29e1f7829fcb6010a055f4c44db9a00bf53f4fe7d19f78dc1f",
+          "digest": "sha256:fec678a9931e8305bc4bd31a3b957b7ac339daa024cdec5784fdb796acfe6076",
           "path": "ecosystem/rumi_kanban_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7428,9 +7388,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative local-first marketplace pack for tag-based capability requirements, provider-independent model tiers, capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
       "display_name": "Rumi Knowledge Marketplace Pack",
       "execution_boundary": "declarative_only",
@@ -7485,7 +7443,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:deb54e527048c1c216f8615e8af964b19dd7fc90b498c27da99b6e4ac249ab23",
+          "digest": "sha256:2cbc7f38c12b65794d25e97222d4214049ec44bb470bb745bea7df1079dfb053",
           "path": "ecosystem/rumi_knowledge_marketplace_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7641,12 +7599,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f6aa562b909962f3bb99ffceaf6b42ff1aa0242ef3aacd4d05858a70203ccbb9",
+          "digest": "sha256:5095cbd537c3aaca7f890280bef74cabf4799fc3074961bb3497ccb9b47b7fb5",
           "path": "ecosystem/rumi_knowledge_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c73f63ad682ec621e2d8449b199444a41c26b357632b693792a6862e8a0e128c",
+          "digest": "sha256:1c27d064e50115cd2747f3efc82cfb6e522b7be41efed6b06010070ce5b37e14",
           "path": "ecosystem/rumi_knowledge_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7746,12 +7704,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:ed7ee9142d774ef07f5311a61d7dd651c6b55a96cf833491d0214f6ae39e25bd",
+          "digest": "sha256:ed2a8bb7c95f862de9f88a90d5f2abdfb55364b319ddcc19dd4e7c7ad917406b",
           "path": "ecosystem/rumi_line_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:70daa2984ce444bd2e3bb77019078a55c622a64157cda5a5eb43a554867e51f4",
+          "digest": "sha256:429ae6e38e52efa67e31c6edef0420c165c2cd68849e6848ae98eec8b7243a53",
           "path": "ecosystem/rumi_line_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7788,7 +7746,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:180bad965bd8667396e4250c20d5dc0779f74bf45743c3b711c457f50b323b5e",
+          "digest": "sha256:d3874489fb11b5bac98d90b0332890d6c45bb884260d0808a49345902b75bb74",
           "path": "ecosystem/rumi_local_agent_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7799,9 +7757,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
       "display_name": "Rumi Localization Pack",
       "execution_boundary": "declarative_only",
@@ -7827,7 +7783,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:cb1d5162532eca8beb86922917022f10344ee2053c830467884bf0bd054675ae",
+          "digest": "sha256:6c2b1f3a04bc97a7e6ec0c7c73ef76d7a247f3e41cd5db9e2adc319b18890c92",
           "path": "ecosystem/rumi_localization_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7841,9 +7797,7 @@
         "mcp.invoke",
         "mcp.tool.call"
       ],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Namespace-isolated approved MCP tool-call adapter and declarative gateway catalog.",
       "display_name": "Rumi MCP Gateway",
       "execution_boundary": "sandbox",
@@ -7913,12 +7867,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:601160fc97a1148a318a765d249621c67f648804f778569695a823362c0d92d6",
+          "digest": "sha256:0967812034d5e64c72699d8e3f1d8237d8e9877b9613af07d7fa45f9df32997f",
           "path": "ecosystem/rumi_mcp_gateway_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:019a59c1715e9d650ecd47eb1c65b2be5401556ab89be22733bab6de1939182d",
+          "digest": "sha256:4f1fbe95f821791048ce3923b35a0598478ed654be3559c22a1e9981f3cca502",
           "path": "ecosystem/rumi_mcp_gateway_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8046,12 +8000,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5d5768f371d4e3692ad5a25a3e84d7ad115f10f90e8951827c2f8d50e0cd71ca",
+          "digest": "sha256:fdb94ea010cbd52957aeb2d6fdb3e89edbffe632bd68c7540373b5638cd4811d",
           "path": "ecosystem/rumi_mcp_server_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:31afae76a6a6253962212d7532b1832dca9d322116119e2901490fc0538f87ac",
+          "digest": "sha256:ec1837ecc5084aa64e37464fa753ebd943580fb0aa0907bf76e0a9bf1a7c1cd4",
           "path": "ecosystem/rumi_mcp_server_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8155,12 +8109,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:ddee6d609a5e6f02e77133b45c79f16199b7034be0024c559ea31869765e9c40",
+          "digest": "sha256:1f75c423abcb29b20e6087bd7ab4fa3ef0480652e10c1a1264c7cab4fc1f19e9",
           "path": "ecosystem/rumi_media_analysis_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c086cb25dc55298df18270b77349ffae8a8634052e94e1e22411f65eb6b9627e",
+          "digest": "sha256:91a55692e095293896100c1ed30504b18a184637e242d09e618ec1bbe5da11eb",
           "path": "ecosystem/rumi_media_analysis_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8285,12 +8239,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f287a3d7774b09cce8395e9c3f6a6871dbff2c4b766a44a8d3e48434f8ae3d3d",
+          "digest": "sha256:4207b6bb4a2b5b4cdb2e8be4fe70acd1e33b875edf4e2bf17d1dff46ddbe4acd",
           "path": "ecosystem/rumi_media_capture_host_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:256bce3c1478df52b2b63e864b7dbb33b760017fb179226b08298a54a62139ce",
+          "digest": "sha256:2a7d0b69f6bbe8ab32fc4aa3c774dd358235d02c1f04da670d62d0da871c8f88",
           "path": "ecosystem/rumi_media_capture_host_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8379,12 +8333,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:250a8688f0164f12a5f0d2a1e8c989fc99f7f701c23c45d60963d7b19eb58234",
+          "digest": "sha256:9df58f81998a91c7718c3c0c5e63bc75f7efd0ee88a3d79c0696aec9ee9f5641",
           "path": "ecosystem/rumi_media_inspect_service_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c0a75966502ecd3a80a1984397b11d6c31c509efabe34521b051e1bb19226a91",
+          "digest": "sha256:fe980195aff332ea529979a846d5aa742a0fb25a2dd05644df3037503ef4acc2",
           "path": "ecosystem/rumi_media_inspect_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8395,9 +8349,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative local-first meeting preparation, decision capture, action extraction, and follow-up handoff pack.",
       "display_name": "Rumi Meeting Intelligence Pack",
       "execution_boundary": "declarative_only",
@@ -8423,7 +8375,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5f24f8878be006f10c3a4f86c5cdcd8bc1ee2b06753a569f6063a2c3cf643c84",
+          "digest": "sha256:f6a9a5383120a52d67014925eaaec0254866bcacc02ca80e699d39b39dac90a8",
           "path": "ecosystem/rumi_meeting_intelligence_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8506,7 +8458,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f0872eb9a42c031e91d318c57d6f64fa0a504e2f987df58aed130658894b2550",
+          "digest": "sha256:9218f8e0028c1c46d3b90e44234e2a11f29785a0b899d72a20bc0760476f6f7c",
           "path": "ecosystem/rumi_memory_knowledge_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8662,12 +8614,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:075bac847b78cf2479f89c600c812bc1fdfad278e8cdfc56b4f7c3fdffa2441f",
+          "digest": "sha256:09f6df6300ca8f51f474f00999f99d060e05147e92f20202ac3225183618951a",
           "path": "ecosystem/rumi_memory_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:aab01d7e1ce46567d99805a44605892bc6caa2c785a4a9c61e789a7988eb4809",
+          "digest": "sha256:d11ab0d78379c25754a8da3f22370dd6d2890e5a340ccb242527332a65374508",
           "path": "ecosystem/rumi_memory_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8775,12 +8727,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:729dfb084a9211093f8517c9eeec9002a5f4bf150affe062a85a48e90c9d58b1",
+          "digest": "sha256:317d78d0e571e80be1ab54e38298c1462d73e059595a6588f8901a62cee3222c",
           "path": "ecosystem/rumi_mobile_pairing_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:523d39324013e628c7d9b6c45cc676bd69e54b228a6bc8eb44c67512b79574de",
+          "digest": "sha256:4c56b2d854ea465c8d9bf3db562c65db6329769af27269872c768b1dbd8f7622",
           "path": "ecosystem/rumi_mobile_pairing_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8867,12 +8819,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c90dccaa8cad8fc230800f667dc131558945ccb765e0bdb2be6c1465a6be0c11",
+          "digest": "sha256:88fd58fa3742eabf552c4a96e6fe85ac173655b48ca259617430febfe7f389d9",
           "path": "ecosystem/rumi_model_catalog_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:576efa213ed99b408015d420b9ac988f9a10a1bded38178073a5d0767689c713",
+          "digest": "sha256:391742283903d0a1f7731c2602028ba58840c3a74aa440e6e05afd9bd1a38a08",
           "path": "ecosystem/rumi_model_catalog_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9027,12 +8979,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:40be2d52bc83405290291818129547cf5db44b93253fe48d7eeb7832e1e46d2b",
+          "digest": "sha256:4e8e7067afc55c889b213a95f4088cd5a4cdf7cae285ca27964b285324227f78",
           "path": "ecosystem/rumi_model_evals_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:17901474568573d413d69a84c74c243217fe5090ba16ecbca1bd22e973f799ee",
+          "digest": "sha256:914df7d789c57c2b1a3d6fdbb067386bb7583a5250fde87fe381abbe867ad6ec",
           "path": "ecosystem/rumi_model_evals_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9203,12 +9155,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b9ac0d7a2b6c535efc8127b0aa04830634a38813a3200bf3d938dafe6bbfe858",
+          "digest": "sha256:cd36f94a632196cc67ddc2333f7df01f4c9f3fb4e6a19571c7035a8de6209746",
           "path": "ecosystem/rumi_model_registry_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:9961df4791e970da98039ded94c70a72603814f35ce1993eb817e39f76516359",
+          "digest": "sha256:d8de8bed125303d43c5aabfab0d27673ce0d158714f32deba152a616306a8525",
           "path": "ecosystem/rumi_model_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9219,9 +9171,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "",
       "display_name": "Rumi Multimodal Media Pack",
       "execution_boundary": "declarative_only",
@@ -9247,7 +9197,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b3ae87fbff01729133f913c89d874c4b6339fb18d0f33274fedef68be6e3405a",
+          "digest": "sha256:cbbd8b5b6d88d4eaec99d12db7b87a148a9d76dc4acf0757da1ed50c5443fe84",
           "path": "ecosystem/rumi_multimodal_media_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9258,9 +9208,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative local-first observability pack for run ledgers, event evidence, privacy-safe cost/latency summaries, and incident review handoffs.",
       "display_name": "Rumi Observability Pack",
       "execution_boundary": "declarative_only",
@@ -9299,7 +9247,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2f2557f0056d18c76d0b49156537a81fcc34abeecb591dac6bcbe65a5a430516",
+          "digest": "sha256:72b6d2b9a00a1593ecd1e71cbe1dd35baf274cc1e202eeddaf9af63442ce0fb4",
           "path": "ecosystem/rumi_observability_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9310,9 +9258,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Office authoring workflow and UI content without host authority.",
       "display_name": "Rumi Office Authoring Content",
       "execution_boundary": "sandbox",
@@ -9344,12 +9290,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c5101fb9d1875ba870f5d5d80935193160d661de0f8e46c5c5e1e88e3740576b",
+          "digest": "sha256:bce85f6ea63e3ad4df263389283360fb4b164a68a0f52eee9c5f2546b1291127",
           "path": "ecosystem/rumi_office_authoring_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c21ebfa262bd4cc503d5b0d74bea51268ebb9ace79655aa135d72ad16540d9e8",
+          "digest": "sha256:be855c864fe716ddaf49404f3b3283e144390b7d5a9ab2a6aeff9546a18171df",
           "path": "ecosystem/rumi_office_authoring_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9360,9 +9306,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative omnichannel agent inbox contracts for channel payloads, identity mapping, ACL gates, thread routing, outbound draft approvals, notification preferences, and inbox UI review.",
       "display_name": "Rumi Omnichannel Agent Inbox Pack",
       "execution_boundary": "declarative_only",
@@ -9388,7 +9332,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:af3e40662c59192b6548bb591dcb7400b783af214fc2e33ec538d0bbf761d4f4",
+          "digest": "sha256:3bf8fe0a3d88a0111b628298515b635602db933d823c4e1cd9c4e7daba1036d4",
           "path": "ecosystem/rumi_omnichannel_agent_inbox_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9456,7 +9400,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f9f9231de2488e0fe2834979c637d0d67d5d9014369d5c9edee93f9f4c5fe6d1",
+          "digest": "sha256:533d2ec8fbf8ef0a571f8aa3ece5936418b45f1b3eefbf44037f3034645b6552",
           "path": "ecosystem/rumi_operations_company_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9556,12 +9500,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:fe90519581e9ce623cfa2d1afa3b9aec30066cd5ff880364439add1ba71393db",
+          "digest": "sha256:e8eefe7e80a3eb6adf7d491b7a85b4b031d1314ea9a8302bf73d39a1ba089120",
           "path": "ecosystem/rumi_p2p_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:5bf93c41a8f32e60c8edd5fd27078b96d9b3192368014350d2e0a66a5898c7fc",
+          "digest": "sha256:c2f02196c11720f4352fea4e8e7e7cf9e59f1cd050a747c189542b1b43437999",
           "path": "ecosystem/rumi_p2p_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9572,9 +9516,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "",
       "display_name": "Rumi Pack Suite Pack",
       "execution_boundary": "declarative_only",
@@ -9600,7 +9542,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:dee162e2e7a089f4581d440bd6d6d5b4dc8b23bcf56304e955b536d7e7d1546e",
+          "digest": "sha256:7ede30e875c651e5ce8874526f1f74654a489fc0fcfccb28f51f37995c0e449e",
           "path": "ecosystem/rumi_pack_suite_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9878,12 +9820,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:537cb86324ec768743528e6350439183d40e84727851a3389cd5ef0d656bcc77",
+          "digest": "sha256:c8e7f9725de3b7282c3cadeaf0b4f1121a4bc53268b9aec8badc3d9288f536f6",
           "path": "ecosystem/rumi_prompt_studio_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:5556d3a06473ea412838c10d7d157567727b75625ed598b1570ed0eb7e703792",
+          "digest": "sha256:166a52df1a3639d75739a74f3617646257dd0ff31d0517a8dc6e8579222d003b",
           "path": "ecosystem/rumi_prompt_studio_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10098,12 +10040,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b98d7ba52c390901ce67211aa2a6d70688caa04b52902e89e5bc51a0bc9d975c",
+          "digest": "sha256:9fa187e5ad91aa25309b83051f1c964c94fad9078fe2bf0bd28669a189864d3b",
           "path": "ecosystem/rumi_provider_adapters_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:924cc23b3dd07d7fae06414c5c2cb4b96f41585802b48f095c534a42616f7486",
+          "digest": "sha256:728d927c6fdfeb23da1f5290253cae1d9fc97d76ddb15d2096372257cc318e8d",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10277,12 +10219,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:afe15948f462c4efc3992c1749e56d85bb8e68f44e740adc768c2febfa5b8bec",
+          "digest": "sha256:a81b51fb5e76d3c9c5755b36e5ac9600975268e5bd4190c3ec69238035242264",
           "path": "ecosystem/rumi_provider_registry_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:77890a4417de2ff6a9e4ae51c3355e2b46acc9efb87366fa6e7f79fc4f70c7af",
+          "digest": "sha256:450767c1a62b3d600d9c474c27798ed7fcda5b303dbe2234cbae00df6ab708c5",
           "path": "ecosystem/rumi_provider_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10390,12 +10332,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:41de561fb678187cd6a524029990bd6658373323009de1776f22a223bde945fc",
+          "digest": "sha256:e127be09f3f50a6bd731f59455c7a15f8bbf481f62486a41b731587094c0b365",
           "path": "ecosystem/rumi_qr_pairing_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:1cb98ff3b036d0e28a0c9156dfd35f2b1dc9fb2f35f5833118cd91c3457bc212",
+          "digest": "sha256:802732e36c1822595d7636023b1f7fa33d791890635f97a661d7480358bdf01f",
           "path": "ecosystem/rumi_qr_pairing_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10432,7 +10374,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:96f9898ef8e799be43fe74c787585fdd62c2b8ec0193a3d0c78a2c1b3617ba45",
+          "digest": "sha256:cc1aeebfe588488e066150fc8a976372780ab986b8073f253137362cba8a3c02",
           "path": "ecosystem/rumi_reference_ui_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10687,12 +10629,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:61307a10dab6a2f04cf8b0edb8c4bde12304bff0295d7d0ac9272aac5dae954d",
+          "digest": "sha256:91ef6e194436a5071206f04517c72374c38d385c6078ae1b70e7794271c0089c",
           "path": "ecosystem/rumi_repository_context_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:7ee043787ccbc00d5b11fdce709332cc321b802712f476da7106ef2425adbe7c",
+          "digest": "sha256:6b80669dba7d95e45a2cf2d56951294322756512ba4d2ec63c1727150213e7ef",
           "path": "ecosystem/rumi_repository_context_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10735,12 +10677,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:7e4f8d991fc94ebf2e01d3418728b11a120e97967479a3923095bf71af7ff5aa",
+          "digest": "sha256:58710acb71901d517104d1cd0069fcd9ea336a907cd2e533ed0fcb6b6d179f7a",
           "path": "ecosystem/rumi_research_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:9f04a4611a8cddeb5a65a081c5d1b876168885d962384cf9d50eef993aad60a0",
+          "digest": "sha256:62fddede9433db01b55bcf3e20903578d73dfe4c684fe6148c737f696a6b2843",
           "path": "ecosystem/rumi_research_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10751,9 +10693,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative runtime benchmark, latency, cost, reproducibility, sampling, environment-capture, and tool-loop measurement pack.",
       "display_name": "Rumi Runtime Benchmark Pack",
       "execution_boundary": "declarative_only",
@@ -10779,7 +10719,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:347c03a4d246eeb63828c92e82d41db87edaf73642db05d80f4f405d9b5c8a9e",
+          "digest": "sha256:d1468eac308b6ec21e0638a182a762a834f3e0cf9f8dcf1668f2887a3eeb94f5",
           "path": "ecosystem/rumi_runtime_benchmark_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10790,9 +10730,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative sandbox/runtime pack for safe code execution boundaries, secret-mount review, runtime receipts, and reproducibility checklists.",
       "display_name": "Rumi Sandbox Runtime Pack",
       "execution_boundary": "declarative_only",
@@ -10818,7 +10756,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:9ce8964f00d5a0605871619cce1a32b1b29067f4072a430ec813dba511fb4fa1",
+          "digest": "sha256:72193c98e79aac8f93f6a647442f8f558f97d9b702b964814cddfea8aaec15cf",
           "path": "ecosystem/rumi_sandbox_runtime_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10943,12 +10881,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5275d5591cb2571a4a5cc42af47ff37488f2cd3aba406c6ec997c8d0503a6e03",
+          "digest": "sha256:41733fa4cb2652913aa37d421c22665e2d6ce02afe955f06eebd376116cdf588",
           "path": "ecosystem/rumi_schedule_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:42c9d69a23fb12e93666ece247c4a420010120a039ccf184dc756ab829857792",
+          "digest": "sha256:c0fad5cf8dd14ac1677d7813ca72716f7761eecb34b612fa40c7ced90a89a5ec",
           "path": "ecosystem/rumi_schedule_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11096,12 +11034,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:8d72d3c707bde1f40643f9a199a006e71553247f5e3c727a895a3be8691ae9c2",
+          "digest": "sha256:447840d18d5b8cf7380e3a886865d4b12667a333e66c2047c5f887c40fd5bb3a",
           "path": "ecosystem/rumi_scheduler_runtime_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:127ee1828385734dfd5b781b6c12e9b379375f2ebe596e926a35f69867ce5271",
+          "digest": "sha256:cddc340575de8be91349e3c11e533e2b56d606c4a3e6692aaad21415f005a841",
           "path": "ecosystem/rumi_scheduler_runtime_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11178,12 +11116,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:3be6476190792c58316398d58f90d0d230c397944ac12fc6e323d03deabdc507",
+          "digest": "sha256:95ebe6ad90311f3c38768cc308df7a110aed4d1cab45fce135a46c40d9b8c6b3",
           "path": "ecosystem/rumi_scheduler_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:dfe7c66a42c8126f75414971d46456290f182ae1d98cbc6af06c649cbbd4ac85",
+          "digest": "sha256:3d48dc05c5399a0b54958d9b9ee58c3e120f9939bb2bf2e1169d3bf7025a228f",
           "path": "ecosystem/rumi_scheduler_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11339,12 +11277,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b21e52d3d648f855336d88ba9919df3d1d8e96fff1b97ae2cab2eae47ec9f94f",
+          "digest": "sha256:6c9c74c006c6182e5f6edaaf0b0f918b7beda7f9950a0efb05264725b8a628e2",
           "path": "ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:3b67943092a6c96c3cb8e2bf9524d015ccd19555152b0a3a7eab0529f8de3928",
+          "digest": "sha256:860e038f0b401320c77bdac7b887dcb56e867b74a9fb69d438509fbf9d63df80",
           "path": "ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11381,7 +11319,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b35a798cfcb11c9655e1447b6bcbfae22b4a82a57942e2c27d8f2d97b1127a03",
+          "digest": "sha256:4bea4b64e78631156d597357ce4744496bd78c5030b89ec5c2cad76cded6ea24",
           "path": "ecosystem/rumi_security_review_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11486,12 +11424,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c1ce0dfb8886277076cccda7678f5feb24e6a9841a045b4e0c112224b2790385",
+          "digest": "sha256:5a1b10af40cf09db7af8f6dc9872171253a15289771a30a42429ea04368c18ef",
           "path": "ecosystem/rumi_shell_execute_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c54cddb6607561c2711c4b36376478b4095e2de71aed13d7a7c0d4e76fc1024e",
+          "digest": "sha256:21651fac3d6a845d46bef9c7b947e772d4e95ad176715bf19fdb326dcea440ec",
           "path": "ecosystem/rumi_shell_execute_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11571,12 +11509,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:6642084287e7741340e6530d8e9e09d5cb3b8d309f2ae9043d11d28f9eb0c923",
+          "digest": "sha256:5581ef4d8f00cce17f8230bc59cfadbda1614707dade63006856c1c68f1e4a9e",
           "path": "ecosystem/rumi_shell_policy_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:8d729e76928e3fb3862ea7eca62ac13135f41023806be42ceb2140888ce8bdf8",
+          "digest": "sha256:fe80b9fc53433d0af84d66b3daa6cc720c6de4669fa869667f5ac42bcce7a6e8",
           "path": "ecosystem/rumi_shell_policy_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11711,12 +11649,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a06f93066176f8c2a2e1394fe7edad9cc414ea8aef38f1bcbd9558f0971b0563",
+          "digest": "sha256:a373b633fecdab1f6640d7f080b189e9db5a5e725ad593a7a6fc09efa4577722",
           "path": "ecosystem/rumi_slack_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:2159fab4f99d4a9ae2979142083a82fedf87588d55916e41457483e53a8fd3b9",
+          "digest": "sha256:0123794acbcbdd4f38fc007b455e48833045da398292f9c8d07c51f349652511",
           "path": "ecosystem/rumi_slack_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11727,9 +11665,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative trace-to-SOP, checklist, runbook, and human-approved workflow recipe pack.",
       "display_name": "Rumi SOP Mining Pack",
       "execution_boundary": "declarative_only",
@@ -11755,7 +11691,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:755b5f39c2620bd4f3078ea5281ff0f231d090257aa7272a241b0af5fd224b8b",
+          "digest": "sha256:192e1dc3196494193be2405f7ac10779de01f0f3c153eca21d68da82a5acb0fa",
           "path": "ecosystem/rumi_sop_mining_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -11766,9 +11702,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative local-note study coaching, diagnostic assessment, quiz generation, spaced review, and progress reporting pack.",
       "display_name": "Rumi Study Coach Pack",
       "execution_boundary": "declarative_only",
@@ -11794,7 +11728,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:88ea40e962941740f4c3d15f776051804349207a723344b3ab70fade070645f9",
+          "digest": "sha256:b41ad3e2c6adefb962dcbe64745c8bb340fc583d6740b3688c2131cfb6548e8d",
           "path": "ecosystem/rumi_study_coach_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12088,12 +12022,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f3908b902a9324f6a8c0e42ba22702b5700f7813e8d23c9579ed16bcee2da382",
+          "digest": "sha256:f00ffa64e7789faf2407325a42ce5f942871a8ac0a6ef8c87d502fa5732b9670",
           "path": "ecosystem/rumi_subagent_placement_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:a11ca20682d927f3956fe6d7f138dfacf92fcd3f65453335d45fb626fa231868",
+          "digest": "sha256:5e91aeccfe9ecffe147099027c7cef99fcb4a51c31354b755d1ab927a73dd193",
           "path": "ecosystem/rumi_subagent_placement_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12104,9 +12038,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative PM, subagent assignment, branch ledger, and one-pack-one-PR governance pack.",
       "display_name": "Rumi Subagent PR Manager Pack",
       "execution_boundary": "declarative_only",
@@ -12132,7 +12064,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:acd2dc966db6e07ffa7de17f6627c8a2a20bd6e95a994cd52c67f096043d6ad1",
+          "digest": "sha256:ef9f67c25d5081e274ea69eb10a70d2d6c641f5380f2e0942862803a2f8cf391",
           "path": "ecosystem/rumi_subagent_pr_manager_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12143,9 +12075,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative provider-neutral call task, dial approval, consent script, transcript redaction, escalation, and never-call policy pack.",
       "display_name": "Rumi Telephony Delegate Pack",
       "execution_boundary": "declarative_only",
@@ -12171,7 +12101,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:ecd6209d3a9e13aaa0d108c5666673cf32d87771820f1cad7cf8b601faf6dc07",
+          "digest": "sha256:296ccf1f8daab01eee9fde1b9f0449e99adf3afd042b10bda04c0a16e947306c",
           "path": "ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12312,12 +12242,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:76d8ff6cbcf78f93a074a3a03cf8978e72ecc618292e47ace8fed80700e1198a",
+          "digest": "sha256:eb9703c6bfe45f3afc91b2977158c32e5e29698c0eed96068778030b2aad3a6a",
           "path": "ecosystem/rumi_terminal_session_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:fee976916c05f8bc8a98fe73b10fd9170201f8d16ed21a55e9cd3946974714fb",
+          "digest": "sha256:20cea3b67a6d02df40233aeaf054fb3aadd46af1d4efadf248f53f83869a4f94",
           "path": "ecosystem/rumi_terminal_session_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12397,12 +12327,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:3738fc323e70abf8e863c3bbdd8b9722384b07c7984fbd83ab7863914ad7b7dd",
+          "digest": "sha256:1d07ab7b98a9ecc4c2bc7731917c18423f145e676e0ecd687e655a6176718492",
           "path": "ecosystem/rumi_tool_approval_bridge_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:e27090d4fef5acf2db6504d664516fb732db589573beea91583dea8f9c59be9f",
+          "digest": "sha256:4bcb41a9fe4fd2deeaf9c6accd33c6b807e188815243a12e303d44c6764bf32f",
           "path": "ecosystem/rumi_tool_approval_bridge_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12482,12 +12412,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:aa66f13a20f57ae13a4b612c7ce069fafac3f9eb74fa7acb3c5f6b97be1c4f59",
+          "digest": "sha256:da2bebd39138a2e6d43466e6b0c530234a8634baa076dc3818226362468bbe5b",
           "path": "ecosystem/rumi_tool_audit_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c67a5e8212b9cfdb2a1ec81ae2900f8880e6cdce8a4350bd0a11e28d7d6b5041",
+          "digest": "sha256:ec9c5f3e5e27c5ab13c68bc02ceedc7d07e5da5334413329c400539387482a09",
           "path": "ecosystem/rumi_tool_audit_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12609,12 +12539,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f2266f5aff09c7fd020225946387c16566ce646a3a530c27103f83506712d4ce",
+          "digest": "sha256:f23e7f41f8c6beef55ab1eaed662c09fe0dc5e5b3f72e0ee2056f63f535a42b1",
           "path": "ecosystem/rumi_tool_authoring_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:3751428c54a3c35e653b8ec433b3fa6405e2365a71ff2797c2b91ff1eedf868a",
+          "digest": "sha256:45b0c33ddf6eed1c801c475e394b9d96054aae8a53da36d6258a23df1c3b3c97",
           "path": "ecosystem/rumi_tool_authoring_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12749,12 +12679,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:fdc1af0c286359c6cb8dc8e4170dbeb73618d4e5a8cdf738e2b83621d37ca8b1",
+          "digest": "sha256:f3a35490dc838ab82a6bcce48f6a4c2bcb78dc7e84a6e5e9e43472c982bb2e92",
           "path": "ecosystem/rumi_tool_broker_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:0257b3583203d22036755d5e51422044037b2fb86e915466e411d75e7dc86f2f",
+          "digest": "sha256:1775c0b1b68020e07ae99c5708dad220fd9b96e2530a1c40b0bea0c9a44a6660",
           "path": "ecosystem/rumi_tool_broker_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12837,12 +12767,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:d8b65f865b828397d41557db63ed15a8a679478ae8f521330cdbc9b0983d2a40",
+          "digest": "sha256:17b556b09fd1915ca3ee3af144ebed36f83fe4f366e09b06a3c2cbca395e471e",
           "path": "ecosystem/rumi_tool_capability_executor_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:fda3aeb1064bbc14fa244a867b970f50858e0e9e7d4a407de10214e8d1f102f1",
+          "digest": "sha256:f84b0dd236d5bbda244c682b17eb2843eb1c3432bf479a9f4a385c6a2d3dde55",
           "path": "ecosystem/rumi_tool_capability_executor_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -12922,12 +12852,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:1aa09a98f7c89469051ebbca13a11a87281e3d12476dbeb5d26885915a0fee91",
+          "digest": "sha256:54dfa9209a7d73b9e4407c08019b8d22815d81530ffd5a553c88d3feaf1d5089",
           "path": "ecosystem/rumi_tool_executor_selector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:91f4cdea1183189480080dd9f86638274152171cb287e52e9af59fde97087cac",
+          "digest": "sha256:e42bc02cb64e0bd1015d201cb29fd95c25860e090d235d96855ddad1ac91b110",
           "path": "ecosystem/rumi_tool_executor_selector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13007,12 +12937,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:63a39fa199c06d26d3fe29af86a077a40f458e79cbd8978e76d3894a78c5ec4d",
+          "digest": "sha256:9da7382e64ac3a98a04f345c72638ebb4cc470c5a86a63ed163860dd9f3d2385",
           "path": "ecosystem/rumi_tool_guard_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:4a0d0cce2a079b7bd39586e03ce86a036fd758278ff769c4f4e4f69cf8ab1267",
+          "digest": "sha256:939a1ec09db2913550228ebd89ce455c56cad149639248172f1159792e9b3179",
           "path": "ecosystem/rumi_tool_guard_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13102,12 +13032,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:101385cd4bc46a302bce92ea86f0e567176ed2109f6b6aabf1e05d9edb0d3615",
+          "digest": "sha256:76a00c430016f0bed30754da0a68994ec867774552f37b7b377bb8a2ffc5b0c5",
           "path": "ecosystem/rumi_tool_local_executor_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6844e49e040a24e89ebc5124971d6be200762ae22e8a80251ba5ff5c0dc5e4fb",
+          "digest": "sha256:6d70625e53fad99c0e111752c26b8be67f486a331ecdd1b95596fd7957d3d1d0",
           "path": "ecosystem/rumi_tool_local_executor_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13197,12 +13127,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:7ba603aded8696d6dd9db7297881c6240cdc2e6fd26799959ea8436e5a18f29d",
+          "digest": "sha256:21f92fe7cdd703d97a433527a5197e3bab261814b387333c2eb38362e1230f8b",
           "path": "ecosystem/rumi_tool_mcp_executor_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c3480ec413031ecf6178199ed138fccaacc46e5a627f99e28a6dafc892e185d0",
+          "digest": "sha256:cf884e36ef70c1c8a387d5ee6362d6c60337f7ec1a4072d6dc362613552e510a",
           "path": "ecosystem/rumi_tool_mcp_executor_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13282,12 +13212,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f4b3dd5a39a3d263a3d4da965d0213209e5700fb5e5c32c4248d4d27739b4c36",
+          "digest": "sha256:3fcd5d2b73995729661f4a924be82bc1c49cda46ee84c77cd49f8c41b63149c5",
           "path": "ecosystem/rumi_tool_policy_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:cdbc8a9dd5774ea581731a7049ffb1750a3d94f4aa58c085f201b8732d7fb900",
+          "digest": "sha256:98347810d375f1b1ba9ece2af0e0d74c11f17ff6c32981f8eba85f785853efce",
           "path": "ecosystem/rumi_tool_policy_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13452,12 +13382,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:fb25a37eab86c6f26a70ad88f38b6d3cab5ce62c1dac0bd0b72ffd6a030cd4c3",
+          "digest": "sha256:0b8aab9b5a3211c28982c888ab3d2ae45eacc4a6252cbeef792ab07e411dd42b",
           "path": "ecosystem/rumi_tool_registry_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6c8574bd896c573a5d879f3bc14f132cb3feee92158c6cf2d2ee067b3a8ecb35",
+          "digest": "sha256:d9bf819d1326c35a272fee976b941e4ac7fc16130555fe51bf3c5c04d9af4302",
           "path": "ecosystem/rumi_tool_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13547,12 +13477,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:de21de0f343d6aec6fa22da8351ec381ba92a22a440b9f6e803d1e1bafc121a2",
+          "digest": "sha256:4ca71382487873fb993b3bb727bd88106174831d5b7b9920ed118087def4f89e",
           "path": "ecosystem/rumi_tool_remote_executor_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:7a601b5d3a0b84de35ab46d47628ca687b1699125b21d6d85338457da8c3dfb6",
+          "digest": "sha256:aa04dff4de5d3ec0ef5bb3d416a6cfa20bab4d24fefa65ee6700232f40d1d22d",
           "path": "ecosystem/rumi_tool_remote_executor_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13632,12 +13562,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:136cf17ea6663fd5d87dabec772abdc9b89210e55ced5cdba56f50a400a1c1d1",
+          "digest": "sha256:a272f2ba6c6db5040946fde1a364366d8baf3034d659d3af031c4c79de3ba02a",
           "path": "ecosystem/rumi_tool_result_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6572a08013870f141f2801719bb59179b6013198ffc0134639e80cad527759cc",
+          "digest": "sha256:73da91127ff27fff3bb37700fe974e0bc02d0fef31e11227ba8384ac907cadbb",
           "path": "ecosystem/rumi_tool_result_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13720,12 +13650,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:4c4d459f3c8a208293e95899f8c047f45d55f7eadf54a07b4ad6d40d41adee51",
+          "digest": "sha256:d15bbd28f0fbb1daeda068189052664e693f77264b7bc966251361279e5d65b6",
           "path": "ecosystem/rumi_tool_sandbox_executor_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:9c1755a4f70855618607dcb50235dab9fac6ef8c103d681905e5d0711ba8bb35",
+          "digest": "sha256:3700af03fe92a6641a45ae563bcd157bd86851a45140efe80410cd2bef6057cc",
           "path": "ecosystem/rumi_tool_sandbox_executor_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13805,12 +13735,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b5dbf3926d0cfa62280e2a1235b786fb3b7e194081e59f98e1dc9edf2b6aefe8",
+          "digest": "sha256:c6103e43950dae98a6d83a9fa224459db8cfd6432c5f72742d0d55814ec16e94",
           "path": "ecosystem/rumi_tool_validation_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:32856fe0424b431154a0ea845d9b4b17040fdbdbd7faf90d4a25528481a4ab6f",
+          "digest": "sha256:512c5ee8205506f6e039747e6ae0f77db7c3fae2679413e38d644ffa197de632",
           "path": "ecosystem/rumi_tool_validation_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13974,12 +13904,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:3d8d216c1018a4a394effc19c79fb333e4c3dcd21e2943df7e6bf20a39fc492b",
+          "digest": "sha256:e173d820b85bfebd9d98dde9e609ecc8f03de5b91774defa21abad655f3c9868",
           "path": "ecosystem/rumi_turn_runtime_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:7483d2a2b585a8e6855123276ec480af09bed0be76722ea7e661c8b3ae9be86e",
+          "digest": "sha256:30f05697237ec35a9e3caf64ca6b06a5835afc9071467ba2083a58cfe01e551d",
           "path": "ecosystem/rumi_turn_runtime_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -13990,9 +13920,7 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {
-        "defaultspack": ">=2.0.0"
-      },
+      "dependencies": {},
       "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
       "display_name": "Rumi Voice Mobile Pack",
       "execution_boundary": "declarative_only",
@@ -14018,7 +13946,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:589bab24f8000aa10b9e9f7bd6377e95507eedbd0dc19ea07a939812bc135f97",
+          "digest": "sha256:62cfe78e46e275f98b13668b5eba4e04b94378c5ec36c462beb27c9326384484",
           "path": "ecosystem/rumi_voice_mobile_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -14055,7 +13983,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:6cafb558387681e372d1ba6b9a3ff7bf6e64aaafcb09f5630ffd07220a8ea01f",
+          "digest": "sha256:13c4271c9f6b951981bff6c43cffb92e4835a6479626632e58fb94369c767ff5",
           "path": "ecosystem/rumi_workflow_scheduler_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -14180,12 +14108,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f2b31c7f64c801189ed39835e8c53b07a3962735c9d347b9223895d9fdf4c40c",
+          "digest": "sha256:016db00fe6fb5339ecfca5cd9f4ad4cf085b031532cb9bd1da3d07b781eeff8d",
           "path": "ecosystem/rumi_workspace_mount_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:2dabaa79709946bb139e5d17e7dc617a86c1ebe5a9f51d5884b76d5f598285d1",
+          "digest": "sha256:1092668cd17b8bad18461c4ae8dae0e06b859a1c641d04a625b48bc7ea1679e7",
           "path": "ecosystem/rumi_workspace_mount_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -14253,7 +14181,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:f93d9dc82fecb0f1151ec0b8380518a8f35ced9d9c0eb2c2254dbe55bef53546",
+          "digest": "sha256:4ac8ca02404d0d59101bb37f7ec2976ce6b6ae15cc28f8a16346f1509aa678cb",
           "path": "ecosystem/rumi_workspace_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -14290,7 +14218,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b76853f268780b6b786ffaa569fdee46df76baa820b38aa86c2950d09e434182",
+          "digest": "sha256:2223657bacfc1737088e613d6eca58a359d8771c766b90fd0ab5ba00325fbebe",
           "path": "ecosystem/search_home_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }

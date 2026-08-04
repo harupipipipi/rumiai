@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "artifacts": [
     {
-      "digest": "sha256:dbb7e396870b3cc5872bb80501f57d904e681ec59aa80a1d5055881f563dc5fc",
+      "digest": "sha256:56af6fca19161d827ebcc5f204047d75f06c742262ca9d3fe773abbe79a7bbc0",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:30c21ba64e133988580f5b0c4af4ebf8ba3a5509d39982acb8bb08402551983f",
+      "digest": "sha256:92105897acd59f0077fd720133bd802e9fed82b21ce8093cb53201475777ea0b",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     }
@@ -15,8 +15,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:804ff0725180619f928587596694e480b06860157e1fc31f222755ae58f92984"
+    "signed_digest": "sha256:86ff5a252b086bf904e39ad9f36b7c48373470c76f23d62521ee42974b4a4815"
   },
   "pack_id": "rumi_subagent_pr_manager_pack",
-  "source_identity": "sha256:5e127a3a0de49368a6011740fade990e6cee8a46a30a2ae7065c4c82d6af59e4"
+  "source_identity": "sha256:c7b1651e7e3a3b3e88bb8ff1d1f0a88a10b722a140066d634b9dce685d942602"
 }
