@@ -7,6 +7,8 @@ import json
 import os
 import platform as host_platform
 import shutil
+import stat
+import threading
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -44,6 +46,12 @@ PROJECTION_TYPES = (
     "policies",
     "scheduler",
 )
+
+_PACK_CONTENT_HASH_CACHE_LOCK = threading.RLock()
+_PACK_CONTENT_HASH_CACHE: dict[
+    tuple[str, str],
+    tuple[tuple[tuple[str, int, int, int, int, int, int], ...], str],
+] = {}
 
 _COMPONENT_TYPE_TO_PROJECTION = {
     "frontend": "ui",
@@ -1116,7 +1124,40 @@ def _lock_identity(lockfile: ProfileLockfile) -> str:
 
 
 def _pack_content_hash(pack_root: Path, manifest_hash: str) -> str:
+    cache_key = (str(pack_root.absolute()), manifest_hash)
+    files, revision = _pack_projection_revision(pack_root)
+    with _PACK_CONTENT_HASH_CACHE_LOCK:
+        cached = _PACK_CONTENT_HASH_CACHE.get(cache_key)
+        if cached is not None and cached[0] == revision:
+            return cached[1]
+
     resources: list[tuple[str, str]] = [("ecosystem.json", manifest_hash)]
+    resources.extend(
+        (path.relative_to(pack_root).as_posix(), _sha256(path))
+        for path in files
+    )
+    content_hash = content_identity(resources)
+    _, verified_revision = _pack_projection_revision(pack_root)
+    if verified_revision != revision:
+        raise RuntimeError("pack projection changed during content hashing")
+    with _PACK_CONTENT_HASH_CACHE_LOCK:
+        _PACK_CONTENT_HASH_CACHE[cache_key] = (revision, content_hash)
+    return content_hash
+
+
+def _pack_projection_revision(
+    pack_root: Path,
+) -> tuple[
+    tuple[Path, ...],
+    tuple[tuple[str, int, int, int, int, int, int], ...],
+]:
+    """Return projected files and a change-sensitive cache revision.
+
+    Reusing an already computed digest is safe only while every projected
+    file keeps the same identity, size, mode, mtime, and ctime. Directory
+    additions and removals also change the ordered path set. The digest is
+    recomputed whenever any of those Host-observed properties changes.
+    """
     declared_directories = set(PROJECTION_TYPES)
     try:
         manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
@@ -1135,11 +1176,28 @@ def _pack_content_hash(pack_root: Path, manifest_hash: str) -> str:
                 and ".." not in declared_path.parts
             ):
                 declared_directories.add(declared)
+    files: list[Path] = []
     for directory in sorted(declared_directories):
         root = pack_root / directory
-        for path in _bounded_pack_files(root):
-            resources.append((path.relative_to(pack_root).as_posix(), _sha256(path)))
-    return content_identity(resources)
+        files.extend(_bounded_pack_files(root))
+    ordered_files = tuple(sorted(set(files), key=lambda path: path.as_posix()))
+    revision: list[tuple[str, int, int, int, int, int, int]] = []
+    for path in ordered_files:
+        file_stat = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise RuntimeError("pack projection contains a non-regular file")
+        revision.append(
+            (
+                path.relative_to(pack_root).as_posix(),
+                file_stat.st_dev,
+                file_stat.st_ino,
+                file_stat.st_mode,
+                file_stat.st_size,
+                file_stat.st_mtime_ns,
+                file_stat.st_ctime_ns,
+            )
+        )
+    return ordered_files, tuple(revision)
 
 
 def _bounded_pack_files(

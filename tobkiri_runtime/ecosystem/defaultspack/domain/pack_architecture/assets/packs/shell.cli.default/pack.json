@@ -81,6 +81,15 @@
       "artifact_kind": "signed_prebuilt_binary"
     },
     {
+      "variant_id": "macos-x86_64",
+      "platform": "macos",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/macos-x86_64.json",
+      "digest": "sha256:dc5a45589ec4004763d3c1139c0c9f67536ade5d0f775830f00a01ee36f38fa6",
+      "entrypoint": "tobkiri-cli",
+      "artifact_kind": "signed_prebuilt_binary"
+    },
+    {
       "variant_id": "linux-x86_64",
       "platform": "linux",
       "architecture": "x86_64",

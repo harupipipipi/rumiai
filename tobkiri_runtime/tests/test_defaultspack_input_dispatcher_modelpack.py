@@ -80,6 +80,27 @@ def _conversation(tmp_path: Path) -> dict:
     return ChatStore().create_conversation(model="stub/default")
 
 
+def test_chat_owner_module_identity_survives_domain_import_probe(
+    monkeypatch, tmp_path
+):
+    """Keep the collected ChatStore bound to the selected owner after a probe."""
+    from tests.test_browser_companion import _defaultspack_domain_module
+
+    import domain.chat.store as chat_store_module
+
+    collected_chat_store = ChatStore
+    original_path = tuple(sys.path)
+    _defaultspack_domain_module("domain.tool.executor")
+
+    assert sys.modules["domain.chat.store"] is chat_store_module
+    assert collected_chat_store is chat_store_module.ChatStore
+    assert tuple(sys.path) == original_path
+
+    _configure_paths(monkeypatch, tmp_path)
+    conversation = collected_chat_store().create_conversation(model="stub/default")
+    assert conversation["model"] == "stub/default"
+
+
 def _fake_route_decision(model: str) -> ModelRoutingDecision:
     return ModelRoutingDecision(
         selected_model=model,

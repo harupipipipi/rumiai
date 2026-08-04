@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import importlib
+import os
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def test_persisted_scope_reads_the_configured_user_data_root(
 
 
 def test_pack_content_hash_does_not_follow_projection_symlinks(tmp_path: Path) -> None:
-    pack_root = tmp_path / "pack"
+    pack_root = tmp_path / "defaultspack"
     tools_root = pack_root / "tools"
     external_root = tmp_path / "external"
     tools_root.mkdir(parents=True)
@@ -122,6 +123,44 @@ def test_pack_content_hash_does_not_follow_projection_symlinks(tmp_path: Path) -
     (external_root / "outside.py").write_text("OUTSIDE = 2\n", encoding="utf-8")
 
     assert _pack_content_hash(pack_root, "manifest") == first
+
+
+def test_pack_content_hash_cache_reuses_only_unchanged_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import core_runtime.resolved_profile as resolver
+
+    pack_root = tmp_path / "pack"
+    tools_root = pack_root / "tools"
+    tools_root.mkdir(parents=True)
+    (pack_root / "ecosystem.json").write_text("{}", encoding="utf-8")
+    tool_path = tools_root / "tool.json"
+    tool_path.write_text('{"version": 1}', encoding="utf-8")
+    calls = 0
+    original_sha256 = resolver._sha256
+
+    def counted_sha256(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        return original_sha256(path)
+
+    monkeypatch.setattr(resolver, "_sha256", counted_sha256)
+    first = resolver._pack_content_hash(pack_root, "manifest")
+    second = resolver._pack_content_hash(pack_root, "manifest")
+    assert second == first
+    assert calls == 1
+
+    original_stat = tool_path.stat()
+    tool_path.write_text('{"version": 2}', encoding="utf-8")
+    os.utime(
+        tool_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+    changed = resolver._pack_content_hash(pack_root, "manifest")
+
+    assert changed != first
+    assert calls == 2
 
 
 def test_startup_profile_input_accepts_only_host_supplied_verified_trust() -> None:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -70,7 +71,34 @@ def load_catalog(path: Path) -> dict[str, Any]:
     return catalog
 
 
-def verify_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+def _artifact_digest(path: Path) -> str:
+    """Return the same relative-name SHA-256 used by the Launcher."""
+    digest = hashlib.sha256()
+
+    def visit(current: Path, relative: Path) -> None:
+        if current.is_symlink():
+            raise RuntimeError(f"packaged artifact contains a symlink: {current}")
+        if current.is_file():
+            digest.update(relative.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            with current.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                    digest.update(chunk)
+            return
+        if not current.is_dir():
+            raise RuntimeError(
+                f"packaged artifact is not a file or directory: {current}"
+            )
+        for child in sorted(current.iterdir(), key=lambda item: item.name):
+            visit(child, relative / child.name)
+
+    visit(path, Path(""))
+    return "sha256:" + digest.hexdigest()
+
+
+def verify_catalog(
+    catalog: dict[str, Any], resource_root_path: Path | None = None
+) -> dict[str, Any]:
     """Verify Base Pack/Shell compatibility, fail-closed artifacts, and identity."""
     base_packs = catalog.get("base_packs")
     shells = catalog.get("shell_providers")
@@ -93,6 +121,7 @@ def verify_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
     )
     compatible_shells: list[str] = []
     blocked_artifacts: list[str] = []
+    verified_artifacts: list[str] = []
     for shell in shells:
         if not isinstance(shell, dict):
             raise RuntimeError("packaged Shell Provider descriptor is invalid")
@@ -110,12 +139,36 @@ def verify_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
         for variant in shell.get("artifact_variants", []):
             if not isinstance(variant, dict):
                 raise RuntimeError("packaged artifact variant is invalid")
-            if variant.get("path") is not None or variant.get("sha256") is not None:
+            path_value = variant.get("path")
+            digest_value = variant.get("sha256")
+            if (path_value is None) != (digest_value is None):
                 raise RuntimeError(
-                    "uninstalled packaged artifacts must not contain install paths "
-                    "or digests"
+                    "packaged artifact path and digest must be supplied together"
                 )
-            blocked_artifacts.append(str(variant["artifact_id"]))
+            if path_value is None:
+                blocked_artifacts.append(str(variant["artifact_id"]))
+                continue
+            if resource_root_path is None:
+                raise RuntimeError(
+                    "installed artifact metadata requires a package resource root"
+                )
+            relative = Path(str(path_value))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise RuntimeError(f"packaged artifact path is unsafe: {path_value}")
+            artifact = (resource_root_path / relative).resolve()
+            resource_root_resolved = resource_root_path.resolve()
+            if not artifact.is_relative_to(resource_root_resolved):
+                raise RuntimeError(
+                    f"packaged artifact path escapes Resources/app: {path_value}"
+                )
+            if not artifact.exists():
+                raise RuntimeError(f"packaged artifact is missing: {artifact}")
+            actual_digest = _artifact_digest(artifact)
+            if actual_digest.lower() != str(digest_value).lower():
+                raise RuntimeError(
+                    f"packaged artifact digest mismatch for {variant['artifact_id']}"
+                )
+            verified_artifacts.append(str(variant["artifact_id"]))
 
     default_selection = catalog.get("default_selection")
     if not isinstance(default_selection, dict):
@@ -131,6 +184,7 @@ def verify_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
         "base_pack_id": base.get("pack_id"),
         "compatible_shell_provider_ids": compatible_shells,
         "blocked_uninstalled_artifact_count": len(blocked_artifacts),
+        "verified_artifact_ids": verified_artifacts,
         "profile_identity": identity,
     }
 
@@ -253,7 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     catalog_path = root / "bundled" / "presentation_catalog.json"
     binary = app / "Contents" / "MacOS" / "tobkiri-launcher"
     report = {
-        "catalog": verify_catalog(load_catalog(catalog_path)),
+        "catalog": verify_catalog(load_catalog(catalog_path), root),
         "ipc": verify_binary(binary),
         "launch": launch_from_relocated_cwd(binary, args.launch_seconds),
     }

@@ -535,7 +535,11 @@ class ModelRuntimeSettingsService:
 
             provider_map = detect_available_providers()
             available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
-            for model in get_all_known_models():
+            # Rumi base-model resolution only needs models from providers that
+            # are actually available in this runtime.  Asking the catalog for
+            # every manifest here makes a routine model-pack lookup walk every
+            # unconfigured provider and repeatedly re-hash its metadata.
+            for model in get_all_known_models(active_provider_ids=available_providers):
                 if not isinstance(model, dict):
                     continue
                 if not self._is_real_chat_profile(model):

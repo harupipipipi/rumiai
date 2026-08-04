@@ -13,10 +13,14 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
-from core_runtime.profile_graph_builder import build_startup_profile_graph_response
+from core_runtime.profile_graph_builder import (
+    _startup_catalog_nodes,
+    build_startup_profile_graph_response,
+)
 from core_runtime.profile_graph_models import normalize_profile_graph_document
 from core_runtime.profile_runtime_selection import apply_profile_graph_selection
 from core_runtime.profile_workspace import ProfileWorkspaceManager
+from core_runtime.startup_profiles import StartupProfileManager
 from ecosystem.defaultspack.transport.registry import HttpRouteSpec
 
 
@@ -267,6 +271,82 @@ def test_profile_graph_get_includes_available_tools_webhooks_api_prompts_fronten
     assert payload["available"]["api_routes"][0]["id"] == "POST /api/chat/conversations/{id}/messages"
     assert "research.system" in [item["id"] for item in payload["available"]["prompts"]]
     assert payload["available"]["frontend"][0]["id"] == "research_sidebar"
+
+
+def test_profile_graph_projects_only_selected_pack_contract_candidates(
+    tmp_path: Path,
+) -> None:
+    class _ApprovedPacks:
+        @staticmethod
+        def get_approval(_pack_id: str) -> object:
+            return object()
+
+        @staticmethod
+        def is_pack_approved_and_verified(
+            _pack_id: str,
+        ) -> tuple[bool, str]:
+            return True, "verified fixture"
+
+    ecosystem = tmp_path / "ecosystem"
+    selected_pack = ecosystem / "rumi_file_inspect_pack"
+    unrelated_pack = ecosystem / "unrelated_pack"
+    selected_pack.mkdir(parents=True)
+    unrelated_pack.mkdir()
+    (selected_pack / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "rumi_file_inspect_pack"}),
+        encoding="utf-8",
+    )
+    (selected_pack / "rumi.pack.v3.json").write_text(
+        json.dumps(
+            {
+                "contracts": {
+                    "provides": [
+                        {
+                            "id": "rumi.service.file.inspect.v1",
+                            "provider_instance_id": "file-inspect.service",
+                            "required_capabilities": ["file.inspect"],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unrelated_pack / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "unrelated_pack"}),
+        encoding="utf-8",
+    )
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        ecosystem_dir=str(ecosystem),
+        approval_manager=_ApprovedPacks(),
+        seed_default_profile=False,
+    )
+    catalog = manager._build_catalog()
+
+    candidates = _startup_catalog_nodes(
+        catalog,
+        {
+            "base_pack": "defaultspack",
+            "packs": ["defaultspack", "rumi_file_inspect_pack"],
+        },
+    )
+
+    inspect_candidate = next(
+        item
+        for item in candidates
+        if item["source_pack_id"] == "rumi_file_inspect_pack"
+        and item["metadata"].get("contract_id")
+    )
+    assert inspect_candidate["id"] == (
+        "rumi_file_inspect_pack.contract.file-inspect.service"
+    )
+    assert inspect_candidate["metadata"]["contract_id"] == (
+        "rumi.service.file.inspect.v1"
+    )
+    assert not any(
+        item["source_pack_id"] == "unrelated_pack" for item in candidates
+    )
 
 
 def test_profile_graph_update_persists_metadata_selected_and_projects_policy(

@@ -1439,6 +1439,74 @@ class StartupProfileManager:
                     })
             except Exception:
                 logger.debug("Failed to load node %s", f, exc_info=True)
+        result.extend(
+            node
+            for node in self._discover_v3_provider_nodes(pack_id, pack_path)
+            if node.get("node_id") not in seen
+        )
+        return result
+
+    def _discover_v3_provider_nodes(
+        self,
+        pack_id: str,
+        pack_path: Path,
+    ) -> List[Dict[str, Any]]:
+        """Project v3 providers as data-only Profile Wiring candidates."""
+        manifest_path = pack_path / "rumi.pack.v3.json"
+        if not manifest_path.is_file():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        contracts = manifest.get("contracts")
+        providers = contracts.get("provides") if isinstance(contracts, dict) else []
+        result: List[Dict[str, Any]] = []
+        for provider in providers if isinstance(providers, list) else []:
+            if not isinstance(provider, dict):
+                continue
+            contract_id = str(provider.get("id") or "").strip()
+            instance_id = str(provider.get("provider_instance_id") or "").strip()
+            if not contract_id or not instance_id:
+                continue
+            node_id = f"{pack_id}.contract.{instance_id}"
+            required_capabilities = [
+                str(value)
+                for value in provider.get("required_capabilities", [])
+                if str(value).strip()
+            ]
+            result.append(
+                {
+                    "node_id": node_id,
+                    "kind": "service",
+                    "component_id": instance_id,
+                    "component_type": "service",
+                    "metadata": {
+                        "pack_id": pack_id,
+                        "source_pack_id": pack_id,
+                        "contract_id": contract_id,
+                        "provider_instance_id": instance_id,
+                        "required_capabilities": required_capabilities,
+                        "data_only_projection": True,
+                    },
+                    "display_name": {
+                        "en": instance_id,
+                        "ja": instance_id,
+                    },
+                    "ports": [
+                        {
+                            "id": "provider",
+                            "direction": "output",
+                            "display_name": {"en": "Provider", "ja": "Provider"},
+                            "description": {},
+                            "standards": [contract_id],
+                            "aliases": [],
+                            "multiple": True,
+                            "required": False,
+                        }
+                    ],
+                }
+            )
         return result
 
     def _core_builtin_nodes_for_pack(self, pack_id: str) -> List[Dict[str, Any]]:

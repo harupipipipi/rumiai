@@ -165,7 +165,7 @@ def _available_catalog(
     input_profiles = InputProfileRegistry(defaultspack_root).list_profiles()
     frontend_catalog = FrontendRegistry(defaultspack_root).build_catalog()
     capability_catalog = CapabilityCatalog(defaultspack_root)
-    startup_nodes = _startup_catalog_nodes(startup_catalog)
+    startup_nodes = _startup_catalog_nodes(startup_catalog, profile)
 
     return {
         "tools": [_tool_candidate(tool) for tool in tools],
@@ -759,13 +759,28 @@ def _flow_candidates(ecosystem_dir: str | None) -> List[Dict[str, Any]]:
     return sorted(flows.values(), key=lambda item: item["id"])
 
 
-def _startup_catalog_nodes(startup_catalog: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+def _startup_catalog_nodes(
+    startup_catalog: Dict[str, Any] | None,
+    profile: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
     nodes: Dict[str, Dict[str, Any]] = {}
     catalog = startup_catalog if isinstance(startup_catalog, dict) else {}
+    selected_pack_ids = {
+        str(value)
+        for value in (profile or {}).get("packs", [])
+        if str(value).strip()
+    }
+    base_pack = str((profile or {}).get("base_pack") or "").strip()
+    if base_pack:
+        selected_pack_ids.add(base_pack)
     for pack in catalog.get("packs") if isinstance(catalog.get("packs"), list) else []:
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("pack_id") or "").strip()
+        if pack.get("available") is False:
+            continue
+        if selected_pack_ids and pack_id not in selected_pack_ids:
+            continue
         for node in pack.get("nodes") if isinstance(pack.get("nodes"), list) else []:
             if not isinstance(node, dict):
                 continue

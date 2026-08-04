@@ -619,9 +619,14 @@ def test_agent_engine_extracts_text_from_thinking_content_blocks():
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run
+    from core_runtime import global_contract_dispatch
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    # This negative-path test requires the request worker to have no resolved
+    # profile.  The repository's developer user-data directory may contain a
+    # persisted startup profile, so make that boundary explicit per test.
+    monkeypatch.setattr(global_contract_dispatch, "persisted_resolved_profile", lambda: None)
     ChatStore._instance = None
 
     store = ChatStore()
@@ -1625,10 +1630,30 @@ def test_browser_computer_active_window_capture_replaces_stale_selected_window(t
 def test_browser_computer_background_type_request_is_visible_only_error(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import cgevent
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    target_window = {
+        "app": "Google Chrome",
+        "title": "QA background typing target",
+        "window_id": 4242,
+        "pid": 4242,
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 800,
+    }
+    monkeypatch.setattr(controller, "_matching_window", lambda payload: dict(target_window))
+    monkeypatch.setattr(controller, "_pid_matches_app", lambda pid, app: True)
+    posted = {}
+
+    def fake_post_key_to_pid(pid, text="", key_combo=""):
+        posted.update({"pid": pid, "text": text, "key_combo": key_combo})
+        return True
+
+    monkeypatch.setattr(cgevent, "post_key_to_pid", fake_post_key_to_pid)
     monkeypatch.setattr(
         controller,
         "_apple_script",
@@ -1642,6 +1667,7 @@ def test_browser_computer_background_type_request_is_visible_only_error(tmp_path
     assert result["error_code"] == "TYPE_COMPLETION_NOT_VERIFIED"
     assert result["completion_verified"] is False
     assert result["effect_observed"] is False
+    assert posted == {"pid": 4242, "text": "hello", "key_combo": ""}
 
 
 def test_browser_computer_background_fallback_flags_do_not_enable_background(tmp_path, monkeypatch):

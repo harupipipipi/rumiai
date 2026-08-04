@@ -1465,12 +1465,23 @@ def _subscription_plans(manifest: Dict[str, Any], curated: Dict[str, Any]) -> Li
 
 
 def _merge_provider_entry(
-    provider_id: str, manifest: Optional[Dict[str, Any]] = None
+    provider_id: str,
+    manifest: Optional[Dict[str, Any]] = None,
+    *,
+    component_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     manifest = dict(manifest or {})
     manifest_was_present = bool(manifest)
-    component_metadata = dict(provider_component_metadata_map().get(provider_id, {}))
-    curated = {**dict(_CURATED_PROVIDER_METADATA.get(provider_id, {})), **component_metadata}
+    metadata_map = (
+        component_metadata
+        if component_metadata is not None
+        else provider_component_metadata_map()
+    )
+    component_metadata_entry = dict(metadata_map.get(provider_id, {}))
+    curated = {
+        **dict(_CURATED_PROVIDER_METADATA.get(provider_id, {})),
+        **component_metadata_entry,
+    }
     component_provider_manifest = curated.pop("provider_manifest", {})
     if isinstance(component_provider_manifest, dict):
         manifest = {**component_provider_manifest, **manifest}
@@ -1566,9 +1577,14 @@ def _provider_status(entry: Dict[str, Any], active: bool, configured: bool) -> s
 def get_provider_catalog(active_provider_ids=None):
     active_ids = set(active_provider_ids or [])
     manifests = _provider_manifest_map()
+    component_metadata = provider_component_metadata_map()
     provider_ids = set(manifests.keys()) | set(_CURATED_PROVIDER_METADATA.keys()) | active_ids
     entries = [
-        _merge_provider_entry(provider_id, manifests.get(provider_id))
+        _merge_provider_entry(
+            provider_id,
+            manifests.get(provider_id),
+            component_metadata=component_metadata,
+        )
         for provider_id in provider_ids
     ]
     entries.sort(key=lambda item: (int(item.get("priority", 100)), item["provider_id"]))
@@ -1744,7 +1760,21 @@ def _annotate_model_collisions(models):
 
 def get_all_known_models(provider_id=None, active_provider_ids=None):
     catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
-    provider_ids = [provider_id] if provider_id else list(catalog_map.keys())
+    if provider_id:
+        provider_ids = [provider_id]
+    elif active_provider_ids is not None:
+        active_ids = {
+            str(item).strip()
+            for item in active_provider_ids
+            if str(item or "").strip()
+        }
+        provider_ids = [
+            current_provider_id
+            for current_provider_id in catalog_map
+            if current_provider_id in active_ids
+        ]
+    else:
+        provider_ids = list(catalog_map.keys())
     models = []
 
     for current_provider_id in provider_ids:

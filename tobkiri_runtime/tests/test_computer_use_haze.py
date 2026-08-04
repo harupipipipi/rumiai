@@ -755,6 +755,11 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
 
     monkeypatch.setattr(BrowserComputerController, "_edge_haze", fake_haze)
     monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(lambda url, app_name="": True))
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_open_url_with_target_app",
+        lambda self, url, app_name: {"opened": True},
+    )
 
     result = BrowserComputerController(artifact_root=tmp_path).run(
         "browser.open_url",

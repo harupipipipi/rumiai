@@ -15,6 +15,12 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+_APPROVAL_MODULE_NAMES = (
+    "domain.safety.approval",
+    "domain.safety.approval_state_json",
+    "domain.safety.approval_store",
+)
+
 pytestmark = [
     pytest.mark.contract,
     pytest.mark.usefixtures("defaultspack_conversation_owner"),
@@ -164,6 +170,37 @@ def _external_provider_tool_names(prepared) -> set[str]:
         and isinstance(tool.get("function"), dict)
         and tool["function"].get("name") != "assistant_progress"
     }
+
+
+def _reload_approval_modules_for_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Load fresh approval modules without leaking split module identities.
+
+    This test intentionally exercises approval state against a temporary
+    SQLite database. Restoring both ``sys.modules`` and the parent package
+    attributes keeps already-imported production aliases (for example the
+    coding contract adapter) bound to the same module objects after teardown.
+    """
+
+    safety_package = sys.modules.get("domain.safety")
+    for module_name in _APPROVAL_MODULE_NAMES:
+        if module_name in sys.modules:
+            monkeypatch.setitem(sys.modules, module_name, sys.modules[module_name])
+        else:
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+        sys.modules.pop(module_name, None)
+
+        if safety_package is None:
+            continue
+        attribute = module_name.rsplit(".", 1)[-1]
+        if hasattr(safety_package, attribute):
+            monkeypatch.setattr(
+                safety_package,
+                attribute,
+                getattr(safety_package, attribute),
+                raising=False,
+            )
+        else:
+            monkeypatch.delattr(safety_package, attribute, raising=False)
 
 
 def _provider_tool_action_enum(prepared, tool_name: str) -> list[str]:
@@ -685,12 +722,7 @@ def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
         "RUMI_DEFAULTSPACK_APPROVAL_DB_PATH",
         str(tmp_path / "approval.sqlite3"),
     )
-    for name in (
-        "domain.safety.approval",
-        "domain.safety.approval_state_json",
-        "domain.safety.approval_store",
-    ):
-        sys.modules.pop(name, None)
+    _reload_approval_modules_for_probe(monkeypatch)
 
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -778,6 +810,15 @@ def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
     assert result["widget"]["approval_required"] is True
     assert not (workspace_root / "api-bypass-probe.txt").exists()
     ChatStore._instance = None
+
+
+def test_approval_probe_restores_canonical_module_aliases() -> None:
+    """A fresh approval probe must not split aliases used by coding blocks."""
+
+    from domain.coding import contract_adapter
+    import domain.safety.approval as approval
+
+    assert contract_adapter.approval is approval
 
 
 def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):

@@ -59,6 +59,15 @@
       "artifact_kind": "signed_prebuilt_bundle"
     },
     {
+      "variant_id": "macos-x86_64",
+      "platform": "macos",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/macos-x86_64.json",
+      "digest": "sha256:10f3b5dd068dcc5975e9a78c28d91254a16660a0f9108691fd093d3c333cad9a",
+      "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+      "artifact_kind": "signed_prebuilt_bundle"
+    },
+    {
       "variant_id": "linux-x86_64",
       "platform": "linux",
       "architecture": "x86_64",

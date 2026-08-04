@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
+const PRESENTATION_RELEASE_ROOT_ENV: &str = "TOBKIRI_PRESENTATION_RELEASE_ROOT";
 const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
@@ -25,6 +26,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
     println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
+    println!("cargo:rerun-if-env-changed={PRESENTATION_RELEASE_ROOT_ENV}");
     println!("cargo:rerun-if-changed=capabilities");
 
     warn_legacy_defaultspack_app_bundle();
@@ -113,13 +115,48 @@ fn stage_runtime_bundle() -> io::Result<()> {
     }
     copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
         .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
-    verify_staged_catalog(&bundled_src, &staged_root.join("bundled"))
+    let catalog_source = stage_presentation_release(&staged_root)
+        .map_err(|error| stage_error("stage verified presentation artifact", error))?
+        .unwrap_or(bundled_src);
+    verify_staged_catalog(&catalog_source, &staged_root.join("bundled"))
         .map_err(|error| stage_error("verify staged presentation catalog", error))?;
 
     stage_pack_shell(&repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
 
     Ok(())
+}
+
+fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
+    let Some(raw_root) = std::env::var_os(PRESENTATION_RELEASE_ROOT_ENV) else {
+        return Ok(None);
+    };
+    let release_root = PathBuf::from(raw_root);
+    let catalog = release_root.join("presentation_catalog.json");
+    let artifacts = release_root.join("bundled").join("presentation-artifacts");
+    if !catalog.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "release presentation catalog is missing at {}",
+                catalog.display()
+            ),
+        ));
+    }
+    if !artifacts.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "release presentation artifacts are missing at {}",
+                artifacts.display()
+            ),
+        ));
+    }
+
+    let staged_bundled = staged_root.join("bundled");
+    copy_file(&catalog, &staged_bundled.join("presentation_catalog.json"))?;
+    copy_dir_recursive(&artifacts, &staged_bundled.join("presentation-artifacts"))?;
+    Ok(Some(catalog))
 }
 
 fn verify_staged_catalog(source_dir: &Path, staged_dir: &Path) -> io::Result<()> {
@@ -362,10 +399,27 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         let source_path = entry.path();
         let target_path = dst.join(entry.file_name());
         let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "symlinked presentation release entry is not accepted: {}",
+                    source_path.display()
+                ),
+            ));
+        }
         if file_type.is_dir() {
             copy_dir_recursive(&source_path, &target_path)?;
         } else if file_type.is_file() {
             copy_file(&source_path, &target_path)?;
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported presentation release entry: {}",
+                    source_path.display()
+                ),
+            ));
         }
     }
     Ok(())

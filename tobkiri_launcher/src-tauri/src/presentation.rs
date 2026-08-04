@@ -522,6 +522,26 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
                     shell.provider_id
                 );
             }
+            match (variant.path.as_deref(), variant.sha256.as_deref()) {
+                (Some(path), Some(_))
+                    if !Path::new(path).is_absolute()
+                        && !Path::new(path)
+                            .components()
+                            .any(|component| matches!(component, Component::ParentDir)) => {}
+                (None, None) => {}
+                (Some(_), None) | (None, Some(_)) => {
+                    bail!(
+                        "Shell Provider {} has incomplete installed artifact metadata",
+                        shell.provider_id
+                    )
+                }
+                (Some(_), Some(_)) => {
+                    bail!(
+                        "Shell Provider {} has an unsafe installed artifact path",
+                        shell.provider_id
+                    )
+                }
+            }
         }
     }
 
@@ -983,7 +1003,8 @@ fn hash_path_contents(path: &Path, relative: &Path, hasher: &mut Sha256) -> AnyR
         bail!("symlinked artifact content is not accepted");
     }
     if metadata.is_file() {
-        hasher.update(relative.to_string_lossy().as_bytes());
+        let normalized_relative = relative.to_string_lossy().replace('\\', "/");
+        hasher.update(normalized_relative.as_bytes());
         hasher.update([0]);
         let mut file = File::open(path)
             .with_context(|| format!("failed to open artifact file {}", path.display()))?;
@@ -1441,6 +1462,85 @@ mod tests {
         assert_eq!(
             state.materialization.selected_contributions[0].family,
             "graphical"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn packaged_artifact_selection_persists_and_tampering_blocks_after_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-presentation-persistence-test-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        let app_dir = root
+            .join("Relocated")
+            .join("Tobkiri Launcher.app")
+            .join("Contents")
+            .join("Resources")
+            .join("app");
+        fs::create_dir_all(app_dir.join("bundled").join("presentation-artifacts")).unwrap();
+        let artifact_path = app_dir
+            .join("bundled")
+            .join("presentation-artifacts")
+            .join("shell.tauri.default.macos-arm64")
+            .join("Tobkiri.app");
+        fs::create_dir_all(&artifact_path).unwrap();
+        fs::write(artifact_path.join("Contents"), b"verified shell artifact").unwrap();
+        let contents = b"verified shell artifact";
+        let mut digest_input = b"Contents".to_vec();
+        digest_input.push(0);
+        digest_input.extend_from_slice(contents);
+        let digest = format!("sha256:{}", hex::encode(Sha256::digest(digest_input)));
+
+        let mut catalog: PresentationCatalog =
+            serde_json::from_str(include_str!("../bundled/presentation_catalog.json")).unwrap();
+        let variant = catalog
+            .shell_providers
+            .iter_mut()
+            .find(|shell| shell.provider_id == "shell.tauri.default")
+            .unwrap()
+            .artifact_variants
+            .iter_mut()
+            .find(|variant| {
+                variant.platform == current_platform()
+                    && variant.architecture == current_architecture()
+            })
+            .unwrap();
+        variant.path = Some(
+            artifact_path
+                .strip_prefix(&app_dir)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        variant.sha256 = Some(digest);
+        fs::write(
+            app_dir.join("bundled").join("presentation_catalog.json"),
+            serde_json::to_vec_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+
+        let mut config = test_config(&app_dir);
+        config.user_data_dir = root.join("Application Support").join("user_data");
+        let selected =
+            select_presentation_impl(&config, catalog.default_selection.clone()).unwrap();
+        assert_eq!(selected.materialization.status, "materialized");
+        assert_eq!(
+            selected.materialization.artifact.as_ref().unwrap().status,
+            "verified"
+        );
+
+        let restarted = build_state(&config).unwrap();
+        assert_eq!(restarted.selection, Some(catalog.default_selection.clone()));
+        assert_eq!(restarted.materialization.status, "materialized");
+
+        fs::write(artifact_path.join("Contents"), b"tampered shell artifact").unwrap();
+        let tampered = build_state(&config).unwrap();
+        assert_eq!(tampered.materialization.status, "blocked");
+        assert_eq!(
+            tampered.materialization.artifact.as_ref().unwrap().status,
+            "digest_mismatch"
         );
         fs::remove_dir_all(&root).unwrap();
     }

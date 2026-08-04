@@ -57,6 +57,11 @@ def project_legacy_ecosystem(manifest: Mapping[str, Any]) -> dict[str, Any]:
         raise ManifestProjectionError(
             "extensions.rumi.legacy_projection.dependencies must be an object or list"
         )
+    host_execution = legacy_options.get("host_execution", False)
+    if not isinstance(host_execution, bool):
+        raise ManifestProjectionError(
+            "extensions.rumi.legacy_projection.host_execution must be a boolean"
+        )
 
     provides = _contract_ids(contracts.get("provides"))
     requires = _contract_ids(contracts.get("requires"))
@@ -86,7 +91,10 @@ def project_legacy_ecosystem(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "required_secrets": [],
         "required_capabilities": capabilities,
         "required_network": {"allowed_domains": [], "allowed_ports": []},
-        "host_execution": False,
+        # This is an explicit compatibility declaration, not authority inferred
+        # from a loader or a requested capability. Host approval remains the
+        # separate runtime gate for in-process Python activation.
+        "host_execution": host_execution,
         "resources": [
             str(resource["id"])
             for resource in _list_of_mappings(manifest.get("resources"))

@@ -120,6 +120,22 @@
         },
         {
           "architecture": "x86_64",
+          "artifact_id": "shell.cli.default.macos-x86_64",
+          "artifact_kind": "signed_prebuilt_binary",
+          "artifact_ref": "artifacts/variants/macos-x86_64.json",
+          "bundle_identifier": null,
+          "descriptor_digest": "sha256:dc5a45589ec4004763d3c1139c0c9f67536ade5d0f775830f00a01ee36f38fa6",
+          "development_command": null,
+          "entrypoint": "tobkiri-cli",
+          "path": null,
+          "platform": "macos",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "macos-x86_64"
+        },
+        {
+          "architecture": "x86_64",
           "artifact_id": "shell.cli.default.linux-x86_64",
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "artifacts/variants/linux-x86_64.json",
@@ -268,6 +284,22 @@
         },
         {
           "architecture": "x86_64",
+          "artifact_id": "shell.electron.default.macos-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/macos-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.electron",
+          "descriptor_digest": "sha256:e287e7b88ebe1c2997d76810f00b2b25f8b5496f84ec68997e136c97e3200a3b",
+          "development_command": null,
+          "entrypoint": "Tobkiri Electron.app/Contents/MacOS/tobkiri-electron",
+          "path": null,
+          "platform": "macos",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "macos-x86_64"
+        },
+        {
+          "architecture": "x86_64",
           "artifact_id": "shell.electron.default.linux-x86_64",
           "artifact_kind": "signed_prebuilt_bundle",
           "artifact_ref": "artifacts/variants/linux-x86_64.json",
@@ -412,6 +444,22 @@
         },
         {
           "architecture": "x86_64",
+          "artifact_id": "shell.tauri.default.macos-x86_64",
+          "artifact_kind": "signed_prebuilt_bundle",
+          "artifact_ref": "artifacts/variants/macos-x86_64.json",
+          "bundle_identifier": "io.tobkiri.shell.tauri",
+          "descriptor_digest": "sha256:10f3b5dd068dcc5975e9a78c28d91254a16660a0f9108691fd093d3c333cad9a",
+          "development_command": null,
+          "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+          "path": null,
+          "platform": "macos",
+          "prebuilt": true,
+          "production": true,
+          "sha256": null,
+          "variant": "macos-x86_64"
+        },
+        {
+          "architecture": "x86_64",
           "artifact_id": "shell.tauri.default.linux-x86_64",
           "artifact_kind": "signed_prebuilt_bundle",
           "artifact_ref": "artifacts/variants/linux-x86_64.json",
@@ -531,8 +579,8 @@
     "dev.tauri.toolchain.default": "sha256:b447bc1d8ff508dbc458c6a9460c2cc1a94d5f3ba02bebd7daf11327f81bb6c4",
     "runtime.electron.application.default": "sha256:3c0055227c8f4e4988e6f5115aa7714306887ce61026fbaf2076399fab1c674a",
     "runtime.tauri.application.default": "sha256:72b713b264f72c47d8e310bd5e103962d6bb4f61f35b01518d26bada2bb800fb",
-    "shell.cli.default": "sha256:e9983c53d0ab96e2233310d126a0c8a63853bf07e4e936f84c827ca0ff05f518",
-    "shell.electron.default": "sha256:62d3a0923d4cdc2691f02c864e81969ae671a4ddaca6c2960d20700b9e834318",
-    "shell.tauri.default": "sha256:3d55268b164708ce4a8363a283076773ae1b62138edff3acc306def3dac5aab0"
+    "shell.cli.default": "sha256:1f1608fd21017d27b0bc202d0be911a8d496945af98608fe1e8eb26f85363903",
+    "shell.electron.default": "sha256:0f1feb8f7749cdd25d08fdc675e411b657e05e2c612a566654964587a65518ba",
+    "shell.tauri.default": "sha256:9e4430f7fc90f41c050768458d18d3101b4d32cf5f67d579ed902e0036598952"
   }
 }

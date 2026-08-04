@@ -7,17 +7,19 @@
       "rumi.resource.workspace.v1"
     ]
   },
-  "dependencies": {},
+  "dependencies": {
+    "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
+  },
   "description": "Read-only workspace-jailed file inspection.",
   "display_name": "Rumi File Inspect",
-  "host_execution": false,
+  "host_execution": true,
   "metadata": {
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
       "generator": "tobkiri.core_runtime.manifest_projection/v1",
       "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:5f8622c8e8ade8ff6b8c208943cc367c49fc86f2c69538b2200b12145c5b9999"
+      "source_content_hash": "sha256:44248f0646a13adbd0137172879005e2ac13edfd54c7e74404faba9e94209948"
     },
     "read_only_projection": true
   },

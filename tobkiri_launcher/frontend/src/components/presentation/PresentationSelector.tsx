@@ -83,6 +83,53 @@ function AuthoritySummary({
   );
 }
 
+function IdentitySummary({
+  state,
+  basePack,
+}: {
+  state: ApiPresentationState;
+  basePack: ApiPresentationState['catalog']['base_packs'][number] | null;
+}) {
+  return (
+    <Card className="p-5" data-testid="presentation-profile-identity">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">
+          Verified profile identity
+        </p>
+        <p className="mt-2 text-sm leading-6 text-text-muted">
+          The profile and backend identity stay pinned when the presentation Shell changes.
+        </p>
+      </div>
+      <dl className="mt-4 grid gap-x-6 gap-y-3 text-xs text-text-muted sm:grid-cols-2">
+        <div>
+          <dt className="font-medium text-text-main">Default profile</dt>
+          <dd className="mt-1 break-words">{state.catalog.default_profile_id}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-text-main">Profile source</dt>
+          <dd className="mt-1 break-words">{state.catalog.default_profile_source}</dd>
+        </div>
+        <div data-testid="default-profile-digest">
+          <dt className="font-medium text-text-main">Profile SHA-256</dt>
+          <dd className="mt-1 break-all font-mono">{state.catalog.default_profile_digest}</dd>
+        </div>
+        <div data-testid="backend-identity-digest">
+          <dt className="font-medium text-text-main">Backend identity SHA-256</dt>
+          <dd className="mt-1 break-all font-mono">{basePack?.backend_identity_digest ?? 'Unavailable'}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-text-main">Backend Providers</dt>
+          <dd className="mt-1 break-words">{basePack?.backend_provider_ids.join(', ') || 'Unavailable'}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-text-main">State owners</dt>
+          <dd className="mt-1 break-words">{basePack?.state_owners.join(', ') || 'Unavailable'}</dd>
+        </div>
+      </dl>
+    </Card>
+  );
+}
+
 export function PresentationSelector({
   state,
   selection,
@@ -129,6 +176,8 @@ export function PresentationSelector({
           it never mints Host authority or changes backend ownership.
         </p>
       </div>
+
+      <IdentitySummary state={state} basePack={selectedBase} />
 
       {error ? (
         <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-main">

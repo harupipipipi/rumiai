@@ -49,6 +49,7 @@ def test_catalog_contains_exact_production_variants_and_no_placeholder_installat
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     expected_variants = {
         "macos-arm64",
+        "macos-x86_64",
         "linux-x86_64",
         "windows-x86_64",
     }

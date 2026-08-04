@@ -20,12 +20,20 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
+            shell_bundles: app
+            presentation_variant: shell.tauri.default.macos-arm64
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            shell_bundles: app
+            presentation_variant: shell.tauri.default.macos-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            shell_bundles: nsis
+            presentation_variant: shell.tauri.default.windows-x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            shell_bundles: appimage
+            presentation_variant: shell.tauri.default.linux-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -109,8 +117,56 @@ jobs:
         working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
 
+      - name: Build verified Tauri Shell artifact
+        working-directory: tobkiri_launcher
+        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
+
+      - name: Stage verified macOS Tauri Shell artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+        run: |
+          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
+          test -n "$artifact"
+          python tobkiri_launcher/scripts/package_presentation_artifact.py \
+            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
+            --artifact-id '${{ matrix.presentation_variant }}' \
+            --artifact "$artifact" \
+            --output-dir "$RELEASE_ROOT"
+
+      - name: Stage verified Linux Tauri Shell artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+        run: |
+          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$artifact"
+          python tobkiri_launcher/scripts/package_presentation_artifact.py \
+            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
+            --artifact-id '${{ matrix.presentation_variant }}' \
+            --artifact "$artifact" \
+            --output-dir "$RELEASE_ROOT"
+
+      - name: Stage verified Windows Tauri Shell artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+        run: |
+          $artifact = Join-Path $env:GITHUB_WORKSPACE "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/tobkiri-shell.exe"
+          if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Tauri Shell binary not found: $artifact" }
+          python tobkiri_launcher/scripts/package_presentation_artifact.py `
+            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json `
+            --artifact-id '${{ matrix.presentation_variant }}' `
+            --artifact $artifact `
+            --output-dir $env:RELEASE_ROOT
+
       - name: Build with cargo tauri
         working-directory: tobkiri_launcher
+        env:
+          TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
         run: cargo tauri build --target ${{ matrix.target }} --ci
 
       - name: Upload release artifacts

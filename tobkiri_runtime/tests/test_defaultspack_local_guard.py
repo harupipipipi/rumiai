@@ -543,7 +543,13 @@ def test_composer_transcription_http_guard_rejects_cross_port_and_oversize_body_
         )
         with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
             sock.sendall(raw_request)
-            response = sock.recv(65536).decode("utf-8", errors="replace")
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            response = b"".join(chunks).decode("utf-8", errors="replace")
         assert "HTTP/1.1 413" in response
         assert "AUDIO_PAYLOAD_TOO_LARGE" in response
     finally:

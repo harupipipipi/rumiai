@@ -157,6 +157,11 @@ _CODING_PR_TOOL_IDS = [
     "coding_github_pr_create",
 ]
 
+# Empty conversations are routed through the catalog-owned Rumi profile.  The
+# persisted model settings default (``stub/default``) remains available for
+# explicit local-provider selection, but is not a user-facing chat default.
+DEFAULT_CHAT_MODEL = "rumi/rumi"
+
 
 def _is_provider_qualified_model(value: Any) -> bool:
     text = str(value or "").strip()
@@ -359,7 +364,7 @@ def prepare_chat_run(
             role=str(user_message.get("role") or message.get("role") or "user"),
             runtime_content=runtime_content,
         )
-    model = str((conversation or {}).get("model") or "stub/default")
+    model = str((conversation or {}).get("model") or DEFAULT_CHAT_MODEL)
     request_id = gen_id()
 
     manager = get_manager()

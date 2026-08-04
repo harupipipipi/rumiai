@@ -11,6 +11,7 @@ if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
 from core_runtime.profile_paths import active_profile_id
 from core_runtime.profile_workspace import ProfileWorkspaceManager
 from core_runtime.profile_runtime_selection import apply_profile_graph_selection
+from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
 from domain.external.input_profile_registry import InputProfileRegistry
 from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID, FunctionSpec
@@ -112,6 +113,7 @@ def build_api_map(*, profile_id: str | None = None, focus: str | None = None) ->
         )
     for edge in profile_edges["edges"]:
         edges.setdefault(edge["id"], edge)
+    _add_profile_contract_providers(nodes, edges, profile_edges)
 
     filtered_nodes = list(nodes.values())
     filtered_edges = list(edges.values())
@@ -140,6 +142,7 @@ def build_api_map(*, profile_id: str | None = None, focus: str | None = None) ->
             "tool_count": len([node for node in filtered_nodes if node["kind"] == "tool"]),
             "webhook_count": len([node for node in filtered_nodes if node["kind"] == "webhook"]),
             "flow_count": len([node for node in filtered_nodes if node["kind"] == "flow"]),
+            "provider_count": len([node for node in filtered_nodes if node["kind"] == "provider"]),
             "function_count": len([node for node in filtered_nodes if node["kind"] == "function"]),
             "operation_count": len([
                 node
@@ -158,6 +161,63 @@ def build_api_map(*, profile_id: str | None = None, focus: str | None = None) ->
         "profile_runtime": profile_edges.get("profile_runtime", {}),
         "diagnostics": diagnostics,
     }
+
+
+def _add_profile_contract_providers(
+    nodes: Dict[str, Dict[str, Any]],
+    edges: Dict[str, Dict[str, Any]],
+    profile_edges: Dict[str, Any],
+) -> None:
+    """Add data-only global provider identities from the verified active plan."""
+    plan = persisted_resolved_profile()
+    profile_runtime = profile_edges.get("profile_runtime")
+    profile_id = str(
+        profile_runtime.get("profile_id")
+        if isinstance(profile_runtime, dict)
+        else ""
+    ).strip()
+    if plan is None or profile_id != plan.profile_id:
+        return
+    profile_node_id = f"profile:{profile_id}"
+    for provider in plan.providers:
+        contract_node_id = f"contract:{provider.contract_id}"
+        provider_node_id = f"provider:{provider.provider_instance_id}"
+        _add_node(
+            nodes,
+            contract_node_id,
+            "contract",
+            provider.contract_id,
+            provider.contract_id,
+            {"runtime_role": "global_contract"},
+        )
+        _add_node(
+            nodes,
+            provider_node_id,
+            "provider",
+            provider.provider_instance_id,
+            provider.provider_instance_id,
+            {
+                "contract_id": provider.contract_id,
+                "source_pack_id": provider.source_pack_id,
+                "version": provider.version,
+                "content_hash": provider.content_hash,
+                "runtime_role": "selected_provider",
+            },
+        )
+        _add_edge(
+            edges,
+            provider_node_id,
+            contract_node_id,
+            "provides_contract",
+            {"source_pack_id": provider.source_pack_id},
+        )
+        _add_edge(
+            edges,
+            profile_node_id,
+            provider_node_id,
+            "activates_provider",
+            {"source_pack_id": provider.source_pack_id},
+        )
 
 
 def _add_http_route(

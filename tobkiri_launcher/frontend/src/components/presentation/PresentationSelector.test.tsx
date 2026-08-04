@@ -89,6 +89,22 @@ const state: ApiPresentationState = {
   },
 };
 
+const verifiedState: ApiPresentationState = {
+  ...state,
+  materialization: {
+    ...state.materialization,
+    status: 'materialized',
+    artifact: {
+      ...state.catalog.shell_providers[0].artifact!,
+      path: 'bundled/presentation-artifacts/shell.tauri.default.test/Tobkiri.app',
+      sha256: 'sha256:' + '4'.repeat(64),
+      status: 'verified',
+      status_detail: 'Pinned digest, prebuilt status, and production metadata verified.',
+    },
+    reason: null,
+  },
+};
+
 test('PresentationSelector exposes exact selection and blocks unverified launch', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   Object.defineProperties(globalThis, {
@@ -101,32 +117,76 @@ test('PresentationSelector exposes exact selection and blocks unverified launch'
   assert.ok(container);
   const root: Root = createRoot(container);
   const saved: Array<{base_pack_id: string; shell_provider_id: string}> = [];
+  const changed: Array<{base_pack_id: string; shell_provider_id: string}> = [];
+  let launches = 0;
 
   await act(async () => {
     root.render(
       <PresentationSelector
         state={state}
         selection={state.selection}
-        onSelectionChange={() => undefined}
+        onSelectionChange={(next) => {
+          if (next) changed.push(next);
+        }}
         onSave={(selection) => { saved.push(selection); }}
-        onLaunch={() => undefined}
+        onLaunch={() => { launches += 1; }}
       />,
     );
   });
 
   try {
     const baseButton = container.querySelector<HTMLButtonElement>('[data-testid="base-pack-defaults-basepack"]');
+    const shellButton = container.querySelector<HTMLButtonElement>(
+      '[data-testid="shell-provider-shell.tauri.default"]',
+    );
     const saveButton = container.querySelector<HTMLButtonElement>('[data-testid="save-presentation"]');
     const launchButton = container.querySelector<HTMLButtonElement>('[data-testid="launch-presentation"]');
     assert.ok(baseButton);
+    assert.ok(shellButton);
     assert.ok(saveButton);
     assert.ok(launchButton);
+    assert.match(container.textContent ?? '', /defaults-modern/);
+    assert.match(container.textContent ?? '', /Profile SHA-256/);
+    assert.match(container.textContent ?? '', /Backend identity SHA-256/);
+    assert.equal(
+      container.querySelector('[data-testid="default-profile-digest"]')?.textContent?.includes(
+        state.catalog.default_profile_digest,
+      ),
+      true,
+    );
+    assert.equal(
+      container.querySelector('[data-testid="backend-identity-digest"]')?.textContent?.includes(
+        state.catalog.base_packs[0].backend_identity_digest,
+      ),
+      true,
+    );
     assert.equal(baseButton.getAttribute('aria-pressed'), 'true');
+    assert.equal(shellButton.getAttribute('aria-pressed'), 'true');
     assert.equal(launchButton.disabled, true);
     assert.match(container.textContent ?? '', /Launch blocked/);
 
+    await act(async () => shellButton.click());
+    assert.deepEqual(changed, [state.selection]);
+
     await act(async () => saveButton.click());
     assert.deepEqual(saved, [state.selection]);
+
+    await act(async () => {
+      root.render(
+        <PresentationSelector
+          state={verifiedState}
+          selection={verifiedState.selection}
+          onSelectionChange={() => undefined}
+          onSave={() => undefined}
+          onLaunch={() => { launches += 1; }}
+        />,
+      );
+    });
+    const verifiedLaunchButton = container.querySelector<HTMLButtonElement>('[data-testid="launch-presentation"]');
+    assert.ok(verifiedLaunchButton);
+    assert.equal(verifiedLaunchButton.disabled, false);
+    await act(async () => verifiedLaunchButton.click());
+    assert.equal(launches, 1);
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

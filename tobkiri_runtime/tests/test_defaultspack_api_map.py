@@ -75,6 +75,21 @@ def test_api_map_contains_route_tool_and_webhook_edges(monkeypatch: pytest.Monke
     monkeypatch.setattr("ecosystem.defaultspack.domain.api_map.builder.InputProfileRegistry", _FakeInputProfileRegistry)
     monkeypatch.setattr("ecosystem.defaultspack.domain.api_map.builder.ProfileWorkspaceManager", _FakeProfileWorkspaceManager)
     monkeypatch.setattr("ecosystem.defaultspack.domain.api_map.builder.active_profile_id", lambda: "research-profile")
+    monkeypatch.setattr(
+        "ecosystem.defaultspack.domain.api_map.builder.persisted_resolved_profile",
+        lambda: SimpleNamespace(
+            profile_id="research-profile",
+            providers=(
+                SimpleNamespace(
+                    contract_id="rumi.service.file.inspect.v1",
+                    provider_instance_id="file-inspect.service",
+                    source_pack_id="rumi_file_inspect_pack",
+                    version="1.0.0",
+                    content_hash="sha256:fixture",
+                ),
+            ),
+        ),
+    )
 
     payload = build_api_map(profile_id="research-profile")
     edges = {(edge["from_id"], edge["to_id"], edge["kind"]) for edge in payload["edges"]}
@@ -84,6 +99,16 @@ def test_api_map_contains_route_tool_and_webhook_edges(monkeypatch: pytest.Monke
     assert ("tool:web_search", "handler:domain.search:web_search", "executes_handler") in edges
     assert ("webhook:research-webhook", "node:ingress.research", "uses_input_profile") in edges
     assert ("profile:research-profile", "tool:web_search", "selects") in edges
+    assert (
+        "profile:research-profile",
+        "provider:file-inspect.service",
+        "activates_provider",
+    ) in edges
+    assert (
+        "provider:file-inspect.service",
+        "contract:rumi.service.file.inspect.v1",
+        "provides_contract",
+    ) in edges
     route = next(
         node
         for node in payload["nodes"]
@@ -95,6 +120,7 @@ def test_api_map_contains_route_tool_and_webhook_edges(monkeypatch: pytest.Monke
     assert block["metadata"]["runtime_role"] == "implementation"
     assert payload["summary"]["operation_count"] >= 2
     assert payload["summary"]["implementation_count"] >= 1
+    assert payload["summary"]["provider_count"] == 1
     assert payload["profile_runtime"]["policy"]["api_route_allowlist"] == [
         "POST /api/chat/conversations/{id}/messages"
     ]

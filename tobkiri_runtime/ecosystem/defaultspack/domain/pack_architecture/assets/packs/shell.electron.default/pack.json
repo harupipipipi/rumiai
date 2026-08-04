@@ -60,6 +60,15 @@
       "artifact_kind": "signed_prebuilt_bundle"
     },
     {
+      "variant_id": "macos-x86_64",
+      "platform": "macos",
+      "architecture": "x86_64",
+      "artifact_ref": "artifacts/variants/macos-x86_64.json",
+      "digest": "sha256:e287e7b88ebe1c2997d76810f00b2b25f8b5496f84ec68997e136c97e3200a3b",
+      "entrypoint": "Tobkiri Electron.app/Contents/MacOS/tobkiri-electron",
+      "artifact_kind": "signed_prebuilt_bundle"
+    },
+    {
       "variant_id": "linux-x86_64",
       "platform": "linux",
       "architecture": "x86_64",
