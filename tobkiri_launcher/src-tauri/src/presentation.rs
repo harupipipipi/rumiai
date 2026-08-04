@@ -1757,12 +1757,12 @@ mod tests {
         let catalog: PresentationCatalog =
             serde_json::from_str(include_str!("../bundled/presentation_catalog.json")).unwrap();
         validate_catalog_integrity(&catalog).unwrap();
-        assert_eq!(catalog.default_profile_id, "defaults-modern");
+        assert_eq!(catalog.default_profile_id, "defaults");
         assert_eq!(
             catalog.default_selection.shell_provider_id,
-            "shell.tauri.default"
+            "shell.cli.default"
         );
-        assert_eq!(catalog.shell_providers.len(), 3);
+        assert_eq!(catalog.shell_providers.len(), 1);
         assert!(catalog.shell_providers.iter().all(|shell| {
             shell
                 .artifact_variants
@@ -1804,7 +1804,7 @@ mod tests {
         );
 
         assert_eq!(state.catalog.base_packs.len(), 1);
-        assert_eq!(state.catalog.shell_providers.len(), 3);
+        assert_eq!(state.catalog.shell_providers.len(), 1);
         assert_eq!(state.selection, None);
         assert_eq!(state.materialization.status, "not_selected");
 
@@ -1818,7 +1818,7 @@ mod tests {
             })
             .filter(|selection| validate_selection(&state.catalog, selection).is_ok())
             .collect::<Vec<_>>();
-        assert_eq!(compatible_shells.len(), 3);
+        assert_eq!(compatible_shells.len(), 1);
 
         for selection in compatible_shells {
             let selected_state =
@@ -1941,7 +1941,7 @@ mod tests {
         let artifact_path = app_dir
             .join("bundled")
             .join("presentation-artifacts")
-            .join("shell.tauri.default.macos-arm64")
+            .join("shell.cli.default.macos-arm64")
             .join("Tobkiri.app");
         fs::create_dir_all(&artifact_path).unwrap();
         fs::write(artifact_path.join("Contents"), b"verified shell artifact").unwrap();
@@ -1956,7 +1956,7 @@ mod tests {
         let variant = catalog
             .shell_providers
             .iter_mut()
-            .find(|shell| shell.provider_id == "shell.tauri.default")
+            .find(|shell| shell.provider_id == "shell.cli.default")
             .unwrap()
             .artifact_variants
             .iter_mut()
@@ -2078,7 +2078,7 @@ mod tests {
         let mut duplicate = catalog.shell_providers[0].artifact_variants[0].clone();
         duplicate.platform = "fixture-platform".into();
         duplicate.architecture = "fixture-architecture".into();
-        catalog.shell_providers[1].artifact_variants.push(duplicate);
+        catalog.shell_providers[0].artifact_variants.push(duplicate);
         let error = validate_catalog_integrity(&catalog).unwrap_err();
         assert!(error.to_string().contains("invalid production variant"));
     }

@@ -28,13 +28,26 @@ PACKAGE = _load("package_presentation_artifact")
 
 def _release(root: Path) -> tuple[Path, dict[str, object]]:
     repository_root = Path(__file__).resolve().parents[3]
-    catalog_path = (
+    source_catalog_path = (
         repository_root
         / "tobkiri_launcher"
         / "src-tauri"
         / "bundled"
         / "presentation_catalog.json"
     )
+    catalog = json.loads(source_catalog_path.read_text(encoding="utf-8"))
+    variant = catalog["shell_providers"][0]["artifact_variants"][0]
+    variant.update(
+        {
+            "artifact_id": "shell.cli.default.linux-x86_64",
+            "architecture": "x86_64",
+            "bundle_identifier": None,
+            "platform": "linux",
+            "variant": "linux-x86_64",
+        }
+    )
+    catalog_path = root / "presentation_catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
     artifact = Path(shutil.which("true") or "/usr/bin/true")
     manifest = root / "shell_build_output.v4.json"
     manifest.write_text(

@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+V4_ROOT = ROOT / "tobkiri_runtime" / "ecosystem" / "defaultspack" / "v4"
+MODULE_PATH = Path(__file__).with_name("presentation_catalog_v4.py")
+SPEC = importlib.util.spec_from_file_location("presentation_catalog_v4", MODULE_PATH)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+
+def _copy_bundle(tmp_path: Path) -> tuple[Path, Path]:
+    repository = tmp_path / "repository"
+    bundle = repository / "tobkiri_runtime" / "ecosystem" / "defaultspack" / "v4"
+    bundle.parent.mkdir(parents=True)
+    shutil.copytree(V4_ROOT, bundle)
+    return repository, bundle
+
+
+def test_v4_catalog_is_byte_identical_and_uninstalled_variants_fail_closed(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "catalog-first.json"
+    second = tmp_path / "catalog-second.json"
+    MODULE.write_presentation_catalog(ROOT, first)
+    MODULE.write_presentation_catalog(ROOT, second)
+
+    assert first.read_bytes() == second.read_bytes()
+    catalog = json.loads(first.read_text(encoding="utf-8"))
+    assert catalog["default_profile_source"].endswith("/v4/defaults.profile.v4.json")
+    assert all(
+        "domain/pack_architecture" not in value
+        for value in json.dumps(catalog, sort_keys=True).split()
+    )
+    variants = catalog["shell_providers"][0]["artifact_variants"]
+    assert [variant["artifact_id"] for variant in variants] == [
+        "shell.cli.default.macos-arm64"
+    ]
+    for variant in variants:
+        assert all(
+            variant[field] is None
+            for field in ("path", "sha256", "size", "source_identity", "source_revision")
+        )
+
+
+def test_v4_catalog_preserves_installed_metadata_and_release_binding(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "catalog.json"
+    MODULE.write_presentation_catalog(ROOT, target)
+    catalog = json.loads(target.read_text(encoding="utf-8"))
+    variant = catalog["shell_providers"][0]["artifact_variants"][0]
+    installed = {
+        "path": "bundled/presentation-artifacts/shell.cli.default.macos-arm64/tobkiri-shell",
+        "sha256": "sha256:" + "1" * 64,
+        "size": 17,
+        "source_identity": "github:tobkiri/shell",
+        "source_revision": "release-2026-08-05",
+    }
+    variant.update(installed)
+    binding = {
+        "schema": "io.tobkiri.shell.release.v4",
+        "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+        "artifact_index_sha256": "sha256:" + "2" * 64,
+        "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+        "profile_lock_sha256": "sha256:" + "3" * 64,
+        "catalog_revision": "sha256:" + "4" * 64,
+        "artifact_id": variant["artifact_id"],
+        "source_identity": installed["source_identity"],
+        "source_revision": installed["source_revision"],
+        "platform": "macos",
+        "architecture": "arm64",
+    }
+    catalog["release_binding"] = binding
+    target.write_text(
+        json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    generated = MODULE.generate_presentation_catalog(ROOT, target)
+    generated_variant = generated["shell_providers"][0]["artifact_variants"][0]
+    assert {field: generated_variant[field] for field in installed} == installed
+    assert generated["release_binding"] == binding
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    (
+        ("tamper", "digest changed"),
+        ("missing", "regular file"),
+        ("relative", "unsafe"),
+        ("symlink", "symlink"),
+        ("unsupported", "unsupported v4 bundle kind"),
+    ),
+)
+def test_v4_bundle_rejects_tamper_missing_relative_symlink_and_unsupported(
+    tmp_path: Path, case: str, message: str
+) -> None:
+    repository, bundle = _copy_bundle(tmp_path)
+    target = bundle / "packs" / "defaultspack.pack.v4.json"
+    lock_path = bundle / "bundle.lock.json"
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+
+    if case == "tamper":
+        target.write_bytes(target.read_bytes() + b" ")
+    elif case == "missing":
+        target.unlink()
+    elif case == "relative":
+        lock["entries"][0]["path"] = "../packs/defaults-basepack.pack.v4.json"
+        lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    elif case == "symlink":
+        target.unlink()
+        target.symlink_to(V4_ROOT / "packs" / "defaultspack.pack.v4.json")
+    else:
+        lock["entries"][0]["kind"] = "unsupported"
+        lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    with pytest.raises(MODULE.PresentationCatalogError, match=message):
+        MODULE.load_v4_bundle(repository)

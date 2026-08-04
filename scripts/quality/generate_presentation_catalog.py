@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate or check the Launcher presentation catalog."""
+"""Generate or check the Launcher presentation catalog from Protocol v4."""
 
 from __future__ import annotations
 
@@ -8,13 +8,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_ROOT = ROOT / "tobkiri_runtime"
-PACK_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack"
-for path in (RUNTIME_ROOT, PACK_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
-from domain.pack_architecture import (  # noqa: E402
+from presentation_catalog_v4 import (  # noqa: E402
+    PresentationCatalogError,
     presentation_catalog_drift,
     write_presentation_catalog,
 )
@@ -39,7 +35,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print("presentation catalog is generated from checked-in defaultspack manifests")
         return 0
-    target = write_presentation_catalog(root, output)
+    try:
+        target = write_presentation_catalog(root, output)
+    except PresentationCatalogError as error:
+        print(f"presentation catalog generation failed: {error}", file=sys.stderr)
+        return 1
     print(f"wrote {target}")
     return 0
 
