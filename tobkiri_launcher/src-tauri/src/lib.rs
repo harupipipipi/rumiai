@@ -16,6 +16,7 @@ mod kernel_manager;
 mod presentation;
 mod process_utils;
 mod python_env;
+mod runtime_resource_integrity;
 mod tray;
 mod updater;
 

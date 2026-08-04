@@ -19,6 +19,7 @@ _LegacyExportTarget = Union[_ExportTarget, _ModuleExportTarget]
 
 
 _PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
+    "Kernel": (".bootstrap.runtime", "Kernel"),
     "Diagnostics": (".diagnostics", "Diagnostics"),
     "DIContainer": (".di_container", "DIContainer"),
     "get_container": (".di_container", "get_container"),

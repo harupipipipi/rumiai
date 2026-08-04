@@ -465,7 +465,8 @@ def main():
         def _finish_runtime_startup():
             try:
                 _kernel.run_startup_remaining()
-                _restore_active_startup_capability_graph(_kernel)
+                if not getattr(_kernel, "owns_host_http_surface", False):
+                    _restore_active_startup_capability_graph(_kernel)
                 try:
                     from backend_core.ecosystem.compat import mark_ecosystem_initialized
 
@@ -516,6 +517,11 @@ def main():
 
         if args.headless:
             print(f"[Rumi] {L('startup.headless')}")
+            return
+
+        if getattr(_kernel, "owns_host_http_surface", False):
+            _start_restart_signal_monitor()
+            _wait_for_signal()
             return
 
         # HTTPサーバーがPackから提供されている場合は起動

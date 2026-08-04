@@ -51,7 +51,22 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
         "<!doctype html>\n",
         encoding="utf-8",
     )
-    (stage / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    shutil.copytree(
+        ROOT / "tobkiri_runtime/core_runtime",
+        stage / "core_runtime",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            "ecosystem.json",
+            "rumi.pack.v3.json",
+        ),
+    )
+    for relative in module.REQUIRED_RUNTIME_BOOTSTRAP_FILES:
+        source = ROOT / "tobkiri_runtime" / relative
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     (stage / "requirements.txt").write_text("", encoding="utf-8")
     ui_root = stage / "ecosystem/defaultspack/ui"
     ui_root.mkdir(parents=True)
@@ -122,6 +137,39 @@ def test_validate_bundle_accepts_canonical_v4_stage_without_legacy_authority(tmp
 
     assert not list(stage.rglob("ecosystem.json"))
     assert not list(stage.rglob("rumi.pack.v3.json"))
+
+
+def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_path):
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+
+    module.validate_bundle(stage, False, None, repository_root=ROOT)
+    manifest_path = module.write_runtime_resource_manifest(stage)
+    module.verify_runtime_resource_manifest(stage)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    paths = {entry["path"] for entry in manifest["entries"]}
+    assert "core_runtime/__init__.py" in paths
+    assert "core_runtime/bootstrap/runtime.py" in paths
+
+
+@pytest.mark.parametrize("case", ("missing", "tampered", "symlink"))
+def test_runtime_resource_manifest_rejects_unsafe_or_changed_tree(tmp_path, case):
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    module.write_runtime_resource_manifest(stage)
+    target = stage / "core_runtime/bootstrap/runtime.py"
+
+    if case == "missing":
+        target.unlink()
+    elif case == "tampered":
+        target.write_bytes(target.read_bytes() + b"\n# tampered\n")
+    else:
+        target.unlink()
+        target.symlink_to(ROOT / "tobkiri_runtime/core_runtime/bootstrap/runtime.py")
+
+    with pytest.raises((FileNotFoundError, RuntimeError)):
+        module.verify_runtime_resource_manifest(stage)
 
 
 def test_validate_bundle_rejects_legacy_authority_document(tmp_path):

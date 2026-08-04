@@ -19,9 +19,7 @@ use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
 use crate::defaultspack_manager::DefaultspackManager;
-use crate::kernel_manager::{
-    detect_port_listener, python_path_with_runtime, terminate_external_listener, PortListener,
-};
+use crate::kernel_manager::{detect_port_listener, terminate_external_listener, PortListener};
 use crate::process_utils;
 
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
@@ -1214,7 +1212,6 @@ pub(crate) fn spawn_defaultspack_local_server(
         ],
     )?;
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
-    let python_path = python_path_with_runtime(&config.app_dir, std::env::var_os("PYTHONPATH"))?;
     let command_parts =
         shell_words::split(&metadata.command).context("defaultspack desktop command is invalid")?;
     let (program, arguments) = command_parts
@@ -1244,9 +1241,15 @@ pub(crate) fn spawn_defaultspack_local_server(
     // listener orphaned and cannot provide a process-lifetime guardian.
     let mut command = process_utils::command(config.venv_python());
     command
+        .args([
+            "-I",
+            "-c",
+            "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv[1]; sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')",
+        ])
+        .arg(&config.app_dir)
         .args(arguments)
         .env("PATH", path)
-        .env("PYTHONPATH", python_path)
+        .env_remove("PYTHONPATH")
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)

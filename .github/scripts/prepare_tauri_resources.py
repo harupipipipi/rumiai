@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import stat
@@ -63,6 +64,16 @@ GENERATED_RESOURCE_DIRS = (
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
     "bundled",
+)
+RUNTIME_RESOURCE_MANIFEST = "runtime-resource-manifest.v1.json"
+RUNTIME_RESOURCE_SCHEMA = "io.tobkiri.runtime-resource-manifest.v1"
+REQUIRED_RUNTIME_BOOTSTRAP_FILES = (
+    Path("app.py"),
+    Path("core_runtime/__init__.py"),
+    Path("core_runtime/bootstrap/__init__.py"),
+    Path("core_runtime/bootstrap/runtime.py"),
+    Path("core_runtime/app_lifecycle_manager.py"),
+    Path("core_runtime/pack_api_server.py"),
 )
 UV_PINNED_VERSION = "0.11.14"
 UV_SHA256_BY_TARGET = {
@@ -176,6 +187,87 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
             copy_file(src, dest_root / rel_under_app)
             copied += 1
     return copied
+
+
+def _resource_files(dest_root: Path) -> list[Path]:
+    """Return the exact regular-file inventory used by the resource seal."""
+    files: list[Path] = []
+    for path in dest_root.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(
+                "Staged resource contains symlink: "
+                f"{path.relative_to(dest_root).as_posix()}"
+            )
+        if path.is_file() and path.name != RUNTIME_RESOURCE_MANIFEST:
+            files.append(path)
+    return sorted(files, key=lambda item: item.relative_to(dest_root).as_posix())
+
+
+def build_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
+    """Build a deterministic manifest over every staged runtime resource."""
+    entries = []
+    for path in _resource_files(dest_root):
+        payload = path.read_bytes()
+        entries.append(
+            {
+                "path": path.relative_to(dest_root).as_posix(),
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    return {"schema": RUNTIME_RESOURCE_SCHEMA, "entries": entries}
+
+
+def write_runtime_resource_manifest(dest_root: Path) -> Path:
+    """Write the deterministic runtime resource manifest."""
+    manifest_path = dest_root / RUNTIME_RESOURCE_MANIFEST
+    manifest_path.write_text(
+        json.dumps(
+            build_runtime_resource_manifest(dest_root),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def verify_runtime_resource_manifest(dest_root: Path) -> None:
+    """Fail closed when staged bytes differ from the resource manifest."""
+    manifest_path = dest_root / RUNTIME_RESOURCE_MANIFEST
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Runtime resource manifest is missing or unsafe: {manifest_path}"
+        )
+    try:
+        actual = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Runtime resource manifest is malformed: {exc}") from exc
+    if actual != build_runtime_resource_manifest(dest_root):
+        raise RuntimeError("Runtime resource manifest does not match staged bytes")
+
+
+def verify_staged_bootstrap_import(dest_root: Path) -> None:
+    """Import the public bootstrap using only the staged runtime tree."""
+    code = (
+        "import pathlib,sys; "
+        f"root=pathlib.Path({str(dest_root.resolve())!r}); "
+        "sys.path.insert(0,str(root)); "
+        "from core_runtime import Kernel; "
+        "module=sys.modules[Kernel.__module__]; "
+        "origin=pathlib.Path(module.__file__).resolve(); "
+        "origin.relative_to(root.resolve())"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=dest_root.parent,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"Staged core_runtime bootstrap import failed: {detail}")
 
 
 def is_windows_target(target: str) -> bool:
@@ -406,7 +498,7 @@ def validate_bundle(
 
     repository_root = (repository_root or Path(__file__).resolve().parents[2]).resolve()
     required = [
-        Path("app.py"),
+        *REQUIRED_RUNTIME_BOOTSTRAP_FILES,
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
         *CANONICAL_DEFAULTSPACK_FILES,
@@ -456,6 +548,7 @@ def validate_bundle(
         raise RuntimeError("Forbidden generated bundle directories: " + ", ".join(forbidden[:20]))
 
     _validate_defaultspack_v4(dest_root, repository_root)
+    verify_staged_bootstrap_import(dest_root)
 
 
 def warn_legacy_defaultspack_app_bundle() -> None:
@@ -543,6 +636,8 @@ def main() -> int:
         args.target,
         repository_root=repo_root,
     )
+    write_runtime_resource_manifest(dest_root)
+    verify_runtime_resource_manifest(dest_root)
     warn_legacy_defaultspack_app_bundle()
     print(
         "Prepared "

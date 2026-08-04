@@ -6,7 +6,6 @@
 //! - Detect exit-code 42 to signal "please restart me".
 //! - Auto-restart on unexpected exit (max 3 times).
 
-use std::ffi::OsString;
 use std::fs;
 #[cfg(unix)]
 use std::io::ErrorKind;
@@ -48,17 +47,6 @@ fn kernel_working_dir(config: &AppConfig) -> &Path {
             .parent()
             .unwrap_or(&config.user_data_dir)
     }
-}
-
-pub(crate) fn python_path_with_runtime(
-    runtime_root: &Path,
-    current: Option<OsString>,
-) -> Result<OsString> {
-    let mut paths = vec![runtime_root.to_path_buf()];
-    if let Some(current) = current {
-        paths.extend(std::env::split_paths(&current));
-    }
-    std::env::join_paths(paths).context("failed to build PYTHONPATH for bundled runtime")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,9 +106,9 @@ impl KernelManager {
 
     /// Start the Kernel process.
     ///
-    /// Runs `{venv}/bin/python -m app`. Bundled builds use the writable app
-    /// data root as cwd while importing code from the signed runtime through
-    /// PYTHONPATH, preventing relative user_data writes inside the app bundle.
+    /// Runs the sealed runtime module with isolated Python. Bundled builds use
+    /// the writable app data root as cwd and an explicit verified resource
+    /// root, preventing ambient imports and writes inside the app bundle.
     /// Stdout and stderr are redirected to `{log_dir}/kernel.log`.
     pub fn start(&mut self) -> Result<()> {
         if self.is_running() {
@@ -146,6 +134,10 @@ impl KernelManager {
                 self.config.rumi_home.display()
             );
         }
+        if !self.config.is_dev_workspace() {
+            crate::runtime_resource_integrity::verify(&self.config.app_dir)
+                .context("packaged runtime integrity verification failed")?;
+        }
 
         fs::create_dir_all(&self.config.log_dir)?;
         let log_file = fs::File::create(self.config.log_dir.join("kernel.log"))
@@ -156,11 +148,8 @@ impl KernelManager {
 
         let working_dir = kernel_working_dir(&self.config);
         fs::create_dir_all(working_dir)?;
-        let python_path =
-            python_path_with_runtime(&self.config.app_dir, std::env::var_os("PYTHONPATH"))?;
-
         info!(
-            "Starting Kernel: {} -m app (cwd={})",
+            "Starting Kernel from sealed runtime: {} (cwd={})",
             venv_python.display(),
             working_dir.display()
         );
@@ -177,9 +166,14 @@ impl KernelManager {
 
         let mut command = process_utils::command(&venv_python);
         command
-            .args(["-m", "app"])
+            .args([
+                "-I",
+                "-c",
+                "import runpy,sys; root=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_module('app',run_name='__main__',alter_sys=True)",
+            ])
+            .arg(&self.config.app_dir)
             .current_dir(working_dir)
-            .env("PYTHONPATH", python_path)
+            .env_remove("PYTHONPATH")
             .env("RUMI_HOME", &self.config.rumi_home)
             .env("RUMI_APP_DIR", &self.config.app_dir)
             .env("RUMI_USER_DATA", &self.config.user_data_dir)
@@ -755,19 +749,6 @@ mod tests {
         let config = test_config();
 
         assert_eq!(kernel_working_dir(&config), Path::new("/tmp/test_appdata"));
-    }
-
-    #[test]
-    fn python_path_keeps_runtime_first() {
-        let value = python_path_with_runtime(
-            Path::new("/runtime/app"),
-            Some(OsString::from("/existing/modules")),
-        )
-        .unwrap();
-        let paths = std::env::split_paths(&value).collect::<Vec<_>>();
-
-        assert_eq!(paths[0], PathBuf::from("/runtime/app"));
-        assert_eq!(paths[1], PathBuf::from("/existing/modules"));
     }
 
     #[test]

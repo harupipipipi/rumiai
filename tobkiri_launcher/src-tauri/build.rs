@@ -3,12 +3,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
 const PRESENTATION_RELEASE_ROOT_ENV: &str = "TOBKIRI_PRESENTATION_RELEASE_ROOT";
 const PRESENTATION_CATALOG_FILENAME: &str = "presentation_catalog.json";
 const PRESENTATION_RELEASE_FILENAME: &str = "presentation_release.v4.json";
 const PRESENTATION_INDEX_FILENAME: &str = "shell_artifact_index.v4.json";
 const PRESENTATION_LOCK_FILENAME: &str = "shell_profile_lock.v4.json";
+const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
+const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
 const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
@@ -135,8 +139,61 @@ fn stage_runtime_bundle() -> io::Result<()> {
 
     stage_pack_shell(&repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
+    write_runtime_resource_manifest(&staged_root)
+        .map_err(|error| stage_error("seal staged runtime", error))?;
 
     Ok(())
+}
+
+fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged runtime resource may not be a symlink: {}",
+                    path.display()
+                ),
+            ));
+        }
+        if metadata.is_dir() {
+            files.extend(collect_runtime_resource_files(root, &path)?);
+        } else if metadata.is_file()
+            && path.file_name().and_then(|name| name.to_str()) != Some(RUNTIME_RESOURCE_MANIFEST)
+        {
+            files.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
+    let entries = collect_runtime_resource_files(staged_root, staged_root)?
+        .into_iter()
+        .map(|relative| {
+            let payload = fs::read(staged_root.join(&relative))?;
+            Ok(serde_json::json!({
+                "path": relative.to_string_lossy().replace('\\', "/"),
+                "size": payload.len(),
+                "sha256": format!("{:x}", Sha256::digest(&payload)),
+            }))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let document = serde_json::json!({
+        "schema": RUNTIME_RESOURCE_SCHEMA,
+        "entries": entries,
+    });
+    let payload = serde_json::to_vec_pretty(&document)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fs::write(
+        staged_root.join(RUNTIME_RESOURCE_MANIFEST),
+        [payload, b"\n".to_vec()].concat(),
+    )
 }
 
 fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
@@ -460,7 +517,18 @@ fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result
             continue;
         }
         let source_path = repo_root.join(rel.as_ref());
-        if !source_path.is_file() {
+        let metadata = match fs::symlink_metadata(&source_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("tracked runtime source may not be a symlink: {}", rel),
+            ));
+        }
+        if !metadata.is_file() {
             continue;
         }
         copy_file(&source_path, &staged_root.join(rel_path))?;
@@ -492,6 +560,16 @@ fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<
 
         if should_skip(relative, file_type.is_dir()) {
             continue;
+        }
+
+        if file_type.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "runtime source may not be a symlink: {}",
+                    source_path.display()
+                ),
+            ));
         }
 
         if file_type.is_dir() {
@@ -550,6 +628,16 @@ fn copy_dir_recursive_filtered(src: &Path, dst: &Path, runtime_root: &Path) -> i
 
         if should_skip(relative, file_type.is_dir()) {
             continue;
+        }
+
+        if file_type.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "generated runtime resource may not be a symlink: {}",
+                    source_path.display()
+                ),
+            ));
         }
 
         if file_type.is_dir() {
