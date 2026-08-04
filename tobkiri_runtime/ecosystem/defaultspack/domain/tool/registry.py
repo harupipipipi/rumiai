@@ -26,6 +26,7 @@ _TOOL_SEARCH_METADATA_KEYS = {
     "skills",
     "triggers",
 }
+_DISCOVERY_ONLY_PACK_IDS = frozenset({"rumi_default_tools_pack"})
 
 
 class ToolRegistrationError(ValueError):
@@ -301,7 +302,13 @@ class ToolRegistry:
             return [self._pack_root()]
         roots: list[Path] = []
         effective = effective_pack_ids()
-        for pack_id in sorted(effective):
+        candidate_pack_ids = set(effective)
+        own_pack_id = self._pack_id_from_root(self._pack_root())
+        if own_pack_id:
+            candidate_pack_ids.add(own_pack_id)
+        if not effective:
+            candidate_pack_ids.update(_DISCOVERY_ONLY_PACK_IDS)
+        for pack_id in sorted(candidate_pack_ids):
             path = ecosystem_dir / pack_id
             if (
                 path.is_dir()

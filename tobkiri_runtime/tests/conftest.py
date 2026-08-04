@@ -627,6 +627,7 @@ def _reset_singletons(request):
         reset_container()
     except Exception:
         pass
+
     try:
         from tobkiri_runtime.core_runtime.di_container import reset_container as _reset_pkg_container
         _reset_pkg_container()
@@ -781,3 +782,349 @@ def _reset_singletons(request):
             _ce._global_executor = None
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Canonical owner bindings for compatibility suites
+# ---------------------------------------------------------------------------
+# These suites predate the persisted Defaults Profile and now need a scoped
+# owner contract in order to exercise their legacy facades.  The fixture below
+# is autouse only for this exact allowlist; all other tests, including negative
+# owner-absence tests, continue to exercise the production fail-closed path.
+_OWNER_MIGRATION_TEST_FILES = frozenset(
+    {
+        "test_defaultspack_agent_service_plan.py",
+        "test_defaultspack_agent_scheduler_approvals.py",
+        "test_defaultspack_operations_company.py",
+        "test_defaultspack_subagent_compat.py",
+        "test_company_workspace.py",
+        "test_defaultspack_ambient_trigger_pack.py",
+        "test_defaultspack_agent_os_tools.py",
+        "test_defaultspack_scheduler.py",
+        "test_subagent_team_workspace.py",
+    }
+)
+_WAVE7_OWNER_TEST_FILES = frozenset(
+    {
+        "test_defaultspack_memory2.py",
+        "test_defaultspack_external_submit.py",
+        "test_defaultspack_artifact_file.py",
+        "test_defaultspack_provider_trace.py",
+    }
+)
+_CHAT_OWNER_TEST_FILES = frozenset({"test_defaultspack_chat_facade_v4.py"})
+_OWNER_BINDING_TEST_FILES = (
+    _OWNER_MIGRATION_TEST_FILES | _WAVE7_OWNER_TEST_FILES | _CHAT_OWNER_TEST_FILES
+)
+_LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS = frozenset(
+    {
+        "defaultspack",
+        "rumi_agent_services_pack",
+        "rumi_browser_host_service_pack",
+        "rumi_clipboard_host_service_pack",
+        "rumi_default_tools_pack",
+        "rumi_desktop_host_service_pack",
+        "rumi_local_agent_pack",
+    }
+)
+
+
+def _owner_contract_invoker(owner, facade, expected_profile_id=None):
+    """Return the exact conversation owner contract test adapter."""
+
+    def invoke(contract_id, operation, payload):
+        if expected_profile_id is not None:
+            request_profile = str(payload.get("profile_id") or expected_profile_id)
+            if request_profile != expected_profile_id:
+                raise AssertionError("conversation request used an unexpected profile")
+
+        if contract_id == facade.CONVERSATION:
+            if operation == "list":
+                return owner.snapshot()
+            if operation == "get":
+                return owner.get(str(payload.get("conversation_id") or ""))
+
+        if contract_id == facade.CONVERSATION_MANAGE:
+            conversation_id = str(payload.get("conversation_id") or "")
+            expected = int(
+                payload.get("expected_conversation_revision")
+                or payload.get("expected_revision")
+                or 0
+            )
+            if operation == "create":
+                return owner.create(
+                    payload["conversation"],
+                    expected_revision=int(payload.get("expected_revision") or 0),
+                )
+            if operation == "update":
+                return owner.update(
+                    conversation_id,
+                    payload.get("patch") or {},
+                    expected_conversation_revision=expected,
+                )
+            if operation == "delete":
+                return owner.delete(
+                    conversation_id,
+                    expected_conversation_revision=expected,
+                )
+
+        if contract_id == facade.MESSAGE:
+            conversation = owner.get(str(payload.get("conversation_id") or ""))
+            if operation == "list":
+                if conversation is None:
+                    return None
+                return {
+                    "conversation_id": conversation["id"],
+                    "conversation_revision": conversation["conversation_revision"],
+                    "messages": list(conversation.get("messages") or []),
+                }
+            if operation == "get":
+                return next(
+                    (
+                        item
+                        for item in (conversation or {}).get("messages", [])
+                        if item.get("id") == payload.get("message_id")
+                    ),
+                    None,
+                )
+
+        if contract_id == facade.MESSAGE_MANAGE:
+            conversation_id = str(payload.get("conversation_id") or "")
+            expected = int(payload.get("expected_conversation_revision") or 0)
+            if operation == "append":
+                return owner.append_message(
+                    conversation_id,
+                    payload["message"],
+                    expected_conversation_revision=expected,
+                )
+            if operation == "update":
+                return owner.mutate_message(
+                    conversation_id,
+                    str(payload.get("message_id") or ""),
+                    expected_conversation_revision=expected,
+                    patch=payload.get("patch") or {},
+                )
+            if operation == "delete":
+                return owner.mutate_message(
+                    conversation_id,
+                    str(payload.get("message_id") or ""),
+                    expected_conversation_revision=expected,
+                    delete=True,
+                )
+            if operation == "replace":
+                return owner.replace_messages(
+                    conversation_id,
+                    payload.get("messages") or [],
+                    expected_conversation_revision=expected,
+                )
+
+        raise AssertionError(f"unexpected owner contract call: {contract_id}/{operation}")
+
+    return invoke
+
+
+def _memory_contract_invoker(owner, facade):
+    """Return the exact memory owner contract test adapter."""
+
+    def invoke(contract_id, operation, payload):
+        if contract_id == facade.RESOURCE:
+            if operation == "snapshot":
+                return owner.snapshot()
+            if operation == "get":
+                return owner.get(str(payload.get("memory_id") or ""))
+            if operation == "search":
+                return owner.search(
+                    str(payload.get("query") or ""),
+                    limit=int(payload.get("limit") or 8),
+                )
+        if contract_id == facade.MANAGE:
+            expected = int(payload.get("expected_revision") or 0)
+            if operation == "put":
+                return owner.put(payload["item"], expected_revision=expected)
+            if operation == "delete":
+                return owner.delete(
+                    str(payload.get("memory_id") or ""),
+                    expected_revision=expected,
+                )
+        raise AssertionError(f"unexpected memory owner call: {contract_id}/{operation}")
+
+    return invoke
+
+
+def _wave7_conversation_owner():
+    """Create the env-selected test owner without changing production behavior."""
+    raw_path = os.environ.get("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", "").strip()
+    if not raw_path:
+        return None
+    from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+    path = Path(raw_path).expanduser()
+    owner = ConversationStore("default", user_data_root=path.parent)
+    owner.root = path.parent
+    owner.path = path
+    owner.backup_root = path.parent / "migration_backups"
+    owner.lock_root = path.parent / "locks"
+    return owner
+
+
+def _wave7_memory_owner():
+    """Create the env-selected memory owner without changing production behavior."""
+    raw_root = os.environ.get("RUMI_DEFAULTSPACK_MEMORY2_DIR", "").strip()
+    if not raw_root:
+        return None
+    from ecosystem.rumi_memory_store_pack.runtime.store import MemoryStore
+
+    root = Path(raw_root).expanduser()
+    owner = MemoryStore("default", user_data_root=root)
+    owner.root = root
+    owner.path = root / "memories.json"
+    owner.backup_root = root / "migration_backups"
+    owner.lock_root = root / "locks"
+    return owner
+
+
+def _patch_imported_facade_globals(
+    test_module,
+    monkeypatch,
+    *,
+    chat_invoke=None,
+    memory_invoke=None,
+):
+    """Patch stale facade module globals retained by collected test imports.
+
+    Some compatibility tests import facade classes at collection time while
+    another test module intentionally replaces the top-level ``domain``
+    package.  Patching only the current ``sys.modules`` entry would leave the
+    already-bound class methods on the old module fail-closed.  Patch those
+    method globals too, but only for the two compatibility facade modules.
+    """
+    seen_globals: set[int] = set()
+    for value in vars(test_module).values():
+        candidates = [value]
+        if isinstance(value, type):
+            candidates.extend(vars(value).values())
+        for candidate in candidates:
+            global_namespace = getattr(candidate, "__globals__", None)
+            if not isinstance(global_namespace, dict):
+                continue
+            namespace_id = id(global_namespace)
+            if namespace_id in seen_globals:
+                continue
+            module_name = str(global_namespace.get("__name__") or "")
+            replacement = None
+            if chat_invoke is not None and module_name.endswith("domain.chat.store"):
+                replacement = chat_invoke
+            elif memory_invoke is not None and module_name.endswith("domain.memory.store"):
+                replacement = memory_invoke
+            if replacement is None:
+                continue
+            seen_globals.add(namespace_id)
+            monkeypatch.setitem(global_namespace, "_invoke", replacement)
+
+
+@pytest.fixture(autouse=True)
+def defaultspack_owner_bindings(request, monkeypatch, tmp_path):
+    """Bind only allowlisted compatibility tests to canonical owner doubles.
+
+    The fixture is intentionally strict-limited: it is a no-op for every
+    other test, so owner absence, missing Capability Plans, and permission
+    denial remain fail-closed in both production and negative tests.
+    """
+    file_name = Path(request.node.fspath).name
+    if file_name not in _OWNER_BINDING_TEST_FILES:
+        yield None
+        return
+
+    from domain.chat import store as chat_facade
+
+    if file_name in _CHAT_OWNER_TEST_FILES:
+        from types import SimpleNamespace
+
+        from core_runtime import resolved_profile_scope
+        from ecosystem.rumi_conversation_store_pack.runtime.store import (
+            ConversationStore,
+        )
+
+        user_data_root = tmp_path / "user_data"
+        owner = ConversationStore("default", user_data_root=user_data_root)
+        plan = SimpleNamespace(
+            profile_id="default",
+            effective_pack_set=("defaultspack", "rumi_conversation_store_pack"),
+            providers=(),
+            effective_permissions=frozenset(),
+            plan_hash="test-default-profile",
+        )
+        monkeypatch.setenv("RUMI_TEST_CONVERSATION_OWNER_ROOT", str(user_data_root))
+        monkeypatch.setattr(resolved_profile_scope, "persisted_resolved_profile", lambda: plan)
+        monkeypatch.setattr(chat_facade, "persisted_resolved_profile", lambda: plan)
+        monkeypatch.setattr(chat_facade, "USER_DATA_DIR", user_data_root)
+        chat_invoke = _owner_contract_invoker(
+            owner, chat_facade, expected_profile_id="default"
+        )
+        monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
+        _patch_imported_facade_globals(
+            request.module,
+            monkeypatch,
+            chat_invoke=chat_invoke,
+        )
+        yield owner
+        return
+
+    if file_name in _OWNER_MIGRATION_TEST_FILES:
+        from ecosystem.rumi_conversation_store_pack.runtime.store import ConversationStore
+
+        owner = ConversationStore("default", user_data_root=tmp_path)
+        chat_invoke = _owner_contract_invoker(owner, chat_facade)
+        monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
+        _patch_imported_facade_globals(
+            request.module,
+            monkeypatch,
+            chat_invoke=chat_invoke,
+        )
+
+        def selected_pack_ids():
+            return _LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS
+
+        import core_runtime.resolved_profile_scope as profile_scope
+
+        monkeypatch.setattr(profile_scope, "effective_pack_ids", selected_pack_ids)
+        for module in tuple(sys.modules.values()):
+            if module is None or not hasattr(module, "effective_pack_ids"):
+                continue
+            try:
+                monkeypatch.setattr(module, "effective_pack_ids", selected_pack_ids)
+            except (AttributeError, TypeError):
+                continue
+        yield owner
+        return
+
+    original_chat_invoke = chat_facade._invoke
+    from domain.memory import store as memory_facade
+
+    original_memory_invoke = memory_facade._invoke
+
+    def chat_invoke(contract_id, operation, payload):
+        owner = _wave7_conversation_owner()
+        if owner is None:
+            return original_chat_invoke(contract_id, operation, payload)
+        return _owner_contract_invoker(owner, chat_facade)(
+            contract_id, operation, payload
+        )
+
+    def memory_invoke(contract_id, operation, payload):
+        owner = _wave7_memory_owner()
+        if owner is None:
+            return original_memory_invoke(contract_id, operation, payload)
+        return _memory_contract_invoker(owner, memory_facade)(
+            contract_id, operation, payload
+        )
+
+    monkeypatch.setattr(chat_facade, "_invoke", chat_invoke)
+    monkeypatch.setattr(memory_facade, "_invoke", memory_invoke)
+    _patch_imported_facade_globals(
+        request.module,
+        monkeypatch,
+        chat_invoke=chat_invoke,
+        memory_invoke=memory_invoke,
+    )
+    yield None

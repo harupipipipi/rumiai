@@ -12,6 +12,10 @@ from core_runtime.resolved_profile_scope import effective_pack_ids
 _LOCK = threading.Lock()
 _REGISTRY: "DomainComponentRegistry | None" = None
 _EXTRA_DOMAIN_ROOTS_ENV = "RUMI_DEFAULTSPACK_DOMAIN_COMPONENT_ROOTS"
+# These components are part of the reviewed default-tools compatibility
+# surface.  They may be listed before a profile has selected the pack, but
+# execution remains gated by the canonical Capability Plan.
+_DISCOVERY_ONLY_PACK_IDS = frozenset({"rumi_default_tools_pack"})
 
 
 def _default_pack_root() -> Path:
@@ -67,7 +71,20 @@ def build_domain_component_roots(
     _append_unique(roots, pack_root / "domain")
     if _is_dir(ecosystem_dir):
         effective = effective_pack_ids()
-        siblings = [ecosystem_dir / pack_id for pack_id in sorted(effective)]
+        candidate_pack_ids = set(effective)
+        try:
+            pack_manifest = pack_root / "ecosystem.json"
+            if _is_file(pack_manifest):
+                import json
+
+                pack_id = str(json.loads(pack_manifest.read_text(encoding="utf-8")).get("pack_id") or "").strip()
+                if pack_id:
+                    candidate_pack_ids.add(pack_id)
+        except (OSError, ValueError, TypeError):
+            pass
+        if not effective:
+            candidate_pack_ids.update(_DISCOVERY_ONLY_PACK_IDS)
+        siblings = [ecosystem_dir / pack_id for pack_id in sorted(candidate_pack_ids)]
         for sibling in siblings:
             if sibling == pack_root:
                 continue

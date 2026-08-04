@@ -167,6 +167,7 @@ def run(context, args):
         "run_id",
         "request_id",
         "conversation_turn_id",
+        "approval_token",
     ):
         if key in raw:
             payload[key] = raw.get(key)

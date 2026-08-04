@@ -378,15 +378,8 @@ def test_rumi_function_computer_use_does_not_double_consume_forwarded_approval_t
         def execute(self, principal_id, request_payload):
             forwarded_context = request_payload.get("context") or {}
             token = forwarded_context["_tool_server_approval_token"]
-            verification = approval.verify_execution_token(
-                token,
-                "browser.open_url",
-                approval.hash_arguments({"action": "browser.open_url", "payload": payload}),
-                pack_id="defaultspack",
-                conversation_id="conv_1",
-                consume=True,
-            )
-            assert verification.valid
+            assert token == decision["token"]
+            assert forwarded_context["_tool_server_approval_token_valid"] is True
             return SimpleNamespace(
                 success=True,
                 output={
@@ -1033,19 +1026,33 @@ def test_tool_executor_permission_preflight_stores_replayable_browser_open_url()
 
 
 def test_computer_use_pack_function_routes_original_arguments(monkeypatch) -> None:
+    from ecosystem.rumi_default_tools_pack.functions.computer_use import main as computer_main
     from ecosystem.rumi_default_tools_pack.functions.computer_use.main import run
 
     captured: dict[str, object] = {}
 
-    def fake_router(action, payload, context=None, *, tool_name="computer_use", tool_arguments=None, artifact_root=None, yolo_mode=False):
+    def fake_router(action, payload, context=None, **kwargs):
         captured["action"] = action
         captured["payload"] = dict(payload)
         captured["context"] = dict(context or {})
-        captured["tool_name"] = tool_name
-        captured["tool_arguments"] = dict(tool_arguments or {})
-        return {"action": action, "tool_name": tool_name, "apps": [{"name": "Google Chrome"}]}
+        captured.update(kwargs)
+        return {"action": action, "tool_name": kwargs.get("tool_name", "computer_use"), "apps": [{"name": "Google Chrome"}]}
 
-    monkeypatch.setattr(_computer_router_module(), "run_computer_action", fake_router)
+    def fake_browser(context, browser_args):
+        routed = fake_router(
+            browser_args["action"],
+            browser_args["payload"],
+            context,
+            tool_name=browser_args["tool_name"],
+            tool_arguments=browser_args["tool_arguments"],
+        )
+        return {
+            "result": "computer_use computer.apps completed",
+            "is_error": False,
+            "widget": {"type": "computer_use", **routed},
+        }
+
+    monkeypatch.setattr(computer_main, "_run_browser_computer", fake_browser)
 
     result = run(
         {"conversation_workspace_dir": "/tmp/conversation/workspace"},

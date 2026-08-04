@@ -2051,6 +2051,7 @@ class ChatRunEngine:
         except Exception:
             self._mark_subagent_prepare_failed(input_data, context)
             raise
+        self._ensure_prepared_user_message(prepared)
         self._run_id = gen_id()
         self._conversation_id = prepared.conversation_id
         self._event_seq = 0
@@ -2321,6 +2322,22 @@ class ChatRunEngine:
                 except Exception:
                     pass
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+
+    def _ensure_prepared_user_message(self, prepared: PreparedChatRun) -> None:
+        """Bind manually prepared requests to the canonical owner before a run."""
+        message_id = str(prepared.user_message.get("id") or "").strip()
+        if not message_id:
+            return
+        get_message = getattr(self._store, "get_message", None)
+        add_message = getattr(self._store, "add_message", None)
+        if not callable(get_message) or not callable(add_message):
+            return
+        if get_message(prepared.conversation_id, message_id) is not None:
+            return
+        stored = add_message(prepared.conversation_id, prepared.user_message)
+        if stored is None:
+            raise RuntimeError("prepared user message could not be committed")
+        prepared.user_message = stored
 
     def _mark_subagent_prepare_failed(self, input_data: dict[str, Any], context: dict[str, Any]) -> None:
         if not isinstance(input_data, dict):

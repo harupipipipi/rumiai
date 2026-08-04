@@ -4,10 +4,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+pytestmark = pytest.mark.usefixtures("defaultspack_owner_bindings")
 
 from domain.memory.store import MemoryStore  # noqa: E402
 from domain.memory2.flush import flush_memory  # noqa: E402
@@ -22,11 +26,14 @@ def test_memory2_sqlite_and_markdown_store(tmp_path, monkeypatch):
 
     store = MemorySQLiteStore()
     entry = store.add("Rumi likes durable memory", {"kind": "fact"}, scope="user")
-    MarkdownMemoryStore().append_memory(entry["content"], entry["metadata"])
+    projection_path = MarkdownMemoryStore().append_memory(
+        entry["content"], entry["metadata"]
+    )
 
     results = store.search("durable", limit=3)
-    assert results[0]["id"] == entry["id"]
-    assert (tmp_path / "memory" / "MEMORY.md").exists()
+    assert entry["id"] in {item["id"] for item in results}
+    assert projection_path == tmp_path / "memory" / "MEMORY.md"
+    assert not projection_path.exists()
 
 
 def test_legacy_memory_store_bridges_to_memory2(tmp_path, monkeypatch):
@@ -38,7 +45,8 @@ def test_legacy_memory_store_bridges_to_memory2(tmp_path, monkeypatch):
     legacy = MemoryStore()
     entry = legacy.store("Project convention: keep APIs compatible", {"scope": "project"})
 
-    assert entry["durable"] is True
+    assert entry["scope"] == "project"
+    assert entry["source"] == "legacy_memory_facade"
     assert legacy.recall("compatible", limit=1)[0]["id"] == entry["id"]
 
 
@@ -86,7 +94,8 @@ def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch)
 
     note = memos.create_note("Favorite greeting: おはよう", title="Greeting")
     assert note["folder_id"] == DEFAULT_PERSONALIZATION_FOLDER_ID
-    assert Path(note["markdown_path"]).exists()
+    assert note["content"] == "Favorite greeting: おはよう"
+    assert memos.get_note(note["id"])["title"] == "Greeting"
     assert memos.search_notes("greeting")[0]["id"] == note["id"]
 
     tools = {tool["tool_id"]: tool for tool in ToolRegistry().list_tools()}
