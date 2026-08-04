@@ -10,8 +10,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from .paths import discover_pack_locations
-from .pack_boundary import finite_children, finite_files, finite_matching_files
+from .pack_boundary import (
+    PackBoundaryError,
+    finite_children,
+    finite_files,
+    finite_matching_files,
+    load_pack_catalog,
+    resolve_pack_root,
+)
 from .profile_runtime_selection import apply_profile_graph_selection
 from .profile_workspace import ProfileWorkspaceManager
 from .node_models import make_core_start_node
@@ -944,14 +950,10 @@ class StartupProfileManager:
         # the expensive security scan once per selected Pack.  Besides making
         # the control-panel GET endpoint take minutes, it duplicated work that
         # ``_build_catalog`` has already performed for availability status.
-        locations = {
-            location.pack_id: location
-            for location in discover_pack_locations(self.ecosystem_dir)
-        }
         for pack_id in pack_ids:
-            location = locations.get(pack_id)
-            pack_subdir = location.pack_subdir if location is not None else None
-            if not pack_subdir:
+            try:
+                pack_subdir = resolve_pack_root(pack_id, self.ecosystem_dir)
+            except PackBoundaryError:
                 continue
             try:
                 manifest = json.loads(
@@ -1352,8 +1354,16 @@ class StartupProfileManager:
         packs: List[Dict[str, Any]] = []
         for pack_id, pack_info in discovered.items():
             available = pack_info.get("enabled", False) and not pack_info.get("approval_issues")
-            graphs = self._discover_graphs_for_pack(pack_id, pack_info.get("pack_subdir"))
-            nodes = self._discover_nodes_for_pack(pack_id, pack_info.get("pack_subdir"))
+            graphs = (
+                self._discover_graphs_for_pack(pack_id, pack_info.get("pack_subdir"))
+                if available
+                else []
+            )
+            nodes = (
+                self._discover_nodes_for_pack(pack_id, pack_info.get("pack_subdir"))
+                if available
+                else []
+            )
             packs.append({
                 "pack_id": pack_id,
                 "name": pack_info.get("name", pack_id),
@@ -1587,12 +1597,11 @@ class StartupProfileManager:
         for pack_info in catalog.get("packs", []):
             if pack_info.get("pack_id") != pack_id:
                 continue
-            pack_subdir = None
-            for loc in discover_pack_locations(self.ecosystem_dir):
-                if loc.pack_id == pack_id:
-                    pack_subdir = loc.pack_subdir
-                    break
-            if not pack_subdir:
+            if pack_info.get("available") is not True:
+                return None
+            try:
+                pack_subdir = resolve_pack_root(pack_id, self.ecosystem_dir)
+            except PackBoundaryError:
                 return None
             graphs_dir = Path(pack_subdir) / "graphs"
             if not graphs_dir.is_dir():
@@ -2007,22 +2016,25 @@ class StartupProfileManager:
     def _discover_packs(self) -> Dict[str, Dict[str, Any]]:
         discovered: Dict[str, Dict[str, Any]] = {}
         enabled_overrides = self._read_pack_enabled_overrides()
-        for loc in discover_pack_locations(self.ecosystem_dir):
+        for pack_id in load_pack_catalog():
             try:
-                ecosystem = json.loads(loc.ecosystem_json_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+                pack_subdir = resolve_pack_root(pack_id, self.ecosystem_dir)
+                ecosystem = json.loads(
+                    (pack_subdir / "ecosystem.json").read_text(encoding="utf-8")
+                )
+            except (PackBoundaryError, json.JSONDecodeError, OSError):
                 continue
             default_enabled = bool(ecosystem.get("enabled", True))
-            enabled = bool(enabled_overrides.get(loc.pack_id, default_enabled))
-            approval_issues = self._approval_runtime_issues(loc.pack_id)
-            discovered[loc.pack_id] = {
-                "pack_id": loc.pack_id,
+            enabled = bool(enabled_overrides.get(pack_id, default_enabled))
+            approval_issues = self._approval_runtime_issues(pack_id)
+            discovered[pack_id] = {
+                "pack_id": pack_id,
                 "pack_identity": str(ecosystem.get("pack_identity", "")),
-                "name": str(ecosystem.get("metadata", {}).get("name", loc.pack_id)),
+                "name": str(ecosystem.get("metadata", {}).get("name", pack_id)),
                 "description": str(ecosystem.get("metadata", {}).get("description", "")),
                 "enabled": enabled,
                 "approval_issues": approval_issues,
-                "pack_subdir": loc.pack_subdir,
+                "pack_subdir": pack_subdir,
             }
         return discovered
 
@@ -2033,22 +2045,22 @@ class StartupProfileManager:
                 from .approval_manager import get_approval_manager
             except Exception:
                 logger.debug("approval manager import is unavailable", exc_info=True)
-                return []
+                return [f"Pack '{pack_id}' approval verification is unavailable."]
 
             try:
                 approval_manager = get_approval_manager()
             except Exception:
                 logger.debug("failed to load approval manager", exc_info=True)
-                return []
+                return [f"Pack '{pack_id}' approval verification is unavailable."]
 
         if approval_manager is None or not hasattr(approval_manager, "get_approval"):
-            return []
+            return [f"Pack '{pack_id}' approval verification is unavailable."]
 
         try:
             approval = approval_manager.get_approval(pack_id)
         except Exception:
             logger.debug("failed to read pack approval for '%s'", pack_id, exc_info=True)
-            return []
+            return [f"Pack '{pack_id}' approval verification is unavailable."]
 
         if approval is None and not hasattr(approval_manager, "is_pack_approved_and_verified"):
             return [f"Pack '{pack_id}' needs approval before it can be launched."]
@@ -2057,9 +2069,7 @@ class StartupProfileManager:
             approved, reason = approval_manager.is_pack_approved_and_verified(pack_id)
         except Exception:
             logger.debug("failed to verify pack approval for '%s'", pack_id, exc_info=True)
-            if approval is None:
-                return [f"Pack '{pack_id}' needs approval before it can be launched."]
-            return []
+            return [f"Pack '{pack_id}' approval verification is unavailable."]
 
         if approved:
             return []

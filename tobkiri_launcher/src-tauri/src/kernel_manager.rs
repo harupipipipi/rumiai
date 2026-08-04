@@ -169,7 +169,10 @@ impl KernelManager {
         let host_contract_path = crate::host_contract::write_contract(
             &self.config,
             crate::host_contract::DEFAULT_PROFILE_ID,
-            [("panel_bootstrap_secret", self.panel_bootstrap_secret.clone())],
+            [(
+                "panel_bootstrap_secret",
+                self.panel_bootstrap_secret.clone(),
+            )],
         )?;
 
         let mut command = process_utils::command(&venv_python);

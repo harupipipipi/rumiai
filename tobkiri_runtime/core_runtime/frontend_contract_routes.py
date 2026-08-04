@@ -38,56 +38,6 @@ class ResolvedContractRoute:
     query: dict[str, str]
 
 
-# These are the Host/API families exposed by the verified defaultspack
-# frontend contract.  A family is intentionally only a coarse admission
-# boundary: the existing API/defaultspack dispatchers still perform the exact
-# route match, pack approval, profile allowlist, local guard, and handler
-# authorization checks.  Keeping this list here prevents the contract endpoint
-# from becoming a generic proxy for unrelated HTTP paths.
-_FRONTEND_ROUTE_FAMILIES = (
-    "/api/activity-center",
-    "/api/agent",
-    "/api/ai",
-    "/api/ambient",
-    "/api/artifacts",
-    "/api/authority",
-    "/api/browser",
-    "/api/change-requests",
-    "/api/chat",
-    "/api/command-protocol",
-    "/api/coding",
-    "/api/company",
-    "/api/conversations",
-    "/api/connections",
-    "/api/context",
-    "/api/continuity",
-    "/api/desktops",
-    "/api/desktop-access",
-    "/api/desktop-system-info",
-    "/api/external",
-    "/api/health",
-    "/api/integrations",
-    "/api/kanban",
-    "/api/mobile",
-    "/api/onboarding",
-    "/api/operating-profiles",
-    "/api/p2p",
-    "/api/packs/defaultspack",
-    "/api/prompts",
-    "/api/remote",
-    "/api/remote-images",
-    "/api/research",
-    "/api/runtime",
-    "/api/sandbox",
-    "/api/share",
-    "/api/subagent-team",
-    "/api/tools",
-    "/api/automations",
-    "/api/ui",
-    "/api/webhooks",
-)
-
-
 def is_contract_route_path(path: str) -> bool:
     """Return whether *path* is the canonical frontend contract endpoint."""
 
@@ -103,19 +53,10 @@ def contract_route_prefix(pack_id: str = DEFAULT_CONTRACT_PACK_ID) -> str:
     return f"/api/contracts/{normalized}/"
 
 
-def _family_allowed(path: str, families: tuple[str, ...] | None = None) -> bool:
-    normalized = str(path or "")
-    allowed_families = _FRONTEND_ROUTE_FAMILIES if families is None else families
-    return any(
-        normalized == prefix or normalized.startswith(prefix + "/")
-        for prefix in allowed_families
-    )
-
-
 def _safe_target_path(path: str) -> bool:
     if not path.startswith("/api/"):
         return False
-    if path.startswith("/api/contracts/") or "\x00" in path:
+    if path.startswith("/api/contracts/") or "\x00" in path or "\\" in path:
         return False
     if "//" in path:
         return False
@@ -125,8 +66,14 @@ def _safe_target_path(path: str) -> bool:
     # A percent-encoded slash is retained for the normal route matcher.  This
     # preserves identifiers such as ``operations%2Fcompany`` while the
     # dispatcher's existing ``_is_safe_path_param`` rejects traversal tokens.
-    if any(unquote(segment) in {".", ".."} for segment in segments[2:]):
-        return False
+    decoded = path
+    for _ in range(3):
+        decoded = unquote(decoded)
+        decoded_segments = decoded.split("/")
+        if "\x00" in decoded or "\\" in decoded or "//" in decoded:
+            return False
+        if any(segment in {".", ".."} for segment in decoded_segments):
+            return False
     return True
 
 
@@ -189,10 +136,8 @@ def _registered_target(
         if handler is not None:
             return True
     except Exception:
-        # The static family map below remains the admission boundary when a
-        # cold/test runtime has not installed the route registry yet.
-        pass
-    return _family_allowed(path, families)
+        return False
+    return False
 
 
 def resolve_contract_route(
@@ -244,9 +189,8 @@ def resolve_contract_route(
         families=route_families,
     ):
         raise ContractRouteError("CONTRACT_OPERATION_UNKNOWN", "Unknown frontend contract operation", 404)
-    query = {
-        key: values[-1]
-        for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
-        if values
-    }
+    parsed_query = parse_qs(parsed.query, keep_blank_values=True)
+    if any(len(values) != 1 for values in parsed_query.values()):
+        raise ContractRouteError("CONTRACT_QUERY_INVALID", "Invalid contract target query", 400)
+    query = {key: values[0] for key, values in parsed_query.items() if values}
     return ResolvedContractRoute(operation_method, target_path, query)

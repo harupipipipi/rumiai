@@ -14,6 +14,7 @@ from core_runtime.pack_boundary import (
     load_pack_catalog,
     resolve_pack_root,
     resolve_selected_pack_roots,
+    finite_files,
 )
 
 
@@ -72,3 +73,23 @@ def test_pack_architecture_boundary_categories_are_zero() -> None:
         "foreign_pack_id_branch",
     }
     assert {rule: counts[rule] for rule in forbidden} == {rule: 0 for rule in forbidden}
+
+
+def test_finite_boundary_rejects_symlinked_pack_roots_and_files(
+    tmp_path: Path,
+) -> None:
+    ecosystem = tmp_path / "ecosystem"
+    ecosystem.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (ecosystem / "defaultspack").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PackBoundaryError, match="symlink"):
+        resolve_pack_root("defaultspack", ecosystem)
+
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+    secret = outside / "secret.json"
+    secret.write_text("{}", encoding="utf-8")
+    (safe_root / "secret.json").symlink_to(secret)
+    with pytest.raises(PackBoundaryError, match="symlink"):
+        finite_files(safe_root, (".json",))

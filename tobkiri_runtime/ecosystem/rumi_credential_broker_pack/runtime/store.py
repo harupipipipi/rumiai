@@ -6,6 +6,7 @@ import json
 import hashlib
 import hmac
 import os
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -25,6 +26,7 @@ class CredentialBrokerStore:
 
     def __init__(self, *, user_data_root: Path | None = None) -> None:
         root = Path(user_data_root or USER_DATA_DIR)
+        self.user_data_root = root
         self.root = root / "packs" / "rumi_credential_broker_pack"
         self.path = self.root / "credentials.store.json"
         self.key_path = self.root / ".credential-store.key"
@@ -38,12 +40,13 @@ class CredentialBrokerStore:
         consumer_pack_id: str,
         provider_instance_id: str,
         scopes: list[str],
-        profile_id: str = "default",
+        profile_id: str,
         purpose: str = "provider.invoke",
         label: str = "",
         expires_at: float | None = None,
     ) -> dict[str, Any]:
         """Encrypt material and create one non-secret handle record."""
+        self._prepare_storage()
         consumer_pack_id = _identifier(consumer_pack_id, "consumer_pack_id")
         provider_instance_id = _identifier(
             provider_instance_id,
@@ -92,11 +95,12 @@ class CredentialBrokerStore:
         consumer_pack_id: str,
         provider_instance_id: str,
         scope: str,
-        profile_id: str = "default",
+        profile_id: str,
         key_version: str = "",
         purpose: str = "provider.invoke",
     ) -> dict[str, Any]:
         """Decrypt only when caller, provider, scope, and expiry all match."""
+        self._prepare_storage()
         with NamedLock(self.lock_root, "credential-broker"):
             return self._resolve_unlocked(
                 handle,
@@ -153,23 +157,34 @@ class CredentialBrokerStore:
             raise RuntimeError("credential material is invalid")
         return material
 
-    def list(self) -> dict[str, Any]:
+    def list(self, *, profile_id: str) -> dict[str, Any]:
         """Return redacted status records only."""
+        self._prepare_storage()
+        profile_id = _identifier(profile_id, "profile_id")
         state = self._read()
         values = [
             self._public(item)
             for item in state["credentials"].values()
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("profile_id") == profile_id
         ]
         values.sort(key=lambda item: item["handle"])
         return {"credentials": values, "count": len(values)}
 
-    def revoke(self, handle: str) -> dict[str, Any]:
+    def revoke(self, handle: str, *, profile_id: str) -> dict[str, Any]:
         """Delete encrypted material for one exact handle."""
+        self._prepare_storage()
+        profile_id = _identifier(profile_id, "profile_id")
         with NamedLock(self.lock_root, "credential-broker"):
             state = self._read()
-            if str(handle) not in state["credentials"]:
+            record = state["credentials"].get(str(handle))
+            if not isinstance(record, dict):
                 raise KeyError("credential handle is unknown")
+            if not hmac.compare_digest(
+                str(record.get("record_mac") or ""), self._record_mac(record)
+            ):
+                raise PermissionError("credential record integrity check failed")
+            if record.get("profile_id") != profile_id:
+                raise PermissionError("credential profile is not bound")
             del state["credentials"][str(handle)]
             state["revision"] += 1
             self._write(state)
@@ -182,6 +197,7 @@ class CredentialBrokerStore:
         expected_source_hash: str,
     ) -> dict[str, Any]:
         """Atomically import explicit legacy records into encrypted handles."""
+        self._prepare_storage()
         source = {"records": [dict(item) for item in records]}
         if _hash(source) != expected_source_hash:
             raise ValueError("credential migration source changed")
@@ -202,7 +218,7 @@ class CredentialBrokerStore:
                 provider_instance_id = _identifier(
                     item.get("provider_instance_id"), "provider_instance_id"
                 )
-                profile_id = _identifier(item.get("profile_id") or "default", "profile_id")
+                profile_id = _identifier(item.get("profile_id"), "profile_id")
                 scopes = _scopes([str(value) for value in item.get("scopes", [])])
                 material = item.get("secret_material")
                 if not scopes or not isinstance(material, Mapping) or not material:
@@ -250,6 +266,7 @@ class CredentialBrokerStore:
 
     def rollback_migration(self, migration_id: str) -> dict[str, Any]:
         """Restore the exact encrypted pre-migration owner state."""
+        self._prepare_storage()
         with NamedLock(self.lock_root, "credential-broker"):
             state = self._read()
             migration = state.get("migration")
@@ -258,6 +275,12 @@ class CredentialBrokerStore:
             ) != migration_id:
                 raise ValueError("credential migration marker mismatch")
             backup = Path(str(migration.get("backup") or ""))
+            try:
+                backup.relative_to(self.backup_root)
+            except ValueError as exc:
+                raise RuntimeError("credential migration backup escapes storage") from exc
+            if backup.is_symlink():
+                raise RuntimeError("credential migration backup is a symlink")
             backup_path = backup / "pre-migration.store.json"
             restored = json.loads(backup_path.read_text(encoding="utf-8"))
             if (
@@ -270,9 +293,9 @@ class CredentialBrokerStore:
             return {"migration_id": migration_id, "rolled_back": True}
 
     def _fernet(self) -> Fernet:
-        self.root.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
+        self._prepare_storage()
         if self.key_path.is_file():
+            self._require_owner_file(self.key_path, "credential key")
             key = self.key_path.read_bytes().strip()
         else:
             key = Fernet.generate_key()
@@ -311,6 +334,7 @@ class CredentialBrokerStore:
                 "credentials": {},
                 "migration": None,
             }
+        self._require_owner_file(self.path, "credential store")
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != STORE_VERSION:
             raise ValueError("credential store version is invalid")
@@ -319,8 +343,7 @@ class CredentialBrokerStore:
         return payload
 
     def _write(self, state: Mapping[str, Any]) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
+        self._prepare_storage()
         temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
             json.dumps(state, ensure_ascii=False, indent=2) + "\n",
@@ -357,6 +380,35 @@ class CredentialBrokerStore:
             "updated_at": record.get("updated_at"),
             "configured": True,
         }
+
+    def _prepare_storage(self) -> None:
+        """Create owner storage while rejecting every mutable symlink edge."""
+
+        for path in (self.user_data_root, self.user_data_root / "packs", self.root):
+            if path.is_symlink():
+                raise PermissionError(f"credential storage path is a symlink: {path}")
+        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.root.is_dir():
+            raise PermissionError("credential storage root is not a directory")
+        user_metadata = self.user_data_root.stat()
+        getuid = getattr(os, "geteuid", None)
+        if user_metadata.st_mode & 0o022 or (
+            callable(getuid) and user_metadata.st_uid != getuid()
+        ):
+            raise PermissionError("credential user-data root permissions are unsafe")
+        os.chmod(self.root, 0o700)
+        for path in (self.path, self.key_path, self.lock_root, self.backup_root):
+            if path.is_symlink():
+                raise PermissionError(f"credential storage entry is a symlink: {path}")
+
+    @staticmethod
+    def _require_owner_file(path: Path, label: str) -> None:
+        metadata = path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise PermissionError(f"{label} permissions are unsafe")
+        getuid = getattr(os, "geteuid", None)
+        if callable(getuid) and metadata.st_uid != getuid():
+            raise PermissionError(f"{label} owner is unsafe")
 
 
 def _identifier(value: Any, label: str) -> str:

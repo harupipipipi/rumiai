@@ -62,6 +62,36 @@ def test_contract_operation_fails_closed_for_escape_recursion_and_unknown_route(
     assert exc_info.value.code == code
 
 
+def test_contract_operation_has_no_family_prefix_fallback() -> None:
+    class _EmptyHost:
+        _api_route_exact = {}
+        _api_route_patterns = ()
+
+    with pytest.raises(ContractRouteError) as exc_info:
+        resolve_contract_route(
+            _EmptyHost(),
+            "POST",
+            _operation("POST", "/api/authority/requests/forged/approve"),
+        )
+
+    assert exc_info.value.code == "CONTRACT_OPERATION_UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    "target",
+    (
+        "/api/ui/value%252F..%252Fsecret",
+        "/api/ui/catalog?mode=a&mode=b",
+        "/api/ui/catalog#ignored",
+    ),
+)
+def test_contract_operation_rejects_nested_traversal_ambiguous_query_and_fragment(
+    target: str,
+) -> None:
+    with pytest.raises(ContractRouteError):
+        resolve_contract_route(_FakeHost(), "GET", _operation("GET", target))
+
+
 def test_encoded_identifier_is_left_for_normal_route_matching() -> None:
     class _PatternHost:
         _api_route_exact = {}

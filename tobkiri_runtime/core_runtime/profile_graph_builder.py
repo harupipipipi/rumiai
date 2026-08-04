@@ -174,7 +174,7 @@ def _available_catalog(
         "api_routes": [_api_route_candidate(spec) for spec in canonical_http_route_specs(include_always_available=True)],
         "prompts": _prompt_candidates(profile, capability_catalog, workspace_manager, defaultspack_root),
         "frontend": _frontend_candidates(frontend_catalog),
-        "flows": _flow_candidates(ecosystem_dir, profile),
+        "flows": _flow_candidates(ecosystem_dir, profile, startup_catalog),
         "capability_nodes": startup_nodes,
         "input_profiles": [_input_profile_candidate(profile_item) for profile_item in input_profiles],
     }
@@ -734,7 +734,9 @@ def _frontend_candidates(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _flow_candidates(
-    ecosystem_dir: str | None, profile: Dict[str, Any]
+    ecosystem_dir: str | None,
+    profile: Dict[str, Any],
+    startup_catalog: Dict[str, Any] | None,
 ) -> List[Dict[str, Any]]:
     selected = {
         str(value).strip()
@@ -745,6 +747,14 @@ def _flow_candidates(
     if base_pack:
         selected.add(base_pack)
     if not selected:
+        return []
+    catalog = startup_catalog if isinstance(startup_catalog, dict) else {}
+    available_pack_ids = {
+        str(pack.get("pack_id") or "").strip()
+        for pack in catalog.get("packs", [])
+        if isinstance(pack, dict) and pack.get("available") is True
+    }
+    if not selected <= available_pack_ids:
         return []
     roots = tuple(
         resolve_selected_pack_roots(sorted(selected), ecosystem_dir).values()

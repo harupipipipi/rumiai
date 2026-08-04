@@ -128,7 +128,11 @@ def resolve_profile_credential(
         if isinstance(reference, ProfileCredentialRef)
         else ProfileCredentialRef.from_mapping(reference)
     )
-    selected_profile = str(profile_id or active_profile_id() or "").strip()
+    bound_profile = str(active_profile_id() or "").strip()
+    requested_profile = str(profile_id or "").strip()
+    if requested_profile and requested_profile != bound_profile:
+        raise CredentialUnavailable("credential profile is not bound")
+    selected_profile = bound_profile
     if not selected_profile or ref.profile_id != selected_profile:
         raise CredentialUnavailable("credential profile is not bound")
     if ref.provider_id != str(provider_id or "").strip():
@@ -136,13 +140,16 @@ def resolve_profile_credential(
     normalized_scope = str(scope or "").strip()
     if not normalized_scope:
         raise CredentialUnavailable("credential scope is missing")
+    normalized_consumer = str(consumer_pack_id or "").strip()
+    if not normalized_consumer:
+        raise CredentialUnavailable("credential consumer is missing")
     broker = _BROKER.get()
     if broker is None:
         raise CredentialUnavailable("credential broker is unavailable")
     material = broker.resolve(
         ref,
         profile_id=selected_profile,
-        consumer_pack_id=str(consumer_pack_id or "").strip(),
+        consumer_pack_id=normalized_consumer,
         scope=normalized_scope,
     )
     if not isinstance(material, Mapping) or not material:

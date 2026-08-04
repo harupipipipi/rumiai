@@ -20,13 +20,14 @@ def test_credential_material_is_encrypted_and_listing_is_redacted(
         "create",
         {
             "secret_material": {"api_key": "fixture-secret"},
+            "profile_id": "profile-a",
             "consumer_pack_id": "provider-adapter-pack",
             "provider_instance_id": "adapter-main",
             "scopes": ["generate", "stream"],
             "label": "fixture",
         },
     )
-    listed = service.invoke("list", {})
+    listed = service.invoke("list", {"profile_id": "profile-a"})
 
     store_text = service.store.path.read_text(encoding="utf-8")
     assert "fixture-secret" not in store_text
@@ -43,6 +44,7 @@ def test_resolution_binds_manifest_consumer_provider_and_scope(
         "create",
         {
             "secret_material": {"api_key": "fixture-secret"},
+            "profile_id": "profile-a",
             "consumer_pack_id": "provider-adapter-pack",
             "provider_instance_id": "adapter-main",
             "scopes": ["generate"],
@@ -56,6 +58,7 @@ def test_resolution_binds_manifest_consumer_provider_and_scope(
             "handle": created["handle"],
             "provider_instance_id": "adapter-main",
             "scope": "generate",
+            "profile_id": "profile-a",
         },
     )
 
@@ -70,6 +73,7 @@ def test_resolution_binds_manifest_consumer_provider_and_scope(
             "handle": created["handle"],
             "provider_instance_id": "adapter-main",
             "scope": "generate",
+            "profile_id": "profile-a",
             **patch,
         }
         with pytest.raises(PermissionError):
@@ -82,13 +86,16 @@ def test_revocation_prevents_later_resolution(tmp_path: Path) -> None:
         "create",
         {
             "secret_material": {"token": "fixture"},
+            "profile_id": "profile-a",
             "consumer_pack_id": "provider-adapter-pack",
             "provider_instance_id": "adapter-main",
             "scopes": ["generate"],
         },
     )
 
-    service.invoke("revoke", {"handle": created["handle"]})
+    service.invoke(
+        "revoke", {"handle": created["handle"], "profile_id": "profile-a"}
+    )
 
     with pytest.raises(KeyError):
         service.invoke(
@@ -98,6 +105,7 @@ def test_revocation_prevents_later_resolution(tmp_path: Path) -> None:
                 "handle": created["handle"],
                 "provider_instance_id": "adapter-main",
                 "scope": "generate",
+                "profile_id": "profile-a",
             },
         )
 
@@ -112,6 +120,7 @@ def test_credential_migration_is_atomic_redacted_and_reversible(
                 "consumer_pack_id": "rumi_provider_adapters_pack",
                 "provider_instance_id": "provider.example",
                 "scopes": ["ai.generate"],
+                "profile_id": "profile-a",
                 "secret_material": {"api_key": "not-returned"},
             }
         ]
@@ -132,5 +141,4 @@ def test_credential_migration_is_atomic_redacted_and_reversible(
     assert service.invoke(
         "migration.rollback", {"migration_id": result["migration_id"]}
     )["rolled_back"]
-    assert service.invoke("list", {})["count"] == 0
-
+    assert service.invoke("list", {"profile_id": "profile-a"})["count"] == 0

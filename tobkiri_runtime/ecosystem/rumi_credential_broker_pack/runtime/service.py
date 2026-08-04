@@ -19,6 +19,7 @@ class CredentialBrokerService:
         data = dict(payload)
         consumer = str(data.pop("_contract_consumer_pack_id", "")).strip()
         if operation == "create":
+            profile_id = _required_profile_id(data)
             result = self.store.create(
                 secret_material=(
                     data.get("secret_material")
@@ -29,14 +30,14 @@ class CredentialBrokerService:
                 provider_instance_id=str(
                     data.get("provider_instance_id") or ""
                 ),
-                profile_id=str(data.get("profile_id") or "default"),
+                profile_id=profile_id,
                 scopes=[str(item) for item in data.get("scopes", [])],
                 purpose=str(data.get("purpose") or "provider.invoke"),
                 label=str(data.get("label") or ""),
                 expires_at=_optional_float(data.get("expires_at")),
             )
             result["credential_ref"] = {
-                "profile_id": result.get("profile_id", "default"),
+                "profile_id": result.get("profile_id", ""),
                 "provider_id": result.get("provider_instance_id", ""),
                 "credential_id": result.get("handle", ""),
                 "key_version": result.get("key_version", ""),
@@ -44,9 +45,12 @@ class CredentialBrokerService:
             }
             return result
         if operation == "revoke":
-            return self.store.revoke(str(data.get("handle") or ""))
+            return self.store.revoke(
+                str(data.get("handle") or ""),
+                profile_id=_required_profile_id(data),
+            )
         if operation == "list":
-            return self.store.list()
+            return self.store.list(profile_id=_required_profile_id(data))
         if operation == "migration.apply":
             records = data.get("records")
             if not isinstance(records, list) or not all(
@@ -64,6 +68,7 @@ class CredentialBrokerService:
         if operation == "resolve":
             if not consumer:
                 raise PermissionError("credential consumer identity is missing")
+            profile_id = _required_profile_id(data)
             return {
                 "secret_material": self.store.resolve(
                     str(data.get("handle") or ""),
@@ -71,7 +76,7 @@ class CredentialBrokerService:
                     provider_instance_id=str(
                         data.get("provider_instance_id") or ""
                     ),
-                    profile_id=str(data.get("profile_id") or "default"),
+                    profile_id=profile_id,
                     scope=str(data.get("scope") or ""),
                     key_version=str(data.get("key_version") or ""),
                     purpose=str(data.get("purpose") or "provider.invoke"),
@@ -85,3 +90,10 @@ def _optional_float(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         raise ValueError("expires_at is invalid") from None
+
+
+def _required_profile_id(data: Mapping[str, Any]) -> str:
+    value = str(data.get("profile_id") or "").strip()
+    if not value:
+        raise PermissionError("credential profile identity is missing")
+    return value

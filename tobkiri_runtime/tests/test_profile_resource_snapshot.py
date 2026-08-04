@@ -106,3 +106,35 @@ def test_snapshot_includes_default_flow_graph_refs_and_prompt(tmp_path: Path):
     assert manifest["graph_ids"] == ["defaultspack.startup", "defaultspack.alt"]
     assert manifest["graph_refs"]["nodes"] == ["defaultspack.agent", "defaultspack.prompt"]
     assert manifest["graph_refs"]["blocks"] == ["blocks.agent", "blocks.prompt.load_effective"]
+
+
+def test_snapshot_does_not_follow_traversal_or_symlink_sources(tmp_path: Path):
+    ecosystem_root = tmp_path / "ecosystem"
+    _write_pack(ecosystem_root)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("flow_id: outside\nsecret: true\n", encoding="utf-8")
+
+    manager = ProfileResourceSnapshotManager(
+        tmp_path / "user_data",
+        ecosystem_dir=str(ecosystem_root),
+    )
+    manifest = manager.snapshot_default_resources(
+        "p1",
+        base_pack="defaultspack",
+        flow_ids=["../../outside.yaml"],
+    )
+
+    assert manifest["items"] == []
+    snapshot_root = (
+        tmp_path
+        / "user_data"
+        / "profiles"
+        / "p1"
+        / "ecosystem"
+        / "snapshots"
+        / "defaultspack"
+    )
+    assert not any(
+        path.is_file() and path.read_bytes() == outside.read_bytes()
+        for path in snapshot_root.rglob("*")
+    )

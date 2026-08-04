@@ -17,6 +17,7 @@ from .validation import validate_pack_id
 
 
 _CATALOG_PATH = Path(__file__).resolve().parents[1] / "schemas" / "pack_v4_catalog.v1.json"
+_CATALOG_API_VERSION = "io.tobkiri.pack-source-catalog.v1"
 
 
 class PackBoundaryError(RuntimeError):
@@ -30,7 +31,11 @@ def load_pack_catalog(catalog_path: Path | None = None) -> dict[str, Mapping[str
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise PackBoundaryError(f"canonical Pack v4 catalog is unavailable: {path}") from exc
-    records = payload.get("packs") if isinstance(payload, Mapping) else None
+    if not isinstance(payload, Mapping):
+        raise PackBoundaryError("canonical Pack v4 catalog is not an object")
+    records = payload.get("packs")
+    if payload.get("catalog_api_version") != _CATALOG_API_VERSION:
+        raise PackBoundaryError("canonical Pack v4 catalog version is invalid")
     if not isinstance(records, list):
         raise PackBoundaryError("canonical Pack v4 catalog has no packs list")
     result: dict[str, Mapping[str, Any]] = {}
@@ -41,6 +46,19 @@ def load_pack_catalog(catalog_path: Path | None = None) -> dict[str, Mapping[str
         if not pack_id or not validate_pack_id(pack_id) or pack_id in result:
             raise PackBoundaryError(f"canonical Pack v4 catalog has invalid Pack ID: {pack_id!r}")
         result[pack_id] = dict(record)
+    declared_ids = payload.get("pack_ids")
+    if not isinstance(declared_ids, list) or declared_ids != sorted(result):
+        raise PackBoundaryError("canonical Pack v4 catalog Pack IDs are inconsistent")
+    for pack_id, record in result.items():
+        dependencies = record.get("dependencies")
+        if not isinstance(dependencies, Mapping):
+            raise PackBoundaryError(f"Pack {pack_id} has malformed v4 dependencies")
+        dependency_ids = tuple(str(item).strip() for item in dependencies)
+        if any(
+            not item or not validate_pack_id(item) or item not in result
+            for item in dependency_ids
+        ):
+            raise PackBoundaryError(f"Pack {pack_id} declares an unknown v4 dependency")
     return result
 
 
@@ -54,7 +72,12 @@ def resolve_pack_root(
     if normalized not in catalog:
         raise PackBoundaryError(f"Pack is absent from the canonical v4 catalog: {normalized}")
     root = Path(ecosystem_dir) if ecosystem_dir is not None else _CATALOG_PATH.parent.parent / "ecosystem"
-    pack_root = (root / normalized).resolve()
+    if root.is_symlink():
+        raise PackBoundaryError("ecosystem boundary must not be a symlink")
+    candidate = root / normalized
+    if candidate.is_symlink():
+        raise PackBoundaryError(f"cataloged Pack root must not be a symlink: {normalized}")
+    pack_root = candidate.resolve()
     try:
         pack_root.relative_to(root.resolve())
     except ValueError as exc:
@@ -92,13 +115,21 @@ def declared_pack_dependencies(pack_id: str) -> tuple[str, ...]:
 
 def finite_children(root: Path, *, directories_only: bool = False) -> tuple[Path, ...]:
     """Return direct children of an already-resolved Pack or staging root."""
+    if root.is_symlink():
+        raise PackBoundaryError(f"finite boundary must not be a symlink: {root}")
     if not root.is_dir():
         return ()
     try:
         entries = tuple(os.scandir(root))
-    except OSError:
-        return ()
-    paths = [Path(entry.path) for entry in entries if not directories_only or entry.is_dir()]
+    except OSError as exc:
+        raise PackBoundaryError(f"finite boundary is unreadable: {root}") from exc
+    if any(entry.is_symlink() for entry in entries):
+        raise PackBoundaryError(f"finite boundary contains a symlink: {root}")
+    paths = [
+        Path(entry.path)
+        for entry in entries
+        if not directories_only or entry.is_dir(follow_symlinks=False)
+    ]
     return tuple(sorted(paths))
 
 
@@ -112,8 +143,15 @@ def finite_files(
     if not root.is_dir():
         return ()
     result: list[Path] = []
-    walker = os.walk(root) if recursive else ((str(root), (), tuple(path.name for path in finite_children(root)),),)
-    for current, _directories, names in walker:
+    walker = os.walk(root, followlinks=False) if recursive else (
+        (str(root), (), tuple(path.name for path in finite_children(root))),
+    )
+    for current, directories, names in walker:
+        current_path = Path(current)
+        if current_path.is_symlink() or any(
+            (current_path / name).is_symlink() for name in (*directories, *names)
+        ):
+            raise PackBoundaryError(f"finite boundary contains a symlink: {root}")
         for name in names:
             path = Path(current) / name
             if path.is_file() and path.suffix.lower() in suffixes:
