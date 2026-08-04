@@ -200,10 +200,10 @@
   ],
   "source_manifest_digests": {
     "defaults-basepack": "sha256:eeb549d2a384b85ad805148da20ee1e37480b80751670ea9050202cd219b21a0",
-    "defaultspack": "sha256:bf8fceb85f9d162099959a9964dea3296791b57f5a48028a1537d02240eca908",
-    "rumi_file_inspect_pack": "sha256:c2d1efe882f26efe32f733d546a57178c7b4eba615e9ac87a1c90da6f5d54bce",
-    "rumi_host_authority_bridge_pack": "sha256:241bae40d644bdfddd5bfe0445c60499d0909032779f2e9257210363e7f2fa98",
-    "rumi_workspace_mount_pack": "sha256:2f672e8479c4d1cba2b92ef9b06c3cf3ad66d50860906a2f6897c9d1803cda25",
+    "defaultspack": "sha256:78d0727d0dbf8178ffaa9a7f985261c94faac734d291425dc74cca01e465b08d",
+    "rumi_file_inspect_pack": "sha256:97ebb5bdc6a9f8c8b661580945f9b01dfbbeace15fa20e1f4624602d84f33391",
+    "rumi_host_authority_bridge_pack": "sha256:ca0eca715c3a680cd4af9550ee5997263b8435c5a75c6ce1063746dbee708a7c",
+    "rumi_workspace_mount_pack": "sha256:a008d6e93f872fecc5954bfa22f2605a1ada132a11c91852965d04473671605f",
     "shell.tauri.default": "sha256:dd236516e496d1eaa51dbc03c9df23db94e96fbcd08c512774fb4d5bd40eeea6"
   }
 }
