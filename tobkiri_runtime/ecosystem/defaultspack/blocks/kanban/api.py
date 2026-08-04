@@ -7,6 +7,11 @@ from typing import Any, Mapping
 
 from blocks._common import error, ok
 from domain.kanban.contract_facade import KanbanContractFacade, KanbanFacadeError
+from domain.kanban.store import (
+    KanbanOwnerUnavailable,
+    StateStoreFactory,
+    default_db_path,
+)
 
 
 def run(input_data: Any, context: Any = None) -> dict[str, Any]:
@@ -16,10 +21,14 @@ def run(input_data: Any, context: Any = None) -> dict[str, Any]:
         return _invalid("input_data must be a dict")
     payload = dict(input_data)
     try:
-        compatibility = _explicit_adapter_result(payload)
+        compatibility = _explicit_adapter_result(payload, _context(context))
         if compatibility is not None:
             return ok(compatibility)
         return ok(KanbanContractFacade(payload, _context(context)).run(_action(payload)))
+    except KanbanOwnerUnavailable as exc:
+        response = error(str(exc), "KANBAN_OWNER_UNAVAILABLE")
+        response["_http_status"] = 503
+        return response
     except KanbanFacadeError as exc:
         response = error(str(exc), exc.code)
         response["_http_status"] = exc.http_status
@@ -54,7 +63,10 @@ def _context(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _explicit_adapter_result(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+def _explicit_adapter_result(
+    payload: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> dict[str, Any] | None:
     """Use the canonical owner adapter only for an explicit local path.
 
     The normal HTTP route remains the approval-aware global contract facade.
@@ -66,7 +78,11 @@ def _explicit_adapter_result(payload: Mapping[str, Any]) -> dict[str, Any] | Non
         return None
     from domain.kanban.service import KanbanService
 
-    service = KanbanService()
+    state_store_factory = _state_store_factory(context)
+    service = KanbanService(
+        db_path=default_db_path(),
+        state_store_factory=state_store_factory,
+    )
     action = _action(payload)
     if action in {"list_boards", "boards"}:
         return service.list_boards(dict(payload))
@@ -92,6 +108,8 @@ def _explicit_adapter_result(payload: Mapping[str, Any]) -> dict[str, Any] | Non
         result = sync_conversation_kanban(
             str(payload.get("conversation_id") or payload.get("source_id") or ""),
             reason=str(payload.get("reason") or "kanban_api"),
+            db_path=default_db_path(),
+            state_store_factory=state_store_factory,
         )
         return result or {}
     if action in {"sync_runs", "sync"}:
@@ -113,6 +131,19 @@ def _explicit_adapter_result(payload: Mapping[str, Any]) -> dict[str, Any] | Non
     if action == "delete_column":
         return service.delete_column(str(payload.get("column_id") or ""))
     return None
+
+
+def _state_store_factory(context: Mapping[str, Any]) -> StateStoreFactory:
+    """Return the caller-selected owner factory or fail closed."""
+
+    value = context.get("kanban_state_store_factory") or context.get(
+        "state_store_factory"
+    )
+    if not callable(value):
+        raise KanbanOwnerUnavailable(
+            "compatibility Kanban path requires an injected state-store factory"
+        )
+    return value
 
 
 def _invalid(message: str) -> dict[str, Any]:

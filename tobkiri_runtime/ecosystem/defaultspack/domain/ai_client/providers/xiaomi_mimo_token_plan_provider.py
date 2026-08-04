@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from copy import deepcopy
 from typing import Any, Dict, List
 
@@ -152,16 +151,15 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         *,
         provider_id: str,
         display_name: str,
+        api_key: str = "",
         api_key_env: list[str],
         base_url_env: str,
         default_base_url: str,
         region: str,
     ) -> None:
         catalog_models = model_manifests_from_provider_components(provider_id)
-        explicit_token_plan_opt_in = any(
-            str(os.environ.get(env_name, "") or "").strip()
-            for env_name in api_key_env
-        )
+        injected_api_key = str(api_key or "").strip()
+        explicit_token_plan_opt_in = bool(injected_api_key)
         if not catalog_models and explicit_token_plan_opt_in:
             # This provider owns a fixed token-plan allowlist. A selected
             # model catalog may refine it, but an unselected external catalog
@@ -176,6 +174,7 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         super().__init__(
             provider_id=provider_id,
             display_name=display_name,
+            api_key=injected_api_key,
             api_key_env=api_key_env,
             base_url_env=base_url_env,
             default_base_url=default_base_url,
@@ -183,6 +182,10 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
             known_models=catalog_models,
             remote_model_discovery=True,
         )
+        # The generic base class supports legacy environment fallback for
+        # other providers.  Xiaomi token-plan availability is caller-owned:
+        # keep only the explicitly injected credential on this provider.
+        self._api_key = injected_api_key
         # Keep the generic provider-program scanner's KNOWN_MODELS contract
         # empty. Token-plan models are a credential-scoped provider contract,
         # not a generic checked-in program inventory.
@@ -286,10 +289,11 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
 
 
 class XiaomiMimoTokenPlanAmsProvider(XiaomiMimoTokenPlanProvider):
-    def __init__(self) -> None:
+    def __init__(self, *, api_key: str = "") -> None:
         super().__init__(
             provider_id="xiaomi-token-plan-ams",
             display_name="Xiaomi MiMo Token Plan AMS",
+            api_key=api_key,
             api_key_env=[
                 "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
             ],
@@ -300,10 +304,11 @@ class XiaomiMimoTokenPlanAmsProvider(XiaomiMimoTokenPlanProvider):
 
 
 class XiaomiMimoTokenPlanCnProvider(XiaomiMimoTokenPlanProvider):
-    def __init__(self) -> None:
+    def __init__(self, *, api_key: str = "") -> None:
         super().__init__(
             provider_id="xiaomi-token-plan-cn",
             display_name="Xiaomi MiMo Token Plan CN",
+            api_key=api_key,
             api_key_env=[
                 "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
             ],
@@ -314,10 +319,11 @@ class XiaomiMimoTokenPlanCnProvider(XiaomiMimoTokenPlanProvider):
 
 
 class XiaomiMimoTokenPlanSgpProvider(XiaomiMimoTokenPlanProvider):
-    def __init__(self) -> None:
+    def __init__(self, *, api_key: str = "") -> None:
         super().__init__(
             provider_id="xiaomi-token-plan-sgp",
             display_name="Xiaomi MiMo Token Plan SGP",
+            api_key=api_key,
             api_key_env=[
                 "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
                 "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",

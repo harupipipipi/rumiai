@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -81,23 +80,7 @@ def run(context, args):
 
 
 def _run_computer_action():
-    """Return the canonical runner for this function boundary.
-
-    The internal Viewer host boundary uses the approval-aware host bridge so
-    the native ComputerSeat implementation can own haze and delivery facts.
-    Ordinary pack execution remains a finite Wave 8 contract projection.  No
-    caller-supplied approval or bypass flag is forwarded by either path.
-    """
-
-    if os.environ.get("RUMI_COMPUTER_HOST_INTERNAL") == "1":
-        try:
-            from ecosystem.defaultspack.domain.host_bridge.computer_router import (
-                run_computer_action,
-            )
-        except ImportError:  # pragma: no cover - direct function execution fallback
-            from domain.host_bridge.computer_router import run_computer_action
-
-        return run_computer_action
+    """Return the host-contract runner used by the legacy function surface."""
 
     def run_action(action, payload, context=None, **kwargs):
         source_function_id = str(kwargs.get("tool_name") or "browser_computer")

@@ -724,7 +724,9 @@ def test_subagent_rumi_function_executes_local_controller(
             "capability_executor": FakeCapabilityExecutor(),
         }
     )
-    result = ToolExecutor().execute(
+    result = ToolExecutor(
+        subagent_factory=SubagentController,
+    ).execute(
         "subagent",
         {"task": "hello from child"},
         tool_context,
@@ -1275,6 +1277,7 @@ def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_
             **defaultspack_capability_plan_context("subagent"),
             "conversation_id": parent["id"],
         },
+        subagent_factory=SubagentController,
     )
 
     assert result["status"] == "ok"

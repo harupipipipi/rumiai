@@ -11,11 +11,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-def test_xiaomi_token_plan_provider_uses_api_key_header(monkeypatch):
+def test_xiaomi_token_plan_provider_uses_api_key_header():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
-    provider = XiaomiMimoTokenPlanSgpProvider()
+    provider = XiaomiMimoTokenPlanSgpProvider(api_key="test-token")
 
     headers = provider._headers()
 
@@ -23,11 +22,10 @@ def test_xiaomi_token_plan_provider_uses_api_key_header(monkeypatch):
     assert "Authorization" not in headers
 
 
-def test_xiaomi_token_plan_provider_passes_openai_tools(monkeypatch):
+def test_xiaomi_token_plan_provider_passes_openai_tools():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
-    provider = XiaomiMimoTokenPlanSgpProvider()
+    provider = XiaomiMimoTokenPlanSgpProvider(api_key="test-token")
     captured = {}
     tool = {
         "type": "function",
@@ -109,11 +107,13 @@ def test_xiaomi_token_plan_provider_passes_openai_tools(monkeypatch):
     assert followup_messages[0]["reasoning_content"] == "I should call the write tool."
 
 
-def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
+def test_xiaomi_token_plan_models_are_tool_capable():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
-    models = {item["id"]: item for item in XiaomiMimoTokenPlanSgpProvider().list_models()}
+    models = {
+        item["id"]: item
+        for item in XiaomiMimoTokenPlanSgpProvider(api_key="test-token").list_models()
+    }
 
     pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
     fast = models["xiaomi-token-plan-sgp/mimo-v2.5"]
@@ -131,11 +131,10 @@ def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
     assert "xiaomi-token-plan-sgp/mimo-v2-flash" not in models
 
 
-def test_xiaomi_token_plan_rejects_removed_flash_model(monkeypatch):
+def test_xiaomi_token_plan_rejects_removed_flash_model():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
-    provider = XiaomiMimoTokenPlanSgpProvider()
+    provider = XiaomiMimoTokenPlanSgpProvider(api_key="test-token")
 
     try:
         provider.complete("mimo-v2-flash", [{"role": "user", "content": "hello"}], [], {})
@@ -147,11 +146,10 @@ def test_xiaomi_token_plan_rejects_removed_flash_model(monkeypatch):
 
 
 
-def test_xiaomi_token_plan_translates_thinking_level_to_xiaomi_thinking_payload(monkeypatch):
+def test_xiaomi_token_plan_translates_thinking_level_to_xiaomi_thinking_payload():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
-    provider = XiaomiMimoTokenPlanSgpProvider()
+    provider = XiaomiMimoTokenPlanSgpProvider(api_key="test-token")
 
     translated = provider._translate_model_params("mimo-v2.5-pro", {"thinking_level": "high", "top_p": 0.8})
     disabled = provider._translate_model_params("mimo-v2.5-pro", {"thinking_level": "none"})

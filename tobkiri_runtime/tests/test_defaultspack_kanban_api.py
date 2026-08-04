@@ -93,6 +93,9 @@ def test_kanban_block_handler_bootstraps_and_mutates_board(tmp_path, monkeypatch
     monkeypatch.setenv("RUMI_DEFAULTSPACK_KANBAN_DB_PATH", str(tmp_path / "kanban.db"))
 
     from blocks.kanban.api import run
+    from ecosystem.rumi_kanban_state_store_pack.runtime.store import KanbanStateStore
+
+    owner_context = {"kanban_state_store_factory": KanbanStateStore}
 
     bootstrapped = run(
         {
@@ -101,7 +104,7 @@ def test_kanban_block_handler_bootstraps_and_mutates_board(tmp_path, monkeypatch
             "scope_id": "conv-1",
             "bootstrap": "true",
         },
-        {},
+        owner_context,
     )
     assert bootstrapped["status"] == "ok"
     snapshot = bootstrapped["data"]
@@ -109,7 +112,10 @@ def test_kanban_block_handler_bootstraps_and_mutates_board(tmp_path, monkeypatch
     assert [column["title"] for column in snapshot["columns"]] == ["Backlog", "Doing", "Review", "Done"]
 
     board_id = snapshot["board"]["board_id"]
-    created = run({"action": "create_card", "board_id": board_id, "title": "Finish API"}, {})
+    created = run(
+        {"action": "create_card", "board_id": board_id, "title": "Finish API"},
+        owner_context,
+    )
     assert created["status"] == "ok"
     card = created["data"]
     assert card["title"] == "Finish API"
@@ -121,23 +127,29 @@ def test_kanban_block_handler_bootstraps_and_mutates_board(tmp_path, monkeypatch
             "task": "Finish API",
             "model": "local",
         },
-        {},
+        owner_context,
     )
     assert started["status"] == "ok"
     assert started["data"]["agent_status"] == "running"
     assert started["data"]["column_id"] == _column_by_title(snapshot, "Doing")["column_id"]
 
-    ready = run({"action": "agent_ready", "card_id": card["card_id"]}, {})
+    ready = run(
+        {"action": "agent_ready", "card_id": card["card_id"]},
+        owner_context,
+    )
     assert ready["status"] == "ok"
     assert ready["data"]["agent_status"] == "ready"
     assert ready["data"]["column_id"] == _column_by_title(snapshot, "Review")["column_id"]
 
-    applied = run({"action": "agent_apply", "card_id": card["card_id"]}, {})
+    applied = run(
+        {"action": "agent_apply", "card_id": card["card_id"]},
+        owner_context,
+    )
     assert applied["status"] == "ok"
     assert applied["data"]["agent_status"] == "applied"
     assert applied["data"]["column_id"] == _column_by_title(snapshot, "Done")["column_id"]
 
-    synced = run({"action": "sync_runs", "board_id": board_id}, {})
+    synced = run({"action": "sync_runs", "board_id": board_id}, owner_context)
     assert synced["status"] == "ok"
     assert synced["data"]["board"]["board_id"] == board_id
     assert any(event["event_type"] == "runs.sync.noop" for event in synced["data"]["events"])

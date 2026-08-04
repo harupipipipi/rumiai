@@ -229,13 +229,12 @@ def test_workflow_run_does_not_trust_client_supplied_approval(
     assert not (tmp_path / "bypassed").exists()
 
 
-def test_xiaomi_token_plan_accepts_all_requested_agent_os_tools(monkeypatch):
+def test_xiaomi_token_plan_accepts_all_requested_agent_os_tools():
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
     from domain.tool.schema_adapter import adapt_tool_definitions
     from domain.tool.tool_manifest_helpers import REQUESTED_AGENT_OS_TOOL_IDS
 
     registry = _reset_registry()
-    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
     tools = [registry.get(tool_id) for tool_id in REQUESTED_AGENT_OS_TOOL_IDS]
     provider_tools = adapt_tool_definitions(tools)
     captured = {}
@@ -246,7 +245,7 @@ def test_xiaomi_token_plan_accepts_all_requested_agent_os_tools(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
 
     with patch.object(XiaomiMimoTokenPlanSgpProvider, "_request_json", side_effect=fake_request_json):
-        response = XiaomiMimoTokenPlanSgpProvider().complete(
+        response = XiaomiMimoTokenPlanSgpProvider(api_key="test-token").complete(
             "mimo-v2.5-pro",
             [{"role": "user", "content": "Use the available tools."}],
             provider_tools,

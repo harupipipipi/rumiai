@@ -2017,7 +2017,9 @@ def _cloud_runtime_enabled() -> bool:
     }
 
 
-def _instantiate_manifest_provider(manifest: Dict[str, Any]):
+def _instantiate_manifest_provider(
+    manifest: Dict[str, Any], *, injected_api_key: str = ""
+):
     provider_id = str(manifest.get("id", "")).strip()
     if not provider_id or provider_id == "rumi":
         return None
@@ -2064,6 +2066,8 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
         )
     if entrypoint:
         provider_cls = _import_provider_entrypoint(entrypoint)
+        if provider_id.startswith("xiaomi-token-plan-"):
+            return provider_cls(api_key=str(injected_api_key or "").strip())
         return provider_cls()
     return None
 
@@ -2089,7 +2093,13 @@ def detect_available_providers():
         if not _credentials_ready(manifest, provider_id):
             continue
         try:
-            provider = _instantiate_manifest_provider(manifest)
+            injected_api_key = ""
+            if provider_id.startswith("xiaomi-token-plan-"):
+                injected_api_key = read_provider_api_key(provider_id, "legacy") or ""
+            provider = _instantiate_manifest_provider(
+                manifest,
+                injected_api_key=injected_api_key,
+            )
         except Exception:
             provider = None
         if provider is not None:

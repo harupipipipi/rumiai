@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from .store import KanbanOwnerUnavailable, StateStoreFactory
 
 
 def sync_conversation_kanban(
     conversation_id: str,
     *,
     reason: str = "chat_changed",
+    db_path: str | Path | None = None,
+    state_store_factory: StateStoreFactory | None = None,
 ) -> dict[str, Any] | None:
     """Re-project one conversation through the canonical Kanban adapter."""
 
@@ -23,10 +28,12 @@ def sync_conversation_kanban(
     board_id = str(kanban.get("board_id") or "").strip() if isinstance(kanban, dict) else ""
 
     from .service import KanbanService
-    from .store import KanbanOwnerUnavailable
 
     try:
-        service = KanbanService()
+        service = KanbanService(
+            db_path=db_path,
+            state_store_factory=state_store_factory,
+        )
     except KanbanOwnerUnavailable:
         # Chat remains usable when the selected profile does not expose the
         # optional Kanban owner.  This is a fail-closed projection skip, not a

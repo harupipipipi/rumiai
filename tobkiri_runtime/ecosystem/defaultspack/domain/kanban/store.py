@@ -10,16 +10,13 @@ database.
 
 from __future__ import annotations
 
+import inspect
 import os
 import threading
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from core_runtime.resolved_profile_scope import persisted_resolved_profile
-from ecosystem.rumi_kanban_state_store_pack.runtime.store import (
-    KanbanConflict,
-    KanbanStateStore,
-)
 
 from .models import (
     DEFAULT_COLUMNS,
@@ -34,7 +31,17 @@ from .models import (
 
 
 class KanbanOwnerUnavailable(RuntimeError):
-    """Raised when no explicit adapter path or resolved profile is available."""
+    """Raised when an injected canonical Kanban owner is unavailable."""
+
+
+class StateStoreFactory(Protocol):
+    """Construct one profile-scoped owner for the compatibility projection."""
+
+    def __call__(self, profile_id: str, *, root: Path | None = None) -> Any:
+        """Return an owner implementing the canonical state-store protocol."""
+
+
+_OWNER_METHODS = ("snapshot", "get", "find_card", "find_column", "apply")
 
 
 def default_db_path() -> Path | None:
@@ -50,8 +57,13 @@ class KanbanStore:
     _instance: "KanbanStore | None" = None
     _class_lock = threading.RLock()
 
-    def __new__(cls, db_path: str | Path | None = None):
-        if db_path is not None:
+    def __new__(
+        cls,
+        db_path: str | Path | None = None,
+        *,
+        state_store_factory: StateStoreFactory | None = None,
+    ):
+        if db_path is not None or state_store_factory is not None:
             instance = super().__new__(cls)
             instance._initialized = False
             return instance
@@ -61,8 +73,17 @@ class KanbanStore:
                 cls._instance._initialized = False
             return cls._instance
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
-        target = Path(db_path).expanduser() if db_path is not None else default_db_path()
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        state_store_factory: StateStoreFactory | None = None,
+    ) -> None:
+        if state_store_factory is None or not callable(state_store_factory):
+            raise KanbanOwnerUnavailable(
+                "canonical Kanban owner requires an injected state-store factory"
+            )
+        target = Path(db_path).expanduser() if db_path is not None else None
         profile = persisted_resolved_profile()
         profile_id = str(getattr(profile, "profile_id", "") or "").strip()
         if not profile_id and target is None:
@@ -78,11 +99,25 @@ class KanbanStore:
             getattr(self, "_initialized", False)
             and self.db_path == target
             and self.profile_id == selected_profile
+            and self._state_store_factory is state_store_factory
         ):
             return
         self.db_path = target
         self.profile_id = selected_profile
-        self.owner = KanbanStateStore(selected_profile, root=root)
+        try:
+            owner = _create_owner(state_store_factory, selected_profile, root)
+        except Exception as exc:
+            raise KanbanOwnerUnavailable(
+                "canonical Kanban owner factory could not provide an owner"
+            ) from exc
+        if owner is None or any(
+            not callable(getattr(owner, name, None)) for name in _OWNER_METHODS
+        ):
+            raise KanbanOwnerUnavailable(
+                "canonical Kanban owner factory returned no usable owner"
+            )
+        self._state_store_factory = state_store_factory
+        self.owner = owner
         self._initialized = True
 
     def get_or_create_board(
@@ -460,7 +495,7 @@ class KanbanStore:
             record = normalized_arguments.get("record")
             if "record_id" not in normalized_arguments and isinstance(record, Mapping):
                 normalized_arguments["record_id"] = str(record.get("id") or "")
-        last_conflict: KanbanConflict | None = None
+        last_conflict: Exception | None = None
         for _ in range(8):
             revision = int(self.owner.snapshot().get("revision") or 0)
             try:
@@ -468,12 +503,13 @@ class KanbanStore:
                     name,
                     {"expected_revision": revision, **normalized_arguments},
                 )
-            except KanbanConflict as exc:
+            except Exception as exc:
+                if not _is_conflict(exc):
+                    raise
                 last_conflict = exc
         if last_conflict is not None:
             raise last_conflict
         raise RuntimeError("Kanban owner transition did not complete")
-
     def _append_event(
         self,
         board_id: str,
@@ -492,6 +528,33 @@ class KanbanStore:
             "created_at_ms": now_ms(),
         }
         self._apply("event.append", {"board_id": str(board_id), "record": record})
+
+
+def _is_conflict(error: Exception) -> bool:
+    """Identify the canonical conflict without importing its owner pack."""
+
+    return any(cls.__name__ == "KanbanConflict" for cls in type(error).__mro__)
+
+
+def _create_owner(
+    factory: StateStoreFactory,
+    profile_id: str,
+    root: Path | None,
+) -> Any:
+    """Call injected factories with compatibility support for simple callbacks."""
+
+    try:
+        parameters = inspect.signature(factory).parameters.values()
+    except (TypeError, ValueError):
+        return factory(profile_id, root=root)
+    accepts_root = any(
+        parameter.name == "root"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if root is None and not accepts_root:
+        return factory(profile_id)  # type: ignore[call-arg]
+    return factory(profile_id, root=root)
 
 
 def _card_record(

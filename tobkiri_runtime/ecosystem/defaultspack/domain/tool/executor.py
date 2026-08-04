@@ -1,3 +1,6 @@
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol
+
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
@@ -40,6 +43,20 @@ import re
 import time
 
 logger = logging.getLogger(__name__)
+
+
+class SubagentRunner(Protocol):
+    """Typed boundary for the pack-owned nested-agent runner."""
+
+    def run(
+        self,
+        arguments: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Mapping[str, Any]:
+        """Run a nested-agent request and return its structured result."""
+
+
+SubagentFactory = Callable[[], SubagentRunner]
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -292,7 +309,7 @@ def _approval_module():
 class ToolExecutor:
     """ツール実行エンジン"""
 
-    def __init__(self):
+    def __init__(self, *, subagent_factory: SubagentFactory | None = None):
         try:
             from domain.integrations.secrets import load_integration_secrets_into_env
 
@@ -301,6 +318,7 @@ class ToolExecutor:
             pass
         self._registry = ToolRegistry()
         self._mcp_client = McpClient()
+        self._subagent_factory = subagent_factory
 
     def execute(self, tool_name, arguments, context):
         """
@@ -1722,14 +1740,20 @@ class ToolExecutor:
                 "widget": None
             }
         elif tool_name == "subagent":
-            from ecosystem.rumi_default_tools_pack.domain.tool.subagent import (
-                SubagentController,
-            )
-
-            delegated = SubagentController().run(
+            if self._subagent_factory is None:
+                return {
+                    "result": "Subagent runner is not configured",
+                    "is_error": True,
+                    "widget": {
+                        "type": "subagent",
+                        "error_type": "subagent_runner_unavailable",
+                    },
+                }
+            delegated = self._subagent_factory().run(
                 arguments if isinstance(arguments, dict) else {},
                 context if isinstance(context, dict) else {},
             )
+            delegated = dict(delegated)
             failed = bool(
                 delegated.get("is_error")
                 or delegated.get("status") == "error"

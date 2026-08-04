@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from .models import KanbanNotFoundError, KanbanValidationError, gen_id
 from .prompt_note import append_kanban_system_prompt_note
-from .store import KanbanStore
+from .store import KanbanStore, StateStoreFactory
 
 KANBAN_SYSTEM_PROMPT_NOTE = (
     "この会話はKanbanに追加されています。会話内のタスク、期限、担当、優先度が変わった場合は、"
@@ -42,8 +43,17 @@ _DIAGNOSTIC_TASK_CONTENT_RE = re.compile(
 class KanbanService:
     """Project conversation imports and agent transitions onto Kanban state."""
 
-    def __init__(self, store: KanbanStore | None = None) -> None:
-        self.store = store or KanbanStore()
+    def __init__(
+        self,
+        store: KanbanStore | None = None,
+        *,
+        db_path: str | Path | None = None,
+        state_store_factory: StateStoreFactory | None = None,
+    ) -> None:
+        self.store = store if store is not None else KanbanStore(
+            db_path,
+            state_store_factory=state_store_factory,
+        )
 
     def list_boards(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """List boards, optionally bootstrapping the requested scope."""
