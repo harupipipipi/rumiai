@@ -963,7 +963,18 @@ def save_provider_oauth_connection(
         "has_refresh_token": bool(refresh_token or existing.get("has_refresh_token")),
     }
     capability_metadata = {**metadata, "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE}
-    requested_capabilities = _provider_granted_capabilities(provider_id, capability_metadata, pack_root=pack_root)
+    explicit_requested_capabilities = _normalize_scope_list(
+        token_data.get("requested_capabilities")
+        or token_data.get("requestedCapabilities")
+    )
+    requested_capabilities = (
+        explicit_requested_capabilities
+        or _provider_granted_capabilities(
+            provider_id,
+            capability_metadata,
+            pack_root=pack_root,
+        )
+    )
     if requested_capabilities:
         capability_metadata["requested_capabilities"] = requested_capabilities
     resolved = _resolve_connection_capabilities(provider_id, capability_metadata, pack_root=pack_root)

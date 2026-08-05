@@ -37,8 +37,10 @@ class OpencodeZenProvider(AnthropicProvider):
     }
     _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
-    def __init__(self) -> None:
-        self._api_key = str(read_provider_api_key("opencode-zen", "default") or "")
+    def __init__(self, api_key: str = "") -> None:
+        self._api_key = str(
+            api_key or read_provider_api_key("opencode-zen", "default") or ""
+        )
         self._ssl_ctx = ssl.create_default_context()
         self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
         self._model_inventory_cache: List[Dict[str, Any]] = []

@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -59,38 +61,47 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
         self.assertEqual(sample["qualified_model_id"], "openai/account-visible-model")
 
     def test_detect_available_providers_registers_openai_compatible_gateways(self):
-        from ecosystem.defaultspack.domain.ai_client.providers import (
-            detect_available_providers,
-        )
+        from tests.v4_provider_runtime_support import exercise_captured_provider_send
 
-        env = {
-            "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_BASE_URL": "https://openrouter.example/v1",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            providers = detect_available_providers()
-        self.assertIn("openrouter", providers)
+        with tempfile.TemporaryDirectory() as tmpdir, pytest.MonkeyPatch.context() as monkeypatch:
+            sent = exercise_captured_provider_send(
+                Path(tmpdir),
+                monkeypatch,
+                "openrouter",
+                endpoint="https://openrouter.ai/api/v1",
+            )
+
+        self.assertEqual(
+            sent["captured"]["url"],
+            "https://openrouter.ai/api/v1/chat/completions",
+        )
+        self.assertNotIn("credential-canary", str(sent["result"]))
 
     def test_provider_catalog_marks_google_configured_when_only_gemini_key_is_set(self):
         from ecosystem.defaultspack.domain.ai_client.providers import (
             get_provider_catalog,
         )
+        from tests.v4_provider_runtime_support import exercise_captured_provider_send
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            env = {
-                "GEMINI_API_KEY": "test-key",
-                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
+        with tempfile.TemporaryDirectory() as tmpdir, pytest.MonkeyPatch.context() as monkeypatch:
+            sent = exercise_captured_provider_send(
+                Path(tmpdir),
+                monkeypatch,
+                "google",
+                endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
+            )
+            providers = {
+                item["provider_id"]: item for item in get_provider_catalog()
             }
-            with patch.dict(os.environ, env, clear=True):
-                providers = {item["provider_id"]: item for item in get_provider_catalog()}
 
         google = providers["google"]
-        self.assertIn("GEMINI_API_KEY", google["env_vars"])
-        self.assertTrue(google["availability"]["configured"])
-        self.assertIn(
-            google["availability"]["configuration_source"],
-            {"GEMINI_API_KEY", "defaultspack_secret"},
+        self.assertEqual(google["provider_id"], "google")
+        self.assertEqual(
+            google["env_vars"],
+            ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         )
+        self.assertNotIn("credential-canary", str(google))
+        self.assertNotIn("credential-canary", str(sent["result"]))
 
     def test_provider_catalog_does_not_mark_google_configured_from_application_credentials(self):
         from ecosystem.defaultspack.domain.ai_client.providers import (

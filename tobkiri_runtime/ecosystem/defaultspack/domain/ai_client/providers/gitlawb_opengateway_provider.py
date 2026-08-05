@@ -125,11 +125,12 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
     # exclusively fetched from the gateway for the configured API key.
     KNOWN_MODELS: List[Dict[str, Any]] = []
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str = "") -> None:
         catalog_models = model_manifests_from_provider_components("gitlawb-opengateway")
         super().__init__(
             provider_id="gitlawb-opengateway",
             display_name="Gitlawb OpenGateway",
+            api_key=api_key,
             api_key_env="GITLAWB_OPENGATEWAY_API_KEY",
             base_url_env="GITLAWB_OPENGATEWAY_BASE_URL",
             default_base_url="https://opengateway.gitlawb.com/v1",

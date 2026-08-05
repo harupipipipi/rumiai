@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -45,18 +47,32 @@ def _openrouter_catalog_models():
 
 class TestDefaultspackProviderExpansion(unittest.TestCase):
     def test_detect_available_providers_accepts_new_openai_compatible_provider_keys(self):
-        from domain.ai_client.providers import detect_available_providers
+        from tests.v4_provider_runtime_support import exercise_captured_provider_send
 
-        with patch.dict(
-            os.environ,
-            {"XAI_API_KEY": "x-key", "GROQ_API_KEY": "g-key", "DEEPSEEK_API_KEY": "d-key"},
-            clear=True,
-        ):
-            providers = detect_available_providers()
+        endpoints = {
+            "xai": "https://api.x.ai/v1",
+            "groq": "https://api.groq.com/openai/v1",
+            "deepseek": "https://api.deepseek.com/v1",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir, pytest.MonkeyPatch.context() as monkeypatch:
+            sent = {
+                provider_id: exercise_captured_provider_send(
+                    Path(tmpdir),
+                    monkeypatch,
+                    provider_id,
+                    endpoint=endpoint,
+                )
+                for provider_id, endpoint in endpoints.items()
+            }
 
-        self.assertIn("xai", providers)
-        self.assertIn("groq", providers)
-        self.assertIn("deepseek", providers)
+        credential_digests = {
+            provider_id: item["credential_digest"]
+            for provider_id, item in sent.items()
+        }
+        self.assertEqual(len(set(credential_digests.values())), len(endpoints))
+        for provider_id, item in sent.items():
+            self.assertIn(endpoints[provider_id], item["captured"]["url"])
+            self.assertNotIn("credential-canary", str(item["result"]))
 
     def test_generic_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.provider_catalog import XaiProvider

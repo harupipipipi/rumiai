@@ -189,9 +189,8 @@ def test_opengateway_does_not_client_filter_newly_provisioned_models():
         GitlawbOpengatewayProvider,
     )
 
-    with patch.dict(os.environ, {"GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token"}, clear=True):
-        provider = GitlawbOpengatewayProvider()
-        provider._assert_supported_model("newly-provisioned-model")
+    provider = GitlawbOpengatewayProvider(api_key="test-ogw-token")
+    provider._assert_supported_model("newly-provisioned-model")
 
 
 def test_opengateway_translates_max_tokens_to_max_completion_tokens():
@@ -270,40 +269,38 @@ def test_opengateway_requires_api_key_and_has_no_dummy_authorization():
     assert "Authorization" not in provider._headers()
 
 
-def test_opengateway_api_key_sets_bearer_authorization():
-    from domain.ai_client.providers.gitlawb_opengateway_provider import (
-        GitlawbOpengatewayProvider,
+def test_opengateway_api_key_sets_bearer_authorization(tmp_path, monkeypatch):
+    from tests.v4_provider_runtime_support import exercise_captured_provider_send
+
+    monkeypatch.setenv("GITLAWB_OPENGATEWAY_API_KEY", "ambient-attacker")
+    sent = exercise_captured_provider_send(
+        tmp_path,
+        monkeypatch,
+        "gitlawb-opengateway",
+        endpoint="https://opengateway.gitlawb.com/v1",
     )
 
-    with patch.dict(os.environ, {"GITLAWB_OPENGATEWAY_API_KEY": "test-gb-token"}, clear=True):
-        provider = GitlawbOpengatewayProvider()
-
-    assert provider._credential_required is True
-    assert provider._headers()["Authorization"] == "Bearer test-gb-token"
+    assert sent["credential_bound"] is True
+    assert sent["provider_id"] == "gitlawb-opengateway"
+    assert "ambient-attacker" not in str(sent)
 
 
-def test_opengateway_api_key_can_be_saved_as_defaultspack_secret():
-    from core_runtime.secrets_store import SecretsStore
-    from domain.ai_client.api_key_store import (
-        load_provider_api_keys_into_env,
-        provider_has_api_key,
-        provider_secret_keys,
-        set_provider_api_key,
+def test_opengateway_credential_remains_opaque_at_defaultspack_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    from tests.v4_provider_runtime_support import exercise_captured_provider_send
+
+    sent = exercise_captured_provider_send(
+        tmp_path,
+        monkeypatch,
+        "gitlawb-opengateway",
+        endpoint="https://opengateway.gitlawb.com/v1",
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        secrets_dir = Path(tmpdir) / "secrets"
-        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
-            result = set_provider_api_key("gitlawb-opengateway", "test-gb-token")
-            store = SecretsStore(str(secrets_dir))
-
-            assert result["success"] is True
-            assert provider_secret_keys("gitlawb-opengateway") == ["GITLAWB_OPENGATEWAY_API_KEY"]
-            assert provider_has_api_key("gitlawb-opengateway") is True
-            assert store.has_secret("GITLAWB_OPENGATEWAY_API_KEY") is True
-            loaded = load_provider_api_keys_into_env()
-            assert loaded["gitlawb-opengateway"] is True
-            assert os.environ["GITLAWB_OPENGATEWAY_API_KEY"] == "test-gb-token"
+    serialized = str(sent["result"]) + str(sent["calls"])
+    assert "credential-canary" not in serialized
+    assert "GITLAWB_OPENGATEWAY_API_KEY" not in os.environ
 
 
 def test_opengateway_uses_browser_user_agent_for_gateway_compatibility():

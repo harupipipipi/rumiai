@@ -74,9 +74,7 @@ class _FakeSseResponse:
 def _provider(monkeypatch):
     from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
 
-    provider = OpencodeGoProvider()
-    provider._api_key = "test-opencode-go-key"
-    return provider
+    return OpencodeGoProvider(api_key="test-opencode-go-key")
 
 
 class _FakeJsonResponse:
@@ -462,15 +460,18 @@ def test_opencode_go_secret_keys():
     ]
 
 
-def test_opencode_go_detect_available_providers_with_key(monkeypatch):
-    from domain.ai_client.providers import detect_available_providers
-    from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
+def test_opencode_go_detect_available_providers_with_key(tmp_path, monkeypatch):
+    from tests.v4_provider_runtime_support import exercise_captured_provider_send
 
-    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-opencode-go-key")
+    sent = exercise_captured_provider_send(
+        tmp_path,
+        monkeypatch,
+        "opencode-go",
+        endpoint="https://opencode.ai/zen/go/v1",
+    )
 
-    available = detect_available_providers()
-
-    assert isinstance(available["opencode-go"], OpencodeGoProvider)
+    assert sent["captured"]["body"]["model"] == "account-visible-model"
+    assert "credential-canary" not in str(sent["result"])
 
 
 def test_opencode_go_rejects_unknown_model(monkeypatch):
