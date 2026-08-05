@@ -518,7 +518,6 @@ class ToolExecutor:
         forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
-        self._ensure_shared_function_registered(qualified_name)
         return self._execute_capability_request(tool_def, request, approved_context)
 
     def _execute_capability(self, tool_def, arguments, context):
@@ -1286,60 +1285,6 @@ class ToolExecutor:
         raise RuntimeError(
             "CapabilityExecutor is not bound; implicit executor creation is forbidden"
         )
-
-    @staticmethod
-    def _ensure_shared_function_registered(qualified_name):
-        try:
-            from core_runtime.di_container import get_container
-
-            registry = get_container().get("function_registry")
-        except Exception:
-            return
-        try:
-            if registry.get(qualified_name) is not None:
-                return
-        except Exception:
-            return
-        ToolExecutor._load_pack_functions_into_registry(registry)
-
-    @staticmethod
-    def _load_pack_functions_into_registry(registry):
-        from core_runtime.resolved_profile_scope import effective_pack_ids
-
-        ecosystem_dir = Path(__file__).resolve().parents[3]
-        effective = effective_pack_ids()
-        for pack_id in sorted(effective):
-            pack_root = ecosystem_dir / pack_id
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
-            try:
-                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-            except Exception:
-                pack_manifest = {}
-            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
-            functions_root = pack_root / "functions"
-            if not functions_root.exists():
-                continue
-            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-                manifest_path = function_dir / "manifest.json"
-                if not manifest_path.is_file():
-                    continue
-                try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                function_id = str(manifest.get("function_id") or function_dir.name).strip()
-                if not function_id:
-                    continue
-                try:
-                    registry.register(
-                        pack_id=pack_id,
-                        function_id=function_id,
-                        manifest=manifest,
-                        function_dir=function_dir,
-                    )
-                except Exception:
-                    continue
 
     @staticmethod
     def _principal_id(tool_def, context):

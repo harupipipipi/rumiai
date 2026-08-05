@@ -85,7 +85,6 @@ from .egress_rate_limiter import (  # noqa: F401 — re-export
 )
 from .egress_domain_controller import (  # noqa: F401 — re-export
     DomainController,
-    _ECOSYSTEM_DIR,
 )
 # BUG-5-1: IPC 認証 (Windows TCP フォールバック)
 from .ipc_auth import IpcAuthManager, perform_server_auth  # noqa: F401
@@ -1083,7 +1082,8 @@ class UDSEgressProxyManager:
         self._audit_logger = audit_logger
         self._lock = threading.Lock()
         self._rate_limiter = PackRateLimiter()
-        self._domain_controller = DomainController()
+        # Deny until the selected Profile supplies an immutable Pack v4 policy.
+        self._domain_controller = DomainController({})
         # BUG-5-1: IPC auth manager
         self._ipc_auth = IpcAuthManager() if _IS_WINDOWS else None
 
