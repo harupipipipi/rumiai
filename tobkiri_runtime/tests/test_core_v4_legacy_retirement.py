@@ -18,6 +18,7 @@ RETIRED_MODULES = {
     "capability_graph_compiler.py",
     "capability_graph_loader.py",
     "component_lifecycle.py",
+    "control_panel_handlers.py",
     "ecosystem_nodes.py",
     "function_registry.py",
     "interface_registry.py",

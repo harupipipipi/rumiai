@@ -5759,27 +5759,6 @@
       },
       {
         "evidence": "InterfaceRegistry",
-        "line": 1197,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence": "InterfaceRegistry",
-        "line": 1310,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence": "InterfaceRegistry",
-        "line": 1349,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence": "InterfaceRegistry",
         "line": 250,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/api/flow_handlers.py",
@@ -14923,24 +14902,6 @@
         "rule_id": "legacy_host_execution_env"
       },
       {
-        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
-        "line": 1197,
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
-        "line": 1310,
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
-        "line": 1349,
-        "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
         "evidence_digest": "sha256:439546a6468caebea2f53518c50aede167d6c1cfd6becceedfa16bf2990d78ad",
         "line": 250,
         "path": "tobkiri_runtime/core_runtime/api/flow_handlers.py",
@@ -18470,7 +18431,7 @@
     ]
   },
   "repository": {
-    "commit": "85cc506ec19d221f33e29d67acea63ea859275fc",
+    "commit": "3d6126c64c7dc0bb5d0f58a6c265bdf006930a19",
     "tree_digest": "200da88015a60a4291fb89366592eb6333399fcf406de86f28a3c7e67de0ca63"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

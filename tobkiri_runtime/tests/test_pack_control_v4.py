@@ -32,7 +32,6 @@ def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Capture one isolated canonical Defaults Profile and approval store."""
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
     session = capture_pack_control_session()
     state_path = user_data / "profiles" / "defaults" / "v4" / "active.json"
@@ -184,7 +183,6 @@ def test_missing_profile_and_symlinked_state_fail_closed(
     """No session is reconstructed from missing or redirected Profile state."""
     user_data = tmp_path / "missing"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
     capture_pack_control_session()
     pointer = user_data / "profiles" / "defaults" / "v4" / "active.json"
@@ -202,7 +200,6 @@ def test_profile_identity_traversal_fails_before_control_state_access(
     """Profile persistence cannot escape the Authority-owned control root."""
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
     session = capture_pack_control_session()
     with pytest.raises(PackControlDenied, match="profile_id"):
@@ -316,7 +313,7 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
         assert all(path != "/api/panel/packs" for path in paths)
         assert not any(path.startswith("/api/panel/packs/") for path in paths)
     finally:
-        from core_runtime.api.control_panel_handlers import (
+        from core_runtime.restart_control import (
             clear_kernel_restart_request,
         )
 

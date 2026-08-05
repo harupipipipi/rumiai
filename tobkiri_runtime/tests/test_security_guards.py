@@ -1,57 +1,10 @@
 """tests/test_security_guards.py — セキュリティガード強化テスト
 
-Wave 1-1: restart 保護（レート制限 + graceful flag）
 Wave 1-2: --permissive ガード強化（lockfile チェック）
 """
-import time
 from pathlib import Path
 
 import pytest
-
-
-# ======================================================================
-# Wave 1-1: restart レート制限テスト
-# ======================================================================
-
-
-def _make_mixin():
-    """テスト用に ControlPanelHandlersMixin のインスタンスを生成する"""
-    from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
-    cls = type("_Stub", (ControlPanelHandlersMixin,), {})
-    return cls()
-
-
-class TestRestartRateLimit:
-    """_panel_restart_kernel のレート制限テスト"""
-
-    def test_first_call_succeeds(self, monkeypatch):
-        """初回呼び出しは成功する"""
-        import core_runtime.api.control_panel_handlers as mod
-        monkeypatch.setattr(mod, "_last_restart_time", 0.0)
-        mod.clear_kernel_restart_request()
-        obj = _make_mixin()
-        result = obj._panel_restart_kernel()
-        assert result.get("restarting") is True
-        assert mod.is_kernel_restart_requested() is True
-
-    def test_second_call_within_60s_rejected(self, monkeypatch):
-        """60秒以内の2回目は HTTP 429 で拒否される"""
-        import core_runtime.api.control_panel_handlers as mod
-        monkeypatch.setattr(mod, "_last_restart_time", time.time() - 10)
-        obj = _make_mixin()
-        result = obj._panel_restart_kernel()
-        assert result.get("status_code") == 429
-        assert "rate limit" in result.get("error", "").lower()
-
-    def test_call_after_60s_succeeds(self, monkeypatch):
-        """60秒経過後の呼び出しは成功する"""
-        import core_runtime.api.control_panel_handlers as mod
-        monkeypatch.setattr(mod, "_last_restart_time", time.time() - 61)
-        mod.clear_kernel_restart_request()
-        obj = _make_mixin()
-        result = obj._panel_restart_kernel()
-        assert result.get("restarting") is True
-        assert mod.is_kernel_restart_requested() is True
 
 
 # ======================================================================

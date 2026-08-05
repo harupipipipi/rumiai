@@ -453,22 +453,6 @@ def _is_di_phase_test(nodeid: str | None) -> bool:
     return bool(nodeid) and "test_di_phase" in nodeid
 
 
-def _is_security_guard_test(nodeid: str | None) -> bool:
-    return bool(nodeid) and "test_security_guards.py" in nodeid
-
-
-def _restore_control_panel_handlers() -> None:
-    for module_name in (
-        "core_runtime.api",
-        "core_runtime.api.control_panel_handlers",
-        "tobkiri_runtime.core_runtime.api",
-        "tobkiri_runtime.core_runtime.api.control_panel_handlers",
-    ):
-        _remove_module_binding(module_name)
-    _force_real_import("core_runtime.api")
-    _force_real_import("core_runtime.api.control_panel_handlers")
-
-
 def _restore_test_module_mocks(test_module) -> None:
     mock_mods = getattr(test_module, "_mock_mods", None)
     if isinstance(mock_mods, dict):
@@ -534,8 +518,6 @@ def _restore_real_modules() -> None:
 def pytest_runtest_setup(item):
     _reset_package_roots()
     _restore_real_di_container()
-    if _is_security_guard_test(item.nodeid):
-        _restore_control_panel_handlers()
     if _is_di_phase_test(item.nodeid):
         setattr(item.module, "get_container", _REAL_DI_CONTAINER_MODULE.get_container)
     if _should_skip_restore(item.nodeid):

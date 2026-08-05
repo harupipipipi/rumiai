@@ -137,7 +137,7 @@ class CapturedPackControlSession:
             if operation_id == "pack.status":
                 return self._status(arguments)
             if operation_id == "runtime.restart":
-                from .api.control_panel_handlers import request_kernel_restart
+                from .restart_control import request_kernel_restart
 
                 request_kernel_restart()
                 return {"restart_requested": True, **self._binding_payload()}
