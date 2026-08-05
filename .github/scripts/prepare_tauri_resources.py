@@ -387,16 +387,38 @@ def resolve_cargo_target_dir(
     relative values here keeps staging tied to the exact build output without
     searching other directories.
     """
-    repository_root = repo_root.resolve()
+    repository_root = repo_root.resolve(strict=True)
+    if not repository_root.is_dir():
+        raise RuntimeError(f"repository root must be a directory: {repository_root}")
     environment = os.environ if environ is None else environ
     configured = environment.get(CARGO_TARGET_DIR_ENV)
     if configured:
         target_dir = Path(configured)
+        if ".." in target_dir.parts:
+            raise ValueError(
+                f"{CARGO_TARGET_DIR_ENV} may not contain parent traversal: {configured!r}"
+            )
         if not target_dir.is_absolute():
             target_dir = repository_root / target_dir
     else:
         target_dir = repository_root / "pack-shell" / "target"
-    return target_dir.resolve()
+    target_dir = Path(os.path.normpath(target_dir))
+
+    components = (target_dir, *target_dir.parents)
+    for component in reversed(components):
+        try:
+            metadata = component.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode):
+            raise RuntimeError(
+                f"Cargo target directory contains a symlink component: {target_dir}"
+            )
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError(
+                f"Cargo target directory has a non-directory component: {component}"
+            )
+    return target_dir
 
 
 def _validate_target_component(target: str) -> None:
@@ -424,12 +446,6 @@ def resolve_pack_shell_binary(
     binary_name = pack_shell_binary_name(target)
     target_dir = resolve_cargo_target_dir(repo_root, environ)
     candidate = target_dir / target / "release" / binary_name
-    canonical = candidate.resolve(strict=False)
-    if canonical != candidate:
-        raise RuntimeError(
-            f"pack-shell binary path is not canonical or contains a symlink: {candidate}"
-        )
-
     try:
         metadata = candidate.lstat()
     except FileNotFoundError as exc:
@@ -441,11 +457,100 @@ def resolve_pack_shell_binary(
         raise RuntimeError(f"pack-shell binary may not be a symlink: {candidate}")
     if not stat.S_ISREG(metadata.st_mode):
         raise RuntimeError(f"pack-shell binary must be a regular file: {candidate}")
-    return canonical
+    canonical = candidate.resolve(strict=True)
+    if canonical != candidate:
+        raise RuntimeError(
+            f"pack-shell binary path is not canonical or contains a symlink: {candidate}"
+        )
+    if os.name != "nt" and not metadata.st_mode & (
+        stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    ):
+        raise RuntimeError(f"pack-shell binary must be executable: {candidate}")
+    return candidate
+
+
+def _expected_pack_shell_architecture(target: str) -> str:
+    architecture = target.split("-", 1)[0]
+    aliases = {"amd64": "x86_64", "arm64": "aarch64", "i586": "x86", "i686": "x86"}
+    return aliases.get(architecture, architecture)
+
+
+def _pack_shell_binary_architecture(payload: bytes, target: str) -> str:
+    """Read the architecture from the target platform's executable header."""
+    if is_windows_target(target):
+        if len(payload) < 64 or payload[:2] != b"MZ":
+            raise RuntimeError("pack-shell is not a PE executable")
+        pe_offset = int.from_bytes(payload[60:64], "little")
+        if (
+            len(payload) < pe_offset + 6
+            or payload[pe_offset : pe_offset + 4] != b"PE\0\0"
+        ):
+            raise RuntimeError("pack-shell has an invalid PE header")
+        machine = int.from_bytes(payload[pe_offset + 4 : pe_offset + 6], "little")
+        return {0x014C: "x86", 0x8664: "x86_64", 0xAA64: "aarch64"}.get(
+            machine, f"pe-machine-{machine:#x}"
+        )
+
+    if "apple-darwin" in target:
+        if len(payload) < 8:
+            raise RuntimeError("pack-shell has a truncated Mach-O header")
+        magic = payload[:4]
+        if magic in {b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe"}:
+            cpu_type = int.from_bytes(payload[4:8], "little")
+        elif magic in {b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce"}:
+            cpu_type = int.from_bytes(payload[4:8], "big")
+        else:
+            raise RuntimeError("pack-shell is not a thin Mach-O executable")
+        return {7: "x86", 0x01000007: "x86_64", 0x0100000C: "aarch64"}.get(
+            cpu_type, f"macho-cpu-{cpu_type:#x}"
+        )
+
+    if len(payload) < 20 or payload[:4] != b"\x7fELF":
+        raise RuntimeError("pack-shell is not an ELF executable")
+    if payload[5:6] == b"\x01":
+        byte_order = "little"
+    elif payload[5:6] == b"\x02":
+        byte_order = "big"
+    else:
+        raise RuntimeError("pack-shell ELF header has an invalid byte order")
+    machine = int.from_bytes(payload[18:20], byte_order)
+    return {3: "x86", 62: "x86_64", 183: "aarch64"}.get(
+        machine, f"elf-machine-{machine:#x}"
+    )
+
+
+def _read_verified_pack_shell(path: Path, target: str) -> tuple[bytes, int]:
+    """Read a regular executable once and detect path substitution around the read."""
+    before = path.lstat()
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise RuntimeError(f"pack-shell binary must be a regular file: {path}")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            payload = handle.read()
+    finally:
+        os.close(descriptor)
+    after = path.lstat()
+    identity_before = (before.st_dev, before.st_ino, before.st_size)
+    identity_opened = (opened.st_dev, opened.st_ino, opened.st_size)
+    identity_after = (after.st_dev, after.st_ino, after.st_size)
+    if identity_before != identity_opened or identity_opened != identity_after:
+        raise RuntimeError(f"pack-shell binary changed while being staged: {path}")
+    actual_architecture = _pack_shell_binary_architecture(payload, target)
+    expected_architecture = _expected_pack_shell_architecture(target)
+    if actual_architecture != expected_architecture:
+        raise RuntimeError(
+            "pack-shell architecture mismatch: "
+            f"expected {expected_architecture}, got {actual_architecture}"
+        )
+    return payload, opened.st_mode
 
 
 def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
     src = resolve_pack_shell_binary(repo_root, target)
+    payload, source_mode = _read_verified_pack_shell(src, target)
     binary_name = pack_shell_binary_name(target)
     staged_root = source_root.resolve()
     bundled_dir = staged_root / "bundled"
@@ -459,7 +564,26 @@ def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
         raise RuntimeError(f"pack-shell staging destination is not canonical: {dest}")
     if dest.exists() and not dest.is_file():
         raise RuntimeError(f"pack-shell staging destination must be a regular file: {dest}")
-    copy_file(src, dest)
+    temporary = bundled_dir / f".{binary_name}.{os.getpid()}.tmp"
+    if temporary.exists() or temporary.is_symlink():
+        raise RuntimeError(
+            f"pack-shell temporary destination already exists: {temporary}"
+        )
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(stat.S_IMODE(source_mode))
+        os.replace(temporary, dest)
+    finally:
+        temporary.unlink(missing_ok=True)
+    staged_payload = dest.read_bytes()
+    source_hash = hashlib.sha256(payload).digest()
+    staged_hash = hashlib.sha256(staged_payload).digest()
+    if staged_hash != source_hash:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"staged pack-shell SHA256 mismatch: {dest}")
     return dest
 
 

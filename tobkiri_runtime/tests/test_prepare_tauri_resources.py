@@ -48,11 +48,32 @@ def _write_pack_shell_binary(
     target: str,
     *,
     filename: str | None = None,
+    architecture: str | None = None,
+    executable: bool = True,
+    profile: str = "release",
 ) -> Path:
     binary_name = filename or module.pack_shell_binary_name(target)
-    binary = target_root / target / "release" / binary_name
+    binary = target_root / target / profile / binary_name
     binary.parent.mkdir(parents=True, exist_ok=True)
-    binary.write_bytes(b"pack-shell fixture")
+    requested_architecture = architecture or target.split("-", 1)[0]
+    if module.is_windows_target(target):
+        payload = bytearray(128)
+        payload[:2] = b"MZ"
+        payload[60:64] = (64).to_bytes(4, "little")
+        payload[64:68] = b"PE\0\0"
+        machine = {"x86_64": 0x8664, "aarch64": 0xAA64}[requested_architecture]
+        payload[68:70] = machine.to_bytes(2, "little")
+    elif "apple-darwin" in target:
+        machine = {"x86_64": 0x01000007, "aarch64": 0x0100000C}[requested_architecture]
+        payload = bytearray(b"\xcf\xfa\xed\xfe" + machine.to_bytes(4, "little"))
+        payload.extend(b"pack-shell fixture")
+    else:
+        payload = bytearray(64)
+        payload[:6] = b"\x7fELF\x02\x01"
+        machine = {"x86_64": 62, "aarch64": 183}[requested_architecture]
+        payload[18:20] = machine.to_bytes(2, "little")
+    binary.write_bytes(payload)
+    binary.chmod(0o755 if executable else 0o644)
     return binary
 
 
@@ -149,7 +170,7 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
 
 
-@pytest.mark.parametrize("target_dir_kind", ("default", "absolute", "relative"))
+@pytest.mark.parametrize("target_dir_kind", ("default", "absolute", "relative-spaces-unicode"))
 def test_stage_pack_shell_resolves_cargo_target_dir_deterministically(
     tmp_path,
     monkeypatch,
@@ -168,8 +189,8 @@ def test_stage_pack_shell_resolves_cargo_target_dir_deterministically(
         target_root = (tmp_path / "absolute-target").resolve()
         monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
     else:
-        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, "relative-target")
-        target_root = repo_root / "relative-target"
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, "relative target-雪")
+        target_root = repo_root / "relative target-雪"
 
     binary = _write_pack_shell_binary(module, target_root, target)
 
@@ -223,6 +244,69 @@ def test_stage_pack_shell_rejects_target_path_traversal(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="path component"):
         module.stage_pack_shell(repo_root, source_root, "../escape")
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "parent-traversal",
+        "file-root",
+        "symlink-root",
+        "dangling-symlink-root",
+        "non-executable",
+        "wrong-arch",
+    ),
+)
+def test_stage_pack_shell_rejects_unsafe_target_roots_and_artifacts(tmp_path, monkeypatch, case):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    repo_root.mkdir()
+    target = "aarch64-apple-darwin"
+
+    if case == "parent-traversal":
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, "../outside")
+    elif case == "file-root":
+        target_root = repo_root / "cargo-target"
+        target_root.write_bytes(b"not a directory")
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    elif case in {"symlink-root", "dangling-symlink-root"}:
+        outside = tmp_path / "outside"
+        if case == "symlink-root":
+            outside.mkdir()
+        target_root = repo_root / "cargo-target"
+        try:
+            target_root.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink creation is unavailable: {exc}")
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    else:
+        target_root = repo_root / "cargo-target"
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+        _write_pack_shell_binary(
+            module,
+            target_root,
+            target,
+            executable=case != "non-executable",
+            architecture="x86_64" if case == "wrong-arch" else None,
+        )
+
+    with pytest.raises((ValueError, RuntimeError)):
+        module.stage_pack_shell(repo_root, source_root, target)
+
+
+def test_stage_pack_shell_does_not_search_wrong_target_or_profile(tmp_path, monkeypatch):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    target_root = repo_root / "cargo-target"
+    repo_root.mkdir()
+    monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    _write_pack_shell_binary(module, target_root, "x86_64-apple-darwin", profile="release")
+    _write_pack_shell_binary(module, target_root, "aarch64-apple-darwin", profile="debug")
+
+    with pytest.raises(FileNotFoundError):
+        module.stage_pack_shell(repo_root, source_root, "aarch64-apple-darwin")
 
 
 def test_validate_bundle_accepts_canonical_v4_stage_without_legacy_authority(tmp_path):

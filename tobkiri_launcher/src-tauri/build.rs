@@ -1,6 +1,6 @@
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use sha2::{Digest, Sha256};
@@ -428,9 +428,50 @@ fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
     let Some(pack_shell) = ensure_pack_shell_binary(repo_root)? else {
         return Ok(());
     };
+    let target = required_cargo_target()?;
+    let (payload, permissions) = read_verified_pack_shell(&pack_shell, &target)?;
     let bundled_dir = staged_root.join("bundled");
+    if bundled_dir.exists() {
+        require_directory(&bundled_dir, "pack-shell staging directory")?;
+    }
     fs::create_dir_all(&bundled_dir)?;
-    copy_file(&pack_shell, &bundled_dir.join(pack_shell_binary_name()))?;
+    let destination = bundled_dir.join(pack_shell_binary_name(&target));
+    if destination.exists() || fs::symlink_metadata(&destination).is_ok() {
+        require_regular_file(&destination, "pack-shell staging destination")?;
+    }
+    let temporary = bundled_dir.join(format!(
+        ".{}.{}.tmp",
+        pack_shell_binary_name(&target),
+        std::process::id()
+    ));
+    let mut temporary_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let stage_result = (|| {
+        temporary_file.write_all(&payload)?;
+        temporary_file.sync_all()?;
+        fs::set_permissions(&temporary, permissions)?;
+        drop(temporary_file);
+        if destination.exists() {
+            fs::remove_file(&destination)?;
+        }
+        fs::rename(&temporary, &destination)?;
+        let staged = fs::read(&destination)?;
+        if Sha256::digest(&staged) != Sha256::digest(&payload) {
+            let _ = fs::remove_file(&destination);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged pack-shell SHA256 mismatch: {}",
+                    destination.display()
+                ),
+            ));
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(&temporary);
+    stage_result?;
     Ok(())
 }
 
@@ -451,13 +492,18 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
         .arg(&manifest)
         .current_dir(repo_root);
 
-    if let Ok(target) = std::env::var("TARGET") {
-        validate_path_component(&target, "Rust target")?;
-        command.arg("--target").arg(&target);
-    }
+    let target = required_cargo_target()?;
+    command.arg("--target").arg(&target);
 
-    if std::env::var("PROFILE").as_deref() == Ok("release") {
-        command.arg("--release");
+    let profile = required_cargo_profile()?;
+    match profile.as_str() {
+        "debug" => {}
+        "release" => {
+            command.arg("--release");
+        }
+        _ => {
+            command.arg("--profile").arg(&profile);
+        }
     }
 
     let output = command.output()?;
@@ -474,20 +520,14 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
 }
 
 fn find_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
-    let target = std::env::var("TARGET").ok();
-    if let Some(target) = &target {
-        validate_path_component(target, "Rust target")?;
-    }
-    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-    validate_path_component(&profile, "Cargo profile")?;
+    let target = required_cargo_target()?;
+    let profile = required_cargo_profile()?;
 
     let target_dir = resolve_cargo_target_dir(repo_root)?;
-    let output_dir = if let Some(target) = target {
-        target_dir.join(target).join(&profile)
-    } else {
-        target_dir.join(&profile)
-    };
-    let candidate = output_dir.join(pack_shell_binary_name());
+    let candidate = target_dir
+        .join(&target)
+        .join(&profile)
+        .join(pack_shell_binary_name(&target));
 
     let metadata = match fs::symlink_metadata(&candidate) {
         Ok(metadata) => metadata,
@@ -513,6 +553,20 @@ fn find_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
         ));
     }
 
+    #[cfg(unix)]
+    if {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 == 0
+    } {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary must be executable: {}",
+                candidate.display()
+            ),
+        ));
+    }
+
     let canonical = candidate.canonicalize()?;
     if canonical != candidate {
         return Err(io::Error::new(
@@ -531,6 +585,7 @@ fn resolve_cargo_target_dir(repo_root: &Path) -> io::Result<PathBuf> {
     let target_dir = match std::env::var_os(CARGO_TARGET_DIR_ENV) {
         Some(configured) if !configured.is_empty() => {
             let configured = PathBuf::from(configured);
+            reject_parent_traversal(&configured, CARGO_TARGET_DIR_ENV)?;
             if configured.is_absolute() {
                 configured
             } else {
@@ -540,11 +595,91 @@ fn resolve_cargo_target_dir(repo_root: &Path) -> io::Result<PathBuf> {
         _ => repository_root.join("pack-shell").join("target"),
     };
 
-    if target_dir.exists() {
-        target_dir.canonicalize()
-    } else {
-        Ok(target_dir)
+    let target_dir = normalize_absolute_path(&target_dir)?;
+    let mut ancestors = target_dir.ancestors().collect::<Vec<_>>();
+    ancestors.reverse();
+    for ancestor in ancestors {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Cargo target directory contains a symlink component: {}",
+                        target_dir.display()
+                    ),
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Cargo target directory has a non-directory component: {}",
+                        ancestor.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
     }
+    Ok(target_dir)
+}
+
+fn reject_parent_traversal(path: &Path, label: &str) -> io::Result<()> {
+    if path
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} may not contain parent traversal: {path:?}"),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_absolute_path(path: &Path) -> io::Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path must be absolute after resolution: {}", path.display()),
+        ));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "resolved path contains parent traversal: {}",
+                        path.display()
+                    ),
+                ));
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    Ok(normalized)
+}
+
+fn required_cargo_target() -> io::Result<String> {
+    let target = std::env::var("TARGET").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Cargo TARGET is missing or non-Unicode",
+        )
+    })?;
+    validate_path_component(&target, "Rust target")?;
+    Ok(target)
+}
+
+fn required_cargo_profile() -> io::Result<String> {
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    validate_path_component(&profile, "Cargo profile")?;
+    Ok(profile)
 }
 
 fn validate_path_component(value: &str, label: &str) -> io::Result<()> {
@@ -562,8 +697,125 @@ fn validate_path_component(value: &str, label: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn pack_shell_binary_name() -> &'static str {
-    if cfg!(target_os = "windows") {
+fn expected_pack_shell_architecture(target: &str) -> &str {
+    match target.split('-').next().unwrap_or_default() {
+        "amd64" => "x86_64",
+        "arm64" => "aarch64",
+        "i586" | "i686" => "x86",
+        architecture => architecture,
+    }
+}
+
+fn pack_shell_binary_architecture(payload: &[u8], target: &str) -> io::Result<String> {
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidData, message);
+    if target.contains("windows") || target.ends_with("-msvc") {
+        if payload.len() < 64 || &payload[..2] != b"MZ" {
+            return Err(invalid("pack-shell is not a PE executable"));
+        }
+        let pe_offset = u32::from_le_bytes(payload[60..64].try_into().unwrap()) as usize;
+        if payload.len() < pe_offset + 6 || &payload[pe_offset..pe_offset + 4] != b"PE\0\0" {
+            return Err(invalid("pack-shell has an invalid PE header"));
+        }
+        let machine = u16::from_le_bytes(payload[pe_offset + 4..pe_offset + 6].try_into().unwrap());
+        return Ok(match machine {
+            0x014c => "x86".to_string(),
+            0x8664 => "x86_64".to_string(),
+            0xaa64 => "aarch64".to_string(),
+            _ => format!("pe-machine-{machine:#x}"),
+        });
+    }
+
+    if target.contains("apple-darwin") {
+        if payload.len() < 8 {
+            return Err(invalid("pack-shell has a truncated Mach-O header"));
+        }
+        let cpu_type = match &payload[..4] {
+            b"\xcf\xfa\xed\xfe" | b"\xce\xfa\xed\xfe" => {
+                u32::from_le_bytes(payload[4..8].try_into().unwrap())
+            }
+            b"\xfe\xed\xfa\xcf" | b"\xfe\xed\xfa\xce" => {
+                u32::from_be_bytes(payload[4..8].try_into().unwrap())
+            }
+            _ => return Err(invalid("pack-shell is not a thin Mach-O executable")),
+        };
+        return Ok(match cpu_type {
+            7 => "x86".to_string(),
+            0x01000007 => "x86_64".to_string(),
+            0x0100000c => "aarch64".to_string(),
+            _ => format!("macho-cpu-{cpu_type:#x}"),
+        });
+    }
+
+    if payload.len() < 20 || &payload[..4] != b"\x7fELF" {
+        return Err(invalid("pack-shell is not an ELF executable"));
+    }
+    let machine_bytes: [u8; 2] = payload[18..20].try_into().unwrap();
+    let machine = match payload.get(5) {
+        Some(1) => u16::from_le_bytes(machine_bytes),
+        Some(2) => u16::from_be_bytes(machine_bytes),
+        _ => return Err(invalid("pack-shell ELF header has an invalid byte order")),
+    };
+    Ok(match machine {
+        3 => "x86".to_string(),
+        62 => "x86_64".to_string(),
+        183 => "aarch64".to_string(),
+        _ => format!("elf-machine-{machine:#x}"),
+    })
+}
+
+fn same_file_identity(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        before.dev() == after.dev() && before.ino() == after.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn read_verified_pack_shell(path: &Path, target: &str) -> io::Result<(Vec<u8>, fs::Permissions)> {
+    let before = fs::symlink_metadata(path)?;
+    if before.file_type().is_symlink() || !before.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary must be a regular non-symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+    let mut source = fs::File::open(path)?;
+    let opened = source.metadata()?;
+    let mut payload = Vec::new();
+    source.read_to_end(&mut payload)?;
+    let after = fs::symlink_metadata(path)?;
+    if !same_file_identity(&before, &opened) || !same_file_identity(&opened, &after) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary changed while being staged: {}",
+                path.display()
+            ),
+        ));
+    }
+    let actual = pack_shell_binary_architecture(&payload, target)?;
+    let expected = expected_pack_shell_architecture(target);
+    if actual != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pack-shell architecture mismatch: expected {expected}, got {actual}"),
+        ));
+    }
+    Ok((payload, opened.permissions()))
+}
+
+fn pack_shell_binary_name(target: &str) -> &'static str {
+    if target.contains("windows") || target.ends_with("-msvc") {
         "pack-shell.exe"
     } else {
         "pack-shell"
@@ -888,10 +1140,45 @@ mod tests {
         let binary = root
             .join(target)
             .join(profile)
-            .join(pack_shell_binary_name());
+            .join(pack_shell_binary_name(target));
         fs::create_dir_all(binary.parent().expect("fixture binary has a parent"))
             .expect("fixture binary directory should be creatable");
-        fs::write(&binary, b"pack-shell fixture").expect("fixture binary should be writable");
+        let architecture = expected_pack_shell_architecture(target);
+        let mut payload = if target.contains("windows") {
+            let mut payload = vec![0_u8; 128];
+            payload[..2].copy_from_slice(b"MZ");
+            payload[60..64].copy_from_slice(&64_u32.to_le_bytes());
+            payload[64..68].copy_from_slice(b"PE\0\0");
+            let machine = match architecture {
+                "aarch64" => 0xaa64_u16,
+                _ => 0x8664_u16,
+            };
+            payload[68..70].copy_from_slice(&machine.to_le_bytes());
+            payload
+        } else if target.contains("apple-darwin") {
+            let cpu_type = match architecture {
+                "aarch64" => 0x0100000c_u32,
+                _ => 0x01000007_u32,
+            };
+            [b"\xcf\xfa\xed\xfe".as_slice(), &cpu_type.to_le_bytes()].concat()
+        } else {
+            let mut payload = vec![0_u8; 64];
+            payload[..6].copy_from_slice(b"\x7fELF\x02\x01");
+            let machine = match architecture {
+                "aarch64" => 183_u16,
+                _ => 62_u16,
+            };
+            payload[18..20].copy_from_slice(&machine.to_le_bytes());
+            payload
+        };
+        payload.extend_from_slice(b"pack-shell fixture");
+        fs::write(&binary, payload).expect("fixture binary should be writable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))
+                .expect("fixture binary should be executable");
+        }
         binary
     }
 
@@ -930,9 +1217,10 @@ mod tests {
         }
 
         {
-            let _target_dir = EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "relative-target");
+            let _target_dir =
+                EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "relative target-雪");
             let binary =
-                write_pack_shell_fixture(&tree.path().join("relative-target"), target, profile);
+                write_pack_shell_fixture(&tree.path().join("relative target-雪"), target, profile);
             assert_eq!(
                 find_pack_shell_binary(tree.path()).expect("relative lookup should succeed"),
                 Some(binary.canonicalize().expect("fixture should canonicalize"))
@@ -979,7 +1267,7 @@ mod tests {
         let binary = target_dir
             .join(target)
             .join("release")
-            .join(pack_shell_binary_name());
+            .join(pack_shell_binary_name(target));
         fs::create_dir_all(binary.parent().expect("fixture binary has a parent"))
             .expect("fixture binary directory should be creatable");
         let outside = tree.path().join("outside-pack-shell");
@@ -989,6 +1277,65 @@ mod tests {
         let error =
             find_pack_shell_binary(tree.path()).expect_err("symlinked binary must be rejected");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn cargo_target_dir_rejects_parent_traversal_and_file_root() {
+        let _environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment test lock should not be poisoned");
+        let tree = TestTree::new("pack-shell-target-root-invalid");
+        {
+            let _target_dir = EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "../outside");
+            let error = resolve_cargo_target_dir(tree.path())
+                .expect_err("parent traversal must be rejected");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        }
+        {
+            let target_file = tree.path().join("target-file");
+            fs::write(&target_file, b"not a directory").expect("target file should be writable");
+            let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_file);
+            let error = resolve_cargo_target_dir(tree.path())
+                .expect_err("file target root must be rejected");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cargo_target_dir_rejects_symlinked_root() {
+        let _environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment test lock should not be poisoned");
+        let tree = TestTree::new("pack-shell-target-root-symlink");
+        let outside = tree.path().join("outside");
+        fs::create_dir_all(&outside).expect("outside directory should be creatable");
+        let target_link = tree.path().join("target-link");
+        std::os::unix::fs::symlink(&outside, &target_link)
+            .expect("target symlink should be creatable");
+        let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_link);
+        let error = resolve_cargo_target_dir(tree.path())
+            .expect_err("symlinked target root must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn pack_shell_header_rejects_wrong_architecture_and_accepts_cross_target_names() {
+        let tree = TestTree::new("pack-shell-header");
+        let arm_target = "aarch64-apple-darwin";
+        let x86_binary = write_pack_shell_fixture(
+            &tree.path().join("target"),
+            "x86_64-apple-darwin",
+            "release",
+        );
+        let error = read_verified_pack_shell(&x86_binary, arm_target)
+            .expect_err("wrong architecture must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            pack_shell_binary_name("x86_64-pc-windows-msvc"),
+            "pack-shell.exe"
+        );
+        assert_eq!(pack_shell_binary_name(arm_target), "pack-shell");
     }
 
     fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {
