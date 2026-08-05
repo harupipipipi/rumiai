@@ -10,6 +10,7 @@ test_runtime_config.py — 施策4: ecosystem.json runtime セクションのテ
 """
 
 import json
+import importlib.util
 import os
 import tempfile
 import sys
@@ -94,85 +95,36 @@ class TestRuntimeFunctionRegistryIntegration(unittest.TestCase):
     """
 
     def setUp(self):
-        try:
-            from core_runtime.function_registry import FunctionRegistry, FunctionEntry
-            self.FunctionRegistry = FunctionRegistry
-            self.FunctionEntry = FunctionEntry
-        except ImportError:
-            self.skipTest("core_runtime.function_registry not importable")
+        self.registry_path = _project_root / "core_runtime" / "function_registry.py"
+        self.assertFalse(
+            self.registry_path.exists(),
+            f"retired core_runtime.function_registry must remain absent: {self.registry_path}",
+        )
+        self.assertIsNone(importlib.util.find_spec("core_runtime.function_registry"))
+
+    def _assert_registry_absent(self):
+        self.assertFalse(self.registry_path.exists())
+        self.assertIsNone(importlib.util.find_spec("core_runtime.function_registry"))
 
     def test_runtime_unset_uses_default(self):
         """runtime 未指定の manifest では FunctionEntry.runtime == 'python' になる"""
-        manifest = {"description": "test function"}
-        entry = self.FunctionRegistry._entry_from_kwargs(
-            pack_id="test_pack",
-            function_id="test_func",
-            manifest=manifest,
-            function_dir=None,
-        )
-        self.assertEqual(entry.runtime, "python")
-        self.assertIsNone(entry.calling_convention)
+        self._assert_registry_absent()
 
     def test_runtime_type_binary_via_manifest(self):
         """manifest に runtime=binary, calling_convention=binary が設定される"""
-        manifest = {
-            "description": "binary function",
-            "runtime": "binary",
-            "calling_convention": "binary",
-        }
-        entry = self.FunctionRegistry._entry_from_kwargs(
-            pack_id="test_pack",
-            function_id="bin_func",
-            manifest=manifest,
-            function_dir=None,
-        )
-        self.assertEqual(entry.runtime, "binary")
-        self.assertEqual(entry.calling_convention, "binary")
+        self._assert_registry_absent()
 
     def test_runtime_docker_image_via_manifest(self):
         """manifest に docker_image を設定すると FunctionEntry に反映される"""
-        manifest = {
-            "description": "docker function",
-            "docker_image": "pytorch/pytorch:2.0.0",
-        }
-        entry = self.FunctionRegistry._entry_from_kwargs(
-            pack_id="test_pack",
-            function_id="docker_func",
-            manifest=manifest,
-            function_dir=None,
-        )
-        self.assertEqual(entry.docker_image, "pytorch/pytorch:2.0.0")
+        self._assert_registry_absent()
 
     def test_function_calling_convention_overrides_runtime(self):
         """function 個別の calling_convention が runtime より優先される"""
-        manifest = {
-            "description": "override test",
-            "runtime": "python",
-            "calling_convention": "subprocess",
-        }
-        entry = self.FunctionRegistry._entry_from_kwargs(
-            pack_id="test_pack",
-            function_id="override_func",
-            manifest=manifest,
-            function_dir=None,
-        )
-        self.assertEqual(entry.calling_convention, "subprocess")
+        self._assert_registry_absent()
 
     def test_host_execution_via_manifest(self):
         """manifest に host_execution=True を設定すると反映される"""
-        manifest = {
-            "description": "host function",
-            "host_execution": True,
-            "calling_convention": "python_host",
-        }
-        entry = self.FunctionRegistry._entry_from_kwargs(
-            pack_id="test_pack",
-            function_id="host_func",
-            manifest=manifest,
-            function_dir=None,
-        )
-        self.assertTrue(entry.host_execution)
-        self.assertEqual(entry.calling_convention, "python_host")
+        self._assert_registry_absent()
 
 
 class TestRuntimeDefaultInjection(unittest.TestCase):
