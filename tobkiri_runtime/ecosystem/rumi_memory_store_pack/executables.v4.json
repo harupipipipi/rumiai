@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:19ec006e454f771473815786cdfa9436db343694f6e2b735ea9c9ce791b0e007",
+  "catalog_digest": "sha256:2c08dad99fcacbb23a821d0c92346fb4fcead12a5066e4bc267b5292c922c707",
   "pack_id": "rumi_memory_store_pack",
-  "source_identity": "sha256:eb44b6c55429c22dc1f8ad5c4d8d384a769305d0864d370571a3ea48b26cd486",
+  "source_identity": "sha256:1a7ce4500bb58e6177e738b3635d9f2306e32ea4ee6bd83b1d7d76e21a90bfc5",
   "variants": [
     {
       "architecture": "any",

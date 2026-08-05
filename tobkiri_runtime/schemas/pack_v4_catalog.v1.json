@@ -148,6 +148,7 @@
   "packs": [
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Canonical Defaults v4 composition artifact.",
@@ -156,7 +157,6 @@
       "kind": "base",
       "legacy_ids": [],
       "legacy_operations": [],
-      "migrated_from": "modern-only",
       "migration": {
         "compatibility": "none",
         "removal_wave": 0,
@@ -178,11 +178,18 @@
           "rule_id": "canonical-bundled-v4-source"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "modern-only",
+        "mode": "canonical-v4",
+        "owner": "defaults",
+        "source_format": "pack.v4.json"
+      },
       "version": "4.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Canonical Defaults v4 composition artifact.",
@@ -191,7 +198,6 @@
       "kind": "normal_sandbox",
       "legacy_ids": [],
       "legacy_operations": [],
-      "migrated_from": "modern-only",
       "migration": {
         "compatibility": "none",
         "removal_wave": 0,
@@ -300,11 +306,18 @@
           "rule_id": "canonical-bundled-v4-source"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "modern-only",
+        "mode": "canonical-v4",
+        "owner": "defaultspack",
+        "source_format": "pack.v4.json"
+      },
       "version": "4.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "rumi_agent_continuity_pack.attention_drift_recovery_note",
         "rumi_agent_continuity_pack.compaction_handoff_packet",
@@ -323,7 +336,6 @@
         "rumi_agent_continuity_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -344,11 +356,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agent_continuity_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "agent.run.control",
         "agent.runtime.observe",
@@ -385,7 +404,6 @@
         "rumi_agent_runtime_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -578,11 +596,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agent_runtime_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -635,7 +660,6 @@
           "source": "legacy_component"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -656,11 +680,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agent_services_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "agent.state.manage",
         "agent.state.read",
@@ -680,7 +711,6 @@
         "rumi_agent_state_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -786,11 +816,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agent_state_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative async agent workroom contracts for run state, plans, progress events, checkpoint/resume, intervention, replay, and run-board review.",
@@ -802,7 +839,6 @@
         "rumi_agent_workroom_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -823,11 +859,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agent_workroom_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative end-to-end agent QA, scenario replay, acceptance, and regression triage pack.",
@@ -839,7 +882,6 @@
         "rumi_agentic_qa_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -860,11 +902,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_agentic_qa_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.gateway.diagnostics.read",
         "ai.gateway.generate",
@@ -883,7 +932,6 @@
         "rumi_ai_gateway_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1087,11 +1135,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_gateway_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.audio.speech",
         "ai.audio.transcribe",
@@ -1112,7 +1167,6 @@
         "rumi_ai_modality_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1307,11 +1361,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_modality_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.failover.decide",
         "ai.request.prepare"
@@ -1328,7 +1389,6 @@
         "rumi_ai_pipeline_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1432,11 +1492,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_pipeline_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.route"
       ],
@@ -1451,7 +1518,6 @@
         "rumi_ai_routing_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1522,11 +1588,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_routing_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.stream.normalize"
       ],
@@ -1541,7 +1614,6 @@
         "rumi_ai_stream_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1612,11 +1684,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_stream_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.tool_intent.normalize"
       ],
@@ -1631,7 +1710,6 @@
         "rumi_ai_tool_bridge_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1702,11 +1780,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_tool_bridge_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.tokenize",
         "ai.usage.cost"
@@ -1723,7 +1808,6 @@
         "rumi_ai_usage_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1827,11 +1911,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ai_usage_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ambient.trigger.dispatch",
         "host.camera.capture",
@@ -1847,7 +1938,6 @@
         "rumi_ambient_trigger_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -1868,11 +1958,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ambient_trigger_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative API, OpenAPI, GraphQL, webhook, and tool-schema review workflow pack.",
@@ -1884,7 +1981,6 @@
         "rumi_api_toolsmith_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -1905,11 +2001,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_api_toolsmith_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Artifact application workflow and UI content without host authority.",
@@ -1921,7 +2024,6 @@
         "rumi_artifact_app_runtime_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -1953,11 +2055,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_artifact_app_runtime_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {
         "rumi_default_tools_pack": ">=1.0.0"
@@ -1971,7 +2080,6 @@
         "rumi_browser_automation_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -1992,11 +2100,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_browser_automation_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -2008,7 +2123,6 @@
         "rumi_browser_element_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2029,11 +2143,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_browser_element_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative browser form recognition, field mapping, action staging, risk review, and submission safety pack.",
@@ -2045,7 +2166,6 @@
         "rumi_browser_form_operator_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2066,11 +2186,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_browser_form_operator_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "browser.host.control",
         "browser.host.observe",
@@ -2090,7 +2217,6 @@
         "rumi_browser_host_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -2201,11 +2327,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_browser_host_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "rumi_browser_session_replay_pack.browser_event_evidence",
         "rumi_browser_session_replay_pack.browser_session_trace_contract",
@@ -2224,7 +2357,6 @@
         "rumi_browser_session_replay_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2245,11 +2377,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_browser_session_replay_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative business operations pack for sales, support, marketing, procurement, CRM hygiene, and admin workflows.",
@@ -2261,7 +2400,6 @@
         "rumi_business_ops_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2282,11 +2420,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_business_ops_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "clipboard.read",
         "clipboard.write",
@@ -2306,7 +2451,6 @@
         "rumi_clipboard_host_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -2428,11 +2572,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_clipboard_host_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {
         "rumi_default_tools_pack": ">=1.0.0"
@@ -2446,7 +2597,6 @@
         "rumi_code_ide_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2467,11 +2617,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_code_ide_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "rumi_code_migration_pack.codemod_plan",
         "rumi_code_migration_pack.compatibility_matrix",
@@ -2490,7 +2647,6 @@
         "rumi_code_migration_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -2511,11 +2667,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_code_migration_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "coding.sandbox.control",
         "coding.sandbox.observe",
@@ -2537,7 +2700,6 @@
         "rumi_coding_sandbox_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -2649,11 +2811,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_coding_sandbox_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "company.work",
         "conversation.manage",
@@ -2675,7 +2844,6 @@
         "rumi_company_agent_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -2767,11 +2935,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_company_agent_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "company.coordinate",
         "company.runtime.observe",
@@ -2797,7 +2972,6 @@
         "rumi_company_coordinator_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -2955,11 +3129,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_company_coordinator_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "company.state.manage",
         "company.state.read",
@@ -2979,7 +3160,6 @@
         "rumi_company_state_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3085,11 +3265,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_company_state_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "company.runtime.observe",
         "company.state.read"
@@ -3107,7 +3294,6 @@
         "rumi_company_surface_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3167,11 +3353,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_company_surface_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {
         "rumi_default_tools_pack": ">=1.0.0"
@@ -3185,7 +3378,6 @@
         "rumi_computer_control_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -3206,11 +3398,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_computer_control_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "company.coordinate",
         "company.state.manage",
@@ -3233,7 +3432,6 @@
         "rumi_connector_company_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3325,11 +3523,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_company_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -3341,7 +3546,6 @@
         "rumi_connector_gateway_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -3362,11 +3566,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_gateway_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.inbound.receive",
@@ -3386,7 +3597,6 @@
         "rumi_connector_inbound_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3471,11 +3681,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_inbound_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.oauth.callback",
         "connector.oauth.manage",
@@ -3502,7 +3719,6 @@
         "rumi_connector_oauth_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3665,11 +3881,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_oauth_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.deliver",
         "connector.outbound.control",
@@ -3692,7 +3915,6 @@
         "rumi_connector_outbound_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3810,11 +4032,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_outbound_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.registry.manage",
         "connector.registry.read",
@@ -3834,7 +4063,6 @@
         "rumi_connector_registry_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -3940,11 +4168,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_registry_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.gateway.read"
       ],
@@ -3960,7 +4195,6 @@
         "rumi_connector_settings_surface_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4019,11 +4253,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_settings_surface_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.gateway.control",
         "connector.gateway.read",
@@ -4052,7 +4293,6 @@
         "rumi_connector_transport_gateway_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4212,11 +4452,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_transport_gateway_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.route",
         "conversation.manage",
@@ -4238,7 +4485,6 @@
         "rumi_connector_turn_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4330,11 +4576,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_connector_turn_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "context.materialize"
       ],
@@ -4353,7 +4606,6 @@
         "rumi_context_runtime_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4437,11 +4689,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_context_runtime_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "conversation.manage",
         "conversation.migrate",
@@ -4464,7 +4723,6 @@
         "rumi_conversation_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4672,11 +4930,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_conversation_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "credential.manage",
         "credential.migrate",
@@ -4697,7 +4962,6 @@
         "rumi_credential_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4883,11 +5147,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_credential_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Customer research workflow and UI content without host authority.",
@@ -4899,7 +5170,6 @@
         "rumi_customer_research_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4931,11 +5201,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_customer_research_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Data analysis workflow and UI content without host authority.",
@@ -4947,7 +5224,6 @@
         "rumi_data_analysis_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -4979,11 +5255,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_data_analysis_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "service.invoke",
         "service.mutate",
@@ -5002,7 +5285,6 @@
         "rumi_default_tool_projection_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5108,11 +5390,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_default_tool_projection_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {
         "rumi_browser_host_service_pack": ">=1.0.0,<2.0.0",
@@ -5128,7 +5417,6 @@
         "rumi_default_tools_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -5149,11 +5437,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_default_tools_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "desktop.host.control",
         "desktop.host.observe",
@@ -5173,7 +5468,6 @@
         "rumi_desktop_host_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5279,11 +5573,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_desktop_host_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {
         "rumi_default_tools_pack": ">=1.0.0"
@@ -5297,7 +5598,6 @@
         "rumi_devops_release_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -5318,11 +5618,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_devops_release_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -5343,7 +5650,6 @@
         "rumi_discord_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5423,11 +5729,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_discord_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative PDF, contract, citation, redline, page-span, and privacy-aware document review workflow pack.",
@@ -5439,7 +5752,6 @@
         "rumi_document_intelligence_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -5460,11 +5772,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_document_intelligence_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -5485,7 +5804,6 @@
         "rumi_email_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5565,11 +5883,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_email_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative evidence dossier contracts for source registry, claim graphs, evidence links, contradiction review, citation ledgers, reviewer queues, quality labels, and export manifests.",
@@ -5581,7 +5906,6 @@
         "rumi_evidence_dossier_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -5602,11 +5926,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_evidence_dossier_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative hypothesis, metric, sample-size, assignment, guardrail, instrumentation, and decision-record design pack.",
@@ -5618,7 +5949,6 @@
         "rumi_experiment_design_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -5639,11 +5969,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_experiment_design_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "file.inspect",
         "workspace.metadata.read"
@@ -5661,7 +5998,6 @@
         "rumi_file_inspect_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5808,11 +6144,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_file_inspect_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "file.mutate",
         "host.authority.consume",
@@ -5832,7 +6175,6 @@
         "rumi_file_mutation_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -5911,11 +6253,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_file_mutation_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "file.patch",
         "host.authority.consume",
@@ -5935,7 +6284,6 @@
         "rumi_file_patch_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6013,11 +6361,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_file_patch_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative frontend, UI design, responsive QA, and component acceptance workflow pack.",
@@ -6029,7 +6384,6 @@
         "rumi_frontend_design_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -6050,11 +6404,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_frontend_design_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -6075,7 +6436,6 @@
         "rumi_generic_webhook_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6155,11 +6515,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_generic_webhook_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "git.publish",
         "git.read",
@@ -6181,7 +6548,6 @@
         "rumi_git_publish_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6265,11 +6631,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_git_publish_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "git.read",
         "workspace.metadata.read"
@@ -6287,7 +6660,6 @@
         "rumi_git_read_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6359,11 +6731,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_git_read_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "git.read",
         "git.write",
@@ -6385,7 +6764,6 @@
         "rumi_git_write_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6469,11 +6847,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_git_write_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume"
       ],
@@ -6488,7 +6873,6 @@
         "rumi_host_authority_bridge_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6554,11 +6938,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_host_authority_bridge_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.permission.open_settings",
         "host.permission.status"
@@ -6573,7 +6964,6 @@
         "rumi_host_capabilities_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -6594,11 +6984,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_host_capabilities_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -6619,7 +7016,6 @@
         "rumi_http_api_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6699,11 +7095,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_http_api_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.provider.human_handoff"
       ],
@@ -6719,7 +7122,6 @@
         "rumi_human_operator_provider_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6829,11 +7231,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_human_operator_provider_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "ide.session.control",
@@ -6855,7 +7264,6 @@
         "rumi_ide_bridge_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -6967,11 +7375,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_ide_bridge_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "workspace_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "job.adapter.invoke",
         "job.dispatch"
@@ -6987,7 +7402,6 @@
         "rumi_job_action_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7060,11 +7474,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_job_action_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "conversation.read",
         "host.authority.consume",
@@ -7087,7 +7508,6 @@
         "rumi_kanban_conversation_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7178,11 +7598,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_kanban_conversation_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "kanban.state.manage",
@@ -7202,7 +7629,6 @@
         "rumi_kanban_state_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7308,11 +7734,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_kanban_state_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "kanban.state.read"
       ],
@@ -7328,7 +7761,6 @@
         "rumi_kanban_surface_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7382,11 +7814,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_kanban_surface_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative local-first marketplace pack for tag-based capability requirements, provider-independent model tiers, capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
@@ -7427,7 +7866,6 @@
           "source": "legacy_connectivity"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -7448,11 +7886,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_knowledge_marketplace_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.2.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "knowledge.manage",
         "knowledge.migrate",
@@ -7471,7 +7916,6 @@
         "rumi_knowledge_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7609,11 +8053,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_knowledge_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -7634,7 +8085,6 @@
         "rumi_line_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7714,11 +8164,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_line_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -7730,7 +8187,6 @@
         "rumi_local_agent_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -7751,11 +8207,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_local_agent_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
@@ -7767,7 +8230,6 @@
         "rumi_localization_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -7788,11 +8250,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_localization_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "mcp.invoke",
         "mcp.tool.call"
@@ -7808,7 +8277,6 @@
         "rumi_mcp_gateway_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -7877,11 +8345,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_mcp_gateway_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "mcp.server.catalog.read",
         "mcp.server.tool.call"
@@ -7898,7 +8373,6 @@
         "rumi_mcp_server_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8010,11 +8484,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_mcp_server_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.audio.transcribe",
         "ai.image",
@@ -8035,7 +8516,6 @@
         "rumi_media_analysis_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8119,11 +8599,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_media_analysis_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "media.capture",
@@ -8143,7 +8630,6 @@
         "rumi_media_capture_host_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8249,11 +8735,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_media_capture_host_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "file.inspect",
         "media.inspect"
@@ -8271,7 +8764,6 @@
         "rumi_media_inspect_service_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8343,11 +8835,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_media_inspect_service_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "workspace_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative local-first meeting preparation, decision capture, action extraction, and follow-up handoff pack.",
@@ -8359,7 +8858,6 @@
         "rumi_meeting_intelligence_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -8380,11 +8878,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_meeting_intelligence_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -8442,7 +8947,6 @@
           "source": "legacy_component"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -8463,11 +8967,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_memory_knowledge_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "memory.manage",
         "memory.migrate",
@@ -8486,7 +8997,6 @@
         "rumi_memory_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8624,11 +9134,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_memory_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -8650,7 +9167,6 @@
         "rumi_mobile_pairing_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8737,11 +9253,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_mobile_pairing_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.model.catalog.read"
       ],
@@ -8756,7 +9279,6 @@
         "rumi_model_catalog_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8829,11 +9351,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_model_catalog_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "2.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.eval.catalog.read",
         "ai.eval.plan",
@@ -8852,7 +9381,6 @@
         "rumi_model_evals_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -8989,11 +9517,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_model_evals_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "2.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.model.profile.manage",
         "ai.model.profile.migrate",
@@ -9012,7 +9547,6 @@
         "rumi_model_registry_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -9165,11 +9699,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_model_registry_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -9181,7 +9722,6 @@
         "rumi_multimodal_media_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -9202,11 +9742,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_multimodal_media_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative local-first observability pack for run ledgers, event evidence, privacy-safe cost/latency summaries, and incident review handoffs.",
@@ -9231,7 +9778,6 @@
           "source": "legacy_connectivity"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -9252,11 +9798,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_observability_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Office authoring workflow and UI content without host authority.",
@@ -9268,7 +9821,6 @@
         "rumi_office_authoring_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -9300,11 +9852,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_office_authoring_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative omnichannel agent inbox contracts for channel payloads, identity mapping, ACL gates, thread routing, outbound draft approvals, notification preferences, and inbox UI review.",
@@ -9316,7 +9875,6 @@
         "rumi_omnichannel_agent_inbox_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -9337,11 +9895,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_omnichannel_agent_inbox_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -9384,7 +9949,6 @@
           "source": "legacy_component"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -9405,11 +9969,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_operations_company_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -9430,7 +10001,6 @@
         "rumi_p2p_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -9510,11 +10080,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_p2p_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -9526,7 +10103,6 @@
         "rumi_pack_suite_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -9547,11 +10123,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_pack_suite_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "profile.prompt.author.migrate",
         "profile.prompt.author.read",
@@ -9572,7 +10155,6 @@
         "rumi_prompt_studio_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -9830,11 +10412,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_prompt_studio_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.provider.embedding",
         "ai.provider.generate",
@@ -9855,7 +10444,6 @@
         "rumi_provider_adapters_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -10050,11 +10638,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_provider_adapters_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.provider.health.read",
         "ai.provider.registry.manage",
@@ -10073,7 +10668,6 @@
         "rumi_provider_registry_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -10229,11 +10823,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_provider_registry_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -10255,7 +10856,6 @@
         "rumi_qr_pairing_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -10342,11 +10942,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_qr_pairing_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -10358,7 +10965,6 @@
         "rumi_reference_ui_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -10379,11 +10985,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_reference_ui_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "ai.gateway.generate",
         "file.inspect",
@@ -10413,7 +11026,6 @@
         "rumi_repository_context_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2028-12-31"
@@ -10639,11 +11251,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_repository_context_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Research workflow and UI content without host authority.",
@@ -10655,7 +11274,6 @@
         "rumi_research_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -10687,11 +11305,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_research_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative runtime benchmark, latency, cost, reproducibility, sampling, environment-capture, and tool-loop measurement pack.",
@@ -10703,7 +11328,6 @@
         "rumi_runtime_benchmark_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -10724,11 +11348,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_runtime_benchmark_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative sandbox/runtime pack for safe code execution boundaries, secret-mount review, runtime receipts, and reproducibility checklists.",
@@ -10740,7 +11371,6 @@
         "rumi_sandbox_runtime_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -10761,11 +11391,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_sandbox_runtime_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "schedule.manage",
@@ -10785,7 +11422,6 @@
         "rumi_schedule_store_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -10891,11 +11527,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_schedule_store_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "job.dispatch",
@@ -10920,7 +11563,6 @@
         "rumi_scheduler_runtime_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11044,11 +11686,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_scheduler_runtime_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "schedule.read",
         "scheduler.observe"
@@ -11066,7 +11715,6 @@
         "rumi_scheduler_surface_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11126,11 +11774,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_scheduler_surface_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "schedule.manage",
@@ -11159,7 +11814,6 @@
         "rumi_scheduler_tool_adapter_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11287,11 +11941,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_scheduler_tool_adapter_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -11303,7 +11964,6 @@
         "rumi_security_review_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -11324,11 +11984,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_security_review_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "shell.execute",
@@ -11350,7 +12017,6 @@
         "rumi_shell_execute_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11434,11 +12100,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_shell_execute_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "shell.inspect"
       ],
@@ -11453,7 +12126,6 @@
         "rumi_shell_policy_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11519,11 +12191,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_shell_policy_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "workspace_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "connector.adapter.verify",
         "connector.delivery.execute",
@@ -11546,7 +12225,6 @@
         "rumi_slack_connector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -11659,11 +12337,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_slack_connector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative trace-to-SOP, checklist, runbook, and human-approved workflow recipe pack.",
@@ -11675,7 +12360,6 @@
         "rumi_sop_mining_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -11696,11 +12380,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_sop_mining_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative local-note study coaching, diagnostic assessment, quiz generation, spaced review, and progress reporting pack.",
@@ -11712,7 +12403,6 @@
         "rumi_study_coach_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -11733,11 +12423,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_study_coach_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "subagent.catalog.read",
@@ -11765,7 +12462,6 @@
         "rumi_subagent_placement_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2028-12-31"
@@ -12032,11 +12728,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_subagent_placement_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative PM, subagent assignment, branch ledger, and one-pack-one-PR governance pack.",
@@ -12048,7 +12751,6 @@
         "rumi_subagent_pr_manager_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -12069,11 +12771,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_subagent_pr_manager_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative provider-neutral call task, dial approval, consent script, transcript redaction, escalation, and never-call policy pack.",
@@ -12085,7 +12794,6 @@
         "rumi_telephony_delegate_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -12106,11 +12814,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_telephony_delegate_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "shell.inspect",
@@ -12134,7 +12849,6 @@
         "rumi_terminal_session_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12252,11 +12966,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_terminal_session_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.authority.consume"
       ],
@@ -12271,7 +12992,6 @@
         "rumi_tool_approval_bridge_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12337,11 +13057,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_approval_bridge_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.audit.emit"
       ],
@@ -12356,7 +13083,6 @@
         "rumi_tool_audit_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12422,11 +13148,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_audit_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.authoring.publish",
         "tool.authoring.validate"
@@ -12443,7 +13176,6 @@
         "rumi_tool_authoring_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12549,11 +13281,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_authoring_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.invoke"
       ],
@@ -12568,7 +13307,6 @@
         "rumi_tool_broker_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12689,11 +13427,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_broker_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.execute"
       ],
@@ -12708,7 +13453,6 @@
         "rumi_tool_capability_executor_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12777,11 +13521,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_capability_executor_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.executor.select"
       ],
@@ -12796,7 +13547,6 @@
         "rumi_tool_executor_selector_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12862,11 +13612,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_executor_selector_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.guard.evaluate"
       ],
@@ -12881,7 +13638,6 @@
         "rumi_tool_guard_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -12947,11 +13703,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_guard_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.execute"
       ],
@@ -12966,7 +13729,6 @@
         "rumi_tool_local_executor_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13042,11 +13804,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_local_executor_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.execute"
       ],
@@ -13061,7 +13830,6 @@
         "rumi_tool_mcp_executor_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13137,11 +13905,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_mcp_executor_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.policy.evaluate"
       ],
@@ -13156,7 +13931,6 @@
         "rumi_tool_policy_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13222,11 +13996,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_policy_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.definition.contribution.read",
         "tool.definition.manage",
@@ -13246,7 +14027,6 @@
         "rumi_tool_registry_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13392,11 +14172,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_registry_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.execute"
       ],
@@ -13411,7 +14198,6 @@
         "rumi_tool_remote_executor_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13487,11 +14273,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_remote_executor_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.result.normalize"
       ],
@@ -13506,7 +14299,6 @@
         "rumi_tool_result_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13572,11 +14364,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_result_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.execute"
       ],
@@ -13591,7 +14390,6 @@
         "rumi_tool_sandbox_executor_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13660,11 +14458,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_sandbox_executor_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "tool.arguments.validate"
       ],
@@ -13679,7 +14484,6 @@
         "rumi_tool_validation_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13745,11 +14549,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_tool_validation_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [
         "turn.manage",
         "turn.read"
@@ -13769,7 +14580,6 @@
         "rumi_turn_runtime_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -13914,11 +14724,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_turn_runtime_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
@@ -13930,7 +14747,6 @@
         "rumi_voice_mobile_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -13951,11 +14767,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_voice_mobile_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -13967,7 +14790,6 @@
         "rumi_workflow_scheduler_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -13988,11 +14810,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_workflow_scheduler_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
       "capabilities": [
         "host.authority.consume",
         "workspace.metadata.read",
@@ -14012,7 +14841,6 @@
         "rumi_workspace_mount_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "v3-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
@@ -14118,11 +14946,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_workspace_mount_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -14165,7 +15000,6 @@
           "source": "legacy_component"
         }
       ],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -14186,11 +15020,18 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_workspace_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
+      "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
       "description": "",
@@ -14202,7 +15043,6 @@
         "search_home_pack"
       ],
       "legacy_operations": [],
-      "migrated_from": "legacy-authoritative",
       "migration": {
         "removal_wave": 10,
         "sunset_at": "2099-01-01"
@@ -14223,6 +15063,12 @@
           "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
+      "source_provenance": {
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "search_home_pack",
+        "source_format": "ecosystem.json"
+      },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
     }

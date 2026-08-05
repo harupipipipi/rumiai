@@ -94,9 +94,10 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:b0e4bc7425b53eb68570c5f9059b2c9cff0dc62efdf50e79e48655f870c99512",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:0fb8186b103ebb2bd70fc66961b297f1e5d319bf5df343078405d9da7fbdbf2e"
+            "source_identity": "sha256:f3b8613161123b871c4f5e3652003fc60e722754c0a7f17cc4c492144f0890d6"
           },
-          "owner_surfaces": []
+          "owner_surfaces": [],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_email_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_email_connector_pack",
@@ -126,6 +127,13 @@
         }
       },
       "pack_id": "rumi_email_connector_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_email_connector_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:f3b8613161123b871c4f5e3652003fc60e722754c0a7f17cc4c492144f0890d6"
     }
   },
   "migration": {

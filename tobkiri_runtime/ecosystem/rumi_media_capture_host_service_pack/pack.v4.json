@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:dc830abfd06cd3759d8ce365166ff53e338e0ae7172e979d693ec58fb4f70d9b",
-    "contract_catalog_digest": "sha256:ed1f7bd6c488660eea6a37ad3380830a5df322a91573ba6315436920057801fd",
-    "source_identity": "sha256:8cceed69fbe2f3abdc7ea458142fc2c04c48b74cbaacd821c99662a662e028ec"
+    "contract_catalog_digest": "sha256:580fc9df04cd452dac979d9cdeadbfc3d24c40324113cb1581d76b11c2a001d7",
+    "source_identity": "sha256:4331551bed04acdcffdb1a5a5469acc55bbcbc04fb8105567e4d3006c11d0571"
   },
   "migration": {
     "compatibility": "read_only",
@@ -69,7 +69,7 @@
       "operation_id": "rumi_media_capture_host_service_pack.media-capture",
       "owner": "rumi_media_capture_host_service_pack",
       "provider_id": "rumi_media_capture_host_service_pack.media.capture",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.action.media.output.v1",
@@ -79,7 +79,7 @@
       "operation_id": "rumi_media_capture_host_service_pack.media-output",
       "owner": "rumi_media_capture_host_service_pack",
       "provider_id": "rumi_media_capture_host_service_pack.media.output",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -93,7 +93,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:8cceed69fbe2f3abdc7ea458142fc2c04c48b74cbaacd821c99662a662e028ec",
+        "digest": "sha256:4331551bed04acdcffdb1a5a5469acc55bbcbc04fb8105567e4d3006c11d0571",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -104,7 +104,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:8cceed69fbe2f3abdc7ea458142fc2c04c48b74cbaacd821c99662a662e028ec",
+    "source_digest": "sha256:4331551bed04acdcffdb1a5a5469acc55bbcbc04fb8105567e4d3006c11d0571",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_media_capture_host_service_pack"
   },

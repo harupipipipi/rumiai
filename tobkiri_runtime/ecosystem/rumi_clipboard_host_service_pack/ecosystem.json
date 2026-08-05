@@ -23,18 +23,20 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:40d3bfe0776fd3dfd9f628f1fd00a8bbe8480059ddfa6ba88c9ad0d01b85f7cf",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:903c86fc8cbed6f7d2e98040c43fcf0556f1702179663435966170b1ce0cd944"
+      "source_identity": "sha256:e69dd60c28d655f5467d78090107abdb7ff20986bf78d800eeefa90166c8d720"
     },
     "executor_owner": "rumi_viewer_host_broker",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:44826444770276bdc332ced9a6294af4afff73898969210a88560e2e2268951a"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:e69dd60c28d655f5467d78090107abdb7ff20986bf78d800eeefa90166c8d720"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "payload_persistence": false,
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "runner": "runtime/runner.py invoked only by Viewer helper after token validation",
     "tool_or_ui_registry_imports": false

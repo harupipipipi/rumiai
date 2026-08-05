@@ -16,22 +16,24 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:0c39273467b0c61f7dde1db93a2bc29afd2fd13fbcf2af0b5a89980f16b9ce9a",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:9601c7cc8ccd6153bf3d33cca20d2355540f94f2333ab19eb1803e6aa5e015f4"
+      "source_identity": "sha256:0d080dd535065c6d93348b908776538534781ed96ef27aa81511fa4af36ce584"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:4403d8721a01e2d59f25dd9a0ea8c30fdb559f84aa6cc18413696b439a5614dc"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:0d080dd535065c6d93348b908776538534781ed96ef27aa81511fa4af36ce584"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "owner_surfaces": [
       "human_handoff_provider_intent"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "security": {
       "authority_granted": false,

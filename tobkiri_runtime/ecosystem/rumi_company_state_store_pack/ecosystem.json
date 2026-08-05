@@ -20,16 +20,17 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:9779ec6138c0e62237988eba65395fba8d00d88d191cc3c809018f2a59f2108e",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:8e1c7bfd695edbaee73617bd8bcab06706a32066c159af215f18da9fe5fbb1d7"
+      "source_identity": "sha256:d0748d5cb0391d2dc4bf9ea0bf4b6d464383f68ac38d82d3617a40a15d08d884"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:322a7f30d10235dc374f974fdd28f0259ea2baa0fc9518ae5877006eb0b4488a"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:d0748d5cb0391d2dc4bf9ea0bf4b6d464383f68ac38d82d3617a40a15d08d884"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "owner_surfaces": [
       "companies",
       "company_roles",
@@ -41,6 +42,7 @@
       "company_messages",
       "legacy_operations_migration"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true
   },
   "pack_id": "rumi_company_state_store_pack",

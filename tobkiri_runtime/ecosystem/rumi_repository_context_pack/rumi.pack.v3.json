@@ -203,11 +203,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:e54616d9597a4901acb00a7aacd755ecced53b272d62ae92ecdf0b6ecdae8dde"
+            "source_identity": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"
           },
           "owner_surfaces": [
             "repository_context_preparation"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "security": {
             "model_cost_tiers": [
               "free",
@@ -258,6 +259,13 @@
         }
       },
       "pack_id": "rumi_repository_context_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_repository_context_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"
     },
     "tobkiri.repository_context.boundary": {
       "map_reduce": true,

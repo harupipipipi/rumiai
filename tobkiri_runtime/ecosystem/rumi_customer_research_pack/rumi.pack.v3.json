@@ -88,7 +88,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:73f5f3cd6d78bd542f1360dd4e44b57f86155c4cda7b47f12fdd6c39c1209349"
+            "source_identity": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
           },
           "consumes_existing_sources_only": true,
           "declarative_only": true,
@@ -144,6 +144,7 @@
             "opportunity_map",
             "evidence_linked_research_brief"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "required_secrets": [],
           "runtime_type": "declarative_setup_pack"
         },
@@ -188,6 +189,13 @@
       "host_imports": false,
       "product": "customer_research",
       "profile_scoped": true
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_customer_research_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
     }
   },
   "migration": {

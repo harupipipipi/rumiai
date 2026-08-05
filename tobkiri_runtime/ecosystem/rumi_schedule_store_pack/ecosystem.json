@@ -20,21 +20,23 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:193eb9d6fc587294870e2ef6b27a0e8a9a45ce293f666b0bee889d2799071504",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:4f177b066c9a044648fdec39c65ec134a2b9f4ec15ee84ed954e5898de0aa51c"
+      "source_identity": "sha256:2bc4498c0994b83e28217b5c57b3892e782ff4f6e1b6c9b1f670876ee1fb41c4"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:1988a7532033b483b5e6d851433b438ba265f179885a3ff9554fc7f5df1729b5"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:2bc4498c0994b83e28217b5c57b3892e782ff4f6e1b6c9b1f670876ee1fb41c4"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "owner_surfaces": [
       "schedules",
       "schedule_leases",
       "schedule_retries"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true
   },
   "pack_id": "rumi_schedule_store_pack",

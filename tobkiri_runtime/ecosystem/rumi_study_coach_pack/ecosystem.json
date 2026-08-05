@@ -81,17 +81,26 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:66b0032ffdd90ac7ff91e2e3abd95493685782f4b96a43b330d5f0fb6d7d9861"
+      "source_identity": "sha256:8751721c92a4501658039951b619748efd2bcd389917ab7b16c51f563e2f2138"
     },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
     "defaultspack_promotion_eligible": false,
     "executable_code": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:8751721c92a4501658039951b619748efd2bcd389917ab7b16c51f563e2f2138"
+    },
     "legacy_annotations": {
       "runtime_dependency_aliases": [
         "defaultspack"
       ]
     },
+    "manifest_authority": "v4-authoritative",
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "document parsing",
@@ -136,6 +145,8 @@
       "progress_report",
       "evidence_bound_explanation"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "required_secrets": [],
     "runtime_type": "declarative_setup_pack"
   },

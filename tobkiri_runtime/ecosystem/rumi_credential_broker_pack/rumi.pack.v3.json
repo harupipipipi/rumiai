@@ -169,7 +169,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:97182b6d69cff2e58ba9ce49bace79d7c81b43c28884fc16c939c9a53d12bd4f",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:7c06d30c8386dc3a9964869c3dc5805ece96bb0547aec0597e20ea271ea19a10"
+            "source_identity": "sha256:81fbee63dfbd994faedb0c70f128014e7a6bede9188030278f597ecc9d3afab9"
           },
           "executable_code": true,
           "integrity": {
@@ -181,6 +181,7 @@
             "credential_scope",
             "credential_status"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "required_secrets": [],
           "security": {
             "consumer_bound": true,
@@ -220,6 +221,13 @@
         }
       },
       "pack_id": "rumi_credential_broker_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_credential_broker_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:81fbee63dfbd994faedb0c70f128014e7a6bede9188030278f597ecc9d3afab9"
     }
   },
   "migration": {

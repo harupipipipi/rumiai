@@ -45,7 +45,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:b84d98d118a551f1dc56554a53294af9be352cfab26bea0f139ccd23370ec069",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:6837bf6e689f1f0b6195e2e2da5baee83a816bf0ea6cc536b08e4e200ea8a229"
+            "source_identity": "sha256:ee6e60e85610b5db61d21b9e4cf09487e433c3eb0fbbea36341741caf20eca6a"
           },
           "executable_code": true,
           "integrity": {
@@ -55,7 +55,8 @@
           "owner_surfaces": [
             "scheduler_route",
             "scheduler_content"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_scheduler_surface_pack",
         "pack_identity": "rumi:ecosystem/rumi_scheduler_surface_pack",
@@ -94,6 +95,13 @@
       "runtime_owner": false,
       "schedule_owner": false,
       "target_imports": false
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_scheduler_surface_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:ee6e60e85610b5db61d21b9e4cf09487e433c3eb0fbbea36341741caf20eca6a"
     }
   },
   "migration": {

@@ -78,7 +78,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:73f5f3cd6d78bd542f1360dd4e44b57f86155c4cda7b47f12fdd6c39c1209349"
+      "source_identity": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
     },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
@@ -87,9 +87,10 @@
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:73c0947a81c55096f04b07253479b6450ee797fe78e323c631082cc4c148d3fe"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -99,7 +100,7 @@
         "defaultspack"
       ]
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "network_policy": "none_by_default",
     "non_owner_surfaces": [
       "live recruiting",
@@ -142,6 +143,7 @@
       "opportunity_map",
       "evidence_linked_research_brief"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "required_secrets": [],
     "runtime_type": "declarative_setup_pack"

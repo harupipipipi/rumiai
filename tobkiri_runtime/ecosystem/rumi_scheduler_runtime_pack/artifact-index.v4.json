@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:19e3002d64b9b8cc0959feecd45fa5e3adba8ebaeb2b6efe76d61b0bc2781c6a",
   "artifacts": [
     {
-      "digest": "sha256:fe909538c2cddf788ad33514fbd967b6ef76265da99025d2ad8b06dc94e4c20b",
+      "digest": "sha256:35004f5abf51119739c3bb4e9b38d3eea8efb6420230381a54f87fa3750c70af",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:2a0291b97853466da24ac65a1642e0049b60959260b5e952e9965939137d7bdc",
+      "digest": "sha256:76a8b453338234a1972460772c8f166f1b99524d7fecddfb208c8722c260fe32",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -20,8 +20,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:1ebc6aece5ad52b8697eafcd8a2334e8df840858a30b1b0d7548c747c3121ce3"
+    "signed_digest": "sha256:fc0814f143586b9bdd69ee64796acc3aeabebb3cdd0dd8da239c2facbffcc6c7"
   },
   "pack_id": "rumi_scheduler_runtime_pack",
-  "source_identity": "sha256:ab0f626e8a31ca7d6a0dc29bad13959c3f1fd7cc7568d279a340ec8766e122a8"
+  "source_identity": "sha256:d6d488cf62b05a1132febff24525502c3c90ac0b6b7357b37a33e7da31cc6c64"
 }

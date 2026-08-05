@@ -117,7 +117,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:4467bf368e4fc1cf1090453b4c6ec4df905158286fedc58a9b9ef79fd0c4ae1b",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:c91983b4c1d384f284cfb392c4636d4763def8877be196b743b805c1dec22f8d"
+            "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
           },
           "owner_surfaces": [
             "kanban_boards",
@@ -125,7 +125,8 @@
             "kanban_cards",
             "kanban_events",
             "legacy_kanban_migration"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_kanban_state_store_pack",
         "pack_identity": "rumi:ecosystem/rumi_kanban_state_store_pack",
@@ -154,6 +155,13 @@
         }
       },
       "pack_id": "rumi_kanban_state_store_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_kanban_state_store_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
     }
   },
   "migration": {

@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:a6d7c39085198536755be67345852bd6d0c6bae7d88ef1655eaad97a142e6a7f",
+  "catalog_digest": "sha256:ba036ae4e668ab8339402dd095dccb5d1a8610284bcdf569f24e4f83693249c9",
   "pack_id": "rumi_email_connector_pack",
-  "source_identity": "sha256:0fb8186b103ebb2bd70fc66961b297f1e5d319bf5df343078405d9da7fbdbf2e",
+  "source_identity": "sha256:f3b8613161123b871c4f5e3652003fc60e722754c0a7f17cc4c492144f0890d6",
   "variants": [
     {
       "architecture": "any",

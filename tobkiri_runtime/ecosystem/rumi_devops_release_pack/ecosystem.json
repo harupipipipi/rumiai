@@ -10,9 +10,17 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:2326a430894f7347ebd479b0efc45f2fdd3fd5d102caff9807cab24fd437da23"
+      "source_identity": "sha256:0ed995ccc091d65fcaed1184eef362ec7e000a82c8dfe7a441c1f7a82809ff8e"
     },
     "description": "Declarative local-first DevOps and release operations pack for CI triage, release evidence, runbooks, rollback plans, GitHub Actions, and Cloudflare Workers-aware operations.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:0ed995ccc091d65fcaed1184eef362ec7e000a82c8dfe7a441c1f7a82809ff8e"
+    },
     "legacy_annotations": {
       "assets": {
         "catalog": [
@@ -74,7 +82,10 @@
       ]
     },
     "license": "MIT",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi DevOps Release Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "tags": [
       "devops",
       "release",

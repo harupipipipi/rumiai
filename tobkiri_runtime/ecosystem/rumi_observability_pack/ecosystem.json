@@ -68,14 +68,23 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:61ba03bc4c77098bfae20a82fa0e0b2afb8147d7dd586a4ac8403452234e2d88"
+      "source_identity": "sha256:3b07422abb075235ca8ebfa3e38b76391fbfe1f348110e3398510aaaf11ffc6c"
     },
     "executable_code": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:3b07422abb075235ca8ebfa3e38b76391fbfe1f348110e3398510aaaf11ffc6c"
+    },
     "legacy_annotations": {
       "runtime_dependency_aliases": [
         "defaultspack"
       ]
     },
+    "manifest_authority": "v4-authoritative",
     "network_policy": "none_by_default",
     "optional_integrations": [
       {
@@ -110,6 +119,8 @@
       "privacy_cost_redaction",
       "incident_review_checklists"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "required_secrets": [],
     "runtime_type": "declarative_pack"
   },

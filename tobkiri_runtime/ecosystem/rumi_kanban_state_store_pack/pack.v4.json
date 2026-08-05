@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:4467bf368e4fc1cf1090453b4c6ec4df905158286fedc58a9b9ef79fd0c4ae1b",
-    "contract_catalog_digest": "sha256:8328b044828795058b7b51235e1f689c6f70edbb95aa62cb87305dbc0aaa700c",
-    "source_identity": "sha256:c91983b4c1d384f284cfb392c4636d4763def8877be196b743b805c1dec22f8d"
+    "contract_catalog_digest": "sha256:076b56dcd9ae158aeec947c0f391f6a9d1e61b39761987acc70cc5e3dbe39f98",
+    "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
   },
   "migration": {
     "compatibility": "read_only",
@@ -69,7 +69,7 @@
       "operation_id": "rumi_kanban_state_store_pack.kanban-state-action",
       "owner": "rumi_kanban_state_store_pack",
       "provider_id": "rumi_kanban_state_store_pack.kanban-state.action",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.kanban.v1",
@@ -79,7 +79,7 @@
       "operation_id": "rumi_kanban_state_store_pack.kanban-state-resource",
       "owner": "rumi_kanban_state_store_pack",
       "provider_id": "rumi_kanban_state_store_pack.kanban-state.resource",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -93,7 +93,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:c91983b4c1d384f284cfb392c4636d4763def8877be196b743b805c1dec22f8d",
+        "digest": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -104,7 +104,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:c91983b4c1d384f284cfb392c4636d4763def8877be196b743b805c1dec22f8d",
+    "source_digest": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_kanban_state_store_pack"
   },

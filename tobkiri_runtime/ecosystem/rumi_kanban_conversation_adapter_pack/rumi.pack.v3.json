@@ -107,14 +107,15 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:b120f600aa64027bb3f8cd50afce66fac6b8f7383238c1c5ecfa76b0f63af910",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:8588539920d385f1cddddf9bef5b6f0b1cd7684784d7acf4ea096a89b238806d"
+            "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
           },
           "chat_imports": false,
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
           },
           "kanban_imports": false,
-          "projection": "conversation_to_kanban"
+          "projection": "conversation_to_kanban",
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_kanban_conversation_adapter_pack",
         "pack_identity": "rumi:ecosystem/rumi_kanban_conversation_adapter_pack",
@@ -145,6 +146,13 @@
         }
       },
       "pack_id": "rumi_kanban_conversation_adapter_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_kanban_conversation_adapter_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
     }
   },
   "migration": {

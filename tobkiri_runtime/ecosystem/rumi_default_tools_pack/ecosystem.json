@@ -23,11 +23,22 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:f50152bdb1f69a862e53af5850c7991e519adf5c2ff1be344bccc801f3cbb32a"
+      "source_identity": "sha256:ba1ae57e498be426bb086f4cff172b109e1c51941a516c629be818d01fb709b3"
     },
     "description": "Concrete AI-facing default tools separated from defaultspack core.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:ba1ae57e498be426bb086f4cff172b109e1c51941a516c629be818d01fb709b3"
+    },
     "license": "MIT",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi Default Tools Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "security_boundary": {
       "client_approval_material": "discard",
       "host_execution": false,

@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:eeaeb9ed727aa1d52757eb210136ffa63f804cbdcc2952b3a7cd39b88479e1a8",
-    "contract_catalog_digest": "sha256:d5c765be0ccbf43900167f63d81c3ed29b67e60135b8514c0c25ef77ff5141c5",
-    "source_identity": "sha256:ba84a4e51cfc917e85b6622c5be68becee82a2df8cb4434f741af020bac3848b"
+    "contract_catalog_digest": "sha256:c00bb33e35579fae8f10eaed7957218d7f3132565ca3133f94491a53a3b9af94",
+    "source_identity": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545"
   },
   "migration": {
     "compatibility": "read_only",
@@ -70,7 +70,7 @@
       "operation_id": "rumi_coding_sandbox_service_pack.sandbox-control",
       "owner": "rumi_coding_sandbox_service_pack",
       "provider_id": "rumi_coding_sandbox_service_pack.coding-sandbox.control",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.coding.sandbox.v1",
@@ -81,7 +81,7 @@
       "operation_id": "rumi_coding_sandbox_service_pack.sandbox-observe",
       "owner": "rumi_coding_sandbox_service_pack",
       "provider_id": "rumi_coding_sandbox_service_pack.coding-sandbox.observe",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -95,7 +95,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:ba84a4e51cfc917e85b6622c5be68becee82a2df8cb4434f741af020bac3848b",
+        "digest": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -106,7 +106,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:ba84a4e51cfc917e85b6622c5be68becee82a2df8cb4434f741af020bac3848b",
+    "source_digest": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_coding_sandbox_service_pack"
   },

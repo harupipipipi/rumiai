@@ -133,11 +133,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:3e3918d0c2a19246af23a0658186807f7923306d58c92408b3909f3f54910641",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:ca4f02fece6a76cc2b89de463ed00da52c953a98b28cfa14bcc2ec152033fca7"
+            "source_identity": "sha256:93807f1a61d02cbc97aa2548e390207ad5b5def201a53ed240ca55ba855d38fd"
           },
           "owner_surfaces": [
             "connector_outbound_delivery_ledger"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_connector_outbound_broker_pack",
         "pack_identity": "rumi:ecosystem/rumi_connector_outbound_broker_pack",
@@ -168,6 +169,13 @@
         }
       },
       "pack_id": "rumi_connector_outbound_broker_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_connector_outbound_broker_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:93807f1a61d02cbc97aa2548e390207ad5b5def201a53ed240ca55ba855d38fd"
     }
   },
   "migration": {

@@ -111,11 +111,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:3a787463f8fe5c7ee1add6c5c1eabea1270a6a8b281de858aa67315eb616a56e",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:48f139dbcf384cc8deb887219d2336517ec6fbf13496eb5fe192a2b6d4b9f3d9"
+            "source_identity": "sha256:c5066de5132b828b0f69f4a5e6500c79a091053b7f5711b8574e2b005bd4ed1a"
           },
           "owner_surfaces": [
             "workspace_mount_metadata"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_workspace_mount_pack",
         "pack_identity": "rumi:ecosystem/rumi_workspace_mount_pack",
@@ -152,6 +153,13 @@
       "git": false,
       "mutation_receipt_required": true,
       "shell": false
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_workspace_mount_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:c5066de5132b828b0f69f4a5e6500c79a091053b7f5711b8574e2b005bd4ed1a"
     }
   },
   "migration": {

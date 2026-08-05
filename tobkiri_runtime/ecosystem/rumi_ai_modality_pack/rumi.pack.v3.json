@@ -197,7 +197,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:e296e2b357bcff998277adcc3c8d5cea968d0e112d7a2ae830253072c72245b8",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:c4f4c1cae3988e88c4504115049636bb44b9ac496d37d54ef8ff5b96d67341b3"
+            "source_identity": "sha256:a9c8e2e2908043cccc62fc15e1fc4f9dc094bb96a20c69ed81fd4baa5250c6b4"
           },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
@@ -208,6 +208,7 @@
             "audio_transcription_gateway",
             "audio_speech_gateway"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "security": {
             "missing_provider_is_explicit": true,
             "provider_pack_id_branches": false,
@@ -242,6 +243,13 @@
         }
       },
       "pack_id": "rumi_ai_modality_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_ai_modality_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:a9c8e2e2908043cccc62fc15e1fc4f9dc094bb96a20c69ed81fd4baa5250c6b4"
     }
   },
   "migration": {

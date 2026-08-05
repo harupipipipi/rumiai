@@ -132,7 +132,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:eeaeb9ed727aa1d52757eb210136ffa63f804cbdcc2952b3a7cd39b88479e1a8",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:ba84a4e51cfc917e85b6622c5be68becee82a2df8cb4434f741af020bac3848b"
+            "source_identity": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545"
           },
           "docker": {
             "digest_pinned": true,
@@ -141,6 +141,7 @@
             "network": "none"
           },
           "host_apply": false,
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "tool_or_ui_registry_imports": false
         },
         "pack_id": "rumi_coding_sandbox_service_pack",
@@ -171,6 +172,13 @@
         }
       },
       "pack_id": "rumi_coding_sandbox_service_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_coding_sandbox_service_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545"
     }
   },
   "migration": {

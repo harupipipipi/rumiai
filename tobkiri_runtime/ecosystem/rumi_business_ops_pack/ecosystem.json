@@ -55,15 +55,24 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:a2152458db5cd246e6b24da70ebba6347c3110d4dd13bb1e02b30e2c13ae5c89"
+      "source_identity": "sha256:7c34fbc9188cb6dbbd92749b68b14167193762989a1b8ebf72acb24f5f2f15b7"
     },
     "declarative_only": true,
     "executable_code": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:7c34fbc9188cb6dbbd92749b68b14167193762989a1b8ebf72acb24f5f2f15b7"
+    },
     "legacy_annotations": {
       "runtime_dependency_aliases": [
         "defaultspack"
       ]
     },
+    "manifest_authority": "v4-authoritative",
     "network_policy": "none_by_default",
     "optional_integrations": [
       {
@@ -93,6 +102,8 @@
       "business_ops_handoff_ledger",
       "operator_handoff_checklist"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "required_secrets": []
   },
   "pack_id": "rumi_business_ops_pack",

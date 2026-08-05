@@ -53,10 +53,18 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:1f9e3cf7c0d2096d1c684ba6fc5ab44eacd49df89f58b2bd04df52c494356cf4"
+      "source_identity": "sha256:369c8c953fe5519ac26858e0c910b9d3b4f6cb5c90d7d2f6fc4b176778dc4967"
     },
     "declarative_only": true,
     "description": "Declarative local-first contracts for session recall, user profile memory, project knowledge, skill-learning proposals, hygiene, and evidence-backed recall.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:369c8c953fe5519ac26858e0c910b9d3b4f6cb5c90d7d2f6fc4b176778dc4967"
+    },
     "inspired_by": [
       "Hermes-style persistent memory and session search",
       "Hermes-style skill creation and self-improvement loops",
@@ -64,8 +72,11 @@
       "OpenClaw-style local-first sessions and skills"
     ],
     "license": "MIT",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi Memory Knowledge Pack",
     "network_policy": "none_by_default",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "required_secrets": [],
     "runtime_memory_write_policy": "defines_contracts_only"
   },

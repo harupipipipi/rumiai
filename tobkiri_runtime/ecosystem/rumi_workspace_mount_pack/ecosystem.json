@@ -24,19 +24,21 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:3a787463f8fe5c7ee1add6c5c1eabea1270a6a8b281de858aa67315eb616a56e",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:48f139dbcf384cc8deb887219d2336517ec6fbf13496eb5fe192a2b6d4b9f3d9"
+      "source_identity": "sha256:c5066de5132b828b0f69f4a5e6500c79a091053b7f5711b8574e2b005bd4ed1a"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:c710f8965bde63ad85e041fc4f3b660806b491e2b1d15814acff06184c516252"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:c5066de5132b828b0f69f4a5e6500c79a091053b7f5711b8574e2b005bd4ed1a"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "owner_surfaces": [
       "workspace_mount_metadata"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true
   },
   "pack_id": "rumi_workspace_mount_pack",

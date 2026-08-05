@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:933d6e6bed53cde3a7178b86b989ba2754099f8ac3f6d15e7b106cb5ab2dbfbc",
+  "catalog_digest": "sha256:4fb070d7725fb8423dafca0d0c709c83510d48b3e4278acc6197dc0f6c65f2a8",
   "pack_id": "rumi_discord_connector_pack",
-  "source_identity": "sha256:bca5872f9a573687b965c7cffe75d8c7a8ca5218a0b43eff610da929c01b3fe9",
+  "source_identity": "sha256:ed73de2aa508b07be27fc52daf51dce5ff739ed303a3425bccb888ee1192311f",
   "variants": [
     {
       "architecture": "any",

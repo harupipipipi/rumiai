@@ -66,7 +66,7 @@
       "owner": "shell.tauri.default",
       "contract_reference": "app.shell.v1",
       "provider_id": "shell.tauri.default",
-      "source_kind": "v3_contract",
+      "source_kind": "canonical_v4_contract",
       "effect_ceiling": []
     }
   ],
@@ -81,7 +81,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:e682ba9cd808f068571e3d41bfa2b0a0c796919bb128e47b7bedd0945df2c207",
+    "source_identity": "sha256:ac867eae094924a502d227d9c0b84e5a1ccd6f1271be2314b92e4710afb699d6",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
   }

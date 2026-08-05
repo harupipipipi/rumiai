@@ -118,7 +118,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:7f26f41ebd6091b56f646c2d8f28292f083c5348418aad78adf8953bcbb55e68",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:41c29da45dbf326b2b3d16f00e7ae477680ea68fe5bf7195b9ca3e0fa9bce92a"
+            "source_identity": "sha256:05e7ea0ceb4af650c08735e8d8103eedac3d5d46e2cf3c40915ffe466f9c4182"
           },
           "owner_surfaces": [
             "agent_profiles",
@@ -126,7 +126,8 @@
             "subagent_links",
             "agent_guidance",
             "agent_handoffs"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_agent_state_store_pack",
         "pack_identity": "rumi:ecosystem/rumi_agent_state_store_pack",
@@ -155,6 +156,13 @@
         }
       },
       "pack_id": "rumi_agent_state_store_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_agent_state_store_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:05e7ea0ceb4af650c08735e8d8103eedac3d5d46e2cf3c40915ffe466f9c4182"
     }
   },
   "migration": {

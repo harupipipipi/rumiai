@@ -29,20 +29,21 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:1f356bae8206f974672b70c709528037632ba0376298a0bdbd3b2c7bcc2c09a1",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:103fdba82cda39b0ce422dae843047545f3c2649e8ae0f1b12b957ba06a0d6b0"
+      "source_identity": "sha256:e8d3c06e2c5cb5755731dac450d1cb0e56c1601f09303ad43ac4e7bdfbc4aecf"
     },
     "executable_code": true,
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:5dc1319fdb30117d3a959543e4a435ab71607a606da8e816d1980c52b24153ee"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:e8d3c06e2c5cb5755731dac450d1cb0e56c1601f09303ad43ac4e7bdfbc4aecf"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
     },
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "network_policy": "none",
     "owner_surfaces": [
       "ai_gateway",
@@ -52,6 +53,7 @@
       "usage_normalization",
       "routing_diagnostics"
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "required_secrets": [],
     "security": {

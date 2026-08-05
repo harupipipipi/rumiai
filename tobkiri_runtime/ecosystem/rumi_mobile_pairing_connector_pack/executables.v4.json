@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:a2e127ee74f0b58aa44e0325facfed675bf46a7301bb9da07c7b5c069f9924cd",
+  "catalog_digest": "sha256:34d38dddabf1e5e7393606ab784266c97cf4a86c3c14e99593a2991fa719baab",
   "pack_id": "rumi_mobile_pairing_connector_pack",
-  "source_identity": "sha256:0b9b2bd087f2e6bfe11fd3f77952d53098f541a6c543bd442aea671d12af8580",
+  "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b",
   "variants": [
     {
       "architecture": "any",

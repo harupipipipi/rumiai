@@ -213,7 +213,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:1f356bae8206f974672b70c709528037632ba0376298a0bdbd3b2c7bcc2c09a1",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:103fdba82cda39b0ce422dae843047545f3c2649e8ae0f1b12b957ba06a0d6b0"
+            "source_identity": "sha256:e8d3c06e2c5cb5755731dac450d1cb0e56c1601f09303ad43ac4e7bdfbc4aecf"
           },
           "executable_code": true,
           "integrity": {
@@ -228,6 +228,7 @@
             "usage_normalization",
             "routing_diagnostics"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "required_secrets": [],
           "security": {
             "absolute_deadlines": true,
@@ -264,6 +265,13 @@
         }
       },
       "pack_id": "rumi_ai_gateway_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_ai_gateway_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:e8d3c06e2c5cb5755731dac450d1cb0e56c1601f09303ad43ac4e7bdfbc4aecf"
     }
   },
   "migration": {

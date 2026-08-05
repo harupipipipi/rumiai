@@ -134,11 +134,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:17c61d17c971d03f8bc4b5f318153c3c1844a9988d8369498a76ccb426a0337c",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:eb44b6c55429c22dc1f8ad5c4d8d384a769305d0864d370571a3ea48b26cd486"
+            "source_identity": "sha256:1a7ce4500bb58e6177e738b3635d9f2306e32ea4ee6bd83b1d7d76e21a90bfc5"
           },
           "owner_surfaces": [
             "memory"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "security": {
             "dual_write": false,
             "local_first": true
@@ -177,6 +178,13 @@
       "markdown_projection": false,
       "secondary_sqlite": false,
       "single_write": true
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_memory_store_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:1a7ce4500bb58e6177e738b3635d9f2306e32ea4ee6bd83b1d7d76e21a90bfc5"
     }
   },
   "migration": {

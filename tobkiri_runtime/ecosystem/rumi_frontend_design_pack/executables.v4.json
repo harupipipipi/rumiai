@@ -1,7 +1,7 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:7b3d722b45f0731bb363c6a56dcfa23dbb0e5b402ab40a5c568b2f673a5af2d0",
+  "catalog_digest": "sha256:b0d10235222159eb72c8819a388452901379ad40cfa00fa675ecb50735e951f9",
   "pack_id": "rumi_frontend_design_pack",
-  "source_identity": "sha256:920f6b8b5d37763cd9ba25439dac658465894eb7d8434a0148d668dcb267ce06",
+  "source_identity": "sha256:b496fa5123722eb84ddc6f28097f94fe6841b6750e699843fd0fc5eabaff4126",
   "variants": []
 }

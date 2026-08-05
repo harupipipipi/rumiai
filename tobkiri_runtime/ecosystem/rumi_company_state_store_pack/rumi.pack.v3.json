@@ -117,7 +117,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:9779ec6138c0e62237988eba65395fba8d00d88d191cc3c809018f2a59f2108e",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:8e1c7bfd695edbaee73617bd8bcab06706a32066c159af215f18da9fe5fbb1d7"
+            "source_identity": "sha256:d0748d5cb0391d2dc4bf9ea0bf4b6d464383f68ac38d82d3617a40a15d08d884"
           },
           "owner_surfaces": [
             "companies",
@@ -129,7 +129,8 @@
             "company_inbound",
             "company_messages",
             "legacy_operations_migration"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_company_state_store_pack",
         "pack_identity": "rumi:ecosystem/rumi_company_state_store_pack",
@@ -158,6 +159,13 @@
         }
       },
       "pack_id": "rumi_company_state_store_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_company_state_store_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:d0748d5cb0391d2dc4bf9ea0bf4b6d464383f68ac38d82d3617a40a15d08d884"
     }
   },
   "migration": {

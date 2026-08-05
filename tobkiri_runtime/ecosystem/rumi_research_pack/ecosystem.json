@@ -47,16 +47,17 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:530611c0460668470c28ceb86dcc91b4cb6c72e350b1bea9a04f1eec8265df2e"
+      "source_identity": "sha256:e2d83995d747960bba97f667015dac30d433110afe19a3b2cda0818220f38e53"
     },
     "declarative_only": true,
     "description": "Declarative local-first deep research, evidence, source quality, and citation workflow pack for Rumi-native research agents.",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:795c58717617c283050670cf0a1ac2007518152956bb198a6c3dbdb5dec3347b"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:e2d83995d747960bba97f667015dac30d433110afe19a3b2cda0818220f38e53"
     },
     "inspired_by": [
       "ChatGPT Deep Research-style synthesis",
@@ -67,9 +68,10 @@
       "artifact_manifest": "artifact-manifest.json"
     },
     "license": "MIT",
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi Research Pack",
     "network_policy": "none_by_default",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "required_secrets": []
   },

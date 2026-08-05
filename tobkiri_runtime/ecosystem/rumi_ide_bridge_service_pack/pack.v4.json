@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:2036ac3558278f354277eb88293f0e46adfefd1e3b43176e19c36e4fcb5b21c4",
-    "contract_catalog_digest": "sha256:58a9df2ae19ec5f7e356b1728cd694cd03a1e9c506d53219a5c1ee15c2b355d8",
-    "source_identity": "sha256:fa06e619a6556cda462c511fc699663a632e0978f31ca7f27d032b80c26b8acb"
+    "contract_catalog_digest": "sha256:b4672b96f41fd35f9a0e29de13fce75ff59b499c1bb9583dd04e626c0bd5c38d",
+    "source_identity": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c"
   },
   "migration": {
     "compatibility": "read_only",
@@ -69,7 +69,7 @@
       "operation_id": "rumi_ide_bridge_service_pack.ide-control",
       "owner": "rumi_ide_bridge_service_pack",
       "provider_id": "rumi_ide_bridge_service_pack.ide-bridge.control",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.ide.session.v1",
@@ -79,7 +79,7 @@
       "operation_id": "rumi_ide_bridge_service_pack.ide-observe",
       "owner": "rumi_ide_bridge_service_pack",
       "provider_id": "rumi_ide_bridge_service_pack.ide-bridge.observe",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -93,7 +93,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:fa06e619a6556cda462c511fc699663a632e0978f31ca7f27d032b80c26b8acb",
+        "digest": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -104,7 +104,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:fa06e619a6556cda462c511fc699663a632e0978f31ca7f27d032b80c26b8acb",
+    "source_digest": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ide_bridge_service_pack"
   },

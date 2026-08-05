@@ -7,11 +7,22 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:2f3e2b104de6ef3a5b9fb7ad04ac601c531200458dd6fbea1962fb0d1dee29a5"
+      "source_identity": "sha256:6bce44d9b494f37d39eff2d0fdbfc55b1c8633fe50c92402baaaec43e6c4e795"
     },
     "description": "Reference shell/sidebar/settings UI declarations for default Rumi installs.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:6bce44d9b494f37d39eff2d0fdbfc55b1c8633fe50c92402baaaec43e6c4e795"
+    },
     "license": "MIT",
-    "name": "Rumi Reference UI Pack"
+    "manifest_authority": "v4-authoritative",
+    "name": "Rumi Reference UI Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true
   },
   "pack_id": "rumi_reference_ui_pack",
   "pack_identity": "rumi:ecosystem/rumi_reference_ui_pack",

@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:1006f2472a3c630c9a75dff44675b4ff8a1e42e5ceafec3eb63a2fbea47b74d4",
+  "catalog_digest": "sha256:8c209b6a0286f4f86693a50680a0c32e3ee51027e0aba40fedc71d9b9601a335",
   "pack_id": "rumi_qr_pairing_connector_pack",
-  "source_identity": "sha256:4bcdae016471883809ab39fb9b5331b3949bcd1856a482a1b6a449547f133724",
+  "source_identity": "sha256:ad05a27dc86febc0c820750b855c359281a69e2cd2e8e37bdbc2f6104429328f",
   "variants": [
     {
       "architecture": "any",

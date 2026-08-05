@@ -129,10 +129,11 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:2036ac3558278f354277eb88293f0e46adfefd1e3b43176e19c36e4fcb5b21c4",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:fa06e619a6556cda462c511fc699663a632e0978f31ca7f27d032b80c26b8acb"
+            "source_identity": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c"
           },
           "chat_or_ui_imports": false,
           "file_shell_git_authority": false,
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "receipt_required": true
         },
         "pack_id": "rumi_ide_bridge_service_pack",
@@ -163,6 +164,13 @@
         }
       },
       "pack_id": "rumi_ide_bridge_service_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_ide_bridge_service_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c"
     }
   },
   "migration": {

@@ -29,8 +29,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:b120f600aa64027bb3f8cd50afce66fac6b8f7383238c1c5ecfa76b0f63af910",
-    "contract_catalog_digest": "sha256:3d4caeb707f4506960aebe11881d0dcec94c2ef34ffb3c1fd8b3a76f8739673b",
-    "source_identity": "sha256:8588539920d385f1cddddf9bef5b6f0b1cd7684784d7acf4ea096a89b238806d"
+    "contract_catalog_digest": "sha256:02eaf08e64d0dd1343340b0f63c97a0fea46ae974fdd6e647f4f7e2e79435a30",
+    "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
   },
   "migration": {
     "compatibility": "read_only",
@@ -51,7 +51,7 @@
       "operation_id": "rumi_kanban_conversation_adapter_pack.kanban-conversation-import",
       "owner": "rumi_kanban_conversation_adapter_pack",
       "provider_id": "rumi_kanban_conversation_adapter_pack.kanban-conversation.import",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -65,7 +65,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:8588539920d385f1cddddf9bef5b6f0b1cd7684784d7acf4ea096a89b238806d",
+        "digest": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -76,7 +76,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:8588539920d385f1cddddf9bef5b6f0b1cd7684784d7acf4ea096a89b238806d",
+    "source_digest": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_kanban_conversation_adapter_pack"
   },

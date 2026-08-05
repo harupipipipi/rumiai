@@ -83,8 +83,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:6874cb67793180ca15ede072072c72fa8bccff75d80bfc97ad790e308d529d1a",
-    "contract_catalog_digest": "sha256:d9dd57f0ade2ca5fc5e2a86b2418023e2ea111609cd6642e9f1f9273529bd90b",
-    "source_identity": "sha256:cb250c5c412bffd6807df8aec7b937b5924011df0dc8819c672b4387a316dbcc"
+    "contract_catalog_digest": "sha256:8a5f276b180a788dfde30f3668624cbc3afab1906cd4472150893028789c3e3b",
+    "source_identity": "sha256:971ef2f5d2b75f0d13f708214e2870f7b20af34aac0dd344ab4cb427d45a265c"
   },
   "migration": {
     "compatibility": "read_only",
@@ -108,7 +108,7 @@
       "operation_id": "rumi_provider_registry_pack.provider-registry-health",
       "owner": "rumi_provider_registry_pack",
       "provider_id": "rumi_provider_registry_pack.provider-registry.health",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.action.ai.provider.registry.manage.v1",
@@ -119,7 +119,7 @@
       "operation_id": "rumi_provider_registry_pack.provider-registry-manage",
       "owner": "rumi_provider_registry_pack",
       "provider_id": "rumi_provider_registry_pack.provider-registry.manage",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.ai.provider.registry.v1",
@@ -130,7 +130,7 @@
       "operation_id": "rumi_provider_registry_pack.provider-registry-resource",
       "owner": "rumi_provider_registry_pack",
       "provider_id": "rumi_provider_registry_pack.provider-registry.resource",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -144,7 +144,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:cb250c5c412bffd6807df8aec7b937b5924011df0dc8819c672b4387a316dbcc",
+        "digest": "sha256:971ef2f5d2b75f0d13f708214e2870f7b20af34aac0dd344ab4cb427d45a265c",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -155,7 +155,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:cb250c5c412bffd6807df8aec7b937b5924011df0dc8819c672b4387a316dbcc",
+    "source_digest": "sha256:971ef2f5d2b75f0d13f708214e2870f7b20af34aac0dd344ab4cb427d45a265c",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_provider_registry_pack"
   },

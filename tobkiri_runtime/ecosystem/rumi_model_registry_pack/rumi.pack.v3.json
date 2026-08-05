@@ -131,7 +131,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:2f3e71475bafb009fc9776c9a4fdc70027d996c1559723d4166375e0e40e7de2",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:dc4247cd4fefb5370f38f1df5804cd0939626fdeea900b340141ddd0b88af399"
+            "source_identity": "sha256:f9cd2b37fdca0c636fc81de8e2c06a7482dbf64365a238dc6e7ad72b8083a849"
           },
           "executable_code": true,
           "integrity": {
@@ -141,6 +141,7 @@
             "model_profiles",
             "model_aliases"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "security": {
             "atomic_write": true,
             "opaque_credentials_only": true,
@@ -182,6 +183,13 @@
       "credential_values_accepted": false,
       "provider_execution_owner": false,
       "provider_pack_id_branches": false
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_model_registry_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:f9cd2b37fdca0c636fc81de8e2c06a7482dbf64365a238dc6e7ad72b8083a849"
     }
   },
   "migration": {

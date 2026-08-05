@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:fcde317f0aba8936d5f8acda34b5bbe9e18b1e17a3ac5f5144b919848a7b8f7a",
+  "catalog_digest": "sha256:5cbc65794b034a344d31229937f968f34ffef328e845d17cee6743739450bf26",
   "pack_id": "rumi_generic_webhook_connector_pack",
-  "source_identity": "sha256:f364e1963856fa8e3386827c7db0b3ada2b99594a37f2ab2de29e7f942fa1edc",
+  "source_identity": "sha256:866386b045fbebd2a554efd18f367f4354efb3f686556bb24aea867521f5d53d",
   "variants": [
     {
       "architecture": "any",

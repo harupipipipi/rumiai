@@ -51,8 +51,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:0c39273467b0c61f7dde1db93a2bc29afd2fd13fbcf2af0b5a89980f16b9ce9a",
-    "contract_catalog_digest": "sha256:e7b63b8d0af9f75d6ca0425dcae63a411561c57eee824dff5a61f7b62c274b3a",
-    "source_identity": "sha256:9601c7cc8ccd6153bf3d33cca20d2355540f94f2333ab19eb1803e6aa5e015f4"
+    "contract_catalog_digest": "sha256:64f8fed5edc56adfa81cad6842fb9cea77a5f5ed64b2f1bb89bdc1dc73601020",
+    "source_identity": "sha256:0d080dd535065c6d93348b908776538534781ed96ef27aa81511fa4af36ce584"
   },
   "migration": {
     "compatibility": "read_only",
@@ -75,7 +75,7 @@
       "operation_id": "rumi_human_operator_provider_pack.human-generate",
       "owner": "rumi_human_operator_provider_pack",
       "provider_id": "rumi_human_operator_provider_pack.provider.human-operator.generate",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.service.ai.provider.stream.v1",
@@ -86,7 +86,7 @@
       "operation_id": "rumi_human_operator_provider_pack.human-stream",
       "owner": "rumi_human_operator_provider_pack",
       "provider_id": "rumi_human_operator_provider_pack.provider.human-operator.stream",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -100,7 +100,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:9601c7cc8ccd6153bf3d33cca20d2355540f94f2333ab19eb1803e6aa5e015f4",
+        "digest": "sha256:0d080dd535065c6d93348b908776538534781ed96ef27aa81511fa4af36ce584",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -111,7 +111,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:9601c7cc8ccd6153bf3d33cca20d2355540f94f2333ab19eb1803e6aa5e015f4",
+    "source_digest": "sha256:0d080dd535065c6d93348b908776538534781ed96ef27aa81511fa4af36ce584",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_human_operator_provider_pack"
   },

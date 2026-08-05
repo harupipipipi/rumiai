@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:161b84138c1592da7abc94d32dc9f4ffec37b32aa3061829926b9c1cc48ec674",
+  "catalog_digest": "sha256:b2b0f106ddf63eb7dd8c57294d91f21405d03d03793a6b134898821a19a872c3",
   "pack_id": "rumi_connector_registry_service_pack",
-  "source_identity": "sha256:66598ec8ebd75a4a888c7dcc8dd579846a49dc4a15ad0fc88abcd26c571618d4",
+  "source_identity": "sha256:7a958c2a915402a0cc419303b3815e58cd71e94512a0e57fba8bc76a465bb077",
   "variants": [
     {
       "architecture": "any",

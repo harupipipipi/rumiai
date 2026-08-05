@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:10833ae5e044683acadc789394da31d5d932f50353ebb55f68f05f1ffa5c6017",
-    "contract_catalog_digest": "sha256:5ec2ca2820144e661a445690956601031a3206030f6e4c4e8b8fafe126bf3af6",
-    "source_identity": "sha256:c495f9248d7660f22022e87a5079f01a56024a98fe75c1a9a67785d4251a90dd"
+    "contract_catalog_digest": "sha256:d5f360bdf35c3cf2da6544e416dd8deeb8ca99efe5f0f9fbb91faa8d26da84f8",
+    "source_identity": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08"
   },
   "migration": {
     "compatibility": "read_only",
@@ -69,7 +69,7 @@
       "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions",
       "owner": "rumi_scheduler_tool_adapter_pack",
       "provider_id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.service.tool.local.operation.v1",
@@ -79,7 +79,7 @@
       "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation",
       "owner": "rumi_scheduler_tool_adapter_pack",
       "provider_id": "rumi_scheduler_tool_adapter_pack.tool-adapter.scheduler",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -93,7 +93,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:c495f9248d7660f22022e87a5079f01a56024a98fe75c1a9a67785d4251a90dd",
+        "digest": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -104,7 +104,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:c495f9248d7660f22022e87a5079f01a56024a98fe75c1a9a67785d4251a90dd",
+    "source_digest": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_scheduler_tool_adapter_pack"
   },

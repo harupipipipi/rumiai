@@ -78,8 +78,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:2f3e71475bafb009fc9776c9a4fdc70027d996c1559723d4166375e0e40e7de2",
-    "contract_catalog_digest": "sha256:1dfe131a94795f03875bc187aa28899254eec71c5fdb63fee27cff9cd4e7848c",
-    "source_identity": "sha256:dc4247cd4fefb5370f38f1df5804cd0939626fdeea900b340141ddd0b88af399"
+    "contract_catalog_digest": "sha256:105d0e8b6784535b7cd1183df3c9a4976d49f2e71f052705d212468cc6be403e",
+    "source_identity": "sha256:f9cd2b37fdca0c636fc81de8e2c06a7482dbf64365a238dc6e7ad72b8083a849"
   },
   "migration": {
     "compatibility": "read_only",
@@ -103,7 +103,7 @@
       "operation_id": "rumi_model_registry_pack.model-profile-manage",
       "owner": "rumi_model_registry_pack",
       "provider_id": "rumi_model_registry_pack.model-registry.manage",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.ai.model.profile.v1",
@@ -114,7 +114,7 @@
       "operation_id": "rumi_model_registry_pack.model-profile-resource",
       "owner": "rumi_model_registry_pack",
       "provider_id": "rumi_model_registry_pack.model-registry.profile",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.action.ai.model.registry.migrate.v1",
@@ -125,7 +125,7 @@
       "operation_id": "rumi_model_registry_pack.model-registry-migrate",
       "owner": "rumi_model_registry_pack",
       "provider_id": "rumi_model_registry_pack.model-registry.migrate",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -139,7 +139,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:dc4247cd4fefb5370f38f1df5804cd0939626fdeea900b340141ddd0b88af399",
+        "digest": "sha256:f9cd2b37fdca0c636fc81de8e2c06a7482dbf64365a238dc6e7ad72b8083a849",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -150,7 +150,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:dc4247cd4fefb5370f38f1df5804cd0939626fdeea900b340141ddd0b88af399",
+    "source_digest": "sha256:f9cd2b37fdca0c636fc81de8e2c06a7482dbf64365a238dc6e7ad72b8083a849",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_model_registry_pack"
   },

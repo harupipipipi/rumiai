@@ -51,8 +51,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:0fed333aaac8abbfd94b5f7d3c1fbfec4bb52b33728671009021c68097169b22",
-    "contract_catalog_digest": "sha256:81fefb4ee4b79c3e599427f98cd9c21d273e6d8c2702ed35bf82bfebb9c0f0ab",
-    "source_identity": "sha256:f34483ff68104e158378a47d620a9edc6f915272dec16ffd1baa55bdcc0b3b4b"
+    "contract_catalog_digest": "sha256:6b802aae0e82cd6bb397b2951950cd2d86962bc44905092dae98348fc0774ac3",
+    "source_identity": "sha256:ea864b1a22817c05332ff395547a0537c77d4253187a9a5f1bce08484dd833b1"
   },
   "migration": {
     "compatibility": "read_only",
@@ -75,7 +75,7 @@
       "operation_id": "rumi_ai_pipeline_pack.ai-failover-decide",
       "owner": "rumi_ai_pipeline_pack",
       "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.service.ai.request.prepare.v1",
@@ -86,7 +86,7 @@
       "operation_id": "rumi_ai_pipeline_pack.ai-request-prepare",
       "owner": "rumi_ai_pipeline_pack",
       "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -100,7 +100,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:f34483ff68104e158378a47d620a9edc6f915272dec16ffd1baa55bdcc0b3b4b",
+        "digest": "sha256:ea864b1a22817c05332ff395547a0537c77d4253187a9a5f1bce08484dd833b1",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -111,7 +111,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:f34483ff68104e158378a47d620a9edc6f915272dec16ffd1baa55bdcc0b3b4b",
+    "source_digest": "sha256:ea864b1a22817c05332ff395547a0537c77d4253187a9a5f1bce08484dd833b1",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_pipeline_pack"
   },

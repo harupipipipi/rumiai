@@ -271,7 +271,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:760d7a71732786195b7325fa74ca75b09c86511a29c880ab6b48bff3f40dd2e8",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:33b0b28a92d94f920a88de24210d795f5b5253fc2847904761221ba4bf92e4ff"
+            "source_identity": "sha256:8eb11e971bb380b7a80568f9a18c1bf9258c44d54b94d65e69335f670f20e48b"
           },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
@@ -280,7 +280,8 @@
             "effective_subagent_plan_compilation",
             "placement_map_compilation",
             "runtime_assignment_pinning"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_subagent_placement_pack",
         "pack_identity": "rumi:ecosystem/rumi_subagent_placement_pack",
@@ -313,6 +314,13 @@
         }
       },
       "pack_id": "rumi_subagent_placement_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_subagent_placement_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:8eb11e971bb380b7a80568f9a18c1bf9258c44d54b94d65e69335f670f20e48b"
     },
     "tobkiri.subagent_placement.boundary": {
       "authority_merge": "intersection",

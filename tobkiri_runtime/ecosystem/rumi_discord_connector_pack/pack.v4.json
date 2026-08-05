@@ -29,8 +29,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:08828f6e19468433b0f1194f823db1d83d8c6dd9931962f8a4f6e90fc2ea37bf",
-    "contract_catalog_digest": "sha256:af2cf16330d9bff653a95639f141664637f9a5a4fea6421897422c0236e3352e",
-    "source_identity": "sha256:bca5872f9a573687b965c7cffe75d8c7a8ca5218a0b43eff610da929c01b3fe9"
+    "contract_catalog_digest": "sha256:5e9578ae4afdb39919c8cbb3e72346b812427623dcb3bd66e0b0e1ab693ca9b8",
+    "source_identity": "sha256:ed73de2aa508b07be27fc52daf51dce5ff739ed303a3425bccb888ee1192311f"
   },
   "migration": {
     "compatibility": "read_only",
@@ -53,7 +53,7 @@
       "operation_id": "rumi_discord_connector_pack.discord-adapter",
       "owner": "rumi_discord_connector_pack",
       "provider_id": "rumi_discord_connector_pack.connector.discord",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -67,7 +67,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:bca5872f9a573687b965c7cffe75d8c7a8ca5218a0b43eff610da929c01b3fe9",
+        "digest": "sha256:ed73de2aa508b07be27fc52daf51dce5ff739ed303a3425bccb888ee1192311f",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -78,7 +78,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:bca5872f9a573687b965c7cffe75d8c7a8ca5218a0b43eff610da929c01b3fe9",
+    "source_digest": "sha256:ed73de2aa508b07be27fc52daf51dce5ff739ed303a3425bccb888ee1192311f",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_discord_connector_pack"
   },

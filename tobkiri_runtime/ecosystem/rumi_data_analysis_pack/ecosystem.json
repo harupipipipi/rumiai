@@ -114,22 +114,24 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:2a314400051ac12857ed61415998a4c2d628a70853e966d27f1f43b97f96c210",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:10209884d6b03a3c0c5c34bbb449db039e89c7a6ad45cb2e54485e9cabf12b80"
+      "source_identity": "sha256:bebe538206c785696ab1e6ed07db91765e5f5bd4b27c93bfc4d6e540994a6c27"
     },
     "description": "Declarative, local-first data analysis profiles, prompts, presets, catalogs, and reproducible recipe specs.",
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:efde00fd4e8f68538a80e347ede050f2445a6117e62a4ab1b5a2fcbf4e778b63"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:bebe538206c785696ab1e6ed07db91765e5f5bd4b27c93bfc4d6e540994a6c27"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
     },
     "license": "MIT",
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi Data Analysis Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true
   },
   "pack_id": "rumi_data_analysis_pack",

@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:f8cc83673859fbfeac4fe20d917468fd980774ae4ec7422ec07aa0a9807b408a",
+  "catalog_digest": "sha256:5ccfca807ecb47a7c42b66814bd1ad2df4a4134322614c91578666b3efecf05e",
   "pack_id": "rumi_kanban_conversation_adapter_pack",
-  "source_identity": "sha256:8588539920d385f1cddddf9bef5b6f0b1cd7684784d7acf4ea096a89b238806d",
+  "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32",
   "variants": [
     {
       "architecture": "any",

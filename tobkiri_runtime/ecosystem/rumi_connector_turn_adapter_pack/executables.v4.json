@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:da6fc202f9b6a73269dd735fa4fd103bed3551f314dab5e90fdb49506c9687cd",
+  "catalog_digest": "sha256:209c46ead3d8ab044560245bf4359a3de967051a116446cebb27f267a84e9ee8",
   "pack_id": "rumi_connector_turn_adapter_pack",
-  "source_identity": "sha256:1bda0b12e4376e1a0ba571ef04b0861c6509d6797fd28ce4b3f9e61990811e18",
+  "source_identity": "sha256:3a4b03628fe3282c4a122d3b5e50d5c723d3d1818ab9d8f86673247741fad6ef",
   "variants": [
     {
       "architecture": "any",

@@ -46,8 +46,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:cd97ee803bf99f6dba493876e8b81ecb2b4ff45bfa91e1910a02dd0e13cb592a",
-    "contract_catalog_digest": "sha256:a87ed41a6e4c2c1f82554aae0d7ecf930c151ce733d485c49cf7806b24102d0d",
-    "source_identity": "sha256:66598ec8ebd75a4a888c7dcc8dd579846a49dc4a15ad0fc88abcd26c571618d4"
+    "contract_catalog_digest": "sha256:7b2fde9eb5a91ddaa6f4dbea2f6f6905f57bde74bee70f9f91195cf0318e7cf7",
+    "source_identity": "sha256:7a958c2a915402a0cc419303b3815e58cd71e94512a0e57fba8bc76a465bb077"
   },
   "migration": {
     "compatibility": "read_only",
@@ -69,7 +69,7 @@
       "operation_id": "rumi_connector_registry_service_pack.connector-registry-action",
       "owner": "rumi_connector_registry_service_pack",
       "provider_id": "rumi_connector_registry_service_pack.connector-registry.action",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     },
     {
       "contract_reference": "tobkiri.resource.connector.registry.v1",
@@ -79,7 +79,7 @@
       "operation_id": "rumi_connector_registry_service_pack.connector-registry-resource",
       "owner": "rumi_connector_registry_service_pack",
       "provider_id": "rumi_connector_registry_service_pack.connector-registry.resource",
-      "source_kind": "v3_contract"
+      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
@@ -93,7 +93,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:66598ec8ebd75a4a888c7dcc8dd579846a49dc4a15ad0fc88abcd26c571618d4",
+        "digest": "sha256:7a958c2a915402a0cc419303b3815e58cd71e94512a0e57fba8bc76a465bb077",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -104,7 +104,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:66598ec8ebd75a4a888c7dcc8dd579846a49dc4a15ad0fc88abcd26c571618d4",
+    "source_digest": "sha256:7a958c2a915402a0cc419303b3815e58cd71e94512a0e57fba8bc76a465bb077",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_connector_registry_service_pack"
   },

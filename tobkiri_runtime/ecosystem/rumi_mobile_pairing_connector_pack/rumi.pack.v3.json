@@ -102,11 +102,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:46a70d0905db576cb416ae4aa1e76538b443caedec4db00638a7bb53f4b9e3d2",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:0b9b2bd087f2e6bfe11fd3f77952d53098f541a6c543bd442aea671d12af8580"
+            "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b"
           },
           "owner_surfaces": [
             "mobile_pairing_nonce_ledger"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_mobile_pairing_connector_pack",
         "pack_identity": "rumi:ecosystem/rumi_mobile_pairing_connector_pack",
@@ -137,6 +138,13 @@
         }
       },
       "pack_id": "rumi_mobile_pairing_connector_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_mobile_pairing_connector_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b"
     }
   },
   "migration": {

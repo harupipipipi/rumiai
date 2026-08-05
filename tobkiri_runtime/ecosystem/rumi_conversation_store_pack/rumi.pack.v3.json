@@ -213,7 +213,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:2861b930e11196e46ab76616b0348c257f05b96582f76ea211c76321f4f8b55d",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:190ca05d2d70ca400d44ad1da2d73e39bf3e6ad9eecd0bb679e7ba44f42e26c3"
+            "source_identity": "sha256:1848518fd6757555c22f379c080453be885d766d86bc80003432eb2e31b1343c"
           },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
@@ -222,6 +222,7 @@
             "conversations",
             "messages"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "security": {
             "atomic_messages": true,
             "dual_write": false
@@ -256,6 +257,13 @@
         }
       },
       "pack_id": "rumi_conversation_store_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_conversation_store_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:1848518fd6757555c22f379c080453be885d766d86bc80003432eb2e31b1343c"
     }
   },
   "migration": {

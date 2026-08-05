@@ -106,7 +106,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:6a1e783c17c46e8c2a791265963f715701a166816f0d31ffa58916d44296cb9f",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:f19b8d35064a7ce82c32be3588c8c2e2b0fc7372552793f8452dddac7b006bfa"
+            "source_identity": "sha256:e489b6f68de7fc0f729929d1212c89ee0e4c6902d3b43f6bd7346d28f4affbfd"
           },
           "consumes_existing_sources_only": true,
           "declarative_only": true,
@@ -179,6 +179,7 @@
             "office_review_gate",
             "office_suite_handoff_packet"
           ],
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "runtime_type": "declarative_setup_pack"
         },
         "pack_id": "rumi_office_authoring_pack",
@@ -218,6 +219,13 @@
       "host_imports": false,
       "product": "office_authoring",
       "profile_scoped": true
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_office_authoring_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:e489b6f68de7fc0f729929d1212c89ee0e4c6902d3b43f6bd7346d28f4affbfd"
     }
   },
   "migration": {

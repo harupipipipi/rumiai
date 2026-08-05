@@ -54,7 +54,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:8bf0553f8f83ae5d014450c0f91f96e3ab9c9943555b38aab10680243d9419a2"
+      "source_identity": "sha256:78103daf20e7e622a2685fc36c8eadd88547a381e8a30c17c3dbbdde72a3804a"
     },
     "dependency_notes": {
       "defaultspack": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, and core tool routing.",
@@ -62,6 +62,14 @@
     },
     "description": "Declarative local-first computer and desktop control playbooks for screenshots, keyboard/mouse workflows, foreground app context, terminal observation, sandbox/host boundaries, and evidence-before-action safety.",
     "executable_code": false,
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:78103daf20e7e622a2685fc36c8eadd88547a381e8a30c17c3dbbdde72a3804a"
+    },
     "grant_override": false,
     "legacy_annotations": {
       "runtime_dependency_aliases": [
@@ -69,6 +77,7 @@
       ]
     },
     "license": "MIT",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi Computer Control Pack",
     "network_policy": "none_by_default",
     "network_policy_details": {
@@ -93,6 +102,8 @@
         "reason": "Agent services pack may route multi-agent work; this pack defines single-seat host-control playbooks and handoff evidence."
       }
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
     "required_secrets": [],
     "runtime_type": "declarative_pack",
     "tags": [

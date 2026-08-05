@@ -47,7 +47,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:679bfeb3df6f832ea99eb9f7909baa1522c2a72cdb843b2daedd16fd358d5ff6",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:9c7cfadae75fdb10c654950491a06686e03deb0bd7bec5698d5c638de53e16c9"
+      "source_identity": "sha256:99eedbd309d55d19cb992ca0cfff49f04b4c8a40ddd658289637b2648a8a2cda"
     },
     "dependency_notes": {
       "defaultspack": "Finite connection-runtime compatibility source until Wave 10; approval and invocation are globally brokered."
@@ -57,9 +57,10 @@
     "format": "rumi.ecosystem.v1",
     "generated": true,
     "generated_from": {
-      "generator": "tobkiri.core_runtime.manifest_projection/v2",
-      "source": "rumi.pack.v3.json",
-      "source_content_hash": "sha256:911f7e38ecff91c6e5d071881510e2c2beb4160fe10a09626de48ef845cc104f"
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:99eedbd309d55d19cb992ca0cfff49f04b4c8a40ddd658289637b2648a8a2cda"
     },
     "legacy_annotations": {
       "runtime_dependency_aliases": [
@@ -67,7 +68,7 @@
       ]
     },
     "license": "MIT",
-    "manifest_authority": "v3-authoritative",
+    "manifest_authority": "v4-authoritative",
     "name": "Rumi MCP Gateway Pack",
     "network_policy": "none_by_default",
     "optional_integrations": [
@@ -77,6 +78,7 @@
         "version": ">=1.0.0"
       }
     ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
     "read_only_projection": true,
     "required_secrets": [],
     "tags": [

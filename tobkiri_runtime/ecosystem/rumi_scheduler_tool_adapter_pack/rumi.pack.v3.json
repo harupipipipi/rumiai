@@ -140,11 +140,12 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:10833ae5e044683acadc789394da31d5d932f50353ebb55f68f05f1ffa5c6017",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:c495f9248d7660f22022e87a5079f01a56024a98fe75c1a9a67785d4251a90dd"
+            "source_identity": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08"
           },
           "owner_surfaces": [
             "scheduler_tool_definitions"
-          ]
+          ],
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_scheduler_tool_adapter_pack",
         "pack_identity": "rumi:ecosystem/rumi_scheduler_tool_adapter_pack",
@@ -188,6 +189,13 @@
       "runtime_owner": false,
       "schedule_owner": false,
       "target_imports": false
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_scheduler_tool_adapter_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08"
     }
   },
   "migration": {

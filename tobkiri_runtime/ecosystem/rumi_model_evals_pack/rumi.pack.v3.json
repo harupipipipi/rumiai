@@ -240,7 +240,7 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:72b92977a2d49cf4f95300051ca08c0e2f78a723c086569d0af3086cc8d54e13",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:6facf9d0d4613b73417f0990dbf0111ecba9e05260a6e373a433770df0dc0e86"
+            "source_identity": "sha256:48a947d62f69a656709a55e268e7aa13c967b6cbca3e4e7fc50b7cafadecd3b4"
           },
           "description": "Declarative, local-first model evaluation and routing evidence pack for provider smoke tests, pass@k, flakiness, fit matrices, and promotion gates.",
           "legacy_annotations": {
@@ -250,7 +250,8 @@
             }
           },
           "license": "MIT",
-          "name": "Rumi Model Evals Pack"
+          "name": "Rumi Model Evals Pack",
+          "projection_owner": "scripts/migrate_manifest_authority.py"
         },
         "pack_id": "rumi_model_evals_pack",
         "pack_identity": "rumi:ecosystem/rumi_model_evals_pack",
@@ -287,6 +288,13 @@
         }
       },
       "pack_id": "rumi_model_evals_pack"
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_model_evals_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:48a947d62f69a656709a55e268e7aa13c967b6cbca3e4e7fc50b7cafadecd3b4"
     }
   },
   "migration": {

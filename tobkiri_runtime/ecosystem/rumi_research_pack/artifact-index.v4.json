@@ -2,12 +2,12 @@
   "artifact_set_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
   "artifacts": [
     {
-      "digest": "sha256:3dfacd7716fd9fd4204f840abf035caf4bf6fad76e2836867ccd040d62e113a9",
+      "digest": "sha256:1fc85d524fbc65b11fa1923a1a0c06ca625ea5c9a560e757f79298f20bd85b59",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:eeda908e3ce1da1d02d368b5285505052411ce31e38fe49282a95ccb1fe1c2a8",
+      "digest": "sha256:8160567092e975de9de188fe41a61c1f716ef729216ae9df24486d3cd8f11ac7",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -20,8 +20,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:5ba0beacdbba45929ab519b6fe00c9339c5fd76b4a37afc56b88404d6d2e966d"
+    "signed_digest": "sha256:fcbeec36780dee95aad74f1e38f911c7f806e449f21d4d8d15901bc1b8aa0240"
   },
   "pack_id": "rumi_research_pack",
-  "source_identity": "sha256:530611c0460668470c28ceb86dcc91b4cb6c72e350b1bea9a04f1eec8265df2e"
+  "source_identity": "sha256:e2d83995d747960bba97f667015dac30d433110afe19a3b2cda0818220f38e53"
 }

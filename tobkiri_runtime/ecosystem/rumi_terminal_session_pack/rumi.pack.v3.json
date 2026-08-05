@@ -128,9 +128,10 @@
             "artifact": "pack.v4.json",
             "artifact_digest": "sha256:45884af99c7650e6e1e3497304a7e21d072e1e34b7d7f7b3d0c541b76a256cce",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:94c53ae54a5a2d9aca43ef32b8cbf62d5b4ec846cfa237363522aa5b87be7b83"
+            "source_identity": "sha256:fc5d8a706c178869e1093e1423415b3d160b7bfb44bc7458ad1a886985b55f96"
           },
           "control_receipt_required": true,
+          "projection_owner": "scripts/migrate_manifest_authority.py",
           "tool_or_ui_registry_imports": false
         },
         "pack_id": "rumi_terminal_session_pack",
@@ -170,6 +171,13 @@
       "observe_control_split": true,
       "output_bytes_per_stream": 131072,
       "persistence": false
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_terminal_session_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:fc5d8a706c178869e1093e1423415b3d160b7bfb44bc7458ad1a886985b55f96"
     }
   },
   "migration": {

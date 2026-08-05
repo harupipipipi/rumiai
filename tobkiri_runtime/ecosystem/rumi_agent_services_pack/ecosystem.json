@@ -89,11 +89,22 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:9fe77ebde0a3fe0b5dce4fa81ea0a2bdcac4ceb0386b9e575350590d9db326ac"
+      "source_identity": "sha256:6f0a0246a15d21299a01c04aa4172f8591415e075fdad23fca2f9b38e0d90c3a"
     },
     "description": "Declarative, local-first multi-agent service workflows inspired by modern agent products.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:6f0a0246a15d21299a01c04aa4172f8591415e075fdad23fca2f9b38e0d90c3a"
+    },
     "license": "MIT",
-    "name": "Rumi Agent Services Pack"
+    "manifest_authority": "v4-authoritative",
+    "name": "Rumi Agent Services Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true
   },
   "pack_id": "rumi_agent_services_pack",
   "pack_identity": "rumi:ecosystem/rumi_agent_services_pack",

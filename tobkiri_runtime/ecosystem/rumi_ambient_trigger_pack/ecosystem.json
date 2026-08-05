@@ -11,9 +11,17 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:f86a8092b8f9eb779d83270de1c930005d32645f0bf866623531f998c8cf32f7"
+      "source_identity": "sha256:fb3398b1e0d6a950fd9cb76e1e65f0c7c9994543968d13a7a3af2ee676e9954d"
     },
     "description": "Voice wake, camera pinch, 2/3/4 gesture replies, and approval gesture extension for defaultspack input.",
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "ecosystem.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:fb3398b1e0d6a950fd9cb76e1e65f0c7c9994543968d13a7a3af2ee676e9954d"
+    },
     "legacy_annotations": {
       "frontend_extensions": [
         "frontend_extensions/ambient_trigger.ui.json"
@@ -66,7 +74,10 @@
       }
     },
     "license": "MIT",
-    "name": "Rumi Ambient Trigger Pack"
+    "manifest_authority": "v4-authoritative",
+    "name": "Rumi Ambient Trigger Pack",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true
   },
   "pack_id": "rumi_ambient_trigger_pack",
   "pack_identity": "rumi:ecosystem/rumi_ambient_trigger_pack",
