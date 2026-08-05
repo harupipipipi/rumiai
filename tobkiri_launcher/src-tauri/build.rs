@@ -13,6 +13,7 @@ const PRESENTATION_INDEX_FILENAME: &str = "shell_artifact_index.v4.json";
 const PRESENTATION_LOCK_FILENAME: &str = "shell_profile_lock.v4.json";
 const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
 const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
+const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
@@ -137,7 +138,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .map_err(|error| stage_error("verify canonical Host package", error))?;
     copy_generated_resource_dirs(&runtime_root, &staged_root)
         .map_err(|error| stage_error("copy generated resources", error))?;
-    stage_setup_brand_icon(&repo_root, &staged_root)
+    stage_setup_brand_icon(repo_root, &staged_root)
         .map_err(|error| stage_error("stage setup brand icon", error))?;
 
     let bundled_src = project_dir.join("bundled");
@@ -165,7 +166,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
     verify_staged_catalog(&catalog_source, &staged_catalog)
         .map_err(|error| stage_error("verify staged presentation catalog", error))?;
 
-    stage_pack_shell(&repo_root, &staged_root)
+    stage_pack_shell(repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
@@ -434,7 +435,7 @@ fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
 }
 
 fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
-    if let Some(pack_shell) = find_pack_shell_binary(repo_root) {
+    if let Some(pack_shell) = find_pack_shell_binary(repo_root)? {
         return Ok(Some(pack_shell));
     }
 
@@ -447,7 +448,13 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
     let mut command = Command::new(cargo);
     command
         .args(["build", "--locked", "--manifest-path"])
-        .arg(&manifest);
+        .arg(&manifest)
+        .current_dir(repo_root);
+
+    if let Ok(target) = std::env::var("TARGET") {
+        validate_path_component(&target, "Rust target")?;
+        command.arg("--target").arg(&target);
+    }
 
     if std::env::var("PROFILE").as_deref() == Ok("release") {
         command.arg("--release");
@@ -455,7 +462,7 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
 
     let output = command.output()?;
     if output.status.success() {
-        return Ok(find_pack_shell_binary(repo_root));
+        return find_pack_shell_binary(repo_root);
     }
 
     Err(io::Error::other(format!(
@@ -466,41 +473,93 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
     )))
 }
 
-fn find_pack_shell_binary(repo_root: &Path) -> Option<PathBuf> {
-    let binary_name = pack_shell_binary_name();
-    let mut candidates = Vec::new();
-    if let Ok(target) = std::env::var("TARGET") {
-        candidates.push(
-            repo_root
-                .join("target")
-                .join(&target)
-                .join("release")
-                .join(binary_name),
-        );
-        candidates.push(
-            repo_root
-                .join("pack-shell")
-                .join("target")
-                .join(target)
-                .join("release")
-                .join(binary_name),
-        );
+fn find_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
+    let target = std::env::var("TARGET").ok();
+    if let Some(target) = &target {
+        validate_path_component(target, "Rust target")?;
     }
-    candidates.extend([
-        repo_root.join("target").join("release").join(binary_name),
-        repo_root.join("target").join("debug").join(binary_name),
-        repo_root
-            .join("pack-shell")
-            .join("target")
-            .join("release")
-            .join(binary_name),
-        repo_root
-            .join("pack-shell")
-            .join("target")
-            .join("debug")
-            .join(binary_name),
-    ]);
-    candidates.into_iter().find(|candidate| candidate.is_file())
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    validate_path_component(&profile, "Cargo profile")?;
+
+    let target_dir = resolve_cargo_target_dir(repo_root)?;
+    let output_dir = if let Some(target) = target {
+        target_dir.join(target).join(&profile)
+    } else {
+        target_dir.join(&profile)
+    };
+    let candidate = output_dir.join(pack_shell_binary_name());
+
+    let metadata = match fs::symlink_metadata(&candidate) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary may not be a symlink: {}",
+                candidate.display()
+            ),
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary must be a regular file: {}",
+                candidate.display()
+            ),
+        ));
+    }
+
+    let canonical = candidate.canonicalize()?;
+    if canonical != candidate {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "pack-shell binary path is not canonical or contains a symlink: {}",
+                candidate.display()
+            ),
+        ));
+    }
+    Ok(Some(canonical))
+}
+
+fn resolve_cargo_target_dir(repo_root: &Path) -> io::Result<PathBuf> {
+    let repository_root = repo_root.canonicalize()?;
+    let target_dir = match std::env::var_os(CARGO_TARGET_DIR_ENV) {
+        Some(configured) if !configured.is_empty() => {
+            let configured = PathBuf::from(configured);
+            if configured.is_absolute() {
+                configured
+            } else {
+                repository_root.join(configured)
+            }
+        }
+        _ => repository_root.join("pack-shell").join("target"),
+    };
+
+    if target_dir.exists() {
+        target_dir.canonicalize()
+    } else {
+        Ok(target_dir)
+    }
+}
+
+fn validate_path_component(value: &str, label: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} must be a single path component: {value:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn pack_shell_binary_name() -> &'static str {
@@ -762,7 +821,10 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
 
     struct TestTree {
         root: PathBuf,
@@ -799,6 +861,12 @@ mod tests {
     }
 
     impl EnvironmentGuard {
+        fn set_value(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
         fn set_path(key: &'static str, value: &Path) -> Self {
             let previous = std::env::var_os(key);
             std::env::set_var(key, value);
@@ -814,6 +882,113 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    fn write_pack_shell_fixture(root: &Path, target: &str, profile: &str) -> PathBuf {
+        let binary = root
+            .join(target)
+            .join(profile)
+            .join(pack_shell_binary_name());
+        fs::create_dir_all(binary.parent().expect("fixture binary has a parent"))
+            .expect("fixture binary directory should be creatable");
+        fs::write(&binary, b"pack-shell fixture").expect("fixture binary should be writable");
+        binary
+    }
+
+    #[test]
+    fn pack_shell_lookup_resolves_default_absolute_and_relative_target_dirs() {
+        let _environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment test lock should not be poisoned");
+        let tree = TestTree::new("pack-shell-target-dir");
+        let target = "aarch64-apple-darwin";
+        let profile = "release";
+        let _target = EnvironmentGuard::set_value("TARGET", target);
+        let _profile = EnvironmentGuard::set_value("PROFILE", profile);
+
+        {
+            let _target_dir = EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "");
+            let binary = write_pack_shell_fixture(
+                &tree.path().join("pack-shell").join("target"),
+                target,
+                profile,
+            );
+            assert_eq!(
+                find_pack_shell_binary(tree.path()).expect("default lookup should succeed"),
+                Some(binary.canonicalize().expect("fixture should canonicalize"))
+            );
+        }
+
+        {
+            let target_dir = tree.path().join("absolute-target");
+            let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_dir);
+            let binary = write_pack_shell_fixture(&target_dir, target, profile);
+            assert_eq!(
+                find_pack_shell_binary(tree.path()).expect("absolute lookup should succeed"),
+                Some(binary.canonicalize().expect("fixture should canonicalize"))
+            );
+        }
+
+        {
+            let _target_dir = EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "relative-target");
+            let binary =
+                write_pack_shell_fixture(&tree.path().join("relative-target"), target, profile);
+            assert_eq!(
+                find_pack_shell_binary(tree.path()).expect("relative lookup should succeed"),
+                Some(binary.canonicalize().expect("fixture should canonicalize"))
+            );
+        }
+    }
+
+    #[test]
+    fn pack_shell_lookup_rejects_missing_wrong_and_traversing_binary_paths() {
+        let _environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment test lock should not be poisoned");
+        let tree = TestTree::new("pack-shell-invalid-paths");
+        let target = "aarch64-apple-darwin";
+        let _target = EnvironmentGuard::set_value("TARGET", target);
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+        let target_dir = tree.path().join("target");
+        let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_dir);
+
+        write_pack_shell_fixture(&target_dir, target, "debug");
+        assert!(find_pack_shell_binary(tree.path())
+            .expect("wrong profile lookup should not error")
+            .is_none());
+
+        let invalid_target = EnvironmentGuard::set_value("TARGET", "../escape");
+        let error = find_pack_shell_binary(tree.path())
+            .expect_err("target path traversal must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        drop(invalid_target);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pack_shell_lookup_rejects_symlinked_binary() {
+        let _environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment test lock should not be poisoned");
+        let tree = TestTree::new("pack-shell-symlink");
+        let target = "aarch64-apple-darwin";
+        let _target = EnvironmentGuard::set_value("TARGET", target);
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+        let target_dir = tree.path().join("target");
+        let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_dir);
+        let binary = target_dir
+            .join(target)
+            .join("release")
+            .join(pack_shell_binary_name());
+        fs::create_dir_all(binary.parent().expect("fixture binary has a parent"))
+            .expect("fixture binary directory should be creatable");
+        let outside = tree.path().join("outside-pack-shell");
+        fs::write(&outside, b"outside fixture").expect("outside fixture should be writable");
+        std::os::unix::fs::symlink(&outside, &binary).expect("binary symlink should be creatable");
+
+        let error =
+            find_pack_shell_binary(tree.path()).expect_err("symlinked binary must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {

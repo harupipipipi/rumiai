@@ -42,6 +42,20 @@ def _write_linux_uv_archive(path: Path, *, target: str, payload: bytes) -> None:
         archive.addfile(info, io.BytesIO(payload))
 
 
+def _write_pack_shell_binary(
+    module,
+    target_root: Path,
+    target: str,
+    *,
+    filename: str | None = None,
+) -> Path:
+    binary_name = filename or module.pack_shell_binary_name(target)
+    binary = target_root / target / "release" / binary_name
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"pack-shell fixture")
+    return binary
+
+
 def _minimal_v4_stage(tmp_path: Path) -> Path:
     """Build a small staged resource tree from the canonical v4 inputs."""
     module = _load_prepare_tauri_resources()
@@ -133,6 +147,82 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
         module.stage_uv(tmp_path / "app", target, version)
 
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
+
+
+@pytest.mark.parametrize("target_dir_kind", ("default", "absolute", "relative"))
+def test_stage_pack_shell_resolves_cargo_target_dir_deterministically(
+    tmp_path,
+    monkeypatch,
+    target_dir_kind,
+):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    repo_root.mkdir()
+    target = "aarch64-apple-darwin"
+
+    if target_dir_kind == "default":
+        monkeypatch.delenv(module.CARGO_TARGET_DIR_ENV, raising=False)
+        target_root = repo_root / "pack-shell" / "target"
+    elif target_dir_kind == "absolute":
+        target_root = (tmp_path / "absolute-target").resolve()
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    else:
+        monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, "relative-target")
+        target_root = repo_root / "relative-target"
+
+    binary = _write_pack_shell_binary(module, target_root, target)
+
+    staged = module.stage_pack_shell(repo_root, source_root, target)
+
+    assert staged == (source_root / "bundled" / "pack-shell").resolve()
+    assert staged.read_bytes() == binary.read_bytes()
+
+
+@pytest.mark.parametrize("case", ("missing", "wrong", "symlink"))
+def test_stage_pack_shell_rejects_missing_wrong_or_symlinked_binary(
+    tmp_path,
+    monkeypatch,
+    case,
+):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    target = "aarch64-apple-darwin"
+    target_root = repo_root / "cargo-target"
+    repo_root.mkdir()
+    monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, "cargo-target")
+    expected = target_root / target / "release" / "pack-shell"
+
+    if case == "wrong":
+        _write_pack_shell_binary(
+            module,
+            target_root,
+            target,
+            filename="not-pack-shell",
+        )
+    elif case == "symlink":
+        expected.parent.mkdir(parents=True, exist_ok=True)
+        outside = tmp_path / "outside-pack-shell"
+        outside.write_bytes(b"outside fixture")
+        try:
+            expected.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    with pytest.raises((FileNotFoundError, RuntimeError)):
+        module.stage_pack_shell(repo_root, source_root, target)
+
+
+def test_stage_pack_shell_rejects_target_path_traversal(tmp_path, monkeypatch):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    repo_root.mkdir()
+    monkeypatch.delenv(module.CARGO_TARGET_DIR_ENV, raising=False)
+
+    with pytest.raises(ValueError, match="path component"):
+        module.stage_pack_shell(repo_root, source_root, "../escape")
 
 
 def test_validate_bundle_accepts_canonical_v4_stage_without_legacy_authority(tmp_path):

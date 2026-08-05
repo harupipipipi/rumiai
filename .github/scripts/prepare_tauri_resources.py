@@ -17,6 +17,7 @@ import time
 import tempfile
 import urllib.request
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -67,6 +68,7 @@ GENERATED_RESOURCE_DIRS = (
 )
 RUNTIME_RESOURCE_MANIFEST = "runtime-resource-manifest.v1.json"
 RUNTIME_RESOURCE_SCHEMA = "io.tobkiri.runtime-resource-manifest.v1"
+CARGO_TARGET_DIR_ENV = "CARGO_TARGET_DIR"
 REQUIRED_RUNTIME_BOOTSTRAP_FILES = (
     Path("app.py"),
     Path("core_runtime/__init__.py"),
@@ -374,15 +376,89 @@ def uv_binary_name(target: str) -> str:
     return "uv.exe" if is_windows_target(target) else "uv"
 
 
-def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
+def resolve_cargo_target_dir(
+    repo_root: Path,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Resolve Cargo's target directory for the repository build.
+
+    Cargo resolves a relative ``CARGO_TARGET_DIR`` from the command's working
+    directory. The release wrapper runs Cargo from ``repo_root``, so resolving
+    relative values here keeps staging tied to the exact build output without
+    searching other directories.
+    """
+    repository_root = repo_root.resolve()
+    environment = os.environ if environ is None else environ
+    configured = environment.get(CARGO_TARGET_DIR_ENV)
+    if configured:
+        target_dir = Path(configured)
+        if not target_dir.is_absolute():
+            target_dir = repository_root / target_dir
+    else:
+        target_dir = repository_root / "pack-shell" / "target"
+    return target_dir.resolve()
+
+
+def _validate_target_component(target: str) -> None:
+    if (
+        not target
+        or target in {".", ".."}
+        or "/" in target
+        or "\\" in target
+    ):
+        raise ValueError(f"invalid Rust target path component: {target!r}")
+
+
+def resolve_pack_shell_binary(
+    repo_root: Path,
+    target: str,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Resolve the exact, canonical release pack-shell binary.
+
+    The target triple and release profile are fixed path components. The
+    target-dir environment variable selects only Cargo's output root; it does
+    not authorize profile changes or fallback searches.
+    """
+    _validate_target_component(target)
     binary_name = pack_shell_binary_name(target)
-    src = repo_root / "pack-shell" / "target" / target / "release" / binary_name
-    if not src.exists():
-        raise FileNotFoundError(
-            f"pack-shell binary not found at {src}. Build pack-shell before preparing resources."
+    target_dir = resolve_cargo_target_dir(repo_root, environ)
+    candidate = target_dir / target / "release" / binary_name
+    canonical = candidate.resolve(strict=False)
+    if canonical != candidate:
+        raise RuntimeError(
+            f"pack-shell binary path is not canonical or contains a symlink: {candidate}"
         )
 
-    dest = source_root / "bundled" / binary_name
+    try:
+        metadata = candidate.lstat()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"pack-shell binary not found at {candidate}. "
+            "Build pack-shell before preparing resources."
+        ) from exc
+    if candidate.is_symlink():
+        raise RuntimeError(f"pack-shell binary may not be a symlink: {candidate}")
+    if not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"pack-shell binary must be a regular file: {candidate}")
+    return canonical
+
+
+def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
+    src = resolve_pack_shell_binary(repo_root, target)
+    binary_name = pack_shell_binary_name(target)
+    staged_root = source_root.resolve()
+    bundled_dir = staged_root / "bundled"
+    if bundled_dir.exists() and (bundled_dir.is_symlink() or not bundled_dir.is_dir()):
+        raise RuntimeError(f"pack-shell staging directory is unsafe: {bundled_dir}")
+    bundled_dir.mkdir(parents=True, exist_ok=True)
+    dest = bundled_dir / binary_name
+    if dest.is_symlink():
+        raise RuntimeError(f"pack-shell staging destination may not be a symlink: {dest}")
+    if dest.resolve(strict=False) != dest:
+        raise RuntimeError(f"pack-shell staging destination is not canonical: {dest}")
+    if dest.exists() and not dest.is_file():
+        raise RuntimeError(f"pack-shell staging destination must be a regular file: {dest}")
     copy_file(src, dest)
     return dest
 
