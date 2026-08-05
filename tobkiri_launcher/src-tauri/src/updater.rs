@@ -134,6 +134,6 @@ mod tests {
     fn no_update_when_current_is_latest() {
         let current = parse_version("1.0.0").unwrap();
         let latest = parse_version("1.0.0").unwrap();
-        assert!(!(latest > current));
+        assert!(latest <= current);
     }
 }
