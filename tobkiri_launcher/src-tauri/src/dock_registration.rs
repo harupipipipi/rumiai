@@ -28,6 +28,7 @@ const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack-main";
 const DEFAULTSPACK_WINDOW_TITLE: &str = "Tobkiri";
+const DEFAULTSPACK_RUNPY_SHIM: &str = "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')";
 static DEFAULTSPACK_LAUNCH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn with_defaultspack_launch_coordination<T>(
@@ -49,13 +50,17 @@ fn with_defaultspack_launch_coordination<T>(
 
 #[derive(Debug, Clone)]
 pub(crate) struct DefaultspackDesktopMetadata {
-    command: String,
+    entrypoint: PathBuf,
+    argv: Vec<OsString>,
     app_working_dir: PathBuf,
     env_vars: Vec<(String, String)>,
     port: u16,
     profile_id: String,
     profile_digest: String,
     catalog_revision: String,
+    artifact_digest: String,
+    function_id: String,
+    provider_id: String,
 }
 
 impl DefaultspackDesktopMetadata {
@@ -114,24 +119,18 @@ fn venv_bin_dir(venv_dir: &Path) -> PathBuf {
     }
 }
 
-fn desktop_python_arguments(command: &str) -> AnyResult<Vec<String>> {
-    let command_parts =
-        shell_words::split(command).context("defaultspack desktop command is invalid")?;
-    let (program, arguments) = command_parts
-        .split_first()
-        .context("defaultspack desktop command is empty")?;
-    let program_name = Path::new(program)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !matches!(program_name.as_str(), "python" | "python3" | "python.exe") {
-        bail!("defaultspack desktop command must use the managed Python runtime");
-    }
-    if arguments.is_empty() {
-        bail!("defaultspack desktop command is missing its entrypoint");
-    }
-    Ok(arguments.to_vec())
+fn defaultspack_python_argv(
+    config: &AppConfig,
+    metadata: &DefaultspackDesktopMetadata,
+) -> Vec<OsString> {
+    let mut argv = vec![
+        OsString::from("-c"),
+        OsString::from(DEFAULTSPACK_RUNPY_SHIM),
+        config.app_dir.as_os_str().to_owned(),
+        metadata.entrypoint.as_os_str().to_owned(),
+    ];
+    argv.extend(metadata.argv.iter().cloned());
+    argv
 }
 
 fn defaultspack_window_url(port: u16) -> String {
@@ -473,8 +472,8 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
     let manager = app.state::<Arc<DefaultspackManager>>();
     let metadata = match read_defaultspack_desktop_metadata(config) {
         Ok(m) => {
-            info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, command={}, working_dir={})",
-                m.port, m.command, m.app_working_dir.display());
+            info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, entrypoint={}, argv_count={}, working_dir={})",
+                m.port, m.entrypoint.display(), m.argv.len(), m.app_working_dir.display());
             m
         }
         Err(e) => {
@@ -620,6 +619,9 @@ fn write_guardian_ready_audit(
                 "authority": "pack-v4-profile-lock",
                 "catalog_revision": metadata.catalog_revision,
                 "profile_digest": metadata.profile_digest,
+                "artifact_digest": metadata.artifact_digest,
+                "function_id": metadata.function_id,
+                "provider_id": metadata.provider_id,
                 "health": "ready",
                 "local_auth": "verified",
                 "guardian": "registered",
@@ -736,7 +738,6 @@ fn read_defaultspack_desktop_metadata(
     config: &AppConfig,
 ) -> AnyResult<DefaultspackDesktopMetadata> {
     let authority = crate::defaultspack_authority::resolve(config)?;
-    let command = "python defaultspack/desktop_app.py".to_string();
     let app_working_dir = authority.pack_root;
     let mut env_vars = vec![
         (
@@ -767,13 +768,17 @@ fn read_defaultspack_desktop_metadata(
     }
 
     Ok(DefaultspackDesktopMetadata {
-        command,
+        entrypoint: authority.launch.entrypoint,
+        argv: authority.launch.argv,
         app_working_dir,
         env_vars,
         port,
         profile_id: authority.profile_id,
         profile_digest: authority.profile_digest,
         catalog_revision: authority.catalog_revision,
+        artifact_digest: authority.launch.artifact_digest,
+        function_id: authority.launch.function_id,
+        provider_id: authority.launch.provider_id,
     })
 }
 
@@ -916,8 +921,6 @@ pub(crate) fn spawn_defaultspack_local_server(
         ],
     )?;
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
-    let arguments = desktop_python_arguments(&metadata.command)?;
-
     info!(
         "spawn_defaultspack_local_server: python={}, port={}, working_dir={}",
         config.venv_python().display(),
@@ -930,12 +933,7 @@ pub(crate) fn spawn_defaultspack_local_server(
     // listener orphaned and cannot provide a process-lifetime guardian.
     let mut command = process_utils::isolated_python(config.venv_python());
     command
-        .args([
-            "-c",
-            "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv[1]; sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')",
-        ])
-        .arg(&config.app_dir)
-        .args(&arguments)
+        .args(defaultspack_python_argv(config, metadata))
         .env("PATH", path)
         .env_remove("PYTHONPATH")
         .env("RUMI_HOME", &config.rumi_home)
@@ -1191,13 +1189,17 @@ mod tests {
     #[test]
     fn stale_listener_identity_requires_defaultspack_and_working_directory() {
         let metadata = DefaultspackDesktopMetadata {
-            command: "python -m ecosystem.defaultspack.desktop_app".into(),
+            entrypoint: PathBuf::from("/tmp/rumi/defaultspack/defaultspack/desktop_app.py"),
+            argv: Vec::new(),
             app_working_dir: PathBuf::from("/tmp/rumi/defaultspack"),
             env_vars: vec![],
             port: DEFAULTSPACK_DEFAULT_PORT,
             profile_id: "defaults".into(),
             profile_digest: "sha256:test".into(),
             catalog_revision: "sha256:test".into(),
+            artifact_digest: "sha256:test".into(),
+            function_id: "runtime.tauri.application.default".into(),
+            provider_id: "runtime.tauri.application.default".into(),
         };
         let owned = PortListener {
             pid: 101,
@@ -1217,7 +1219,10 @@ mod tests {
     #[test]
     fn authenticated_prior_bundle_listener_is_stale_but_foreign_server_is_not() {
         let metadata = DefaultspackDesktopMetadata {
-            command: "python defaultspack/desktop_app.py".into(),
+            entrypoint: PathBuf::from(
+                "/Applications/Tobkiri Launcher.app/Contents/Resources/app/ecosystem/defaultspack/defaultspack/desktop_app.py",
+            ),
+            argv: Vec::new(),
             app_working_dir: PathBuf::from(
                 "/Applications/Tobkiri Launcher.app/Contents/Resources/app/ecosystem/defaultspack",
             ),
@@ -1226,6 +1231,9 @@ mod tests {
             profile_id: "defaults".into(),
             profile_digest: "sha256:test".into(),
             catalog_revision: "sha256:test".into(),
+            artifact_digest: "sha256:test".into(),
+            function_id: "runtime.tauri.application.default".into(),
+            provider_id: "runtime.tauri.application.default".into(),
         };
         let prior_bundle = PortListener {
             pid: 303,
@@ -1268,6 +1276,47 @@ mod tests {
                 .join("connection.json")
         );
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn packaged_launch_materializes_verified_entrypoint_once_and_no_application_argv() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-defaultspack-launch-argv-{}",
+            std::process::id()
+        ));
+        let config = test_config(&root);
+        let entrypoint = config
+            .app_dir
+            .join("ecosystem/defaultspack/defaultspack/desktop_app.py");
+        let metadata = DefaultspackDesktopMetadata {
+            entrypoint: entrypoint.clone(),
+            argv: Vec::new(),
+            app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
+            env_vars: Vec::new(),
+            port: DEFAULTSPACK_DEFAULT_PORT,
+            profile_id: "defaults".into(),
+            profile_digest: format!("sha256:{}", "1".repeat(64)),
+            catalog_revision: format!("sha256:{}", "2".repeat(64)),
+            artifact_digest: format!("sha256:{}", "3".repeat(64)),
+            function_id: "runtime.tauri.application.default".into(),
+            provider_id: "runtime.tauri.application.default".into(),
+        };
+
+        let argv = defaultspack_python_argv(&config, &metadata);
+
+        assert_eq!(argv.len(), 4);
+        assert_eq!(argv[0], "-c");
+        assert_eq!(argv[1], DEFAULTSPACK_RUNPY_SHIM);
+        assert_eq!(argv[2], config.app_dir.as_os_str());
+        assert_eq!(argv[3], entrypoint.as_os_str());
+        assert_eq!(
+            argv.iter()
+                .filter(|argument| argument.as_os_str() == entrypoint.as_os_str())
+                .count(),
+            1
+        );
+        assert!(DEFAULTSPACK_RUNPY_SHIM.contains("entry=sys.argv.pop(1)"));
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -1389,13 +1438,19 @@ mod tests {
         ));
         let config = test_config(&root);
         let metadata = DefaultspackDesktopMetadata {
-            command: "python defaultspack/desktop_app.py".into(),
+            entrypoint: config
+                .app_dir
+                .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+            argv: Vec::new(),
             app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
             env_vars: Vec::new(),
             port: DEFAULTSPACK_DEFAULT_PORT,
             profile_id: "defaults".into(),
             profile_digest: format!("sha256:{}", "1".repeat(64)),
             catalog_revision: format!("sha256:{}", "2".repeat(64)),
+            artifact_digest: format!("sha256:{}", "3".repeat(64)),
+            function_id: "runtime.tauri.application.default".into(),
+            provider_id: "runtime.tauri.application.default".into(),
         };
 
         write_guardian_ready_audit(&config, &metadata).unwrap();
@@ -1406,6 +1461,9 @@ mod tests {
         assert!(audit.contains("\"local_auth\":\"verified\""));
         assert!(audit.contains("\"guardian\":\"registered\""));
         assert!(audit.contains("\"profile_id\":\"defaults\""));
+        assert!(audit.contains("\"artifact_digest\":\"sha256:3333"));
+        assert!(audit.contains("\"function_id\":\"runtime.tauri.application.default\""));
+        assert!(audit.contains("\"provider_id\":\"runtime.tauri.application.default\""));
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -4,13 +4,13 @@
     "id": "runtime.tauri.application.default",
     "version": "1.0.0",
     "kind": "application",
-    "artifact_digest": "sha256:3c146f4da6f0dc7ce890dab2b7db603b7805fa8807d0809581d3641e7a78cb0c",
+    "artifact_digest": "sha256:b80d10978bca077c4066d81ae7ba78401f8645309113fc3e2ffc4a7e10553324",
     "display_name": "Tobkiri Tauri Application Runtime"
   },
   "functions": [
     {
       "id": "runtime.tauri.application.default",
-      "implementation_digest": "sha256:6c67c32bcfe7bddb7545d8da98b923d959bd120be28fd40659d3c5427d7d6543",
+      "implementation_digest": "sha256:9bf9a8d2456daba58d728006b7d2296a4861d8d463301a8ebe4a3f077f48f06e",
       "contract_revision_digest": "sha256:fd443fd9faf828ba60f0c81b26a5f6eed613cd8382368af32938121f147481c9",
       "operations": [
         "launch"
@@ -30,10 +30,12 @@
   ],
   "artifacts": [
     {
-      "path": "artifacts/runtime.tauri.application.default",
-      "digest": "sha256:6c67c32bcfe7bddb7545d8da98b923d959bd120be28fd40659d3c5427d7d6543",
+      "path": "defaultspack/desktop_app.py",
+      "digest": "sha256:9bf9a8d2456daba58d728006b7d2296a4861d8d463301a8ebe4a3f077f48f06e",
       "kind": "executable",
-      "platform": "host"
+      "platform": "host",
+      "entrypoint": "defaultspack/desktop_app.py",
+      "argv": []
     }
   ],
   "provenance": {
@@ -88,8 +90,8 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:da6bd445e78568ca44b29478e9b54a088089762aa5e9758b5037e6c2d67f9b7e",
-    "artifact_set_digest": "sha256:3046f56a6d3f616e347bcaada4e2cdc90e55cf20a539648a1d3fd14b7bd491fe",
+    "source_identity": "sha256:75a65b94e10e756aba9a25c92688d7092ab9980b3a4a3a5c88056e96f9c0b4d1",
+    "artifact_set_digest": "sha256:b80d10978bca077c4066d81ae7ba78401f8645309113fc3e2ffc4a7e10553324",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }
 }

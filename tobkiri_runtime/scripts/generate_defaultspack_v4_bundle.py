@@ -52,6 +52,7 @@ TAURI_ROLE_PACKS = {
         "isolation": "dedicated_process",
     },
 }
+DEFAULTSPACK_DESKTOP_ENTRYPOINT = "defaultspack/desktop_app.py"
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -59,7 +60,9 @@ def _pretty(document: dict[str, Any]) -> bytes:
 
 
 def _requirements(pack_id: str, kind: str) -> dict[str, Any]:
-    capabilities = ["file.inspect", "workspace.metadata.read"] if pack_id == "rumi-file-inspect" else []
+    capabilities = (
+        ["file.inspect", "workspace.metadata.read"] if pack_id == "rumi-file-inspect" else []
+    )
     return {
         "pack_dependencies": {},
         "contract_dependencies": [],
@@ -136,15 +139,40 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
     pack_id = spec["pack_id"]
     contract_id = spec["contract_id"]
     operation_id = spec["operation_id"]
-    contract_digest = canonical_digest(
-        {"contract_id": contract_id, "operations": [operation_id]}
-    )
-    implementation_digest = canonical_digest(
-        {"pack_id": pack_id, "contract": contract_digest, "operation": operation_id}
-    )
-    artifact_digest = canonical_digest(
-        {"pack_id": pack_id, "implementation": implementation_digest, "prebuilt": True}
-    )
+    contract_digest = canonical_digest({"contract_id": contract_id, "operations": [operation_id]})
+    if pack_id == "runtime.tauri.application.default":
+        entrypoint = ROOT / "ecosystem" / "defaultspack" / DEFAULTSPACK_DESKTOP_ENTRYPOINT
+        implementation_digest = "sha256:" + hashlib.sha256(entrypoint.read_bytes()).hexdigest()
+        artifacts = [
+            {
+                "path": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
+                "digest": implementation_digest,
+                "kind": "executable",
+                "platform": "host",
+                "entrypoint": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
+                "argv": [],
+            }
+        ]
+        artifact_digest = canonical_digest(artifacts)
+    else:
+        implementation_digest = canonical_digest(
+            {"pack_id": pack_id, "contract": contract_digest, "operation": operation_id}
+        )
+        artifacts = [
+            {
+                "path": f"artifacts/{pack_id}",
+                "digest": implementation_digest,
+                "kind": "executable",
+                "platform": "host",
+            }
+        ]
+        artifact_digest = canonical_digest(
+            {
+                "pack_id": pack_id,
+                "implementation": implementation_digest,
+                "prebuilt": True,
+            }
+        )
     source_path = f"ecosystem/defaultspack/v4/packs/{pack_id}.pack.v4.json"
     document = {
         "pack_api_version": "io.tobkiri.pack.v4",
@@ -172,21 +200,16 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
                 "operations": [operation_id],
             }
         ],
-        "artifacts": [
-            {
-                "path": f"artifacts/{pack_id}",
-                "digest": implementation_digest,
-                "kind": "executable",
-                "platform": "host",
-            }
-        ],
+        "artifacts": artifacts,
         "provenance": {
             "schema": "io.tobkiri.provenance.v1",
             "source_kind": "repository",
             "source_path": source_path,
             "source_digest": canonical_digest({"source": source_path}),
             "repository_commit": "working-tree",
-            "repository_tree": canonical_digest({"tree": "defaultspack-v4"}).removeprefix("sha256:"),
+            "repository_tree": canonical_digest({"tree": "defaultspack-v4"}).removeprefix(
+                "sha256:"
+            ),
             "generator": "defaultspack-v4-core",
             "generator_version": "1.0.0",
             "normative": True,
@@ -274,9 +297,7 @@ def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
             "kind": "terminal_stdio",
             "technology": "cli",
             "capabilities": list(document["required_capabilities"]),
-            "consumes_contribution_contracts": list(
-                document["consumes_contribution_contracts"]
-            ),
+            "consumes_contribution_contracts": list(document["consumes_contribution_contracts"]),
         },
         "launch": {
             "prebuilt_only": True,
@@ -316,9 +337,11 @@ def _normalize_profile(document: dict[str, Any]) -> dict[str, Any]:
 
 def _render() -> dict[Path, bytes]:
     rendered: dict[Path, bytes] = {}
-    pack_paths = set(PACKS.glob("*.pack.v4.json")) | {
-        PACKS / name for name in CANONICAL_PACK_FILES
-    } | {PACKS / name for name in TAURI_ROLE_PACKS}
+    pack_paths = (
+        set(PACKS.glob("*.pack.v4.json"))
+        | {PACKS / name for name in CANONICAL_PACK_FILES}
+        | {PACKS / name for name in TAURI_ROLE_PACKS}
+    )
     for path in sorted(pack_paths):
         canonical = CANONICAL_PACK_FILES.get(path.name)
         role_spec = TAURI_ROLE_PACKS.get(path.name)
@@ -345,10 +368,7 @@ def _render() -> dict[Path, bytes]:
     for pack in profile["packs"]:
         if pack["pack_id"] == "rumi-file-inspect":
             pack["pack_id"] = "rumi_file_inspect_pack"
-    if not any(
-        pack["pack_id"] == "runtime.tauri.application.default"
-        for pack in profile["packs"]
-    ):
+    if not any(pack["pack_id"] == "runtime.tauri.application.default" for pack in profile["packs"]):
         profile["packs"].append(
             {
                 "pack_id": "runtime.tauri.application.default",
@@ -362,9 +382,7 @@ def _render() -> dict[Path, bytes]:
         if edge["target_provider_id"] == "defaultspack.file.inspect":
             edge.update(
                 {
-                    "target_provider_id": (
-                        "rumi_file_inspect_pack.file-inspect.service"
-                    ),
+                    "target_provider_id": ("rumi_file_inspect_pack.file-inspect.service"),
                     "contract_id": "tobkiri.service.file.inspect.v1",
                     "operation_id": "rumi_file_inspect_pack.file-inspect",
                 }
@@ -394,7 +412,9 @@ def _render() -> dict[Path, bytes]:
             }
         )
     lock = {"schema": "io.tobkiri.defaultspack-bundle-lock.v1", "entries": entries}
-    rendered[BUNDLE / "bundle.lock.json"] = json.dumps(lock, indent=2, ensure_ascii=False).encode() + b"\n"
+    rendered[BUNDLE / "bundle.lock.json"] = (
+        json.dumps(lock, indent=2, ensure_ascii=False).encode() + b"\n"
+    )
     return rendered
 
 
@@ -403,7 +423,9 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     rendered = _render()
-    stale = [path for path, raw in rendered.items() if not path.exists() or path.read_bytes() != raw]
+    stale = [
+        path for path, raw in rendered.items() if not path.exists() or path.read_bytes() != raw
+    ]
     if args.check:
         if stale:
             for path in stale:

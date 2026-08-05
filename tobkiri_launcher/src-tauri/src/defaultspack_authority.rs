@@ -1,6 +1,7 @@
 //! Pack v4 authority resolution for the Launcher-owned Defaultspack guardian.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -28,9 +29,20 @@ const RUNTIME_PACK_PATH: &str = "packs/runtime.tauri.application.default.pack.v4
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GuardianAuthority {
     pub pack_root: PathBuf,
+    pub launch: GuardianLaunch,
     pub profile_id: String,
     pub profile_digest: String,
     pub catalog_revision: String,
+}
+
+/// Verified process materialization for the application Pack's launch function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GuardianLaunch {
+    pub entrypoint: PathBuf,
+    pub argv: Vec<OsString>,
+    pub artifact_digest: String,
+    pub function_id: String,
+    pub provider_id: String,
 }
 
 #[derive(Deserialize)]
@@ -116,17 +128,108 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         &bundle_root.join(DEFAULTSPACK_PACK_PATH),
         "Defaultspack Pack v4",
     )?)?;
+    let launch = validate_application_pack(
+        &pack_root,
+        &read_json(
+            &bundle_root.join(RUNTIME_PACK_PATH),
+            "Defaultspack application Pack v4",
+        )?,
+    )?;
     verify_pack_artifact_index(&pack_root, &bundle_root)?;
-
-    let desktop_entry = pack_root.join("defaultspack/desktop_app.py");
-    read_regular_file(&desktop_entry, "Defaultspack desktop entrypoint")?;
 
     let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
     Ok(GuardianAuthority {
         pack_root,
+        launch,
         profile_id: DEFAULT_PROFILE_ID.to_string(),
         profile_digest: catalog.default_profile_digest,
         catalog_revision,
+    })
+}
+
+fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianLaunch> {
+    let functions = pack
+        .get("functions")
+        .and_then(Value::as_array)
+        .context("application Pack functions must be an array")?;
+    let providers = pack
+        .get("provider_catalog")
+        .and_then(Value::as_array)
+        .context("application Pack providers must be an array")?;
+    let operations = pack
+        .get("operation_catalog")
+        .and_then(Value::as_array)
+        .context("application Pack operations must be an array")?;
+    let artifacts = pack
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .context("application Pack artifacts must be an array")?;
+    if value_str(pack, "/pack_api_version") != Some("io.tobkiri.pack.v4")
+        || value_str(pack, "/pack/id") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(pack, "/pack/kind") != Some("application")
+        || value_str(pack, "/migration/compatibility") != Some("none")
+        || functions.len() != 1
+        || providers.len() != 1
+        || operations.len() != 1
+        || artifacts.len() != 1
+        || value_str(&functions[0], "/id") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(&functions[0], "/isolation") != Some("dedicated_process")
+        || functions[0]["operations"] != serde_json::json!(["launch"])
+        || value_str(&providers[0], "/provider_id") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(&providers[0], "/owner") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(&providers[0], "/contract_reference") != Some("runtime.tauri.application.v1")
+        || providers[0]["operations"] != serde_json::json!(["launch"])
+        || value_str(&operations[0], "/operation_id") != Some("launch")
+        || value_str(&operations[0], "/owner") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(&operations[0], "/provider_id") != Some(DEFAULT_RUNTIME_ID)
+        || value_str(&operations[0], "/contract_reference") != Some("runtime.tauri.application.v1")
+        || value_str(&artifacts[0], "/kind") != Some("executable")
+        || value_str(&artifacts[0], "/platform") != Some("host")
+    {
+        bail!("application Pack launch identity is invalid");
+    }
+
+    let artifact_digest = value_str(&artifacts[0], "/digest")
+        .context("application Pack artifact digest is missing")?;
+    if value_str(&functions[0], "/implementation_digest") != Some(artifact_digest)
+        || value_str(pack, "/pack/artifact_digest")
+            != value_str(pack, "/integrity/artifact_set_digest")
+        || sha256(&serde_json::to_vec(artifacts)?)
+            != value_str(pack, "/integrity/artifact_set_digest").unwrap_or_default()
+    {
+        bail!("application Pack artifact identity is inconsistent");
+    }
+
+    let artifact_path =
+        value_str(&artifacts[0], "/path").context("application Pack artifact path is missing")?;
+    let entrypoint = value_str(&artifacts[0], "/entrypoint")
+        .context("application Pack entrypoint is missing")?;
+    if artifact_path != entrypoint {
+        bail!("application Pack entrypoint does not identify its executable artifact");
+    }
+    let argv = artifacts[0]
+        .get("argv")
+        .and_then(Value::as_array)
+        .context("application Pack argv must be an array")?;
+    if !argv.is_empty() {
+        bail!("application Pack launch argv must not contain positional arguments");
+    }
+
+    let relative = safe_relative(entrypoint)?;
+    let candidate = pack_root.join(relative);
+    let bytes = read_regular_file(&candidate, "application Pack entrypoint")?;
+    let canonical = candidate
+        .canonicalize()
+        .context("failed to canonicalize application Pack entrypoint")?;
+    if !canonical.starts_with(pack_root) || sha256(&bytes) != artifact_digest {
+        bail!("application Pack entrypoint escaped or failed artifact verification");
+    }
+    Ok(GuardianLaunch {
+        entrypoint: canonical,
+        argv: Vec::new(),
+        artifact_digest: artifact_digest.to_string(),
+        function_id: DEFAULT_RUNTIME_ID.to_string(),
+        provider_id: DEFAULT_RUNTIME_ID.to_string(),
     })
 }
 
@@ -412,6 +515,43 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn rewrite_locked_document(
+        config: &AppConfig,
+        relative: &str,
+        mutate: impl FnOnce(&mut Value),
+    ) {
+        let bundle = config.app_dir.join("ecosystem/defaultspack/v4");
+        let path = bundle.join(relative);
+        let mut document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        mutate(&mut document);
+        let raw = serde_json::to_vec(&document).unwrap();
+        fs::write(&path, &raw).unwrap();
+
+        let lock_path = bundle.join("bundle.lock.json");
+        let mut lock: Value = serde_json::from_slice(&fs::read(&lock_path).unwrap()).unwrap();
+        let entry = lock["entries"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry["path"] == relative)
+            .unwrap();
+        entry["digest"] = Value::String(sha256(&raw));
+        fs::write(lock_path, serde_json::to_vec(&lock).unwrap()).unwrap();
+
+        let catalog_path = config.app_dir.join("bundled/presentation_catalog.json");
+        let mut catalog: Value = serde_json::from_slice(&fs::read(&catalog_path).unwrap()).unwrap();
+        if relative == RUNTIME_PACK_PATH {
+            catalog["source_manifest_digests"][DEFAULT_RUNTIME_ID] = Value::String(sha256(&raw));
+        } else if relative == PROFILE_PATH {
+            catalog["default_profile_digest"] = Value::String(sha256(&raw));
+        }
+        fs::write(catalog_path, serde_json::to_vec(&catalog).unwrap()).unwrap();
+    }
+
+    fn rewrite_runtime_pack(config: &AppConfig, mutate: impl FnOnce(&mut Value)) {
+        rewrite_locked_document(config, RUNTIME_PACK_PATH, mutate);
+    }
+
     fn copy_tree(source: &Path, destination: &Path) {
         fs::create_dir_all(destination).unwrap();
         for entry in fs::read_dir(source).unwrap() {
@@ -489,6 +629,22 @@ mod tests {
 
         assert_eq!(first, restarted);
         assert_eq!(first.profile_id, DEFAULT_PROFILE_ID);
+        assert!(first.launch.argv.is_empty());
+        assert_eq!(first.launch.function_id, DEFAULT_RUNTIME_ID);
+        assert_eq!(first.launch.provider_id, DEFAULT_RUNTIME_ID);
+        assert_eq!(first.launch.entrypoint, restarted.launch.entrypoint);
+        assert_eq!(
+            first.launch.entrypoint,
+            first
+                .pack_root
+                .join("defaultspack/desktop_app.py")
+                .canonicalize()
+                .unwrap()
+        );
+        assert_eq!(
+            first.launch.artifact_digest,
+            sha256(&fs::read(&first.launch.entrypoint).unwrap())
+        );
         assert_eq!(
             first.pack_root,
             config
@@ -502,6 +658,67 @@ mod tests {
             "guardian preparation must not synthesize legacy state"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_module_extra_and_wrong_launch_identities_fail_closed() {
+        let mutations: &[fn(&mut Value)] = &[
+            |pack| {
+                pack["artifacts"][0]["argv"] = serde_json::json!(["defaultspack/desktop_app.py"]);
+            },
+            |pack| {
+                pack["artifacts"][0]["argv"] =
+                    serde_json::json!(["-m", "ecosystem.defaultspack.desktop_app"]);
+            },
+            |pack| pack["artifacts"][0]["argv"] = serde_json::json!(["unexpected"]),
+            |pack| {
+                pack["artifacts"][0]["entrypoint"] =
+                    Value::String("runtime/conversation.py".into());
+            },
+            |pack| {
+                pack["artifacts"][0]["digest"] =
+                    Value::String(format!("sha256:{}", "0".repeat(64)));
+            },
+            |pack| pack["functions"][0]["id"] = Value::String("wrong.function".into()),
+            |pack| {
+                pack["provider_catalog"][0]["provider_id"] = Value::String("wrong.provider".into());
+            },
+        ];
+        for (index, mutation) in mutations.iter().enumerate() {
+            let (root, config) = fixture(&format!("invalid-launch-{index}"));
+            rewrite_runtime_pack(&config, *mutation);
+            assert!(resolve(&config).is_err(), "mutation {index} was accepted");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn wrong_profile_path_escape_and_artifact_tamper_fail_closed() {
+        let (profile_root, profile_config) = fixture("wrong-profile");
+        rewrite_locked_document(&profile_config, PROFILE_PATH, |profile| {
+            profile["profile_id"] = Value::String("wrong-profile".into());
+        });
+        assert!(resolve(&profile_config).is_err());
+        fs::remove_dir_all(profile_root).unwrap();
+
+        let (escape_root, escape_config) = fixture("entrypoint-escape");
+        rewrite_runtime_pack(&escape_config, |pack| {
+            pack["artifacts"][0]["path"] = Value::String("../desktop_app.py".into());
+            pack["artifacts"][0]["entrypoint"] = Value::String("../desktop_app.py".into());
+        });
+        assert!(resolve(&escape_config).is_err());
+        fs::remove_dir_all(escape_root).unwrap();
+
+        let (tamper_root, tamper_config) = fixture("entrypoint-tamper");
+        fs::write(
+            tamper_config
+                .app_dir
+                .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+            b"raise SystemExit(0)\n",
+        )
+        .unwrap();
+        assert!(resolve(&tamper_config).is_err());
+        fs::remove_dir_all(tamper_root).unwrap();
     }
 
     #[test]
@@ -562,5 +779,15 @@ mod tests {
         fs::write(lock_path, serde_json::to_vec(&lock).unwrap()).unwrap();
         assert!(resolve(&escape_config).is_err());
         fs::remove_dir_all(escape_root).unwrap();
+
+        let (artifact_root, artifact_config) = fixture("artifact-symlink");
+        let entrypoint = artifact_config
+            .app_dir
+            .join("ecosystem/defaultspack/defaultspack/desktop_app.py");
+        let outside_entrypoint = artifact_root.join("outside.py");
+        fs::rename(&entrypoint, &outside_entrypoint).unwrap();
+        symlink(&outside_entrypoint, &entrypoint).unwrap();
+        assert!(resolve(&artifact_config).is_err());
+        fs::remove_dir_all(artifact_root).unwrap();
     }
 }

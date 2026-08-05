@@ -60,7 +60,9 @@
           "path": {"type": "string", "minLength": 1},
           "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
           "kind": {"enum": ["executable", "schema", "asset", "variant", "sidecar"]},
-          "platform": {"type": "string"}
+          "platform": {"type": "string"},
+          "entrypoint": {"type": "string", "minLength": 1},
+          "argv": {"type": "array", "items": {"type": "string"}}
         }
       }
     },
