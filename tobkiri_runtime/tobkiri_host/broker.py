@@ -33,6 +33,7 @@ from .errors import (
 )
 from .models import (
     EffectClass,
+    ExecutionKind,
     InvocationFrame,
     OpaqueAuthorityRef,
     RequestContext,
@@ -383,6 +384,15 @@ class RequestBroker:
             or not evidence.authenticated_channel
             or not evidence.nonce_fresh
         )
+        if backend.status.execution_kind is ExecutionKind.PACK_VM:
+            mismatch = mismatch or (
+                evidence.platform != backend.status.platform
+                or evidence.isolation_profile
+                != binding.route.execution_domain_profile
+                or evidence.attestation_digest is None
+                or evidence.domain_lease_id is None
+                or evidence.resource_reservation_id is None
+            )
         if mismatch:
             backend.terminate(evidence.domain_ref.value)
             raise AuthorizationError("runtime evidence mismatch")

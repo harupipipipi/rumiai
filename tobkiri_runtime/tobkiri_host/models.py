@@ -254,7 +254,14 @@ class RuntimeEvidence:
     backend_digest: str
     authenticated_channel: bool
     nonce_fresh: bool
+    platform: str | None = None
+    isolation_profile: str | None = None
+    attestation_digest: str | None = None
+    domain_lease_id: str | None = None
+    resource_reservation_id: str | None = None
 
     def __post_init__(self) -> None:
         require_digest(self.executable_digest, "evidence executable")
         require_digest(self.backend_digest, "evidence backend")
+        if self.attestation_digest is not None:
+            require_digest(self.attestation_digest, "evidence attestation")

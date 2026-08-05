@@ -6,11 +6,24 @@ from dataclasses import dataclass
 import sqlite3
 from threading import RLock
 import time
-from typing import Callable
+from typing import Callable, Protocol
 
 from .errors import TriggerError
 from .models import OpaqueAuthorityRef
-from .ports import AuthorityPort, OpaqueInvocationLease
+from .ports import OpaqueInvocationLease
+
+
+class TriggerAuthorityPort(Protocol):
+    """Occurrence-bound authority surface needed by the wake kernel."""
+
+    def issue_trigger_lease(
+        self,
+        registration_id: str,
+        occurrence_id: str,
+        target: OpaqueAuthorityRef,
+        security_epoch: int,
+    ) -> OpaqueInvocationLease:
+        """Issue a current-epoch one-shot occurrence lease."""
 
 
 @dataclass(frozen=True)
@@ -36,6 +49,45 @@ class TriggerDelivery:
     lease: OpaqueInvocationLease
 
 
+@dataclass(frozen=True)
+class WakeAdapterStatus:
+    """Deterministic OS wake adapter capability state."""
+
+    adapter_id: str
+    platform: str
+    available: bool
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class WakeRegistrationLease:
+    """Opaque finite binding between one registration and an OS wake source."""
+
+    lease_id: str
+    registration_id: str
+    security_epoch: int
+
+
+class OSWakeAdapter(Protocol):
+    """Host-owned OS wake integration; it is never discovered from env/daemon."""
+
+    status: WakeAdapterStatus
+
+    def register(self, registration: TriggerRegistration) -> WakeRegistrationLease:
+        """Register one exact wake target and return its Host-owned lease."""
+
+    def arm(
+        self,
+        lease: WakeRegistrationLease,
+        occurrence_id: str,
+        due_monotonic: float,
+    ) -> None:
+        """Arm one deduplicated occurrence."""
+
+    def revoke(self, lease: WakeRegistrationLease) -> None:
+        """Revoke one registration and all pending OS wake state."""
+
+
 class TriggerWakeKernel:
     """Durable bounded at-least-once occurrence claimant.
 
@@ -46,15 +98,22 @@ class TriggerWakeKernel:
     def __init__(
         self,
         database: sqlite3.Connection,
-        authority: AuthorityPort,
+        authority: TriggerAuthorityPort,
         *,
         clock: Callable[[], float] = time.monotonic,
         claim_timeout_seconds: float = 30.0,
+        wake_adapter: OSWakeAdapter | None = None,
+        current_security_epoch: Callable[[], int] | None = None,
+        production: bool = False,
     ) -> None:
         self._database = database
         self._authority = authority
         self._clock = clock
         self._claim_timeout = claim_timeout_seconds
+        self._wake_adapter = wake_adapter
+        self._current_security_epoch = current_security_epoch
+        self._production = production
+        self._wake_leases: dict[str, WakeRegistrationLease] = {}
         self._lock = RLock()
         self._database.execute("PRAGMA foreign_keys = ON")
         self._create_schema()
@@ -92,6 +151,23 @@ class TriggerWakeKernel:
         """Durably register an exact pinned Trigger Contract target."""
         if registration.pending_quota <= 0:
             raise TriggerError("pending quota must be positive")
+        if self._production:
+            self._require_current_epoch(registration.security_epoch)
+            if self._wake_adapter is None or not self._wake_adapter.status.available:
+                reason = (
+                    self._wake_adapter.status.reason
+                    if self._wake_adapter is not None
+                    else "OS wake adapter is not registered"
+                )
+                raise TriggerError(reason or "OS wake adapter is unavailable")
+            lease = self._wake_adapter.register(registration)
+            if (
+                lease.registration_id != registration.registration_id
+                or lease.security_epoch != registration.security_epoch
+                or not lease.lease_id
+            ):
+                raise TriggerError("OS wake registration lease mismatch")
+            self._wake_leases[registration.registration_id] = lease
         with self._lock, self._database:
             self._database.execute(
                 """
@@ -118,16 +194,23 @@ class TriggerWakeKernel:
         due_monotonic: float,
     ) -> bool:
         """Store one deduplicated occurrence subject to registration quota."""
+        wake_lease: WakeRegistrationLease | None = None
         with self._lock, self._database:
             row = self._database.execute(
                 """
-                SELECT pending_quota, enabled
+                SELECT pending_quota, enabled, security_epoch
                 FROM trigger_registration WHERE registration_id = ?
                 """,
                 (registration_id,),
             ).fetchone()
             if row is None or not row[1]:
                 raise TriggerError("trigger is unknown or disabled")
+            registration_epoch = int(row[2])
+            if self._production:
+                self._require_current_epoch(registration_epoch)
+                wake_lease = self._wake_leases.get(registration_id)
+                if wake_lease is None or self._wake_adapter is None:
+                    raise TriggerError("OS wake registration lease is unavailable")
             duplicate = self._database.execute(
                 """
                 SELECT 1 FROM trigger_occurrence
@@ -154,7 +237,16 @@ class TriggerWakeKernel:
                 """,
                 (registration_id, occurrence_id, due_monotonic),
             )
-            return cursor.rowcount == 1
+            inserted = cursor.rowcount == 1
+            if inserted and self._production:
+                if wake_lease is None or self._wake_adapter is None:
+                    raise TriggerError("OS wake registration lease is unavailable")
+                self._wake_adapter.arm(
+                    wake_lease,
+                    occurrence_id,
+                    due_monotonic,
+                )
+        return inserted
 
     def claim_due(self) -> TriggerDelivery | None:
         """Claim one due occurrence and issue its one-shot authority lease."""
@@ -205,6 +297,11 @@ class TriggerWakeKernel:
             pending_quota=row[6],
         )
         try:
+            if self._production:
+                self._require_current_epoch(registration.security_epoch)
+                wake_lease = self._wake_leases.get(registration.registration_id)
+                if wake_lease is None:
+                    raise TriggerError("wake without a registration lease")
             lease = self._authority.issue_trigger_lease(
                 registration.registration_id,
                 row[7],
@@ -229,6 +326,25 @@ class TriggerWakeKernel:
             lease=lease,
         )
 
+    def revoke(self, registration_id: str) -> None:
+        """Disable a trigger and revoke its OS wake registration lease."""
+        with self._lock, self._database:
+            updated = self._database.execute(
+                "UPDATE trigger_registration SET enabled = 0 WHERE registration_id = ?",
+                (registration_id,),
+            )
+            if updated.rowcount != 1:
+                raise TriggerError("trigger is unknown")
+        wake_lease = self._wake_leases.pop(registration_id, None)
+        if wake_lease is not None and self._wake_adapter is not None:
+            self._wake_adapter.revoke(wake_lease)
+
+    def _require_current_epoch(self, expected: int) -> None:
+        if self._current_security_epoch is None:
+            raise TriggerError("SecurityEpoch source is unavailable")
+        if self._current_security_epoch() != expected:
+            raise TriggerError("trigger SecurityEpoch is stale")
+
     def acknowledge(self, delivery: TriggerDelivery) -> None:
         """Mark one claimed occurrence delivered; missing claims fail closed."""
         with self._lock, self._database:
@@ -245,3 +361,13 @@ class TriggerWakeKernel:
             )
             if cursor.rowcount != 1:
                 raise TriggerError("trigger occurrence is not currently claimed")
+
+
+__all__ = [
+    "OSWakeAdapter",
+    "TriggerDelivery",
+    "TriggerRegistration",
+    "TriggerWakeKernel",
+    "WakeAdapterStatus",
+    "WakeRegistrationLease",
+]

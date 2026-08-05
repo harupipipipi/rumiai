@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import TYPE_CHECKING, Iterable, Protocol
 
 from .contracts import ResolvedOperationBinding
 from .errors import BackendUnavailableError
 from .models import ExecutionKind, RuntimeEvidence
+
+if TYPE_CHECKING:
+    from .platform_backends import PlatformIsolationDriver
 
 
 REQUIRED_PRODUCTION_GATES = frozenset(
@@ -35,6 +38,7 @@ class BackendStatus:
     production_enabled: bool = False
     conformance_only: bool = True
     satisfied_gates: frozenset[str] = frozenset()
+    unavailable_reason: str | None = None
 
     @property
     def ready_for_production(self) -> bool:
@@ -72,7 +76,10 @@ class BackendRegistry:
     """Select exact backends without a weaker fallback."""
 
     def __init__(self, backends: Iterable[ExecutionBackend]) -> None:
-        self._backends = {backend.status.backend_id: backend for backend in backends}
+        items = tuple(backends)
+        self._backends = {backend.status.backend_id: backend for backend in items}
+        if len(self._backends) != len(items):
+            raise BackendUnavailableError("duplicate backend registration")
 
     def select(
         self,
@@ -85,9 +92,13 @@ class BackendRegistry:
         if backend is None:
             raise BackendUnavailableError("pinned backend is not installed")
         status = backend.status
+        if status.platform != f"{binding.variant.os}-{binding.variant.architecture}":
+            raise BackendUnavailableError("backend platform does not match pinned variant")
         if status.execution_kind is not binding.variant.execution_kind:
             raise BackendUnavailableError("backend execution kind mismatch")
         if production and not status.ready_for_production:
+            if status.unavailable_reason is not None:
+                raise BackendUnavailableError(status.unavailable_reason)
             missing = sorted(REQUIRED_PRODUCTION_GATES - status.satisfied_gates)
             raise BackendUnavailableError(
                 f"backend is feature-disabled; missing gates: {missing}"
@@ -97,3 +108,43 @@ class BackendRegistry:
         ):
             raise BackendUnavailableError("backend is disabled")
         return backend
+
+    @property
+    def statuses(self) -> tuple[BackendStatus, ...]:
+        """Return registered backend status in deterministic ID order."""
+        return tuple(
+            self._backends[backend_id].status
+            for backend_id in sorted(self._backends)
+        )
+
+
+def production_backend_registry(
+    *,
+    platform_system: str | None = None,
+    machine: str | None = None,
+    drivers: Iterable[PlatformIsolationDriver] = (),
+) -> BackendRegistry:
+    """Register the one documented PackVM substrate for the current platform.
+
+    A caller may inject an already-authenticated platform driver.  Host probing
+    never launches helpers, reads environment variables, or substitutes another
+    substrate.  An unavailable dependency is represented by a disabled backend,
+    so selecting it returns the stable ``backend_unavailable`` result.
+    """
+    from .platform_backends import build_platform_backend
+
+    backend = build_platform_backend(
+        platform_system=platform_system,
+        machine=machine,
+        drivers=drivers,
+    )
+    return BackendRegistry((backend,))
+
+
+__all__ = [
+    "BackendRegistry",
+    "BackendStatus",
+    "ExecutionBackend",
+    "REQUIRED_PRODUCTION_GATES",
+    "production_backend_registry",
+]

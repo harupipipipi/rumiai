@@ -21,6 +21,7 @@ from .authority_v4 import AuthorityV4Adapter, PrincipalReferenceResolver
 from .contracts import OperationCatalog, OperationRoute
 from .errors import ResolutionError
 from .models import OpaqueAuthorityRef, PackArtifact
+from .tauri_roles import validate_production_tauri_roles
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class HostV4Composition:
         checked_lock = validate_document(lock, "profile_lock")
         checked_plan = validate_document(plan, "resolved_plan")
         checked_activation = validate_document(activation, "activation")
+        validate_production_tauri_roles(checked_profile, checked_lock)
         cls._validate_record_graph(
             checked_profile, checked_lock, checked_plan, checked_activation
         )
