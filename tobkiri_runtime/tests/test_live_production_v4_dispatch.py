@@ -21,7 +21,10 @@ from core_runtime.authority.v4 import (
     authority_digest,
 )
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
-from core_runtime.bootstrap.profile_capture import capture_default_profile
+from core_runtime.bootstrap.profile_capture import (
+    capture_default_profile,
+    prepare_default_profile_confirmation,
+)
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
     BackendRegistry,
@@ -101,7 +104,9 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
 ) -> None:
     user_data = tmp_path / "clean-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    active = capture_default_profile()
+    active = capture_default_profile(
+        confirmation=prepare_default_profile_confirmation()
+    )
     binding = next(
         item
         for item in active.resolved.plan["bindings"]

@@ -68,7 +68,7 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 73,
+        "line": 79,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
@@ -10057,14 +10057,14 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:38575d60b72cb7931ec0c5ee03f8d118a8fb64f6ac5b9287c05056dfb4fe31e6",
+        "evidence_digest": "sha256:ddec807184289e885e1c3d7f10d7bead691ba798da55c980aed879b7e3e23d79",
         "line": 22,
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:38575d60b72cb7931ec0c5ee03f8d118a8fb64f6ac5b9287c05056dfb4fe31e6",
-        "line": 73,
+        "evidence_digest": "sha256:ddec807184289e885e1c3d7f10d7bead691ba798da55c980aed879b7e3e23d79",
+        "line": 79,
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -18505,7 +18505,7 @@
     ]
   },
   "repository": {
-    "commit": "c8a36ff319384ff093bf5278fd4d8ca6e8ab1e70",
+    "commit": "df4933861b269d3296bf4f7278ee9431f1fd186c",
     "tree_digest": "41cbfea529928b93e211efac06131160eb6d454242040fee1700e48396762f90"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

@@ -13,7 +13,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,9 @@ class AppLifecycleManager:
     """
 
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
+    _activation_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def _check_setup_pack_selection_status(self) -> Dict[str, Any]:
         try:
@@ -120,8 +123,19 @@ class AppLifecycleManager:
         Returns:
             {"needs_setup": bool, "reason": str}
         """
-        from .bootstrap.profile_capture import capture_default_profile
+        from .bootstrap.profile_capture import (
+            active_default_profile_exists,
+            capture_default_profile,
+        )
 
+        if not active_default_profile_exists(base_dir=self.base_dir):
+            result = {
+                "needs_setup": True,
+                "reason": "explicit_defaults_confirmation_required",
+                "setup_state": "profile_transaction_required",
+            }
+            result.update(get_runtime_readiness())
+            return result
         try:
             active = capture_default_profile(base_dir=self.base_dir)
             result = {
@@ -143,6 +157,39 @@ class AppLifecycleManager:
 
         result.update(get_runtime_readiness())
         return result
+
+    def activate_default_profile(
+        self, confirmation: Mapping[str, Any]
+    ) -> Any:
+        """Commit one confirmed activation and publish its Broker session."""
+
+        from .authority.v4 import AuthorityStore
+        from .bootstrap.production_v4 import capture_production_dispatch
+        from .bootstrap.profile_capture import (
+            capture_default_profile,
+            runtime_user_data_root,
+        )
+        from .di_container import get_container
+        from tobkiri_host.runtime import install_dispatch_session
+
+        with self._activation_lock:
+            active = capture_default_profile(
+                base_dir=self.base_dir,
+                confirmation=confirmation,
+            )
+            runtime_root = Path(__file__).resolve().parents[1]
+            user_data = runtime_user_data_root(self.base_dir)
+            session = capture_production_dispatch(
+                active,
+                bundle_root=runtime_root / "ecosystem" / "defaultspack" / "v4",
+                ecosystem_root=runtime_root / "ecosystem",
+                authority_store=AuthorityStore(
+                    user_data / "authority" / "v4.sqlite3"
+                ),
+            )
+            install_dispatch_session(get_container(), session)
+            mark_runtime_ready()
+            return active, session
 
     def complete_setup(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """

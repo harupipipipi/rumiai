@@ -1,1 +1,0 @@
-import{r as e}from"./hooks-BASSfYkd.js";import{H as t,N as n,P as r}from"./index-CK8HvZJX.js";var i=n();function a(){let n=e();return(0,i.jsx)(t,{to:`${r.profileGraph}${n.search}${n.hash}`,replace:!0})}export{a as StartupProfiles};

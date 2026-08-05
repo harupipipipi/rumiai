@@ -8,6 +8,8 @@ from typing import Any, Dict
 class SetupHandlersMixin:
     """Expose one finite setup transaction with no legacy Registry authority."""
 
+    _dispatch_session: Any = None
+
     @staticmethod
     def _recommended_default_profile_preview() -> Dict[str, Any]:
         """Return the exact integrity-checked Defaults Profile selection."""
@@ -21,6 +23,9 @@ class SetupHandlersMixin:
             / "v4"
         )
         catalog = BundledCatalog.load(bundle_root)
+        from ..bootstrap.profile_capture import prepare_default_profile_confirmation
+
+        confirmation = prepare_default_profile_confirmation()
         profile = catalog.profiles["defaults"]
         base = profile["base"]
         shell = profile["shell"]
@@ -64,15 +69,20 @@ class SetupHandlersMixin:
             "conversation_provider": str(
                 conversation_edges[0]["target_provider_id"]
             ),
+            "confirmation": confirmation,
         }
 
     def _setup_list_packs(self) -> Dict[str, Any]:
         """Return the sole canonical setup candidate and its typed state."""
 
+        from ..bootstrap.profile_capture import active_default_profile_exists
+
         preview = self._recommended_default_profile_preview()
         return {
             "setup_api_version": "io.tobkiri.setup-state.v4",
-            "state": "review_required",
+            "state": (
+                "active" if active_default_profile_exists() else "review_required"
+            ),
             "packs": preview["packs"],
             "recommended_default_profile": preview,
             "required_transaction": [
@@ -88,31 +98,61 @@ class SetupHandlersMixin:
     def _setup_install_pack(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Complete the explicitly confirmed Defaults v4 activation transaction."""
 
-        if body.get("install_defaults_profile") is not True:
+        expected_keys = {
+            "setup_api_version",
+            "operation_id",
+            "confirmed",
+            "confirmation",
+        }
+        if set(body) != expected_keys:
+            return self._retired_state()
+        if (
+            body.get("setup_api_version") != "io.tobkiri.setup-state.v4"
+            or body.get("operation_id") != "defaults.activate"
+        ):
             return self._retired_state()
         preview = self._recommended_default_profile_preview()
-        reviewed = [
-            str(pack_id)
-            for pack_id in body.get("reviewed_default_profile_pack_ids") or []
-        ]
-        if reviewed != preview["pack_ids"]:
+        confirmation = body.get("confirmation")
+        if not isinstance(confirmation, dict) or confirmation != preview["confirmation"]:
             return {
-                "error": "Defaults Profile review is missing or stale",
+                "error": "Defaults Profile confirmation is stale or tampered",
                 "status_code": 409,
                 "state": "review_required",
-                "required_pack_ids": preview["pack_ids"],
+                "write_set": [],
             }
-        if body.get("confirmed_defaults_profile") is not True:
+        if body.get("confirmed") is not True:
             return {
                 "error": "Defaults Profile requires explicit confirmation",
                 "status_code": 409,
                 "state": "confirmation_required",
+                "write_set": [],
             }
-        from ..bootstrap.profile_capture import capture_default_profile
+        from ..bootstrap.profile_capture import (
+            activation_audit_receipt,
+            capture_default_profile,
+        )
 
-        active = capture_default_profile()
+        lifecycle = getattr(self.__class__, "app_lifecycle_manager", None)
+        try:
+            if lifecycle is not None and hasattr(
+                lifecycle, "activate_default_profile"
+            ):
+                activated = lifecycle.activate_default_profile(confirmation)
+                if not isinstance(activated, tuple) or len(activated) != 2:
+                    raise RuntimeError("Defaults activation result is invalid")
+                active, dispatch_session = activated
+                self.__class__._dispatch_session = dispatch_session
+            else:
+                active = capture_default_profile(confirmation=confirmation)
+            audit_receipt = activation_audit_receipt(active)
+        except Exception:
+            return {
+                "error": "Defaults Profile activation rejected",
+                "status_code": 409,
+                "state": "activation_rejected",
+                "write_set": [],
+            }
         return {
-            "success": True,
             "setup_api_version": "io.tobkiri.setup-state.v4",
             "state": "active",
             "profile_id": active.resolved.profile["profile_id"],
@@ -121,6 +161,10 @@ class SetupHandlersMixin:
             "activation_id": active.activation["activation_id"],
             "security_epoch": active.activation["security_epoch"],
             "fencing_token": active.activation["fencing_token"],
+            "authority_snapshot_digest": active.activation[
+                "profile_authority_snapshot_digest"
+            ],
+            "audit_receipt": audit_receipt,
             "restart_required": False,
         }
 

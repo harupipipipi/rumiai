@@ -17,6 +17,10 @@ from core_runtime.pack_control_v4 import (
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+from core_runtime.bootstrap.profile_capture import (
+    capture_default_profile,
+    prepare_default_profile_confirmation,
+)
 import core_runtime.pack_control_v4 as pack_control
 
 
@@ -29,6 +33,7 @@ def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
+    capture_default_profile(confirmation=prepare_default_profile_confirmation())
     session = capture_pack_control_session()
     state_path = user_data / "profiles" / "defaults" / "v4" / "active.json"
     yield session, state_path, user_data
@@ -186,6 +191,7 @@ def test_missing_profile_and_symlinked_state_fail_closed(
     user_data = tmp_path / "missing"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
+    capture_default_profile(confirmation=prepare_default_profile_confirmation())
     capture_pack_control_session()
     pointer = user_data / "profiles" / "defaults" / "v4" / "active.json"
     pointer.unlink()
@@ -203,6 +209,7 @@ def test_profile_identity_traversal_fails_before_control_state_access(
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
+    capture_default_profile(confirmation=prepare_default_profile_confirmation())
     session = capture_pack_control_session()
     with pytest.raises(PackControlDenied, match="profile_id"):
         _invoke(session, "catalog.read", {"profile_id": "../escaped"})

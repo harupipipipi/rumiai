@@ -10,7 +10,7 @@ import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/a
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
-import { hasSelectedSetupPack } from '@/src/lib/setupPacks';
+import {fetchDefaultsSetupState} from '@/src/lib/defaultsSetup';
 import {
   LazyAiInputInspector,
   LazyApiMap,
@@ -56,25 +56,25 @@ export default function App() {
     };
     const target = window as IdleWindow;
     let cancelled = false;
-    const verifySetupPack = () => {
-      void hasSelectedSetupPack()
-        .then((verified) => {
-          if (cancelled || verified) return;
-          addToast('The selected setup pack is no longer available. Setup must be completed again.', 'error');
+    const verifyDefaultsProfile = () => {
+      void fetchDefaultsSetupState()
+        .then((state) => {
+          if (cancelled || state.state === 'active') return;
+          addToast('The Defaults Profile activation is no longer available. Setup must be completed again.', 'error');
           setSetupDone(false);
         })
         .catch((error) => {
           if (cancelled) return;
-          addToast(error instanceof Error ? error.message : 'Setup pack verification failed', 'error');
+          addToast(error instanceof Error ? error.message : 'Defaults Profile verification failed', 'error');
         });
     };
 
     let cancelScheduled: () => void;
     if (typeof target.requestIdleCallback === 'function') {
-      const handle = target.requestIdleCallback(verifySetupPack, { timeout: 1_000 });
+      const handle = target.requestIdleCallback(verifyDefaultsProfile, { timeout: 1_000 });
       cancelScheduled = () => target.cancelIdleCallback?.(handle);
     } else {
-      const handle = window.setTimeout(verifySetupPack, 300);
+      const handle = window.setTimeout(verifyDefaultsProfile, 300);
       cancelScheduled = () => window.clearTimeout(handle);
     }
 

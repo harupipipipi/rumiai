@@ -13,6 +13,23 @@ class _Handler(SetupHandlersMixin):
 
 
 def _preview() -> dict[str, object]:
+    confirmation = {
+        "confirmation_api_version": "io.tobkiri.defaults-confirmation.v1",
+        "operation_id": "defaults.activate",
+        "profile_id": "defaults",
+        "catalog_revision": "sha256:" + "2" * 64,
+        "profile_revision": "sha256:" + "3" * 64,
+        "plan_digest": "sha256:" + "1" * 64,
+        "authority_snapshot_digest": "sha256:" + "4" * 64,
+        "security_epoch": 7,
+        "base": {"pack_id": "defaults-basepack"},
+        "shell": {
+            "provider_id": "shell.tauri.default",
+            "contract_id": "app.shell.v1",
+        },
+        "bindings": [],
+        "confirmation_digest": "sha256:" + "5" * 64,
+    }
     return {
         "available": True,
         "profile_id": "defaults",
@@ -28,6 +45,16 @@ def _preview() -> dict[str, object]:
             {"pack_id": "provider.local", "display_name": "Local Provider"},
         ],
         "conversation_provider": "provider.local",
+        "confirmation": confirmation,
+    }
+
+
+def _request(*, confirmed: bool = True) -> dict[str, object]:
+    return {
+        "setup_api_version": "io.tobkiri.setup-state.v4",
+        "operation_id": "defaults.activate",
+        "confirmed": confirmed,
+        "confirmation": _preview()["confirmation"],
     }
 
 
@@ -44,6 +71,7 @@ def _active() -> SimpleNamespace:
             "activation_id": "activation:test",
             "security_epoch": 7,
             "fencing_token": 11,
+            "profile_authority_snapshot_digest": "sha256:" + "4" * 64,
         },
     )
 
@@ -69,23 +97,19 @@ def test_setup_lists_one_typed_finite_v4_transaction() -> None:
     ]
 
 
-def test_setup_requires_exact_reviewed_profile() -> None:
+def test_setup_rejects_tampered_confirmation() -> None:
     with patch.object(
         SetupHandlersMixin,
         "_recommended_default_profile_preview",
         return_value=_preview(),
     ):
-        result = _Handler()._setup_install_pack(
-            {
-                "install_defaults_profile": True,
-                "reviewed_default_profile_pack_ids": ["defaultspack"],
-                "confirmed_defaults_profile": True,
-            }
-        )
+        request = _request()
+        request["confirmation"] = {**request["confirmation"], "security_epoch": 8}
+        result = _Handler()._setup_install_pack(request)
 
     assert result["status_code"] == 409
     assert result["state"] == "review_required"
-    assert result["required_pack_ids"] == _preview()["pack_ids"]
+    assert result["write_set"] == []
 
 
 def test_setup_requires_explicit_confirmation() -> None:
@@ -94,12 +118,7 @@ def test_setup_requires_explicit_confirmation() -> None:
         "_recommended_default_profile_preview",
         return_value=_preview(),
     ):
-        result = _Handler()._setup_install_pack(
-            {
-                "install_defaults_profile": True,
-                "reviewed_default_profile_pack_ids": _preview()["pack_ids"],
-            }
-        )
+        result = _Handler()._setup_install_pack(_request(confirmed=False))
 
     assert result["status_code"] == 409
     assert result["state"] == "confirmation_required"
@@ -116,18 +135,20 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
             "core_runtime.bootstrap.profile_capture.capture_default_profile",
             return_value=_active(),
         ) as capture,
+        patch(
+            "core_runtime.bootstrap.profile_capture.activation_audit_receipt",
+            return_value={
+                "reservation_id": "activation-reservation:test",
+                "state": "committed",
+                "activation_id": "activation:test",
+                "fencing_token": 11,
+            },
+        ),
     ):
-        result = _Handler()._setup_install_pack(
-            {
-                "install_defaults_profile": True,
-                "reviewed_default_profile_pack_ids": _preview()["pack_ids"],
-                "confirmed_defaults_profile": True,
-            }
-        )
+        result = _Handler()._setup_install_pack(_request())
 
-    capture.assert_called_once_with()
+    capture.assert_called_once_with(confirmation=_preview()["confirmation"])
     assert result == {
-        "success": True,
         "setup_api_version": "io.tobkiri.setup-state.v4",
         "state": "active",
         "profile_id": "defaults",
@@ -136,6 +157,13 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
         "activation_id": "activation:test",
         "security_epoch": 7,
         "fencing_token": 11,
+        "authority_snapshot_digest": "sha256:" + "4" * 64,
+        "audit_receipt": {
+            "reservation_id": "activation-reservation:test",
+            "state": "committed",
+            "activation_id": "activation:test",
+            "fencing_token": 11,
+        },
         "restart_required": False,
     }
 
