@@ -528,24 +528,6 @@ def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, A
             or ""
         ).strip()
         allowlist[(method, pattern, legacy_block_module)] = metadata
-    compatibility = dict(metadata_defaults)
-    compatibility.update(
-        {
-            "method": "GET",
-            "pattern": "/api/company/{company_id}/status",
-            "legacy_block_module": "blocks.company.status",
-            "replacement_function_id": "",
-            "owner": "defaultspack",
-            "reason": "Company status route alias for harness compatibility.",
-            "remove_after": "v2.4",
-        }
-    )
-    compatibility["function_id"] = str(compatibility.get("function_id") or "").strip()
-    compatibility["legacy_until"] = str(compatibility.get("legacy_until") or compatibility.get("remove_after") or "").strip()
-    allowlist.setdefault(
-        ("GET", "/api/company/{company_id}/status", "blocks.company.status"),
-        compatibility,
-    )
     return allowlist
 
 
