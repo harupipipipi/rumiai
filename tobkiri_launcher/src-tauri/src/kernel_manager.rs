@@ -58,17 +58,17 @@ pub(crate) struct PortListener {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListenerIdentity {
-    MatchingWorkingDirectory,
-    MatchingEntrypointPath,
-    MatchingVenvPython,
+    WorkingDirectory,
+    EntrypointPath,
+    VenvPython,
 }
 
 impl ListenerIdentity {
     fn description(self) -> &'static str {
         match self {
-            Self::MatchingWorkingDirectory => "matched the configured RUMI_HOME working directory",
-            Self::MatchingEntrypointPath => "matched the configured Kernel entrypoint path",
-            Self::MatchingVenvPython => "matched the configured venv Python path",
+            Self::WorkingDirectory => "matched the configured RUMI_HOME working directory",
+            Self::EntrypointPath => "matched the configured Kernel entrypoint path",
+            Self::VenvPython => "matched the configured venv Python path",
         }
     }
 }
@@ -543,18 +543,18 @@ fn identify_owned_listener(
         .as_deref()
         .is_some_and(|cwd| observed_path_matches(cwd, &config.rumi_home))
     {
-        return Some(ListenerIdentity::MatchingWorkingDirectory);
+        return Some(ListenerIdentity::WorkingDirectory);
     }
 
     let entrypoint = config.rumi_home.join("app.py");
     if command_mentions_path(&listener.command, &entrypoint)
         || command_mentions_path(&listener.command, &config.rumi_home)
     {
-        return Some(ListenerIdentity::MatchingEntrypointPath);
+        return Some(ListenerIdentity::EntrypointPath);
     }
 
     if command_mentions_path(&listener.command, &config.venv_python()) {
-        return Some(ListenerIdentity::MatchingVenvPython);
+        return Some(ListenerIdentity::VenvPython);
     }
 
     None
@@ -600,7 +600,7 @@ pub(crate) fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
             .args(["-TERM", &pid_str])
             .status();
         wait_for_port_to_clear(port, pid, Duration::from_secs(KILL_TIMEOUT_SECS))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(windows)]
@@ -761,7 +761,7 @@ mod tests {
 
         assert_eq!(
             identify_owned_listener(&listener, &config),
-            Some(ListenerIdentity::MatchingWorkingDirectory),
+            Some(ListenerIdentity::WorkingDirectory),
         );
     }
 
@@ -776,7 +776,7 @@ mod tests {
 
         assert_eq!(
             identify_owned_listener(&listener, &config),
-            Some(ListenerIdentity::MatchingVenvPython),
+            Some(ListenerIdentity::VenvPython),
         );
     }
 
@@ -794,7 +794,7 @@ mod tests {
 
         assert_eq!(
             identify_owned_listener(&listener, &config),
-            Some(ListenerIdentity::MatchingEntrypointPath),
+            Some(ListenerIdentity::EntrypointPath),
         );
     }
 

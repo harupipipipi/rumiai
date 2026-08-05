@@ -41,6 +41,7 @@ pub(crate) struct DefaultspackManager {
     state: Mutex<DefaultspackState>,
 }
 
+#[derive(Default)]
 struct DefaultspackState {
     child: Option<Child>,
     /// Process groups created by this Launcher. Keep the ids even after the
@@ -55,23 +56,6 @@ struct DefaultspackState {
     started_at: Option<Instant>,
     active_run_id: Option<String>,
     active_guardian_pid: Option<u32>,
-}
-
-impl Default for DefaultspackState {
-    fn default() -> Self {
-        Self {
-            child: None,
-            owned_process_groups: Vec::new(),
-            launch_metadata: None,
-            restart_in_progress: false,
-            stop_requested: false,
-            consecutive_failures: 0,
-            next_restart_at: None,
-            started_at: None,
-            active_run_id: None,
-            active_guardian_pid: None,
-        }
-    }
 }
 
 impl DefaultspackManager {

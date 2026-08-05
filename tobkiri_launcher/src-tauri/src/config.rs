@@ -207,19 +207,13 @@ impl AppConfig {
         which::which(uv_binary_name()).ok()
     }
 
-    /// Resolve the best available `uv` binary path for diagnostics.
-    pub fn resolved_uv_path(&self) -> PathBuf {
-        self.trusted_uv_path()
-            .unwrap_or_else(|| self.uv_path.clone())
-    }
-
     pub fn is_dev_workspace(&self) -> bool {
         self.dev_workspace_root.is_some()
     }
 
     /// Resolve `pack-shell` only from the packaged application root.
     pub fn pack_shell_path(&self) -> Option<PathBuf> {
-        self.bundled_pack_shell_path()
+        self.ensure_pack_shell_path().ok()
     }
 
     /// Require packaged `pack-shell`; no environment, PATH, or build fallback exists.
@@ -324,63 +318,10 @@ fn pack_shell_binary_name() -> &'static str {
     }
 }
 
-/// Return the platform triple string used by python-build-standalone
-/// and the `uv` release filenames.
-pub fn platform_triple() -> &'static str {
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-    {
-        "x86_64-unknown-linux-gnu"
-    }
-
-    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
-    {
-        "aarch64-unknown-linux-gnu"
-    }
-
-    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
-    {
-        "x86_64-apple-darwin"
-    }
-
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    {
-        "aarch64-apple-darwin"
-    }
-
-    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
-    {
-        "x86_64-pc-windows-msvc"
-    }
-
-    #[cfg(all(target_arch = "aarch64", target_os = "windows"))]
-    {
-        "aarch64-pc-windows-msvc"
-    }
-
-    #[cfg(not(any(
-        all(target_arch = "x86_64", target_os = "linux"),
-        all(target_arch = "aarch64", target_os = "linux"),
-        all(target_arch = "x86_64", target_os = "macos"),
-        all(target_arch = "aarch64", target_os = "macos"),
-        all(target_arch = "x86_64", target_os = "windows"),
-        all(target_arch = "aarch64", target_os = "windows"),
-    )))]
-    {
-        compile_error!("unsupported target platform")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
-    #[test]
-    fn platform_triple_is_not_empty() {
-        let triple = platform_triple();
-        assert!(!triple.is_empty());
-        assert!(triple.contains('-'));
-    }
 
     #[test]
     fn detect_for_tauri_produces_valid_paths() {
@@ -639,7 +580,6 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
 
         assert_eq!(config.trusted_uv_path(), None);
-        assert_eq!(config.resolved_uv_path(), config.uv_path);
         assert_eq!(config.uv_path, appdata.join(uv_binary_name()));
 
         if let Some(path) = old_path {
