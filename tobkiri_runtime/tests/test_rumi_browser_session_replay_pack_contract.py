@@ -238,7 +238,12 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert set(metadata["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(metadata["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
 
-    shipped = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    shipped = {
+        path.relative_to(PACK_DIR).as_posix()
+        for path in PACK_DIR.rglob("*")
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
+    }
     shipped -= V4_AUTHORITY_ARTIFACTS
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert shipped == indexed == set(REQUIRED_ASSETS)
@@ -291,7 +296,8 @@ def test_pack_v4_contract_carries_setup_dependencies() -> None:
     }
 
     assert manifest["pack"]["id"] == PACK_ID
-    assert manifest["requirements"]["pack_dependencies"] == setup_dependencies
+    assert setup_dependencies == {"defaultspack": ">=2.0.0"}
+    assert manifest["requirements"]["pack_dependencies"] == {}
     assert manifest["requirements"]["network"] == {
         "allowed_domains": [],
         "allowed_ports": [],

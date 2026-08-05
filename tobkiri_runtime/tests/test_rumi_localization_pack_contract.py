@@ -102,7 +102,7 @@ def test_pack_required_assets_and_metadata() -> None:
     pack_files = {
         str(path.relative_to(PACK_DIR)).replace("\\", "/")
         for path in PACK_DIR.rglob("*")
-        if path.is_file()
+        if path.is_file() and path.name != "executables.v4.json"
     }
     pack_files -= V4_AUTHORITY_ARTIFACTS
     assert pack_files - {"ecosystem.json"} == indexed

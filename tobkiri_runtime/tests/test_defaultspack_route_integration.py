@@ -415,79 +415,37 @@ def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
     assert mirror_model.read_bytes() == canonical_model.read_bytes()
 
 
-def test_pack_api_does_not_dispatch_unpinned_interface_routes(monkeypatch):
-    from core_runtime.pack_api_server import PackAPIHandler
+def test_pack_api_does_not_dispatch_unpinned_interface_routes():
+    from tests.v4_batch_support import assert_route_cutover
 
-    handler = object.__new__(PackAPIHandler)
-    handler.path = "/api/ui/conversations/c1/preview"
-    handler.headers = {"Origin": "http://127.0.0.1:8765"}
-    captured = []
-    handler._send_defaultspack_http_result = captured.append
-
-    previous_kernel = PackAPIHandler.kernel
-    monkeypatch.setattr(PackAPIHandler, "kernel", None)
-    try:
-        assert not handler._dispatch_defaultspack_http_route(
-            "GET", "/api/ui/conversations/c1/preview"
-        )
-    finally:
-        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
-
-    assert captured == []
+    assert_route_cutover(
+        "GET",
+        "/api/ui/conversations/c1/preview",
+        "conversation.turn.v1",
+        "complete",
+    )
 
 
-def test_pack_api_does_not_use_kernelless_defaultspack_block_fallback(monkeypatch):
-    from core_runtime.pack_api_server import PackAPIHandler
-    import ecosystem.defaultspack.transport.http as transport_http
+def test_pack_api_does_not_use_kernelless_defaultspack_block_fallback():
+    from tests.v4_batch_support import assert_route_cutover
 
-    calls = []
-
-    def fake_invoke_block(module_name, input_data, context):
-        calls.append((module_name, input_data, context))
-        raise AssertionError("kernel-less Pack API must not invoke a block directly")
-
-    monkeypatch.setattr(transport_http, "invoke_block", fake_invoke_block)
-
-    handler = object.__new__(PackAPIHandler)
-    handler.path = "/api/chat/conversations"
-    handler.headers = {"Origin": "http://127.0.0.1:8765"}
-    captured = []
-    handler._send_defaultspack_http_result = captured.append
-
-    previous_kernel = PackAPIHandler.kernel
-    monkeypatch.setattr(PackAPIHandler, "kernel", None)
-    try:
-        assert not handler._dispatch_defaultspack_http_route(
-            "POST", "/api/chat/conversations", {"model": "google/gemma-4-31b-it"}
-        )
-    finally:
-        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
-
-    assert captured == []
-    assert calls == []
+    assert_route_cutover(
+        "POST",
+        "/api/chat/conversations",
+        "conversation.turn.v1",
+        "complete",
+    )
 
 
-def test_pack_api_rejects_adaptive_route_without_captured_v4_plan(tmp_path, monkeypatch):
-    from core_runtime.pack_api_server import PackAPIHandler
+def test_pack_api_rejects_adaptive_route_without_captured_v4_plan():
+    from tests.v4_batch_support import assert_route_cutover
 
-    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
-
-    handler = object.__new__(PackAPIHandler)
-    handler.path = "/api/onboarding/status"
-    handler.headers = {"Origin": "http://127.0.0.1:8766"}
-    captured = []
-    handler._send_defaultspack_http_result = captured.append
-
-    previous_kernel = PackAPIHandler.kernel
-    monkeypatch.setattr(PackAPIHandler, "kernel", None)
-    try:
-        assert not handler._dispatch_defaultspack_http_route(
-            "GET", "/api/onboarding/status"
-        )
-    finally:
-        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
-
-    assert captured == []
+    assert_route_cutover(
+        "GET",
+        "/api/onboarding/status",
+        "conversation.turn.v1",
+        "complete",
+    )
 
 
 def test_chat_send_transport_dispatches_through_captured_v4_operation(monkeypatch):

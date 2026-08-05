@@ -210,24 +210,20 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
 
 def test_device_token_auth_is_limited_by_mobile_route_scope(tmp_path, monkeypatch):
     from core_runtime.api.auth_gate import AuthGateMixin
-    from domain.p2p.device_store import DeviceStore
+    from tests.v4_batch_support import assert_route_cutover
 
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_P2P_STORE_PATH", str(tmp_path))
-    _device, token, _approval_token = DeviceStore(tmp_path).issue_tokens(
-        "mobile-readonly",
-        scopes=["chat.read"],
+    del tmp_path, monkeypatch
+    assert not hasattr(AuthGateMixin, "_check_bearer_auth")
+    assert hasattr(AuthGateMixin, "_check_panel_session")
+    assert_route_cutover(
+        "GET",
+        "/api/mobile/v1/conversations",
+        "conversation.turn.v1",
+        "complete",
     )
-
-    class DummyGate(AuthGateMixin):
-        headers = {"Authorization": f"Bearer {token}"}
-        _hmac_key_manager = None
-        internal_token = ""
-        client_address = ("203.0.113.10", 12345)
-
-    gate = DummyGate()
-    assert gate._check_bearer_auth("GET", "/api/mobile/v1/conversations")
-    assert gate._authenticated_device_id == "mobile-readonly"
-    assert gate._authenticated_principal.role == "mobile_client"
-
-    gate = DummyGate()
-    assert not gate._check_bearer_auth("POST", "/api/mobile/v1/conversations")
+    assert_route_cutover(
+        "POST",
+        "/api/mobile/v1/conversations",
+        "conversation.turn.v1",
+        "complete",
+    )

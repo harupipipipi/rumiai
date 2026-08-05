@@ -51,6 +51,7 @@ def test_profile_resolver_delegates_dependency_order_to_effective_set() -> None:
         "shell.tauri.default",
         "defaultspack",
         "rumi_file_inspect_pack",
+        "runtime.tauri.application.default",
         "rumi_workspace_mount_pack",
         "rumi_host_authority_bridge_pack",
     ]

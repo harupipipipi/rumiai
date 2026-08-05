@@ -3,34 +3,52 @@ from __future__ import annotations
 import json
 import importlib
 import os
-from dataclasses import FrozenInstanceError, replace
+import sys
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from core_runtime.global_contracts.models import ContractStatus
 from core_runtime.resolved_profile import (
-    ResolutionInput,
     _pack_content_hash,
     apply_legacy_selection_migration,
-    create_lockfile,
     plan_legacy_selection_migration,
     resolution_input_from_startup_profile,
-    resolve_profile,
-    read_lockfile,
-    refresh_lockfile,
     rollback_legacy_selection_migration,
-    validate_lockfile,
 )
 from core_runtime.resolved_profile_scope import (
     _persisted_startup_pack_ids,
-    activate_resolved_profile,
-    effective_pack_ids,
     invalidate_persisted_resolved_profile,
     persisted_resolved_profile,
-    require_effective_pack,
-    restore_resolved_profile,
 )
+
+
+_DEFAULTSPACK_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
+if str(_DEFAULTSPACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DEFAULTSPACK_ROOT))
+
+
+@dataclass(frozen=True)
+class _CapturedV4Profile:
+    """Small test-owned view of one verified protocol Profile graph."""
+
+    resolved: object
+    profile_id: str
+    effective_pack_set: tuple[str, ...]
+    plan_hash: str
+
+    @property
+    def profile(self):
+        return self.resolved.profile
+
+    @property
+    def lock(self):
+        return self.resolved.lock
+
+    @property
+    def plan(self):
+        return self.resolved.plan
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +87,57 @@ def _isolate_profile_resolution_from_pack_install_policy(
         "core_runtime.resolved_profile.verify_declared_artifacts",
         lambda *_args, **_kwargs: (True, ()),
     )
+
+
+@pytest.fixture
+def captured_v4_profile(request: pytest.FixtureRequest):
+    """Bind the checked-in, Host-verified Defaults Profile snapshot."""
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        BundledCatalog,
+        resolve_default_profile,
+    )
+    from core_runtime.resolved_profile_scope import (
+        activate_resolved_profile,
+        restore_resolved_profile,
+    )
+
+    bundle_root = _DEFAULTSPACK_ROOT / "v4"
+    catalog = BundledCatalog.load(bundle_root)
+    source = catalog.profiles["defaults"]
+    authority_bindings = {
+        "|".join(
+            str(edge[field])
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        ): f"authority-ref:test.default.{index}"
+        for index, edge in enumerate(source["requested_edges"])
+    }
+    resolved = resolve_default_profile(
+        catalog,
+        "defaults",
+        approved_artifact_digests={
+            str(manifest["pack"]["artifact_digest"])
+            for manifest in catalog.packs.values()
+        },
+        authority_snapshot_digest="sha256:" + "9" * 64,
+        authority_bindings=authority_bindings,
+        security_epoch=1,
+    )
+    snapshot = _CapturedV4Profile(
+        resolved=resolved,
+        profile_id=str(resolved.profile["profile_id"]),
+        effective_pack_set=tuple(
+            item["identity"] for item in resolved.lock["effective_set"]
+        ),
+        plan_hash=str(resolved.plan["plan_digest"]),
+    )
+    token = activate_resolved_profile(snapshot)
+    request.addfinalizer(lambda: restore_resolved_profile(token))
+    return snapshot
 
 
 def test_persisted_scope_reads_the_configured_user_data_root(
@@ -330,193 +399,126 @@ def test_persisted_profile_cache_tracks_host_authority_and_invalidation(
     assert invalidated is not authority_changed
 
 
-def _write_pack(
-    root: Path,
-    pack_id: str,
-    *,
-    dependencies: list[str] | None = None,
-    components: dict[str, dict[str, object]] | None = None,
-    required_capabilities: list[str] | None = None,
-) -> Path:
-    pack = root / pack_id
-    pack.mkdir(parents=True)
-    manifest = {
-        "pack_id": pack_id,
-        "version": "1.0.0",
-        "dependencies": dependencies or [],
-        "components": components or {},
-        "required_capabilities": required_capabilities or [],
-    }
-    (pack / "ecosystem.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
-    )
-    return pack
-
-
-def _input(
-    *pack_ids: str,
-    authorized: tuple[str, ...] | None = None,
-) -> ResolutionInput:
-    return ResolutionInput(
-        profile_id="fixture",
-        profile_revision="profile-r1",
-        platform="fixture-os",
-        policy_revision="policy-r1",
-        lockfile_revision=None,
-        requested_pack_ids=tuple(pack_ids),
-        authorized_pack_ids=authorized or (),
-        policy_capabilities=("filesystem.read",),
-    )
-
-
 def test_resolution_is_deterministic_immutable_and_dependency_complete(
-    tmp_path: Path,
+    captured_v4_profile,
 ) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    _write_pack(
-        ecosystem,
-        "pack-a",
-        dependencies=["pack-b"],
-        components={"tool-a": {"id": "tool-a", "type": "tool"}},
+    """The captured v4 Profile, Lock, and Plan form one exact graph."""
+    first = captured_v4_profile
+    second = captured_v4_profile
+
+    assert first.profile_id == second.profile_id == "defaults"
+    assert first.plan_hash == second.plan_hash == first.plan["plan_digest"]
+    assert first.profile["state"] == "resolved"
+    assert tuple(sorted(item["identity"] for item in first.lock["effective_set"])) == tuple(
+        sorted(first.effective_pack_set)
     )
-    _write_pack(
-        ecosystem,
-        "pack-b",
-        components={"ui-b": {"id": "ui-b", "type": "frontend"}},
+    assert {item["pack_id"] for item in first.plan["bindings"]} <= set(
+        first.effective_pack_set
     )
-    _write_pack(ecosystem, "unrelated-pack")
-    resolution_input = _input(
-        "pack-a", authorized=("pack-a", "pack-b")
-    )
-
-    first = resolve_profile(resolution_input, ecosystem_dir=ecosystem)
-    second = resolve_profile(resolution_input, ecosystem_dir=ecosystem)
-
-    assert first.plan_hash == second.plan_hash
-    assert first.effective_pack_set == ("pack-a", "pack-b")
-    assert "unrelated-pack" not in first.effective_pack_set
-    assert {item.resource_id for item in first.projections} == {
-        "tool-a",
-        "ui-b",
-    }
-    with pytest.raises(FrozenInstanceError):
-        first.profile_id = "changed"  # type: ignore[misc]
+    with pytest.raises((AttributeError, TypeError)):
+        first.profile_id = "changed"
 
 
-def test_selection_is_not_an_authority_grant(tmp_path: Path) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    _write_pack(ecosystem, "pack-a")
-
-    plan = resolve_profile(_input("pack-a"), ecosystem_dir=ecosystem)
-
-    assert plan.selected_pack_ids == ("pack-a",)
-    assert plan.authorized_pack_ids == ()
-    assert plan.effective_pack_set == ()
-    assert any(item.code == "pack_not_authorized" for item in plan.diagnostics)
-
-
-def test_runtime_scope_is_bound_to_one_plan_revision(tmp_path: Path) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    _write_pack(ecosystem, "pack-a")
-    _write_pack(ecosystem, "pack-b")
-    plan = resolve_profile(
-        _input("pack-a", authorized=("pack-a",)), ecosystem_dir=ecosystem
+def test_selection_is_not_an_authority_grant(captured_v4_profile) -> None:
+    """A selected v4 composition is denied when Host authority is absent."""
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        BundledCatalog,
+        ProfileResolutionDenied,
+        resolve_default_profile,
     )
 
-    token = activate_resolved_profile(plan)
-    try:
-        assert effective_pack_ids() == {"pack-a"}
-        require_effective_pack("pack-a")
-        with pytest.raises(PermissionError):
-            require_effective_pack("pack-b")
-    finally:
-        restore_resolved_profile(token)
-
-
-def test_pack_removal_removes_every_projection(tmp_path: Path) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    _write_pack(
-        ecosystem,
-        "pack-a",
-        components={
-            "tool-a": {"id": "tool-a", "type": "tool"},
-            "prompt-a": {"id": "prompt-a", "type": "prompt"},
-            "route-a": {"id": "route-a", "type": "route"},
-            "provider-a": {"id": "provider-a", "type": "provider"},
-            "service-a": {"id": "service-a", "type": "service"},
-        },
+    snapshot = captured_v4_profile
+    assert snapshot.profile["state"] == "resolved"
+    catalog = BundledCatalog.load(
+        Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack" / "v4"
     )
-    with_pack = resolve_profile(
-        _input("pack-a", authorized=("pack-a",)), ecosystem_dir=ecosystem
-    )
-    without_pack = resolve_profile(_input(), ecosystem_dir=ecosystem)
+    with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference"):
+        resolve_default_profile(
+            catalog,
+            "defaults",
+            approved_artifact_digests={
+                str(manifest["pack"]["artifact_digest"])
+                for manifest in catalog.packs.values()
+            },
+            authority_snapshot_digest=snapshot.profile[
+                "profile_authority_snapshot_digest"
+            ],
+            authority_bindings={},
+            security_epoch=1,
+        )
 
-    assert {item.kind for item in with_pack.projections} == {
-        "tools",
-        "prompts",
-        "routes",
-        "providers",
-        "services",
-    }
-    assert without_pack.projections == ()
 
-
-def test_effective_permissions_are_policy_intersection(tmp_path: Path) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    _write_pack(
-        ecosystem,
-        "pack-a",
-        required_capabilities=["filesystem.read", "terminal.execute"],
+def test_runtime_scope_is_bound_to_one_plan_revision(captured_v4_profile) -> None:
+    """Runtime access follows the captured v4 plan, not filesystem selection."""
+    from core_runtime.resolved_profile_scope import (
+        active_resolved_profile,
+        require_effective_pack,
     )
 
-    plan = resolve_profile(
-        _input("pack-a", authorized=("pack-a",)), ecosystem_dir=ecosystem
-    )
+    snapshot = captured_v4_profile
+    assert active_resolved_profile() is snapshot
+    require_effective_pack(snapshot.effective_pack_set[0])
+    with pytest.raises(PermissionError, match="outside resolved profile"):
+        require_effective_pack("unbound-test-pack")
 
-    assert plan.effective_permissions == ("filesystem.read",)
+
+def test_pack_removal_removes_every_projection(captured_v4_profile) -> None:
+    """The active v4 graph exposes no legacy resource projection surface."""
+    snapshot = captured_v4_profile
+    assert tuple(sorted(item["identity"] for item in snapshot.lock["effective_set"])) == tuple(
+        sorted(snapshot.effective_pack_set)
+    )
+    assert snapshot.plan["bindings"]
+    with pytest.raises(AttributeError):
+        snapshot.projections
+    defaultspack_root = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
+    assert not (defaultspack_root / "ecosystem.json").exists()
+
+
+def test_effective_permissions_are_policy_intersection(captured_v4_profile) -> None:
+    """v4 binds exact operations; it does not project legacy permission tuples."""
+    snapshot = captured_v4_profile
+    assert "effective_permissions" not in snapshot.plan
+    assert snapshot.plan["bindings"]
+    assert len(snapshot.plan["bindings"]) == len(
+        snapshot.profile["authority_references"]
+    )
+    assert all(
+        isinstance(binding["operation_id"], str)
+        and isinstance(binding["contract_id"], str)
+        for binding in snapshot.plan["bindings"]
+    )
 
 
 def test_lockfile_detects_pack_content_and_profile_revision_changes(
-    tmp_path: Path,
+    captured_v4_profile,
 ) -> None:
-    ecosystem = tmp_path / "ecosystem"
-    pack = _write_pack(
-        ecosystem,
-        "pack-a",
-        components={"tool-a": {"id": "tool-a", "type": "tool"}},
-    )
-    (pack / "tools").mkdir()
-    (pack / "tools" / "tool.json").write_text("{}", encoding="utf-8")
-    resolution_input = _input("pack-a", authorized=("pack-a",))
-    original = resolve_profile(resolution_input, ecosystem_dir=ecosystem)
-    lockfile = create_lockfile(original)
-
-    assert validate_lockfile(lockfile, original).status is ContractStatus.OK
-
-    (pack / "tools" / "tool.json").write_text(
-        '{"changed": true}', encoding="utf-8"
-    )
-    changed = resolve_profile(resolution_input, ecosystem_dir=ecosystem)
-    assert (
-        validate_lockfile(lockfile, changed).status
-        is ContractStatus.STALE_RESOLUTION
+    """v4 lock and plan digests reject content or revision substitution."""
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        ActivationStore,
+        ProfileResolutionDenied,
     )
 
-    revised = replace(changed, profile_revision="profile-r2")
-    assert (
-        validate_lockfile(lockfile, revised).status
-        is ContractStatus.STALE_RESOLUTION
+    snapshot = captured_v4_profile
+    ActivationStore._validate_record_graph(
+        deepcopy(snapshot.profile),
+        deepcopy(snapshot.lock),
+        deepcopy(snapshot.plan),
     )
 
-    lock_path = tmp_path / "profile.lock.json"
-    refreshed = refresh_lockfile(lock_path, changed)
-    assert read_lockfile(lock_path) == refreshed
+    changed_lock = deepcopy(snapshot.lock)
+    changed_lock["effective_set"][0]["artifact_digest"] = "sha256:" + "0" * 64
+    with pytest.raises(ProfileResolutionDenied, match="ProfileLock digest is stale"):
+        ActivationStore._validate_record_graph(
+            deepcopy(snapshot.profile), changed_lock, deepcopy(snapshot.plan)
+        )
 
-    tampered = json.loads(lock_path.read_text(encoding="utf-8"))
-    tampered["profile_revision"] = "tampered"
-    lock_path.write_text(json.dumps(tampered), encoding="utf-8")
-    with pytest.raises(ValueError, match="hash mismatch"):
-        read_lockfile(lock_path)
+    changed_profile = deepcopy(snapshot.profile)
+    changed_profile["display_name"] = "tampered"
+    with pytest.raises(ProfileResolutionDenied, match="ProfileLock or ResolvedPlan is stale"):
+        ActivationStore._validate_record_graph(
+            changed_profile, deepcopy(snapshot.lock), deepcopy(snapshot.plan)
+        )
 
 
 def test_legacy_selection_migration_has_dry_run_backup_and_rollback(

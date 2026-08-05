@@ -23,6 +23,7 @@ PACK_METADATA_FILES = {
     "ecosystem.json",
     "rumi.pack.v3.json",
     "artifact-manifest.json",
+    "executables.v4.json",
     "frontend/contributions/customer-research.json",
 }
 

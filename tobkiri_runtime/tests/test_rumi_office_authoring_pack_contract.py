@@ -286,6 +286,7 @@ PACK_METADATA_FILES = {
     "ecosystem.json",
     "rumi.pack.v3.json",
     "artifact-manifest.json",
+    "executables.v4.json",
     "frontend/contributions/office-authoring.json",
 }
 
@@ -382,7 +383,11 @@ def test_pack_v4_contract_carries_setup_dependencies() -> None:
     }
 
     assert manifest["pack"]["id"] == PACK_ID
-    assert manifest["requirements"]["pack_dependencies"] == setup_dependencies
+    # Setup selection depends on Defaults, while the generated v4 runtime
+    # manifest is declarative and carries no runtime Pack dependency.  These
+    # are separate authorities and must not be conflated.
+    assert setup_dependencies == {"defaultspack": ">=2.0.0"}
+    assert manifest["requirements"]["pack_dependencies"] == {}
     assert manifest["requirements"]["network"] == {
         "allowed_domains": [],
         "allowed_ports": [],

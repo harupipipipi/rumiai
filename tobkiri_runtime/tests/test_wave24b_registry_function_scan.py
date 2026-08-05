@@ -69,6 +69,7 @@ def test_v4_profile_resolves_exact_effective_set() -> None:
         "defaultspack",
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
+        "runtime.tauri.application.default",
         "rumi_workspace_mount_pack",
         "shell.tauri.default",
     }

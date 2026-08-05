@@ -120,7 +120,7 @@ def test_v3_import_hashes_entrypoint_bytes_not_stale_projection_hashes(
         lambda _pack_root, _paths: [],
     )
 
-    record = _import_record(pack_root, "v3-authoritative")
+    record = _import_record(pack_root)
     expected = _file_digest(source_root / "runtime" / "adapter.py")
     imported = {
         operation["implementation_digest"]

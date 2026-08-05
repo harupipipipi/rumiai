@@ -62,7 +62,11 @@ def test_pack_manifest_schema_valid_and_asset_index_complete() -> None:
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     assert ecosystem["metadata"]["owner_surfaces"]
-    shipped = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file()}
+    shipped = {
+        path.relative_to(PACK_DIR).as_posix()
+        for path in PACK_DIR.rglob("*")
+        if path.is_file() and path.name != "executables.v4.json"
+    }
     shipped -= V4_AUTHORITY_ARTIFACTS
     assert asset_index_paths(ecosystem) == shipped
 
@@ -107,7 +111,8 @@ def test_pack_v4_contract_carries_setup_dependencies() -> None:
     }
 
     assert manifest["pack"]["id"] == PACK_ID
-    assert manifest["requirements"]["pack_dependencies"] == setup_dependencies
+    assert setup_dependencies == {"defaultspack": ">=2.0.0"}
+    assert manifest["requirements"]["pack_dependencies"] == {}
     assert manifest["requirements"]["network"] == {
         "allowed_domains": [],
         "allowed_ports": [],

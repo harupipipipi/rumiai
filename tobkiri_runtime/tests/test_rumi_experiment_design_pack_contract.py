@@ -74,7 +74,12 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert {item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]} <= available
 
     metadata_indexed = {item for values in ecosystem["metadata"]["asset_index"].values() for item in values}
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    actual = {
+        str(path.relative_to(PACK_DIR))
+        for path in PACK_DIR.rglob("*")
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
+    }
     actual -= V4_AUTHORITY_ARTIFACTS
     assert metadata_indexed == actual
     assert set(REQUIRED_ASSETS) == actual

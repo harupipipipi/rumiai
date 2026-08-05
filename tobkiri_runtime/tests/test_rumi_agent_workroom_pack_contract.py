@@ -80,7 +80,12 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert "tool execution" in optional_integrations["rumi_default_tools_pack"]
     assert "metrics" in optional_integrations["defaultspack"]
     assert "choreography" in optional_integrations["rumi_operations_company_pack"]
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    actual = {
+        str(path.relative_to(PACK_DIR))
+        for path in PACK_DIR.rglob("*")
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
+    }
     actual -= V4_AUTHORITY_ARTIFACTS
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)

@@ -38,7 +38,8 @@ def _meaningful_pack_assets() -> set[str]:
     return {
         path.relative_to(PACK_DIR).as_posix()
         for path in PACK_DIR.rglob("*")
-        if path.is_file() and path.name != "ecosystem.json"
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
     }
 
 

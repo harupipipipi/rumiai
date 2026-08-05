@@ -17,39 +17,51 @@ VERIFIED_PACK_ARTIFACTS: dict[str, tuple[str, str, str, str]] = {
     ),
     "defaultspack": (
         "packs/defaultspack.pack.v4.json",
-        "sha256:78d0727d0dbf8178ffaa9a7f985261c94faac734d291425dc74cca01e465b08d",
+        "sha256:2bb6c5d31b9f255fd3845c5affbd6cb9df169743fa2cded9b9459660b26b7ddb",
         "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "schemas/pack_v4_catalog.v1.json#/packs/defaultspack",
     ),
+    "dev.tauri.toolchain.default": (
+        "packs/dev.tauri.toolchain.default.pack.v4.json",
+        "sha256:25753127532c8caadb1b5fce16fe605a62f6cf29a280033831b70e1a5cbb3d97",
+        "working-tree",
+        "ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
+    ),
     "rumi_file_inspect_pack": (
         "packs/rumi-file-inspect.pack.v4.json",
-        "sha256:97ebb5bdc6a9f8c8b661580945f9b01dfbbeace15fa20e1f4624602d84f33391",
+        "sha256:62a93f58d7f051fddaffa048a3c7fd95bf7f8945f89e2be42b873c273de93f47",
         "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "schemas/pack_v4_catalog.v1.json#/packs/rumi_file_inspect_pack",
     ),
     "rumi_host_authority_bridge_pack": (
         "packs/rumi-host-authority-bridge.pack.v4.json",
-        "sha256:ca0eca715c3a680cd4af9550ee5997263b8435c5a75c6ce1063746dbee708a7c",
+        "sha256:148a26429d5125a9757677f8ff618394377b48cbcd15a8d8cefc37f6bce79529",
         "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "schemas/pack_v4_catalog.v1.json#/packs/rumi_host_authority_bridge_pack",
     ),
     "rumi_workspace_mount_pack": (
         "packs/rumi-workspace-mount.pack.v4.json",
-        "sha256:a008d6e93f872fecc5954bfa22f2605a1ada132a11c91852965d04473671605f",
+        "sha256:82d4a833716dd809894612b0172d4aa73cc25f0bb4e690aa0813de87189caf51",
         "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "schemas/pack_v4_catalog.v1.json#/packs/rumi_workspace_mount_pack",
     ),
     "shell.cli.default": (
         "packs/shell.cli.default.pack.v4.json",
-        "sha256:0036eb71bb2ee39500f3e279db4ca4a3a1e3fa47c899a578deaad3c0ccbdad20",
+        "sha256:03ff7a6c68b1adf22b700fe5dced0871b48b16da10e0cc948cc2270d2328e87f",
         "working-tree",
         "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
     ),
     "shell.tauri.default": (
         "packs/shell.tauri.default.pack.v4.json",
-        "sha256:dd236516e496d1eaa51dbc03c9df23db94e96fbcd08c512774fb4d5bd40eeea6",
+        "sha256:afdaca4071f2d3697ee90f90cd0ee09eb99d46692eb01a5ec7c6a7ef94c00855",
         "working-tree",
         "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
+    ),
+    "runtime.tauri.application.default": (
+        "packs/runtime.tauri.application.default.pack.v4.json",
+        "sha256:d75c399f62cce73156cb7d4c02559343ee0f5db6976c1ff50602e61428a448ac",
+        "working-tree",
+        "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
     ),
 }
 

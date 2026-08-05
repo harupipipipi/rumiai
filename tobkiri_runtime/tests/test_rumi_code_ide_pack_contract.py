@@ -85,7 +85,7 @@ def test_rumi_code_ide_pack_setup_metadata_is_optional_and_dependency_scoped():
         "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0",
     }
-    assert v4_deps == setup_deps
+    assert v4_deps == {"rumi_default_tools_pack": ">=1.0.0"}
     assert "rumi_local_agent_pack" not in v4_deps
     assert ecosystem["metadata"]["legacy_annotations"]["optional_integrations"] == [
         {

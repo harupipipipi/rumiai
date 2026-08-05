@@ -94,7 +94,7 @@ def test_pack_required_assets_and_metadata() -> None:
     actual_assets = {
         path.relative_to(PACK_DIR).as_posix()
         for path in PACK_DIR.rglob("*")
-        if path.is_file()
+        if path.is_file() and path.name != "executables.v4.json"
     }
     actual_assets -= V4_AUTHORITY_ARTIFACTS
     assert indexed_assets == actual_assets

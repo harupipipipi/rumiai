@@ -66,7 +66,12 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert set(metadata["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
     assert {item["owner_ref"] for item in metadata["optional_integrations"]} == OPTIONAL_OWNER_REFS
     assert all("pack_id" not in item for item in metadata["optional_integrations"])
-    actual = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    actual = {
+        path.relative_to(PACK_DIR).as_posix()
+        for path in PACK_DIR.rglob("*")
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
+    }
     actual -= V4_AUTHORITY_ARTIFACTS
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)

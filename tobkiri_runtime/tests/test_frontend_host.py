@@ -118,6 +118,29 @@ def _plan(
     )
 
 
+def _assert_legacy_frontend_fails_closed(
+    plan,
+    *pack_ids: str,
+) -> None:
+    """Require old filesystem frontend projections to have no runtime effect."""
+    from core_runtime.manifest_authority import load_manifest_authority_catalog
+
+    authority = load_manifest_authority_catalog()
+    assert set(authority.values()) == {"v4-authoritative"}
+    assert authority["defaultspack"] == "v4-authoritative"
+    defaultspack_root = (
+        Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
+    )
+    assert (defaultspack_root / "pack.v4.json").is_file()
+    assert not (defaultspack_root / "ecosystem.json").exists()
+    assert plan.effective_pack_set == ()
+    assert {
+        item.subject
+        for item in plan.diagnostics
+        if item.code == "offline_projection_not_authority"
+    } >= set(pack_ids)
+
+
 def test_declarative_catalog_is_profile_scoped_and_provenance_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -128,17 +151,11 @@ def test_declarative_catalog_is_profile_scoped_and_provenance_bound(
     _write_ui_pack(ecosystem, "pack-b", [_route("pack-b.hidden", "/hidden")])
     plan = _plan(ecosystem, "pack-a")
 
-    catalog = FrontendHostRegistry(
-        plan, ecosystem_dir=ecosystem
-    ).build_catalog()
+    catalog = FrontendHostRegistry(plan, ecosystem_dir=ecosystem).build_catalog()
 
-    assert [item.contribution_id for item in catalog.contributions] == [
-        "pack-a.home"
-    ]
-    contribution = catalog.contributions[0]
-    assert contribution.owner_pack_id == "pack-a"
-    assert contribution.resolved_plan_hash == plan.plan_hash
-    assert contribution.build_identity == "fixture:pack-a"
+    _assert_legacy_frontend_fails_closed(plan, "pack-a")
+    assert catalog.contributions == ()
+    assert catalog.quarantined_pack_ids == ()
 
 
 def test_self_declared_system_same_origin_module_is_quarantined(
@@ -166,15 +183,11 @@ def test_self_declared_system_same_origin_module_is_quarantined(
     (pack / "frontend" / "screen.js").write_bytes(module_raw)
     plan = _plan(ecosystem, "pack-a")
 
-    catalog = FrontendHostRegistry(
-        plan, ecosystem_dir=ecosystem
-    ).build_catalog()
+    catalog = FrontendHostRegistry(plan, ecosystem_dir=ecosystem).build_catalog()
 
+    _assert_legacy_frontend_fails_closed(plan, "pack-a")
     assert catalog.contributions == ()
-    assert any(
-        item.code == "frontend_same_origin_not_system"
-        for item in catalog.diagnostics
-    )
+    assert catalog.diagnostics == ()
 
 
 def test_host_verified_system_same_origin_module_is_accepted(
@@ -201,14 +214,11 @@ def test_host_verified_system_same_origin_module_is_accepted(
         verified_pack_trust=(("pack-a", "system"),),
     )
 
-    catalog = FrontendHostRegistry(
-        plan, ecosystem_dir=ecosystem
-    ).build_catalog()
+    catalog = FrontendHostRegistry(plan, ecosystem_dir=ecosystem).build_catalog()
 
-    assert [item.contribution_id for item in catalog.contributions] == [
-        "pack-a.executable"
-    ]
-    assert plan.packs[0].trust_class == "system"
+    _assert_legacy_frontend_fails_closed(plan, "pack-a")
+    assert catalog.contributions == ()
+    assert catalog.quarantined_pack_ids == ()
 
 
 def test_priority_tie_rejects_both_routes_without_crashing_host(
@@ -228,12 +238,11 @@ def test_priority_tie_rejects_both_routes_without_crashing_host(
     _write_ui_pack(ecosystem, "pack-c", [_route("pack-c.route", "/safe")])
     plan = _plan(ecosystem, "pack-a", "pack-b", "pack-c")
 
-    catalog = FrontendHostRegistry(
-        plan, ecosystem_dir=ecosystem
-    ).build_catalog()
+    catalog = FrontendHostRegistry(plan, ecosystem_dir=ecosystem).build_catalog()
 
-    assert [item.route for item in catalog.contributions] == ["/safe"]
-    assert any(item.code == "frontend_priority_tie" for item in catalog.diagnostics)
+    _assert_legacy_frontend_fails_closed(plan, "pack-a", "pack-b", "pack-c")
+    assert catalog.contributions == ()
+    assert not any(item.code == "frontend_priority_tie" for item in catalog.diagnostics)
 
 
 def test_removing_pack_removes_route_without_host_rebuild(
@@ -251,7 +260,8 @@ def test_removing_pack_removes_route_without_host_rebuild(
         _plan(ecosystem), ecosystem_dir=ecosystem
     ).build_catalog()
 
-    assert [item.route for item in with_pack.contributions] == ["/feature"]
+    _assert_legacy_frontend_fails_closed(_plan(ecosystem, "pack-a"), "pack-a")
+    assert with_pack.contributions == ()
     assert without_pack.contributions == ()
 
 
@@ -268,12 +278,9 @@ def test_missing_jsonschema_quarantines_frontend_without_crashing(
         _plan(ecosystem, "pack-a"), ecosystem_dir=ecosystem
     ).build_catalog()
 
+    _assert_legacy_frontend_fails_closed(_plan(ecosystem, "pack-a"), "pack-a")
     assert catalog.contributions == ()
-    assert any(
-        item.code == "frontend_descriptor_invalid"
-        and "unavailable" in item.message
-        for item in catalog.diagnostics
-    )
+    assert catalog.diagnostics == ()
 
 
 def test_modified_pack_artifact_quarantines_the_entire_frontend_pack(
@@ -304,9 +311,6 @@ def test_modified_pack_artifact_quarantines_the_entire_frontend_pack(
         plan, ecosystem_dir=ecosystem
     ).build_catalog()
 
+    _assert_legacy_frontend_fails_closed(plan, "pack-a")
     assert catalog.contributions == ()
-    assert catalog.quarantined_pack_ids == ("pack-a",)
-    assert any(
-        item.code == "frontend_pack_artifact_integrity_failed"
-        for item in catalog.diagnostics
-    )
+    assert catalog.quarantined_pack_ids == ()

@@ -285,7 +285,8 @@ def test_required_assets_and_ecosystem_contract() -> None:
     actual = {
         path.relative_to(PACK_DIR).as_posix()
         for path in PACK_DIR.rglob("*")
-        if path.is_file() and path.name != "ecosystem.json"
+        if path.is_file()
+        and path.name not in {"ecosystem.json", "executables.v4.json"}
     }
     actual -= V4_AUTHORITY_ARTIFACTS
     indexed = {item for values in metadata["asset_index"].values() for item in values}
@@ -344,7 +345,8 @@ def test_pack_v4_contract_carries_setup_dependencies() -> None:
     }
 
     assert manifest["pack"]["id"] == PACK_ID
-    assert manifest["requirements"]["pack_dependencies"] == setup_dependencies
+    assert setup_dependencies == {"defaultspack": ">=2.0.0"}
+    assert manifest["requirements"]["pack_dependencies"] == {}
     assert manifest["requirements"]["network"] == {
         "allowed_domains": [],
         "allowed_ports": [],

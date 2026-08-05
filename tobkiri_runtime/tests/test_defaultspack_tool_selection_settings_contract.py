@@ -612,15 +612,20 @@ def test_frontend_settings_resolver_failure_fails_closed_for_write_tools(monkeyp
     assert read_response is None
 
 
-def test_full_tool_selection_trace_creates_hidden_child_conversation(tmp_path, monkeypatch):
+def test_full_tool_selection_trace_creates_hidden_child_conversation(
+    tmp_path, monkeypatch, defaultspack_conversation_owner
+):
     conversation_path = tmp_path / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(conversation_path))
 
     from domain.chat.store import ChatStore
 
     store = ChatStore()
-    with pytest.raises(RuntimeError, match="global conversation owner is unavailable"):
-        store.create_conversation(model="stub/default")
+    conversation = store.create_conversation(model="stub/default")
+
+    assert conversation["id"]
+    assert conversation["model"] == "stub/default"
+    assert defaultspack_conversation_owner.get(conversation["id"]) is not None
     assert not conversation_path.exists()
     assert not (tmp_path / "traces").exists()
 
@@ -710,7 +715,9 @@ def test_tool_selection_summary_trace_requires_owner_and_expiry(tmp_path, monkey
     assert expired["error"]["code"] == "EXPIRED"
 
 
-def test_tool_preferences_are_profile_scoped_and_schema_checked(tmp_path, monkeypatch):
+def test_tool_preferences_are_profile_scoped_and_schema_checked(
+    tmp_path, monkeypatch, defaultspack_conversation_owner
+):
     conversation_path = tmp_path / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(conversation_path))
 
@@ -718,15 +725,19 @@ def test_tool_preferences_are_profile_scoped_and_schema_checked(tmp_path, monkey
 
     ChatStore._instance = None
     store = ChatStore()
-    with pytest.raises(RuntimeError, match="global conversation owner is unavailable"):
-        store.create_conversation(
-            model="stub/default",
-            metadata={"owner_profile_id": "profile-alice"},
-        )
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"owner_profile_id": "profile-alice"},
+    )
+
+    assert conversation["metadata"]["owner_profile_id"] == "profile-alice"
+    assert defaultspack_conversation_owner.get(conversation["id"]) is not None
     assert not conversation_path.exists()
 
 
-def test_tool_preferences_claim_owner_for_unowned_conversation(tmp_path, monkeypatch):
+def test_tool_preferences_claim_owner_for_unowned_conversation(
+    tmp_path, monkeypatch, defaultspack_conversation_owner
+):
     conversation_path = tmp_path / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(conversation_path))
 
@@ -734,8 +745,10 @@ def test_tool_preferences_claim_owner_for_unowned_conversation(tmp_path, monkeyp
 
     ChatStore._instance = None
     store = ChatStore()
-    with pytest.raises(RuntimeError, match="global conversation owner is unavailable"):
-        store.create_conversation(model="stub/default")
+    conversation = store.create_conversation(model="stub/default")
+
+    assert conversation["id"]
+    assert defaultspack_conversation_owner.get(conversation["id"]) is not None
     assert not conversation_path.exists()
 
 
