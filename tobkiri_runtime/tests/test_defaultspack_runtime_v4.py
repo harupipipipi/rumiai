@@ -71,6 +71,8 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
+        "runtime.tauri.application.default",
+        "dev.tauri.toolchain.default",
         "shell.cli.default",
         "shell.tauri.default",
     }
@@ -86,6 +88,14 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
+        "runtime.tauri.application.default",
+    }
+    roles = {
+        item["pack_id"]: item["role"] for item in resolved.profile["packs"]
+    }
+    assert roles["runtime.tauri.application.default"] == "application"
+    assert "dev.tauri.toolchain.default" not in {
+        item["identity"] for item in resolved.lock["effective_set"]
     }
     assert [item["function_principal"]["function_id"] for item in resolved.plan["bindings"]] == [
         "defaultspack.conversation",

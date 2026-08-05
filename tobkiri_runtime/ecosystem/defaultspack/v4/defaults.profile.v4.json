@@ -19,6 +19,11 @@
       "artifact_digest": null,
       "pack_id": "rumi_file_inspect_pack",
       "role": "provider"
+    },
+    {
+      "pack_id": "runtime.tauri.application.default",
+      "artifact_digest": null,
+      "role": "application"
     }
   ],
   "profile_api_version": "io.tobkiri.profile.v4",

@@ -32,6 +32,26 @@ CANONICAL_PACK_FILES = {
         ROOT / "ecosystem" / "rumi_workspace_mount_pack" / "pack.v4.json"
     ),
 }
+TAURI_ROLE_PACKS = {
+    "runtime.tauri.application.default.pack.v4.json": {
+        "pack_id": "runtime.tauri.application.default",
+        "display_name": "Tobkiri Tauri Application Runtime",
+        "kind": "application",
+        "contract_id": "runtime.tauri.application.v1",
+        "operation_id": "launch",
+        "role": "brokered",
+        "isolation": "dedicated_process",
+    },
+    "dev.tauri.toolchain.default.pack.v4.json": {
+        "pack_id": "dev.tauri.toolchain.default",
+        "display_name": "Tobkiri Tauri Development Toolchain",
+        "kind": "host_extension",
+        "contract_id": "dev.tauri.toolchain.v1",
+        "operation_id": "build",
+        "role": "host_capability_provider",
+        "isolation": "dedicated_process",
+    },
+}
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -109,6 +129,94 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
         "contract_catalog_digest": canonical_digest(document["contracts"]),
     }
     return validate_document(document, "pack")
+
+
+def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
+    """Generate one canonical Tauri role without projecting shell authority."""
+    pack_id = spec["pack_id"]
+    contract_id = spec["contract_id"]
+    operation_id = spec["operation_id"]
+    contract_digest = canonical_digest(
+        {"contract_id": contract_id, "operations": [operation_id]}
+    )
+    implementation_digest = canonical_digest(
+        {"pack_id": pack_id, "contract": contract_digest, "operation": operation_id}
+    )
+    artifact_digest = canonical_digest(
+        {"pack_id": pack_id, "implementation": implementation_digest, "prebuilt": True}
+    )
+    source_path = f"ecosystem/defaultspack/v4/packs/{pack_id}.pack.v4.json"
+    document = {
+        "pack_api_version": "io.tobkiri.pack.v4",
+        "pack": {
+            "id": pack_id,
+            "version": "1.0.0",
+            "kind": spec["kind"],
+            "artifact_digest": artifact_digest,
+            "display_name": spec["display_name"],
+        },
+        "functions": [
+            {
+                "id": pack_id,
+                "implementation_digest": implementation_digest,
+                "contract_revision_digest": contract_digest,
+                "operations": [operation_id],
+                "role": spec["role"],
+                "isolation": spec["isolation"],
+            }
+        ],
+        "contracts": [
+            {
+                "contract_id": contract_id,
+                "revision_digest": contract_digest,
+                "operations": [operation_id],
+            }
+        ],
+        "artifacts": [
+            {
+                "path": f"artifacts/{pack_id}",
+                "digest": implementation_digest,
+                "kind": "executable",
+                "platform": "host",
+            }
+        ],
+        "provenance": {
+            "schema": "io.tobkiri.provenance.v1",
+            "source_kind": "repository",
+            "source_path": source_path,
+            "source_digest": canonical_digest({"source": source_path}),
+            "repository_commit": "working-tree",
+            "repository_tree": canonical_digest({"tree": "defaultspack-v4"}).removeprefix("sha256:"),
+            "generator": "defaultspack-v4-core",
+            "generator_version": "1.0.0",
+            "normative": True,
+            "evidence": [],
+        },
+        "migration": {
+            "compatibility": "none",
+            "legacy_ids": [],
+            "removal_wave": 0,
+            "sunset_at": "2026-08-05",
+        },
+    }
+    normalized = _normalize_pack(document)
+    if pack_id.startswith("dev.tauri."):
+        normalized["requirements"].update(
+            {
+                "execution_boundary": "host_brokered",
+                "approval_policy": "always",
+                "workspace_boundary": "host_brokered",
+            }
+        )
+        normalized["integrity"] = {
+            "source_identity": canonical_digest(
+                {key: value for key, value in normalized.items() if key != "integrity"}
+            ),
+            "artifact_set_digest": canonical_digest(normalized["artifacts"]),
+            "contract_catalog_digest": canonical_digest(normalized["contracts"]),
+        }
+        normalized = validate_document(normalized, "pack")
+    return normalized
 
 
 def _normalize_base(document: dict[str, Any]) -> dict[str, Any]:
@@ -210,15 +318,18 @@ def _render() -> dict[Path, bytes]:
     rendered: dict[Path, bytes] = {}
     pack_paths = set(PACKS.glob("*.pack.v4.json")) | {
         PACKS / name for name in CANONICAL_PACK_FILES
-    }
+    } | {PACKS / name for name in TAURI_ROLE_PACKS}
     for path in sorted(pack_paths):
         canonical = CANONICAL_PACK_FILES.get(path.name)
-        document = json.loads(
-            (canonical or path).read_text(encoding="utf-8")
+        role_spec = TAURI_ROLE_PACKS.get(path.name)
+        document = (
+            _tauri_role_pack(role_spec)
+            if role_spec is not None
+            else json.loads((canonical or path).read_text(encoding="utf-8"))
         )
         rendered[path] = _pretty(
             validate_document(document, "pack")
-            if canonical is not None
+            if canonical is not None or role_spec is not None
             else _normalize_pack(document)
         )
 
@@ -234,6 +345,19 @@ def _render() -> dict[Path, bytes]:
     for pack in profile["packs"]:
         if pack["pack_id"] == "rumi-file-inspect":
             pack["pack_id"] = "rumi_file_inspect_pack"
+    if not any(
+        pack["pack_id"] == "runtime.tauri.application.default"
+        for pack in profile["packs"]
+    ):
+        profile["packs"].append(
+            {
+                "pack_id": "runtime.tauri.application.default",
+                "artifact_digest": None,
+                "role": "application",
+            }
+        )
+    if any(pack["pack_id"].startswith("dev.tauri.") for pack in profile["packs"]):
+        raise ValueError("Development Realm Tauri toolchain cannot enter production Profile")
     for edge in profile["requested_edges"]:
         if edge["target_provider_id"] == "defaultspack.file.inspect":
             edge.update(

@@ -303,6 +303,10 @@ def resolve_default_profile(
         raise ProfileResolutionDenied("Shell does not satisfy Base capabilities")
 
     requested_pack_ids = [item["pack_id"] for item in source["packs"]]
+    requested_pack_roles = {
+        item["pack_id"]: item.get("role", "provider")
+        for item in source["packs"]
+    }
     selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
     pending = list(selected_ids)
     while pending:
@@ -430,7 +434,9 @@ def resolve_default_profile(
         {
             "pack_id": manifest["pack"]["id"],
             "artifact_digest": manifest["pack"]["artifact_digest"],
-            "role": "provider",
+            "role": requested_pack_roles.get(
+                manifest["pack"]["id"], "provider"
+            ),
         }
         for manifest in selected
         if manifest["pack"]["id"] not in {base_id, shell_pack_id}

@@ -1,0 +1,95 @@
+{
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "pack": {
+    "id": "runtime.tauri.application.default",
+    "version": "1.0.0",
+    "kind": "application",
+    "artifact_digest": "sha256:3c146f4da6f0dc7ce890dab2b7db603b7805fa8807d0809581d3641e7a78cb0c",
+    "display_name": "Tobkiri Tauri Application Runtime"
+  },
+  "functions": [
+    {
+      "id": "runtime.tauri.application.default",
+      "implementation_digest": "sha256:6c67c32bcfe7bddb7545d8da98b923d959bd120be28fd40659d3c5427d7d6543",
+      "contract_revision_digest": "sha256:fd443fd9faf828ba60f0c81b26a5f6eed613cd8382368af32938121f147481c9",
+      "operations": [
+        "launch"
+      ],
+      "role": "brokered",
+      "isolation": "dedicated_process"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "runtime.tauri.application.v1",
+      "revision_digest": "sha256:fd443fd9faf828ba60f0c81b26a5f6eed613cd8382368af32938121f147481c9",
+      "operations": [
+        "launch"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "artifacts/runtime.tauri.application.default",
+      "digest": "sha256:6c67c32bcfe7bddb7545d8da98b923d959bd120be28fd40659d3c5427d7d6543",
+      "kind": "executable",
+      "platform": "host"
+    }
+  ],
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v1",
+    "source_kind": "repository",
+    "source_path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
+    "source_digest": "sha256:1021f6cb25156f8768cf2836d61909a5769d272f916831ef0dbb6541e353f94d",
+    "repository_commit": "working-tree",
+    "repository_tree": "82cb47a45264cdba7e3a778bd7f603f75395f3cb1e0c6e7ae4e8234d1f2cd4f9",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "evidence": []
+  },
+  "migration": {
+    "compatibility": "none",
+    "legacy_ids": [],
+    "removal_wave": 0,
+    "sunset_at": "2026-08-05"
+  },
+  "requirements": {
+    "pack_dependencies": {},
+    "contract_dependencies": [],
+    "capabilities": [],
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "secrets": [],
+    "execution_boundary": "sandbox",
+    "approval_policy": "none",
+    "workspace_boundary": "pack_local"
+  },
+  "operation_catalog": [
+    {
+      "operation_id": "launch",
+      "owner": "runtime.tauri.application.default",
+      "contract_reference": "runtime.tauri.application.v1",
+      "provider_id": "runtime.tauri.application.default",
+      "source_kind": "v3_contract",
+      "effect_ceiling": []
+    }
+  ],
+  "provider_catalog": [
+    {
+      "provider_id": "runtime.tauri.application.default",
+      "owner": "runtime.tauri.application.default",
+      "contract_reference": "runtime.tauri.application.v1",
+      "operations": [
+        "launch"
+      ]
+    }
+  ],
+  "integrity": {
+    "source_identity": "sha256:cfc892c80c522c4d859204081d6734edefa03df6ab98277a93d3fa0ac3fd198e",
+    "artifact_set_digest": "sha256:3046f56a6d3f616e347bcaada4e2cdc90e55cf20a539648a1d3fd14b7bd491fe",
+    "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
+  }
+}
