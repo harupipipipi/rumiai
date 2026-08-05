@@ -94,28 +94,6 @@ class AppLifecycleManager:
         default_factory=threading.Lock, init=False, repr=False
     )
 
-    def _check_setup_pack_selection_status(self) -> Dict[str, Any]:
-        try:
-            from .setup_pack import SetupPackManager
-
-            manager = SetupPackManager(
-                root=self.base_dir / "ecosystem" / "setup_pack",
-                selection_file=(
-                    self.base_dir
-                    / "user_data"
-                    / "settings"
-                    / "setup_pack_selection.json"
-                ),
-                ecosystem_dir=self.base_dir / "ecosystem",
-            )
-            return manager.get_completed_selection_status()
-        except Exception as e:
-            logger.warning("setup_pack selection status check failed: %s", e)
-            return {
-                "completed": False,
-                "reason": "setup_pack_selection_check_error: {}".format(e),
-            }
-
     def check_setup_status(self) -> Dict[str, Any]:
         """
         セットアップ状態を確認する。
