@@ -579,9 +579,59 @@ def _read_verified_pack_shell(path: Path, target: str) -> tuple[bytes, int]:
     return payload, opened.st_mode
 
 
+def pack_shell_digest_path(binary: Path) -> Path:
+    """Return the canonical digest sidecar for a pack-shell artifact."""
+    return binary.with_name(f"{binary.name}.sha256")
+
+
+def _write_pack_shell_digest(binary: Path, payload: bytes) -> Path:
+    """Atomically seal the exact validated pack-shell bytes for Cargo staging."""
+    digest_path = pack_shell_digest_path(binary)
+    if digest_path.exists() or digest_path.is_symlink():
+        metadata = digest_path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(
+                f"pack-shell digest destination is unsafe: {digest_path}"
+            )
+    digest_payload = f"{hashlib.sha256(payload).hexdigest()}\n".encode("ascii")
+    temporary = digest_path.with_name(f".{digest_path.name}.{os.getpid()}.tmp")
+    if temporary.exists() or temporary.is_symlink():
+        raise RuntimeError(
+            f"pack-shell digest temporary destination already exists: {temporary}"
+        )
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(digest_payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o644)
+        os.replace(temporary, digest_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    metadata = digest_path.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or digest_path.read_bytes() != digest_payload:
+        digest_path.unlink(missing_ok=True)
+        raise RuntimeError(f"pack-shell digest sealing failed: {digest_path}")
+    return digest_path
+
+
+def seal_pack_shell_binary(
+    repo_root: Path,
+    target: str,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, bytes, int, Path]:
+    """Validate and seal the canonical target release pack-shell artifact."""
+    binary = resolve_pack_shell_binary(repo_root, target, environ)
+    payload, source_mode = _read_verified_pack_shell(binary, target)
+    digest_path = _write_pack_shell_digest(binary, payload)
+    return binary, payload, source_mode, digest_path
+
+
 def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
-    src = resolve_pack_shell_binary(repo_root, target)
-    payload, source_mode = _read_verified_pack_shell(src, target)
+    _src, payload, source_mode, _digest_path = seal_pack_shell_binary(
+        repo_root,
+        target,
+    )
     binary_name = pack_shell_binary_name(target)
     staged_root = source_root.resolve()
     bundled_dir = staged_root / "bundled"

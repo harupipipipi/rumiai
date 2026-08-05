@@ -242,6 +242,7 @@ def prepare_release(repo_root: Path, target: str) -> None:
         cwd=repo_root,
     )
 
+    preparer.seal_pack_shell_binary(repo_root, target)
     remove_existing_staged_uv(repo_root, target)
 
     run_command(

@@ -175,18 +175,26 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
 
 
+@pytest.mark.parametrize(
+    "target",
+    (
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+    ),
+)
 @pytest.mark.parametrize("target_dir_kind", ("default", "absolute", "relative-spaces-unicode"))
 def test_stage_pack_shell_resolves_cargo_target_dir_deterministically(
     tmp_path,
     monkeypatch,
     target_dir_kind,
+    target,
 ):
     module = _load_prepare_tauri_resources()
     repo_root = tmp_path / "repo"
     source_root = repo_root / "tobkiri_runtime"
     repo_root.mkdir()
-    target = "aarch64-apple-darwin"
-
     if target_dir_kind == "default":
         monkeypatch.delenv(module.CARGO_TARGET_DIR_ENV, raising=False)
         target_root = repo_root / "pack-shell" / "target"
@@ -201,8 +209,62 @@ def test_stage_pack_shell_resolves_cargo_target_dir_deterministically(
 
     staged = module.stage_pack_shell(repo_root, source_root, target)
 
-    assert staged == (source_root / "bundled" / "pack-shell").resolve()
+    assert staged == (
+        source_root / "bundled" / module.pack_shell_binary_name(target)
+    ).resolve()
     assert staged.read_bytes() == binary.read_bytes()
+    digest_path = module.pack_shell_digest_path(binary)
+    assert digest_path.read_text(encoding="ascii") == f"{_sha256(binary.read_bytes())}\n"
+
+
+def test_stage_pack_shell_replaces_stale_digest_deterministically(tmp_path, monkeypatch):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    target = "aarch64-apple-darwin"
+    target_root = repo_root / "cargo-target"
+    repo_root.mkdir()
+    monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    binary = _write_pack_shell_binary(module, target_root, target)
+    digest_path = module.pack_shell_digest_path(binary)
+    digest_path.write_text(f"{'0' * 64}\n", encoding="ascii")
+
+    first = module.stage_pack_shell(repo_root, source_root, target)
+    first_digest = digest_path.read_bytes()
+    second = module.stage_pack_shell(repo_root, source_root, target)
+
+    assert first == second
+    assert first_digest == digest_path.read_bytes()
+    assert first_digest == f"{_sha256(binary.read_bytes())}\n".encode("ascii")
+
+
+@pytest.mark.parametrize("case", ("symlink", "directory"))
+def test_stage_pack_shell_rejects_unsafe_digest_destination(
+    tmp_path,
+    monkeypatch,
+    case,
+):
+    module = _load_prepare_tauri_resources()
+    repo_root = tmp_path / "repo"
+    source_root = repo_root / "tobkiri_runtime"
+    target = "aarch64-apple-darwin"
+    target_root = repo_root / "cargo-target"
+    repo_root.mkdir()
+    monkeypatch.setenv(module.CARGO_TARGET_DIR_ENV, str(target_root))
+    binary = _write_pack_shell_binary(module, target_root, target)
+    digest_path = module.pack_shell_digest_path(binary)
+    if case == "symlink":
+        outside = tmp_path / "outside-digest"
+        outside.write_text("outside\n", encoding="ascii")
+        try:
+            digest_path.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"symlink creation is unavailable: {exc}")
+    else:
+        digest_path.mkdir()
+
+    with pytest.raises(RuntimeError, match="digest destination is unsafe"):
+        module.stage_pack_shell(repo_root, source_root, target)
 
 
 @pytest.mark.parametrize("case", ("missing", "wrong", "symlink"))

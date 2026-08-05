@@ -605,18 +605,11 @@ fn verify_prebuilt_pack_shell_digest(path: &Path, payload: &[u8]) -> io::Result<
             "prebuilt pack-shell digest must be UTF-8",
         )
     })?;
-    let expected = expected.trim();
-    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    let actual = format!("{:x}\n", Sha256::digest(payload));
+    if expected != actual {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "prebuilt pack-shell digest is malformed",
-        ));
-    }
-    let actual = format!("{:x}", Sha256::digest(payload));
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "prebuilt pack-shell digest mismatch",
+            "prebuilt pack-shell digest mismatch or non-canonical encoding",
         ));
     }
     Ok(())
@@ -1533,7 +1526,8 @@ mod tests {
         let mut digest_name = binary.as_os_str().to_os_string();
         digest_name.push(".sha256");
         let digest_path = PathBuf::from(digest_name);
-        fs::write(&digest_path, "0".repeat(64)).expect("digest should be writable");
+        fs::write(&digest_path, format!("{}\n", "0".repeat(64)))
+            .expect("digest should be writable");
         let mismatch = verify_prebuilt_pack_shell_digest(&binary, payload)
             .expect_err("unverified payload must fail closed");
         assert_eq!(mismatch.kind(), io::ErrorKind::InvalidData);
@@ -1542,6 +1536,37 @@ mod tests {
             .expect("verified digest should be writable");
         verify_prebuilt_pack_shell_digest(&binary, payload)
             .expect("matching prebuilt digest should pass");
+
+        fs::write(&digest_path, format!("{:X}\n", Sha256::digest(payload)))
+            .expect("non-canonical digest should be writable");
+        let noncanonical = verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect_err("uppercase digest encoding must fail closed");
+        assert_eq!(noncanonical.kind(), io::ErrorKind::InvalidData);
+
+        fs::write(&digest_path, format!("{:x}\n", Sha256::digest(b"tampered")))
+            .expect("stale digest should be writable");
+        let tampered = verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect_err("stale digest must fail closed");
+        assert_eq!(tampered.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn production_pack_shell_rejects_symlinked_digest() {
+        let tree = TestTree::new("pack-shell-digest-symlink");
+        let binary = tree.path().join("pack-shell");
+        let payload = b"prebuilt pack-shell";
+        fs::write(&binary, payload).expect("fixture binary should be writable");
+        let outside = tree.path().join("outside.sha256");
+        fs::write(&outside, format!("{:x}\n", Sha256::digest(payload)))
+            .expect("outside digest should be writable");
+        let digest_path = tree.path().join("pack-shell.sha256");
+        std::os::unix::fs::symlink(&outside, &digest_path)
+            .expect("digest symlink should be creatable");
+
+        let error = verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect_err("symlinked digest must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
