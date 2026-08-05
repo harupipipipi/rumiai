@@ -161,8 +161,13 @@ class DispatchContainer(Protocol):
 class CapturedDispatchSession(Protocol):
     """Common Host port for immutable runtime and Authority-control sessions."""
 
-    profile_id: str
-    plan_digest: str
+    @property
+    def profile_id(self) -> str:
+        """Return the exact captured Profile identity."""
+
+    @property
+    def plan_digest(self) -> str:
+        """Return the exact captured ResolvedPlan digest."""
 
 
 def install_dispatch_session(

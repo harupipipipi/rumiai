@@ -30,7 +30,8 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
 
 
 def _bundle_root(base_dir: Path | None = None) -> Path:
-    runtime_root = base_dir or Path(__file__).resolve().parents[2]
+    del base_dir
+    runtime_root = Path(__file__).resolve().parents[2]
     return runtime_root / "ecosystem" / "defaultspack" / "v4"
 
 

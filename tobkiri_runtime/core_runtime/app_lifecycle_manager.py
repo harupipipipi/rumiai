@@ -156,7 +156,19 @@ class AppLifecycleManager:
         Returns:
             {"success": bool, "errors": list, ...}
         """
-        del data
+        username = str(data.get("username") or "").strip()
+        language = str(data.get("language") or "").strip()
+        errors = []
+        if not username:
+            errors.append("username is required")
+        if language not in {"en", "ja"}:
+            errors.append("language must be en or ja")
+        if errors:
+            return {
+                "success": False,
+                "errors": errors,
+                "setup_state": "invalid_request",
+            }
         from .bootstrap.profile_capture import capture_default_profile
         try:
             active = capture_default_profile(base_dir=self.base_dir)
@@ -170,6 +182,7 @@ class AppLifecycleManager:
             }
         return {
             "success": True,
+            "errors": [],
             "setup_state": "complete",
             "profile_id": active.resolved.profile["profile_id"],
             "plan_digest": active.resolved.plan["plan_digest"],
