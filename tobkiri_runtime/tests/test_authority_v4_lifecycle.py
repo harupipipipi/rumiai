@@ -416,6 +416,38 @@ def test_non_finite_lease_timing_is_rejected(tmp_path: Path) -> None:
         SecurityEpoch(value=0, advanced_at=1, reason_digest=_digest("1"))
 
 
+def test_authority_store_close_is_idempotent_and_restartable(tmp_path: Path) -> None:
+    database = tmp_path / "authority.sqlite3"
+    store = AuthorityStore(database)
+    assert store.security_epoch == 1
+
+    store.close()
+    store.close()
+    with pytest.raises(AuthorityStoreError, match="closed"):
+        _ = store.security_epoch
+
+    renamed = tmp_path / "authority-renamed.sqlite3"
+    database.rename(renamed)
+    renamed.rename(database)
+    with AuthorityStore(database) as restarted:
+        assert restarted.security_epoch == 1
+    with pytest.raises(AuthorityStoreError, match="closed"):
+        _ = restarted.security_epoch
+
+
+def test_authority_store_releases_database_for_deletion(tmp_path: Path) -> None:
+    database = tmp_path / "authority.sqlite3"
+    store = AuthorityStore(database)
+    key_path = store.key_path
+
+    store.close()
+    database.unlink()
+    key_path.unlink()
+
+    assert not database.exists()
+    assert not key_path.exists()
+
+
 def test_authoritative_audit_failure_rolls_back_grant_and_lease(tmp_path: Path) -> None:
     fault_enabled = False
 

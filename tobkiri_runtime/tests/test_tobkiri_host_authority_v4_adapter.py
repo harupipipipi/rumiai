@@ -156,6 +156,30 @@ def test_adapter_authorizes_dispatches_and_finishes_authoritative_audit(
     ]
 
 
+def test_broker_close_is_idempotent_and_context_managed(tmp_path: Path) -> None:
+    harness = _Harness(tmp_path)
+    adapter = _adapter(harness)
+    frame = InvocationFrame(
+        contract_id="host.http",
+        version_range=">=1,<2",
+        operation_id="invoke",
+        payload={"message": "hello"},
+        idempotency_key="request-close",
+    )
+    broker = _broker(harness, adapter, ProviderOutcome({"ok": True}))
+
+    broker.close()
+    broker.close()
+    with pytest.raises(RuntimeError, match="broker is closed"):
+        broker.invoke(frame, _context(harness), effect_scope=harness.scope.to_dict())
+
+    scoped = _broker(harness, adapter, ProviderOutcome({"ok": True}))
+    with scoped as entered:
+        assert entered is scoped
+    with pytest.raises(RuntimeError, match="broker is closed"):
+        scoped.invoke(frame, _context(harness), effect_scope=harness.scope.to_dict())
+
+
 class _Admission:
     def estimate(self, context, binding, payload) -> AdmissionEstimate:
         return AdmissionEstimate(1, 1, 1, 1, 1)

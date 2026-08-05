@@ -102,9 +102,11 @@ def _resolve_candidate(
     ).hexdigest()
     authority_path = user_data / "authority" / "v4.sqlite3"
     if authority_path.is_file():
-        authority = AuthorityStore(authority_path)
-        security_epoch = authority.security_epoch
-        snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
+        with AuthorityStore(authority_path) as authority:
+            security_epoch = authority.security_epoch
+            snapshot_digest = _authority_snapshot_digest(
+                authority, bundle_lock_digest
+            )
     elif authority_path.exists():
         raise ProfileResolutionDenied("Authority store path is not a regular file")
     else:
@@ -173,12 +175,12 @@ def activation_audit_receipt(
 ) -> dict[str, Any]:
     """Return the committed Authority reservation bound to an activation."""
 
-    authority = AuthorityStore(
+    with AuthorityStore(
         runtime_user_data_root(base_dir) / "authority" / "v4.sqlite3"
-    )
-    reservation = authority.active_activation_reservation(
-        str(active.activation["activation_id"])
-    )
+    ) as authority:
+        reservation = authority.active_activation_reservation(
+            str(active.activation["activation_id"])
+        )
     if reservation is None or (
         reservation.get("state") != "active"
         or reservation.get("plan_digest") != active.activation["plan_digest"]
@@ -212,14 +214,14 @@ def capture_default_profile(
         if confirmation is not None:
             raise ProfileResolutionDenied("Defaults activation confirmation was replayed")
         workspace = user_data / "workspaces" / "defaults"
-        authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-        store = ActivationStore(
-            state_root,
-            workspace,
-            profile_id="defaults",
-            authority=authority,
-        )
-        return store.load_active_snapshot()
+        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+            store = ActivationStore(
+                state_root,
+                workspace,
+                profile_id="defaults",
+                authority=authority,
+            )
+            return store.load_active_snapshot()
     if active_pointer.exists():
         raise ProfileResolutionDenied("active activation pointer is not a regular file")
     if confirmation is None:
@@ -234,24 +236,25 @@ def capture_default_profile(
         )
     workspace = user_data / "workspaces" / "defaults"
     workspace.mkdir(parents=True, exist_ok=True)
-    authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-    store = ActivationStore(
-        state_root,
-        workspace,
-        profile_id="defaults",
-        authority=authority,
-    )
-    store.recover()
-    activation_id = (
-        "activation:defaults-" + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
-    )
-    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    store.activate(
-        resolved,
-        activation_id=activation_id,
-        created_at=created_at,
-    )
-    return store.load_active_snapshot()
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        store = ActivationStore(
+            state_root,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+        )
+        store.recover()
+        activation_id = (
+            "activation:defaults-"
+            + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
+        )
+        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        store.activate(
+            resolved,
+            activation_id=activation_id,
+            created_at=created_at,
+        )
+        return store.load_active_snapshot()
 
 
 __all__ = [

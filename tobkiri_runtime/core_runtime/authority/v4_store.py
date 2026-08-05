@@ -18,11 +18,13 @@ import stat
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, Iterator, TypeAlias
 
 from cryptography.fernet import Fernet, InvalidToken
+from tobkiri_protocol.durability import flush_directory
 
 from .v4_models import (
     ApprovalRecord,
@@ -58,17 +60,6 @@ Record: TypeAlias = (
 )
 
 
-def _fsync_directory(path: Path) -> None:
-    try:
-        descriptor = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 class AuthorityStore:
     """Host-owned authority database for ADR-014/015 state.
 
@@ -98,6 +89,7 @@ class AuthorityStore:
         self._clock = clock
         self._audit_fault = audit_fault
         self._lock = threading.RLock()
+        self._closed = False
         self._fernet_key = self._load_or_create_key()
         self._fernet = Fernet(self._fernet_key)
         self._mac_key = hashlib.sha256(self._fernet_key + b":lease-mac:v1").digest()
@@ -141,13 +133,15 @@ class AuthorityStore:
                 return existing
             finally:
                 temporary.unlink(missing_ok=True)
-            _fsync_directory(self.key_path.parent)
+            flush_directory(self.key_path.parent)
         except (OSError, ValueError):
             temporary.unlink(missing_ok=True)
             raise
         return key
 
     def _connect(self) -> sqlite3.Connection:
+        if self._closed:
+            raise AuthorityStoreError("authority store is closed")
         connection = sqlite3.connect(
             str(self.path),
             timeout=30.0,
@@ -161,8 +155,44 @@ class AuthorityStore:
         connection.execute("PRAGMA trusted_schema=OFF")
         return connection
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Yield one transaction and always release its native file handle."""
+
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    def close(self) -> None:
+        """Idempotently prevent new work after all active transactions finish."""
+
+        with self._lock:
+            self._closed = True
+
+    def __enter__(self) -> "AuthorityStore":
+        """Return this open store for explicit scoped ownership."""
+
+        with self._lock:
+            if self._closed:
+                raise AuthorityStoreError("authority store is closed")
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        """Close the store when its ownership scope exits."""
+
+        del exc_type, exc_value, traceback
+        self.close()
+
     def _initialize(self) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock, self._connection() as connection:
             existing_tables = {
                 str(row["name"])
                 for row in connection.execute(
@@ -492,7 +522,7 @@ class AuthorityStore:
         digest = authority_digest(payload)
         operation = "INSERT OR REPLACE" if replace else "INSERT"
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     f"{operation} INTO authority_records"
@@ -518,7 +548,7 @@ class AuthorityStore:
         if not pending:
             raise ValueError("authority transaction cannot be empty")
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 for record in pending:
                     record_type = self._record_type(record)
@@ -597,7 +627,7 @@ class AuthorityStore:
 
     def _get_record(self, record_type: str, record_id: str) -> dict[str, Any] | None:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 row = connection.execute(
                     "SELECT record_digest, encrypted_payload FROM authority_records"
                     " WHERE record_type=? AND record_id=?",
@@ -634,7 +664,7 @@ class AuthorityStore:
 
     def _list_records(self, record_type: str) -> list[dict[str, Any]]:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 rows = connection.execute(
                     "SELECT record_digest, encrypted_payload FROM authority_records"
                     " WHERE record_type=? ORDER BY record_id",
@@ -655,7 +685,7 @@ class AuthorityStore:
         """Return the Host-owned monotonic SecurityEpoch."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 row = connection.execute(
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
                 ).fetchone()
@@ -670,7 +700,7 @@ class AuthorityStore:
         """Return the complete current SecurityEpoch metadata."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 rows = connection.execute(
                     "SELECT key, value FROM authority_meta WHERE key IN"
                     " ('security_epoch', 'security_epoch_advanced_at',"
@@ -693,7 +723,7 @@ class AuthorityStore:
 
         reason_digest = authority_digest({"reason": str(reason)})
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
@@ -761,7 +791,7 @@ class AuthorityStore:
 
         reservation_id = "activation-reservation:" + secrets.token_urlsafe(24)
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 epoch_row = connection.execute(
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
@@ -853,7 +883,7 @@ class AuthorityStore:
         if (expected_state, new_state) not in allowed:
             raise ValueError("invalid activation state transition")
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     "SELECT * FROM activation_reservations WHERE reservation_id=?",
@@ -935,7 +965,7 @@ class AuthorityStore:
         """Return one durable activation reservation for Host recovery."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 row = connection.execute(
                     "SELECT * FROM activation_reservations WHERE reservation_id=?",
                     (reservation_id,),
@@ -950,7 +980,7 @@ class AuthorityStore:
         """Return candidate reservations that must be recovered before activation."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 rows = connection.execute(
                     "SELECT * FROM activation_reservations WHERE profile_id=?"
                     " AND state IN ('prepared', 'ready_without_authority', 'committing')"
@@ -967,7 +997,7 @@ class AuthorityStore:
         """Return the sole authoritative active reservation for restart capture."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 rows = connection.execute(
                     "SELECT * FROM activation_reservations"
                     " WHERE activation_id=? AND state='active'",
@@ -1001,7 +1031,7 @@ class AuthorityStore:
         if persisted is None or persisted.identity_digest != domain.identity_digest:
             raise AuthorityDenied("execution domain is not registered")
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute(
                     "INSERT INTO execution_sessions"
                     " (session_id, domain_id, profile_id, activation_id, boot_epoch,"
@@ -1057,7 +1087,7 @@ class AuthorityStore:
         if new_state not in allowed[expected_state]:
             raise AuthorityDenied("invalid execution-domain lifecycle transition")
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     "SELECT encrypted_payload FROM authority_records"
@@ -1124,7 +1154,7 @@ class AuthorityStore:
         """Resolve Host-authenticated caller identity; never use payload identity."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 row = connection.execute(
                     "SELECT domain_id, boot_epoch, channel_digest, principal_id, active"
                     " FROM execution_sessions WHERE session_id=?",
@@ -1179,7 +1209,7 @@ class AuthorityStore:
         reason_digest = authority_digest({"reason": str(reason)})
         epoch = self.security_epoch
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     "INSERT INTO revocations"
@@ -1346,7 +1376,7 @@ class AuthorityStore:
         """Return whether an exact target has an active Host revocation."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 return self._is_revoked(connection, target_kind, target_id)
         except sqlite3.Error as exc:
             raise AuthorityStoreError("revocation lookup failed") from exc
@@ -1375,7 +1405,7 @@ class AuthorityStore:
         """
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 epoch_row = connection.execute(
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
@@ -1587,7 +1617,7 @@ class AuthorityStore:
         """Revoke every unused lease for one exact Host request."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 rows = connection.execute(
                     "SELECT lease_id, grant_id FROM invocation_leases"
@@ -1639,7 +1669,7 @@ class AuthorityStore:
         self.expire_leases()
         lease_id, expected_digest = self._decode_lease_token(token)
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     "SELECT encrypted_payload, lease_digest, state FROM invocation_leases"
@@ -1731,7 +1761,7 @@ class AuthorityStore:
         expired: list[str] = []
         now = self._clock()
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 rows = connection.execute(
                     "SELECT lease_id, grant_id, audit_reservation_id"
@@ -1775,7 +1805,7 @@ class AuthorityStore:
         """Load and authenticate a Lease for Host-side delegation checks."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 row = connection.execute(
                     "SELECT encrypted_payload, lease_digest, state"
                     " FROM invocation_leases WHERE lease_id=?",
@@ -1802,7 +1832,7 @@ class AuthorityStore:
         if state not in {LeaseState.COMMITTED, LeaseState.FAILED, LeaseState.AMBIGUOUS}:
             raise ValueError("invalid final Lease state")
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     "SELECT grant_id, audit_reservation_id, state"
@@ -1855,7 +1885,7 @@ class AuthorityStore:
 
         recovered: list[str] = []
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 rows = connection.execute(
                     "SELECT lease_id, grant_id, audit_reservation_id"
@@ -1906,7 +1936,7 @@ class AuthorityStore:
         """Read and verify the complete authoritative audit hash chain."""
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection() as connection:
                 rows = connection.execute(
                     "SELECT * FROM authority_audit ORDER BY sequence"
                 ).fetchall()
@@ -1959,7 +1989,7 @@ class AuthorityStore:
     def grant_usage(self, grant_id: str) -> tuple[int, int]:
         """Return ``(reserved, committed)`` use counters for tests/operations."""
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._connection() as connection:
             row = connection.execute(
                 "SELECT reserved_uses, committed_uses FROM grant_usage WHERE grant_id=?",
                 (grant_id,),

@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from core_runtime.authority.v4 import AuthorityStoreError
 from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
 from core_runtime.di_container import get_container
@@ -121,3 +122,12 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
         assert session.plan_digest == first.resolved.plan["plan_digest"]
     finally:
         kernel.shutdown()
+        kernel.shutdown()
+
+    assert session.owned_authority_store is not None
+    with pytest.raises(AuthorityStoreError, match="closed"):
+        _ = session.owned_authority_store.security_epoch
+    authority_path = user_data / "authority" / "v4.sqlite3"
+    renamed_path = user_data / "authority" / "v4-renamed.sqlite3"
+    authority_path.rename(renamed_path)
+    renamed_path.rename(authority_path)

@@ -9,7 +9,6 @@ Profile, ProfileLock, ResolvedPlan, and Activation records.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
+from tobkiri_protocol.durability import write_bytes_atomic
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
 from tobkiri_protocol.validation import validate_document
 
@@ -91,22 +91,8 @@ def _require_digest(value: object, field: str) -> str:
 
 
 def _write_atomic(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     data = canonical_json(dict(payload)) + b"\n"
-    try:
-        with temporary.open("xb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_bytes_atomic(path, data)
 
 
 @dataclass(frozen=True)

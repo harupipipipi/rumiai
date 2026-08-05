@@ -612,6 +612,7 @@ def capture_production_dispatch(
         providers=providers,
         authority_control=authority_control,
         current_capture_check=assert_current_capture,
+        owned_authority_store=authority_store,
     )
 
 

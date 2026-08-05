@@ -98,6 +98,7 @@ class ProductionRuntimeV4:
         providers: Mapping[str, tuple[Mapping[str, Any], ...]],
         authority_control: AuthorityV4Adapter | None = None,
         current_capture_check: Callable[[], None] | None = None,
+        owned_authority_store: AuthorityStore | None = None,
     ) -> "V4DispatchSession":
         """Bind request ports to identities from this captured composition."""
         return V4DispatchSession(
@@ -109,6 +110,7 @@ class ProductionRuntimeV4:
             plan_digest=str(self.composition.plan["plan_digest"]),
             authority_control=authority_control,
             current_capture_check=current_capture_check,
+            owned_authority_store=owned_authority_store,
         )
 
 
@@ -124,6 +126,30 @@ class V4DispatchSession:
     plan_digest: str
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
+    owned_authority_store: AuthorityStore | None = None
+
+    def close(self) -> None:
+        """Close the Broker, then its owned Authority database, idempotently."""
+
+        self.broker.close()
+        if self.owned_authority_store is not None:
+            self.owned_authority_store.close()
+
+    def __enter__(self) -> "V4DispatchSession":
+        """Return this captured session for explicit scoped ownership."""
+
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        """Release captured Broker and Authority resources."""
+
+        del exc_type, exc_value, traceback
+        self.close()
 
     def assert_current(self) -> None:
         """Fail closed when the persisted activation no longer matches."""

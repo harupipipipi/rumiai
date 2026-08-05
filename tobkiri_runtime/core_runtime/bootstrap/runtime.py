@@ -25,7 +25,7 @@ from ..frontend_contract_routes import (
     load_frontend_contract_bindings,
 )
 from ..runtime_port import resolve_runtime_port
-from tobkiri_host.runtime import install_dispatch_session
+from tobkiri_host.runtime import V4DispatchSession, install_dispatch_session
 from .production_v4 import capture_production_dispatch
 from .profile_capture import (
     active_default_profile_exists,
@@ -52,6 +52,7 @@ class Kernel:
     def __init__(self) -> None:
         self._lock = RLock()
         self._server: PackAPIServer | None = None
+        self._dispatch_session: V4DispatchSession | None = None
         self._lifecycle = AppLifecycleManager()
 
     def run_startup_until(self, step_id: str) -> dict[str, Any]:
@@ -70,12 +71,17 @@ class Kernel:
             contract_bindings: tuple[FrontendContractBinding, ...] = ()
             if active_default_profile_exists():
                 active = capture_default_profile()
-                dispatch_session = capture_production_dispatch(
-                    active,
-                    bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
-                    ecosystem_root=runtime_root / "ecosystem",
-                    authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
-                )
+                authority_store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+                try:
+                    dispatch_session = capture_production_dispatch(
+                        active,
+                        bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
+                        ecosystem_root=runtime_root / "ecosystem",
+                        authority_store=authority_store,
+                    )
+                except Exception:
+                    authority_store.close()
+                    raise
                 install_dispatch_session(get_container(), dispatch_session)
                 catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
                 contract_bindings = load_frontend_contract_bindings(
@@ -86,6 +92,7 @@ class Kernel:
                     / "frontend_contract_map.v4.json",
                     catalog.packs["runtime.tauri.application.default"],
                 )
+                self._dispatch_session = dispatch_session
             port = resolve_runtime_port()
             self._server = initialize_pack_api_server(
                 host="127.0.0.1",
@@ -145,8 +152,15 @@ class Kernel:
         """Stop the Host HTTP surface if this bootstrap started it."""
         with self._lock:
             if self._server is not None:
-                self._server.stop()
-                self._server = None
+                try:
+                    self._server.stop()
+                finally:
+                    self._server = None
+            if self._dispatch_session is not None:
+                try:
+                    self._dispatch_session.close()
+                finally:
+                    self._dispatch_session = None
 
 
 __all__ = ["Kernel"]

@@ -157,18 +157,19 @@ def _v4_provider_fixture(
     )
     workspace = fixture_root / "workspace"
     workspace.mkdir(parents=True)
-    activation_store = ActivationStore(
-        fixture_root / "activation",
-        workspace,
-        profile_id="defaults",
-        authority=AuthorityStore(fixture_root / "authority.sqlite3"),
-    )
-    activation_store.activate(
-        resolved,
-        activation_id="activation:provider-v4",
-        created_at="2026-08-05T00:00:00Z",
-    )
-    active = activation_store.load_active_snapshot()
+    with AuthorityStore(fixture_root / "authority.sqlite3") as authority:
+        activation_store = ActivationStore(
+            fixture_root / "activation",
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+        )
+        activation_store.activate(
+            resolved,
+            activation_id="activation:provider-v4",
+            created_at="2026-08-05T00:00:00Z",
+        )
+        active = activation_store.load_active_snapshot()
     effective_pack_ids = {item["identity"] for item in active.resolved.lock["effective_set"]}
     assert set(provider_packs).issubset(effective_pack_ids)
     assert any(

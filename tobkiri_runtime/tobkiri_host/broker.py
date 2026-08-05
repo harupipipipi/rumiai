@@ -6,6 +6,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
 import hashlib
 import json
+import threading
 import time
 from typing import Any, Mapping, Protocol
 
@@ -131,6 +132,8 @@ class RequestBroker:
         self._authority = authority
         self._audit = audit
         self._reconciliation = reconciliation
+        self._lifecycle_lock = threading.RLock()
+        self._closed = False
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="tobkiri-v4-request",
@@ -145,6 +148,9 @@ class RequestBroker:
         allow_lossy_adapters: bool = False,
     ) -> Mapping[str, Any]:
         """Resolve, admit, materialize, authorize, dispatch, and validate."""
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("request broker is closed")
         binding = self._catalog.resolve(
             frame.contract_id,
             frame.operation_id,
@@ -397,8 +403,32 @@ class RequestBroker:
             raise AuthorizationError("runtime evidence mismatch")
 
     def close(self) -> None:
-        """Stop accepting executor work without waiting for hostile providers."""
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        """Idempotently stop accepting work without waiting on hostile providers."""
+
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def __enter__(self) -> "RequestBroker":
+        """Return this open Broker for explicit scoped ownership."""
+
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("request broker is closed")
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        """Close the Broker when its ownership scope exits."""
+
+        del exc_type, exc_value, traceback
+        self.close()
 
 
 def _digest(value: object) -> str:
