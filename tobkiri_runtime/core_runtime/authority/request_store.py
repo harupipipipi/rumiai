@@ -465,13 +465,15 @@ class AuthorityRequestStore:
                 seen_token_ids.add(token_id)
 
                 path = self._one_shot_dir / f"{token_id}.json"
-                record = self._read_json(path)
+                record = self._read_json(path) or {}
+                raw_resource = item.get("resource")
+                resource = raw_resource if isinstance(raw_resource, dict) else {}
                 reason = self._one_shot_validation_error(
                     record,
                     request_id=str(item.get("request_id") or ""),
                     principal_id=str(item.get("principal_id") or ""),
                     permission_id=str(item.get("permission_id") or ""),
-                    resource=item.get("resource") if isinstance(item.get("resource"), dict) else {},
+                    resource=resource,
                 )
                 if reason:
                     return {
@@ -588,7 +590,7 @@ class AuthorityRequestStore:
         resource: dict[str, Any],
         reason: str = "",
     ) -> dict[str, Any]:
-        record = {
+        record: dict[str, Any] = {
             "deny_id": "deny_" + secrets.token_urlsafe(12),
             "principal_id": principal_id,
             "permission_id": permission_id,
@@ -639,7 +641,9 @@ class AuthorityRequestStore:
                 continue
             if str(deny.get("principal_id") or "") not in candidate_set:
                 continue
-            if self._resource_pattern_matches(deny.get("resource") if isinstance(deny.get("resource"), dict) else {}, resource):
+            raw_pattern = deny.get("resource")
+            pattern = raw_pattern if isinstance(raw_pattern, dict) else {}
+            if self._resource_pattern_matches(pattern, resource):
                 return deny
         return None
 

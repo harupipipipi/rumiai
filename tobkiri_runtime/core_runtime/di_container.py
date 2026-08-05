@@ -15,7 +15,37 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .approval_manager import ApprovalManager
+    from .audit_logger import AuditLogger
+    from .capability_grant_manager import CapabilityGrantManager
+    from .capability_trust_store import CapabilityTrustStore
+    from .container_orchestrator import ContainerOrchestrator
+    from .desktop_capability import DesktopCapabilityHandler
+    from .diagnostics import Diagnostics
+    from .docker_capability import DockerCapabilityHandler
+    from .egress_proxy import UDSEgressProxyManager
+    from .event_bus import EventBus
+    from .flow_composer import FlowComposer
+    from .flow_modifier import FlowModifierApplier, FlowModifierLoader
+    from .function_alias import FunctionAliasRegistry
+    from .health import HealthChecker
+    from .hmac_key_manager import HMACKeyManager
+    from .host_privilege_manager import HostPrivilegeManager
+    from .install_journal import InstallJournal
+    from .lib_executor import LibExecutor
+    from .metrics import MetricsCollector
+    from .network_grant_manager import NetworkGrantManager
+    from .profiling import Profiler
+    from .python_file_executor import PythonFileExecutor
+    from .secure_executor import SecureExecutor
+    from .secrets_grant_manager import SecretsGrantManager
+    from .secrets_store import SecretsStore
+    from .store_registry import StoreRegistry
+    from .unit_executor import UnitExecutor
+    from .vocab_registry import VocabRegistry
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
@@ -229,41 +259,41 @@ def _register_defaults(container: DIContainer) -> None:
         container: Target DIContainer.
     """
     # --- Wave 1: core ---
-    def _audit_logger_factory() -> "AuditLogger":  # noqa: F821
+    def _audit_logger_factory() -> "AuditLogger":
         from .audit_logger import AuditLogger
         from .paths import USER_DATA_DIR
 
         return AuditLogger(str(USER_DATA_DIR / "audit"))
 
-    def _hmac_key_manager_factory() -> "HMACKeyManager":  # noqa: F821
+    def _hmac_key_manager_factory() -> "HMACKeyManager":
         from .hmac_key_manager import HMACKeyManager
         return HMACKeyManager()
 
     # --- Wave 2: registry ---
-    def _vocab_registry_factory() -> "VocabRegistry":  # noqa: F821
+    def _vocab_registry_factory() -> "VocabRegistry":
         from .vocab_registry import VocabRegistry
         return VocabRegistry()
 
-    def _network_grant_manager_factory() -> "NetworkGrantManager":  # noqa: F821
+    def _network_grant_manager_factory() -> "NetworkGrantManager":
         from .network_grant_manager import NetworkGrantManager
         return NetworkGrantManager()
 
-    def _store_registry_factory() -> "StoreRegistry":  # noqa: F821
+    def _store_registry_factory() -> "StoreRegistry":
         from .store_registry import StoreRegistry
         return StoreRegistry()
 
     # --- Wave 3: approval / permission ---
-    def _approval_manager_factory() -> "ApprovalManager":  # noqa: F821
+    def _approval_manager_factory() -> "ApprovalManager":
         from .approval_manager import ApprovalManager
         instance = ApprovalManager()
         instance.initialize()
         return instance
 
-    def _capability_trust_store_factory() -> "CapabilityTrustStore":  # noqa: F821
+    def _capability_trust_store_factory() -> "CapabilityTrustStore":
         from .capability_trust_store import CapabilityTrustStore
         return CapabilityTrustStore()
 
-    def _capability_grant_manager_factory() -> "CapabilityGrantManager":  # noqa: F821
+    def _capability_grant_manager_factory() -> "CapabilityGrantManager":
         from .capability_grant_manager import get_capability_grant_manager
         instance = get_capability_grant_manager()
         try:
@@ -275,39 +305,39 @@ def _register_defaults(container: DIContainer) -> None:
         return instance
 
     # --- Wave 4: orchestration / composition ---
-    def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
+    def _container_orchestrator_factory() -> "ContainerOrchestrator":
         from .container_orchestrator import ContainerOrchestrator
         return ContainerOrchestrator()
 
-    def _host_privilege_manager_factory() -> "HostPrivilegeManager":  # noqa: F821
+    def _host_privilege_manager_factory() -> "HostPrivilegeManager":
         from .host_privilege_manager import HostPrivilegeManager
         return HostPrivilegeManager()
 
-    def _flow_composer_factory() -> "FlowComposer":  # noqa: F821
+    def _flow_composer_factory() -> "FlowComposer":
         from .flow_composer import FlowComposer
         return FlowComposer()
 
-    def _function_alias_registry_factory() -> "FunctionAliasRegistry":  # noqa: F821
+    def _function_alias_registry_factory() -> "FunctionAliasRegistry":
         from .function_alias import FunctionAliasRegistry
         return FunctionAliasRegistry()
 
-    def _secrets_store_factory() -> "SecretsStore":  # noqa: F821
+    def _secrets_store_factory() -> "SecretsStore":
         from .secrets_store import SecretsStore
         return SecretsStore()
 
-    def _secrets_grant_manager_factory() -> "SecretsGrantManager":  # noqa: F821
+    def _secrets_grant_manager_factory() -> "SecretsGrantManager":
         from .secrets_grant_manager import SecretsGrantManager
         return SecretsGrantManager()
 
-    def _modifier_loader_factory() -> "FlowModifierLoader":  # noqa: F821
+    def _modifier_loader_factory() -> "FlowModifierLoader":
         from .flow_modifier import FlowModifierLoader
         return FlowModifierLoader()
 
-    def _modifier_applier_factory() -> "FlowModifierApplier":  # noqa: F821
+    def _modifier_applier_factory() -> "FlowModifierApplier":
         from .flow_modifier import FlowModifierApplier
         return FlowModifierApplier()
 
-    def _egress_proxy_manager_factory() -> "UDSEgressProxyManager":  # noqa: F821
+    def _egress_proxy_manager_factory() -> "UDSEgressProxyManager":
         from .egress_proxy import UDSEgressProxyManager
         c = get_container()
         return UDSEgressProxyManager(
@@ -315,57 +345,57 @@ def _register_defaults(container: DIContainer) -> None:
             audit_logger=c.get_or_none("audit_logger"),
         )
 
-    def _python_file_executor_factory() -> "PythonFileExecutor":  # noqa: F821
+    def _python_file_executor_factory() -> "PythonFileExecutor":
         from .python_file_executor import PythonFileExecutor
         return PythonFileExecutor()
 
-    def _secure_executor_factory() -> "SecureExecutor":  # noqa: F821
+    def _secure_executor_factory() -> "SecureExecutor":
         from .secure_executor import SecureExecutor
         return SecureExecutor()
 
-    def _lib_executor_factory() -> "LibExecutor":  # noqa: F821
+    def _lib_executor_factory() -> "LibExecutor":
         from .lib_executor import LibExecutor
         return LibExecutor()
 
-    def _unit_executor_factory() -> "UnitExecutor":  # noqa: F821
+    def _unit_executor_factory() -> "UnitExecutor":
         from .unit_executor import UnitExecutor
         return UnitExecutor()
 
     # --- Wave 8: Kernel core services ---
-    def _diagnostics_factory() -> "Diagnostics":  # noqa: F821
+    def _diagnostics_factory() -> "Diagnostics":
         from .diagnostics import Diagnostics
         return Diagnostics()
 
-    def _install_journal_factory() -> "InstallJournal":  # noqa: F821
+    def _install_journal_factory() -> "InstallJournal":
         from .install_journal import InstallJournal
         return InstallJournal()
 
-    def _event_bus_factory() -> "EventBus":  # noqa: F821
+    def _event_bus_factory() -> "EventBus":
         from .event_bus import EventBus
         return EventBus()
 
     # --- Wave 15: Foundation services ---
-    def _health_checker_factory() -> "HealthChecker":  # noqa: F821
+    def _health_checker_factory() -> "HealthChecker":
         from .health import HealthChecker
         return HealthChecker()
 
-    def _metrics_collector_factory() -> "MetricsCollector":  # noqa: F821
+    def _metrics_collector_factory() -> "MetricsCollector":
         from .metrics import MetricsCollector
         return MetricsCollector()
 
-    def _profiler_factory() -> "Profiler":  # noqa: F821
+    def _profiler_factory() -> "Profiler":
         from .profiling import Profiler
         return Profiler()
 
     # --- Wave 22: Docker capability ---
-    def _docker_capability_handler_factory() -> "DockerCapabilityHandler":  # noqa: F821
+    def _docker_capability_handler_factory() -> "DockerCapabilityHandler":
         from .docker_capability import DockerCapabilityHandler
         return DockerCapabilityHandler()
 
 
 
     # --- Wave V-4: Desktop app capability ---
-    def _desktop_capability_handler_factory() -> "DesktopCapabilityHandler":  # noqa: F821
+    def _desktop_capability_handler_factory() -> "DesktopCapabilityHandler":
         from .desktop_capability import DesktopCapabilityHandler
         return DesktopCapabilityHandler()
 

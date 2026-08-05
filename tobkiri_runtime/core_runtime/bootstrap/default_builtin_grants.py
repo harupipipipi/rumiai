@@ -27,7 +27,7 @@ HOST_BROKER_PERMISSIONS = (
     "host.permission.open_settings",
 )
 
-HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS = frozenset()
+HOST_CAPABILITIES_PACK_DEFAULT_GRANT_EXCLUSIONS: frozenset[str] = frozenset()
 
 HOST_CAPABILITIES_PACK_PERMISSIONS = (
     "function.call",

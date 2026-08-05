@@ -70,7 +70,7 @@ def active_authority_debug_binding(
     active_profile = str(status.get("profile_id") or "")
     if profile_id and str(profile_id) != active_profile:
         return {}
-    binding = {
+    binding: dict[str, Any] = {
         "debug_session_id": str(status.get("session_id") or ""),
         "lease_epoch": int(status.get("lease_epoch") or 0),
         "debug_run_id": str(status.get("run_id") or ""),

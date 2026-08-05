@@ -319,7 +319,12 @@ class AuthorityScope:
             if requested_is_unbounded:
                 if not allowed_is_unbounded:
                     return False
-            elif not allowed_is_unbounded and not set(requested).issubset(allowed):
+            elif (
+                requested is not None
+                and allowed is not None
+                and not allowed_is_unbounded
+                and not set(requested).issubset(allowed)
+            ):
                 return False
         quota_names = set(self.quotas) | set(ceiling.quotas)
         for quota_name in quota_names:

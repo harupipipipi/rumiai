@@ -118,8 +118,11 @@ def resource_within_authority_config(
         if not allowed or not actual.intersection(allowed):
             return False
     if AUTHORITY_PORT_FACET in config:
+        raw_port = resource.get("port")
+        if not isinstance(raw_port, (str, int, float, bytes)):
+            return False
         try:
-            port = int(resource.get("port"))
+            port = int(raw_port)
         except (TypeError, ValueError):
             return False
         if port not in set(_port_values(config.get(AUTHORITY_PORT_FACET))):
@@ -128,9 +131,12 @@ def resource_within_authority_config(
         if not bool(config.get("allow_stream")):
             return False
     if "max_input_tokens" in config and resource.get("input_tokens") is not None:
+        raw_max_tokens = config.get("max_input_tokens")
+        if not isinstance(raw_max_tokens, (str, int, float, bytes)):
+            return False
         try:
             if int(resource.get("input_tokens") or 0) > int(
-                config.get("max_input_tokens")
+                raw_max_tokens
             ):
                 return False
         except (TypeError, ValueError):

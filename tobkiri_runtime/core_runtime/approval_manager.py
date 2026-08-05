@@ -369,7 +369,7 @@ class ApprovalManager:
         
         対象: ecosystem/flows/**/*.flow.yaml, ecosystem/flows/**/*.modifier.yaml
         """
-        hashes = {}
+        hashes: Dict[str, str] = {}
         local_dir = self._get_local_pack_dir()
         
         if not local_dir.exists():

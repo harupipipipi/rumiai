@@ -91,7 +91,11 @@ class NetworkGrantManager:
     GRANTS_DIR = "user_data/permissions/network"
     SECRET_KEY_FILE = "user_data/permissions/.secret_key"
     
-    def __init__(self, grants_dir: str = None, secret_key: str = None):
+    def __init__(
+        self,
+        grants_dir: Optional[str] = None,
+        secret_key: Optional[str] = None,
+    ) -> None:
         if grants_dir:
             self._grants_dir = Path(grants_dir)
         else:
@@ -481,7 +485,9 @@ def get_network_grant_manager() -> NetworkGrantManager:
     return get_container().get("network_grant_manager")
 
 
-def reset_network_grant_manager(grants_dir: str = None) -> NetworkGrantManager:
+def reset_network_grant_manager(
+    grants_dir: Optional[str] = None,
+) -> NetworkGrantManager:
     """
     NetworkGrantManager をリセットする（テスト用）。
 

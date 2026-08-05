@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-from importlib import import_module
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -19,32 +18,31 @@ from .profile_graph_models import (
 from .profile_workspace import ProfileWorkspaceManager
 from .profile_runtime_selection import apply_profile_graph_selection
 from .pack_boundary import finite_files, resolve_selected_pack_roots
+from ecosystem.defaultspack.domain.capability.catalog import CapabilityCatalog
+from ecosystem.defaultspack.domain.external.input_profile_registry import (
+    InputProfileRegistry,
+)
+from ecosystem.defaultspack.domain.frontend.registry import FrontendRegistry
+from ecosystem.defaultspack.domain.prompt.effective import resolve_effective_prompt
+from ecosystem.defaultspack.domain.tool.catalog_contract_client import (
+    ContractToolCatalog as ToolRegistry,
+)
+from ecosystem.defaultspack.domain.webhook.endpoint_store import WebhookEndpointStore
+from ecosystem.defaultspack.transport.registry import (
+    HttpRouteSpec,
+    canonical_http_route_specs,
+)
 
 _DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
 if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
 
-CapabilityCatalog = import_module(
-    "ecosystem.defaultspack.domain.capability.catalog"
-).CapabilityCatalog
-InputProfileRegistry = import_module(
-    "ecosystem.defaultspack.domain.external.input_profile_registry"
-).InputProfileRegistry
-FrontendRegistry = import_module(
-    "ecosystem.defaultspack.domain.frontend.registry"
-).FrontendRegistry
-resolve_effective_prompt = import_module(
-    "ecosystem.defaultspack.domain.prompt.effective"
-).resolve_effective_prompt
-ToolRegistry = import_module(
-    "ecosystem.defaultspack.domain.tool.catalog_contract_client"
-).ContractToolCatalog
-WebhookEndpointStore = import_module(
-    "ecosystem.defaultspack.domain.webhook.endpoint_store"
-).WebhookEndpointStore
-_transport_registry = import_module("ecosystem.defaultspack.transport.registry")
-HttpRouteSpec = _transport_registry.HttpRouteSpec
-canonical_http_route_specs = _transport_registry.canonical_http_route_specs
+def _dict_or_empty(value: object) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _list_or_empty(value: object) -> List[Any]:
+    return list(value) if isinstance(value, list) else []
 
 
 def build_startup_profile_graph_response(
@@ -56,7 +54,7 @@ def build_startup_profile_graph_response(
 ) -> Dict[str, Any]:
     normalized_profile = apply_profile_graph_selection(profile)
     profile_id = str(normalized_profile.get("profile_id") or "").strip()
-    metadata = normalized_profile.get("metadata") if isinstance(normalized_profile.get("metadata"), dict) else {}
+    metadata = _dict_or_empty(normalized_profile.get("metadata"))
     document, document_diagnostics = normalize_profile_graph_document(
         profile_id,
         metadata.get("profile_graph"),
@@ -107,9 +105,9 @@ def build_profile_graph_runtime_preview(
     ecosystem_dir: str | None = None,
 ) -> Dict[str, Any]:
     normalized_profile = apply_profile_graph_selection(profile)
-    metadata = normalized_profile.get("metadata") if isinstance(normalized_profile.get("metadata"), dict) else {}
+    metadata = _dict_or_empty(normalized_profile.get("metadata"))
     selected = normalize_profile_graph_selected(metadata.get("selected"))
-    policy = normalized_profile.get("policy") if isinstance(normalized_profile.get("policy"), dict) else {}
+    policy = _dict_or_empty(normalized_profile.get("policy"))
     workspace_manager = profile_workspace_manager or ProfileWorkspaceManager()
     available_catalog = available or _available_catalog(
         normalized_profile,
@@ -418,7 +416,7 @@ def _ensure_webhook_edges(
                 kind="uses_input_profile",
                 metadata={"input_profile_id": input_profile_id},
             )
-        delivery = candidate.get("default_delivery") if isinstance(candidate.get("default_delivery"), dict) else {}
+        delivery = _dict_or_empty(candidate.get("default_delivery"))
         action_id = str(delivery.get("action_id") or "").strip()
         if action_id:
             action_node = ProfileGraphNode(
@@ -531,8 +529,8 @@ def _ensure_prompt_storage_edges(
 
 def _selection_diagnostics(profile: Dict[str, Any], available: Dict[str, Any]) -> List[Dict[str, Any]]:
     diagnostics: List[Dict[str, Any]] = []
-    policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
-    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    policy = _dict_or_empty(profile.get("policy"))
+    metadata = _dict_or_empty(profile.get("metadata"))
     selected = normalize_profile_graph_selected(metadata.get("selected"))
     if (policy.get("api_route_allowlist") or selected.get("api_routes")) and not policy.get("enforce_api_route_allowlist"):
         diagnostics.append(
@@ -565,8 +563,8 @@ def _selection_diagnostics(profile: Dict[str, Any], available: Dict[str, Any]) -
 
 
 def _tool_candidate(tool: Dict[str, Any]) -> Dict[str, Any]:
-    execution = tool.get("execution") if isinstance(tool.get("execution"), dict) else {}
-    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    execution = _dict_or_empty(tool.get("execution"))
+    metadata = _dict_or_empty(tool.get("metadata"))
     tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip()
     return {
         "id": tool_id,
@@ -589,10 +587,10 @@ def _webhook_candidate(endpoint: Dict[str, Any]) -> Dict[str, Any]:
         "kind": "webhook",
         "webhook_kind": str(endpoint.get("kind") or "generic"),
         "input_profile_id": str(endpoint.get("input_profile_id") or "").strip(),
-        "default_delivery": dict(endpoint.get("default_delivery") if isinstance(endpoint.get("default_delivery"), dict) else {}),
+        "default_delivery": _dict_or_empty(endpoint.get("default_delivery")),
         "enabled": bool(endpoint.get("enabled")),
-        "public_url": dict(endpoint.get("public_url") if isinstance(endpoint.get("public_url"), dict) else {}),
-        "metadata": dict(endpoint.get("metadata") if isinstance(endpoint.get("metadata"), dict) else {}),
+        "public_url": _dict_or_empty(endpoint.get("public_url")),
+        "metadata": _dict_or_empty(endpoint.get("metadata")),
     }
 
 
@@ -699,7 +697,7 @@ def _frontend_candidates(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
             "label": str(entry.get("label") or entry.get("title") or item_id),
             "kind": "frontend",
             "source_kind": source_kind,
-            "profile_visibility": dict(entry.get("profile_visibility") if isinstance(entry.get("profile_visibility"), dict) else {}),
+            "profile_visibility": _dict_or_empty(entry.get("profile_visibility")),
             "metadata": {
                 key: value
                 for key, value in entry.items()
@@ -707,27 +705,27 @@ def _frontend_candidates(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
             },
         }
 
-    shell = catalog.get("shell") if isinstance(catalog.get("shell"), dict) else {}
-    layout = shell.get("layout") if isinstance(shell.get("layout"), dict) else {}
-    for region in layout.get("regions") if isinstance(layout.get("regions"), list) else []:
+    shell = _dict_or_empty(catalog.get("shell"))
+    layout = _dict_or_empty(shell.get("layout"))
+    for region in _list_or_empty(layout.get("regions")):
         if isinstance(region, dict):
             _add(region, "shell_region")
-    for renderer in shell.get("renderers") if isinstance(shell.get("renderers"), list) else []:
+    for renderer in _list_or_empty(shell.get("renderers")):
         if isinstance(renderer, dict):
             _add(renderer, "shell_renderer")
-    for part in catalog.get("parts") if isinstance(catalog.get("parts"), list) else []:
+    for part in _list_or_empty(catalog.get("parts")):
         if isinstance(part, dict):
             _add(part, "part")
-    sidebar = catalog.get("sidebar") if isinstance(catalog.get("sidebar"), dict) else {}
-    for item in sidebar.get("items") if isinstance(sidebar.get("items"), list) else []:
+    sidebar = _dict_or_empty(catalog.get("sidebar"))
+    for item in _list_or_empty(sidebar.get("items")):
         if isinstance(item, dict):
             _add(item, "sidebar_item")
-    settings = catalog.get("settings") if isinstance(catalog.get("settings"), dict) else {}
-    for section in settings.get("sections") if isinstance(settings.get("sections"), list) else []:
+    settings = _dict_or_empty(catalog.get("settings"))
+    for section in _list_or_empty(settings.get("sections")):
         if isinstance(section, dict):
             _add(section, "settings_section")
-    chat_rendering = catalog.get("chat_rendering") if isinstance(catalog.get("chat_rendering"), dict) else {}
-    for renderer in chat_rendering.get("renderers") if isinstance(chat_rendering.get("renderers"), list) else []:
+    chat_rendering = _dict_or_empty(catalog.get("chat_rendering"))
+    for renderer in _list_or_empty(chat_rendering.get("renderers")):
         if isinstance(renderer, dict):
             _add(renderer, "chat_renderer")
     return sorted(items.values(), key=lambda item: (item["source_kind"], item["id"]))
@@ -798,7 +796,7 @@ def _startup_catalog_nodes(
     base_pack = str((profile or {}).get("base_pack") or "").strip()
     if base_pack:
         selected_pack_ids.add(base_pack)
-    for pack in catalog.get("packs") if isinstance(catalog.get("packs"), list) else []:
+    for pack in _list_or_empty(catalog.get("packs")):
         if not isinstance(pack, dict):
             continue
         pack_id = str(pack.get("pack_id") or "").strip()
@@ -806,16 +804,16 @@ def _startup_catalog_nodes(
             continue
         if selected_pack_ids and pack_id not in selected_pack_ids:
             continue
-        for node in pack.get("nodes") if isinstance(pack.get("nodes"), list) else []:
+        for node in _list_or_empty(pack.get("nodes")):
             if not isinstance(node, dict):
                 continue
             node_id = str(node.get("node_id") or node.get("ref") or "").strip()
             if not node_id:
                 continue
-            display_name = node.get("display_name") if isinstance(node.get("display_name"), dict) else {}
+            display_name = _dict_or_empty(node.get("display_name"))
             label = str(display_name.get("en") or display_name.get("ja") or node.get("component_id") or node_id)
-            node_metadata = dict(node.get("metadata") if isinstance(node.get("metadata"), dict) else {})
-            launch = node_metadata.get("launch") if isinstance(node_metadata.get("launch"), dict) else {}
+            node_metadata = _dict_or_empty(node.get("metadata"))
+            launch = _dict_or_empty(node_metadata.get("launch"))
             nodes[node_id] = {
                 "id": node_id,
                 "label": label,
@@ -823,8 +821,8 @@ def _startup_catalog_nodes(
                 "component_type": str(node.get("component_type") or node_metadata.get("component_type") or ""),
                 "component_id": str(node.get("component_id") or node_metadata.get("component_id") or ""),
                 "source_pack_id": pack_id,
-                "ports": list(node.get("ports") if isinstance(node.get("ports"), list) else []),
-                "launch": dict(launch),
+                "ports": _list_or_empty(node.get("ports")),
+                "launch": launch,
                 "metadata": node_metadata,
             }
     return sorted(nodes.values(), key=lambda item: item["id"])
@@ -903,7 +901,7 @@ def _webhook_runtime_preview(selected_ids: Any, catalog_items: Any) -> Dict[str,
     for webhook_id in selected:
         candidate = catalog.get(webhook_id)
         if candidate:
-            delivery = candidate.get("default_delivery") if isinstance(candidate.get("default_delivery"), dict) else {}
+            delivery = _dict_or_empty(candidate.get("default_delivery"))
             effective.append(
                 {
                     **copy.deepcopy(candidate),

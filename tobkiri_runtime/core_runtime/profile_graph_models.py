@@ -129,7 +129,9 @@ def normalize_profile_graph_selected(value: Any) -> dict[str, list[str] | dict[s
 
 
 def empty_profile_graph_document(profile_id: str) -> ProfileGraphDocument:
-    selected = {category: [] for category in PROFILE_GRAPH_SELECTED_CATEGORIES}
+    selected: dict[str, list[str] | dict[str, Any]] = {
+        category: [] for category in PROFILE_GRAPH_SELECTED_CATEGORIES
+    }
     return ProfileGraphDocument(
         version=PROFILE_GRAPH_VERSION,
         profile_id=str(profile_id or "").strip(),

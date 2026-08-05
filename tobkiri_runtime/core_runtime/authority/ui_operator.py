@@ -140,15 +140,17 @@ def verify_ui_operator(
                 return False, f"ui_operator {key} is missing", {}
 
     try:
-        normalized["issued_at"] = int(normalized["issued_at"] or 0)
-        normalized["expires_at"] = int(normalized["expires_at"] or 0)
+        issued_at = int(normalized["issued_at"] or 0)
+        expires_at = int(normalized["expires_at"] or 0)
     except (TypeError, ValueError):
         return False, "ui_operator timestamps are invalid", {}
+    normalized["issued_at"] = issued_at
+    normalized["expires_at"] = expires_at
 
     current = int(now if now is not None else time.time())
-    if normalized["expires_at"] <= current:
+    if expires_at <= current:
         return False, "ui_operator expired", {}
-    if normalized["issued_at"] > current + 30:
+    if issued_at > current + 30:
         return False, "ui_operator issued_at is invalid", {}
 
     expected = hmac.new(secret, _operator_message(normalized), hashlib.sha256).hexdigest()
