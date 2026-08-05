@@ -121,6 +121,7 @@ class RequestBroker:
         authority: AuthorityPort,
         audit: AuditPort,
         reconciliation: ReconciliationStore,
+        production: bool = True,
         max_workers: int = 16,
     ) -> None:
         self._catalog = catalog
@@ -132,6 +133,8 @@ class RequestBroker:
         self._authority = authority
         self._audit = audit
         self._reconciliation = reconciliation
+        # Host-owned test/conformance mode; never caller-controlled request data.
+        self._production = production
         self._lifecycle_lock = threading.RLock()
         self._closed = False
         self._executor = ThreadPoolExecutor(
@@ -216,7 +219,7 @@ class RequestBroker:
         )
         lease_issued = False
         try:
-            backend = self._backends.select(binding)
+            backend = self._backends.select(binding, production=self._production)
             workload_key = WorkloadInstanceKey(
                 profile_id=context.profile_id,
                 activation_id=context.activation_id,

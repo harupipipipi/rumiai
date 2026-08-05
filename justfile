@@ -47,6 +47,10 @@ pack-architecture:
 pack-architecture-v4:
     python scripts/quality/validate_pack_architecture.py
 
+# Exercise one Defaults-independent Profile through the canonical v4 Host path.
+pack-v4-minimal-profile:
+    cd tobkiri_runtime && python -m pytest tests/test_minimal_profile_vertical_slice.py -q
+
 # Check the checked-in Launcher presentation projection against canonical manifests.
 presentation-catalog:
     python scripts/quality/generate_presentation_catalog.py --check
