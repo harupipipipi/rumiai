@@ -135,7 +135,7 @@ jobs:
       - name: Run Task D smoke tests
         working-directory: tobkiri_runtime
         run: |
-          pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v
+          pytest tests/test_canonical_artifact_checkout.py tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v
 
   tobkiri-security-audit:
     runs-on: ubuntu-latest
