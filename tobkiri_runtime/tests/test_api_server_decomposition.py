@@ -42,6 +42,8 @@ def test_router_table_function_route_error_status_contract():
     from tests.v4_batch_support import assert_payload_mutations_denied, harness
 
     assert_retired_module_absent("core_runtime.capability_executor")
+    assert_retired_module_absent("core_runtime.api.router_table")
+    assert_retired_module_absent("core_runtime.api.lifecycle.pack_handlers")
     assert_profile_resolver_requires_authority_snapshot()
     with TemporaryDirectory() as root:
         assert_payload_mutations_denied(harness(Path(root)))
