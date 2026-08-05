@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 38766",
-    "build": "node scripts/clean-shell-bundle.mjs && vite build && node -e \"require('node:fs').rmSync('../ui/index.html', { force: true })\" && node scripts/check-shell-bundle-sync.mjs",
+    "build": "npm run check:vendored-assets -- --require-ui && node scripts/clean-shell-bundle.mjs && vite build && node -e \"require('node:fs').rmSync('../ui/index.html', { force: true })\" && node scripts/check-shell-bundle-sync.mjs && npm run check:vendored-assets -- --require-ui",
     "lint": "tsc --noEmit && npm run lint:layers && npm run lint:boundaries && npm run lint:local-fonts && npm run check:ui-security-guardrails",
     "lint:layers": "node scripts/forbid-raw-z-index.mjs",
     "lint:boundaries": "node scripts/forbid-renderer-api-imports.mjs",
