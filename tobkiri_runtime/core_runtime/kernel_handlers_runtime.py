@@ -19,14 +19,13 @@ Mixin方式でKernelクラスに合成される。
 
 from __future__ import annotations
 
-import copy
 
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-from .flow_loader import FlowDefinition, FlowStep
+from .flow_loader import FlowDefinition
 
 from .paths import ECOSYSTEM_DIR
 from .kernel_flow_converter import FlowConverter
@@ -579,7 +578,6 @@ class KernelRuntimeHandlersMixin:
             loop = None
 
         if loop and loop.is_running():
-            import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(
                 self._handle_universal_call_async(step, ctx), loop,
             )

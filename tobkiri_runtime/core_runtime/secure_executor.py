@@ -29,12 +29,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
-
-logger = logging.getLogger(__name__)
-
 from .compat import safe_chmod
 from .docker_run_builder import DockerRunBuilder
 from .paths import LOCAL_PACK_ID, PACK_DATA_BASE_DIR as _PACK_DATA_BASE_DIR
+
+logger = logging.getLogger(__name__)
 
 # lib 実行用定数
 LIB_INSTALL = "install"

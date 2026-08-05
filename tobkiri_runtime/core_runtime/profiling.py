@@ -28,7 +28,7 @@ import threading
 import time
 from collections import deque
 from contextlib import contextmanager
-from typing import Any, Callable, Deque, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 
 # ============================================================

@@ -29,8 +29,6 @@ try:
 except ImportError:
     HAS_YAML = False
 
-logger = logging.getLogger(__name__)
-
 from .flow_modifier_models import (
     FlowModifierDef,
     ModifierLoadResult,
@@ -40,15 +38,15 @@ from .flow_modifier_models import (
 
 from .paths import (
     LOCAL_PACK_ID,
-    LOCAL_PACK_DIR,
     LOCAL_PACK_MODIFIERS_DIR,
     ECOSYSTEM_DIR,
     resolve_pack_locations,
     get_pack_modifier_dirs,
     get_shared_modifier_dir,
-    PackLocation,
 )
 from .resolved_profile_scope import effective_pack_ids
+
+logger = logging.getLogger(__name__)
 
 
 class FlowModifierLoader:

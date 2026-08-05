@@ -37,11 +37,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .ipc_auth import IpcAuthManager, perform_server_auth
+
 MAX_REQUEST_SIZE = 4 * 1024 * 1024
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
-
-# BUG-5-1: IPC 認証 (Windows TCP フォールバック)
-from .ipc_auth import IpcAuthManager, perform_server_auth
 
 logger = logging.getLogger(__name__)
 

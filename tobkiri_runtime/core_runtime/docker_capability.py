@@ -699,6 +699,21 @@ class DockerCapabilityHandler:
                 timeout=timeout + 30,
             )
 
+            if result.returncode != 0:
+                error = result.stderr.strip() or "docker stop failed"
+                self._audit_log(
+                    "warning",
+                    "docker.stop.failed",
+                    False,
+                    principal_id,
+                    {"container_name": container_name, "error": error},
+                )
+                return {
+                    "stopped": False,
+                    "container_name": container_name,
+                    "error": error,
+                }
+
             with self._lock:
                 self._active_containers.pop(container_name, None)
 

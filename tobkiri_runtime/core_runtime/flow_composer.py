@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import copy
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, List, Any, Optional
 
 from .function_alias import FunctionAliasRegistry, get_function_alias_registry
 

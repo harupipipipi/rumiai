@@ -54,6 +54,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .docker_run_builder import DockerRunBuilder
+from .paths import (
+    PACK_DATA_BASE_DIR,
+    discover_pack_locations,
+    get_pack_block_dirs,
+    is_path_within,
+    PackLocation,
+)
 
 # ============================================================
 # Docker可用性キャッシュ (#17)
@@ -68,22 +76,6 @@ _DOCKER_CHECK_CACHE_TTL: float = float(os.environ.get("RUMI_DOCKER_CHECK_CACHE_T
 # SEC-2: Docker image ダイジェスト固定
 DEFAULT_EXECUTOR_IMAGE: str = "python:3.11-slim@sha256:233de06753d30d120b1a3ce359d8d3be8bda78524cd8f520c99883bfe33964cf"
 EXECUTOR_IMAGE: str = os.environ.get("RUMI_EXECUTOR_IMAGE") or DEFAULT_EXECUTOR_IMAGE
-
-
-
-from .docker_run_builder import DockerRunBuilder
-
-from .paths import (
-    ECOSYSTEM_DIR,
-    PACK_DATA_BASE_DIR,
-    discover_pack_locations,
-    find_ecosystem_json,
-    get_pack_block_dirs,
-    is_path_within,
-    PackLocation,
-)
-
-
 
 # ============================================================
 # UDS GID ユーティリティ (A-1: --group-add 対応)
@@ -445,7 +437,6 @@ class PythonFileExecutor:
 
         # principal 強制（v1）: principal は必ず owner_pack に固定
         # FlowStep から principal_id が来ても無視（乱用事故防止）
-        effective_principal = resolved_pack
         if principal_id is not None and principal_id != resolved_pack:
             try:
                 from .audit_logger import get_audit_logger
@@ -903,18 +894,12 @@ request = http_request
                 )
 
                 # タイムアウト付きで stdout を制限読み取り
-                import selectors
-                stdout_chunks = []
-                stderr_chunks = []
-                stdout_total = 0
-                stdout_exceeded = False
                 deadline = _t14.monotonic() + timeout_seconds
 
                 # communicate に頼らず、stdout を制限付きで読む
                 # ただし stderr も回収する必要があるため Popen.communicate 的に処理
                 raw_stdout = proc.stdout.read(MAX_STDOUT_SIZE + 1)
                 if len(raw_stdout) > MAX_STDOUT_SIZE:
-                    stdout_exceeded = True
                     proc.kill()
                     proc.wait(timeout=5)
                     result.error = f"stdout exceeded size limit ({MAX_STDOUT_SIZE} bytes)"

@@ -1181,12 +1181,14 @@ class KernelFlowExecutionMixin:
         ctx: dict,
     ) -> dict:
         """Execute a universal_call step (python / binary / command)."""
-        import asyncio, json, os, time
+        import asyncio
+        import json
+        import os
+        import time
 
         owner_pack = step.get("owner_pack", "")
         uc_file = step.get("file", "")
         runtime = step.get("runtime", "python")
-        protocol = step.get("protocol", "stdio_json")
         docker_image = step.get("docker_image")
         input_data = step.get("input", {}) if isinstance(step.get("input"), dict) else {}
         timeout = min(
@@ -1302,7 +1304,8 @@ class KernelFlowExecutionMixin:
 
     # ── binary runtime ──────────────────────────────────────
     async def _uc_exec_binary(self, target, input_data, timeout, docker_image, pack_dir):
-        import asyncio, json, os
+        import asyncio
+        import json
         if docker_image:
             return await self._uc_exec_in_container(
                 target, input_data, timeout, docker_image, pack_dir, runtime="binary",
@@ -1330,7 +1333,9 @@ class KernelFlowExecutionMixin:
 
     # ── command runtime ─────────────────────────────────────
     async def _uc_exec_command(self, target, input_data, timeout, docker_image, pack_dir):
-        import asyncio, json, os
+        import asyncio
+        import json
+        import os
         if docker_image:
             return await self._uc_exec_in_container(
                 target, input_data, timeout, docker_image, pack_dir, runtime="command",
@@ -1359,7 +1364,9 @@ class KernelFlowExecutionMixin:
 
     # ── Docker container execution ──────────────────────────
     async def _uc_exec_in_container(self, target, input_data, timeout, docker_image, pack_dir, runtime="binary"):
-        import asyncio, json, os
+        import asyncio
+        import json
+        import os
         try:
             from core_runtime.container_orchestrator import get_container_orchestrator
             orch = get_container_orchestrator()

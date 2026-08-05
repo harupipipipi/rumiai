@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
 import threading
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone, timedelta

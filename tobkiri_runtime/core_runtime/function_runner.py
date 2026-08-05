@@ -4,20 +4,19 @@ function_runner.py - JSON 入力で Python callable を実行する runner
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
+import json
 import os
 import sys
+from pathlib import Path
+from typing import Any, Dict
 
 # Avoid shadowing stdlib modules like `types` when this file is executed directly
 # from inside the core_runtime package directory.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if sys.path and os.path.abspath(sys.path[0]) == _SCRIPT_DIR:
     sys.path.pop(0)
-
-import argparse
-import importlib.util
-import json
-from pathlib import Path
-from typing import Any, Dict
 
 
 def _configure_utf8_stdio() -> None:

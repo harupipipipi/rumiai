@@ -20,12 +20,11 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 _SAFE_ID_RE = re.compile("^[a-zA-Z0-9_.-]+$")
 
