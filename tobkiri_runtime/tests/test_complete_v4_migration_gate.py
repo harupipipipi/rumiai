@@ -1709,6 +1709,27 @@ def test_double_authority_is_zero_by_production_reachability() -> None:
     _assert_zero("double authority", _double_authority_findings())
 
 
+def test_retired_setup_functions_and_conformance_pack_are_not_production_packs() -> None:
+    functions_root = ECOSYSTEM / "defaultspack" / "functions"
+    for function_id in (
+        "list_setup_packs",
+        "install_setup_pack",
+        "grant_all_ok",
+        "revoke_all_ok",
+    ):
+        assert not (functions_root / function_id / "manifest.json").exists()
+        assert not (functions_root / function_id / "main.py").exists()
+    assert not (ECOSYSTEM / "conformance_minimal_echo_pack").exists()
+    assert (
+        RUNTIME
+        / "tobkiri_host"
+        / "conformance"
+        / "fixtures"
+        / "conformance_minimal_echo_pack"
+        / "pack.v4.json"
+    ).is_file()
+
+
 def test_launcher_env_path_direct_and_unverified_fallback_are_zero() -> None:
     """Launcher has no unscoped environment, process, or unverified entrypoint path."""
     launcher_fixture = """

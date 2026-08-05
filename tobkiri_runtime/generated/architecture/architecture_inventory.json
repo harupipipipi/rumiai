@@ -2420,13 +2420,6 @@
       },
       {
         "evidence": "host_execution",
-        "line": 6,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/grant_all_ok/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence": "host_execution",
         "line": 14,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/input_endpoint_create/manifest.json",
@@ -2444,13 +2437,6 @@
         "line": 12,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/input_endpoint_list/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence": "host_execution",
-        "line": 6,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/install_setup_pack/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -2542,13 +2528,6 @@
         "line": 6,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/list_pack_requests/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence": "host_execution",
-        "line": 6,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/list_setup_packs/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -2997,13 +2976,6 @@
         "line": 6,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/review_pack_request/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence": "host_execution",
-        "line": 6,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/revoke_all_ok/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -12040,12 +12012,6 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:2addf169c67b5df4b8a63878c6cfc3c9492217593e7ccd7e13fb0f610f701acf",
-        "line": 6,
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/grant_all_ok/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
         "evidence_digest": "sha256:236acf41e22355284aab2ee055ff28a9c19f271531f5663c0f460952527cd37e",
         "line": 14,
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/input_endpoint_create/manifest.json",
@@ -12061,12 +12027,6 @@
         "evidence_digest": "sha256:a2a623db2039e9f88fd46f5e481f2861370c09e5830f742b4b04e8d6f9aec045",
         "line": 12,
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/input_endpoint_list/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence_digest": "sha256:d892f4fdfd1336ad552845188c967a8fbcfb1d178383551de50e0ffa11352c0b",
-        "line": 6,
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/install_setup_pack/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -12145,12 +12105,6 @@
         "evidence_digest": "sha256:8526af0a17c46634901abab0f9edf39f243001931284efc713461858cb773d8d",
         "line": 6,
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/list_pack_requests/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence_digest": "sha256:c555b6676a2039838f914de078f83d5ee917a8cf7b25ad94cd554620ef21cbf5",
-        "line": 6,
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/list_setup_packs/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -12535,12 +12489,6 @@
         "evidence_digest": "sha256:28e5dbc0056ebf7344ae0e704679521a0f35cc023af36ca25a4ad388c77f467c",
         "line": 6,
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/review_pack_request/manifest.json",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence_digest": "sha256:1f899d233db49f9aa08ba65ef459df30512cf75c7c61151c782a2c175b6c6ee1",
-        "line": 6,
-        "path": "tobkiri_runtime/ecosystem/defaultspack/functions/revoke_all_ok/manifest.json",
         "rule_id": "legacy_host_execution"
       },
       {
@@ -18431,7 +18379,7 @@
     ]
   },
   "repository": {
-    "commit": "d05ca5f9f8af4cd0bbf9f6c197fe85ad3f9d615f",
+    "commit": "f6a4ff7ecfd8a71f5a21fdebddf9d28d818ca799",
     "tree_digest": "200da88015a60a4291fb89366592eb6333399fcf406de86f28a3c7e67de0ca63"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

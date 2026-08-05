@@ -57,7 +57,7 @@
       "provenance": {
         "schema": "io.tobkiri.provenance.v1",
         "source_kind": "generated",
-        "source_path": "tobkiri_runtime/ecosystem/conformance_minimal_echo_pack/contracts.v4.json",
+        "source_path": "tobkiri_runtime/tobkiri_host/conformance/fixtures/conformance_minimal_echo_pack/contracts.v4.json",
         "source_digest": "sha256:c4a09bb78ff098244d7aeab1d7a6415f190b5539478733f8d30468eab7fb589c",
         "repository_commit": "working-tree",
         "repository_tree": "0000000000000000000000000000000000000000000000000000000000000000",

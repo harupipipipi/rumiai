@@ -65,7 +65,11 @@ MINIMAL_BASE_DEFINITION_DIGEST = _digest("base-definition")
 MINIMAL_SHELL_DEFINITION_DIGEST = _digest("shell-definition")
 MINIMAL_CONTRACT_REVISION_DIGEST = _digest("echo-contract")
 MINIMAL_BACKEND_DIGEST = _digest("conformance-backend")
-MINIMAL_PACK_ROOT = Path(__file__).resolve().parents[2] / "ecosystem" / "conformance_minimal_echo_pack"
+MINIMAL_PACK_ROOT = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "conformance_minimal_echo_pack"
+)
 
 _ECHO_SCHEMA: Mapping[str, Any] = {
     "type": "object",
