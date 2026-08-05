@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import patch
-
-
-def test_pack_api_handler_uses_router_table_mixin_for_dispatch():
+def test_pack_api_handler_excludes_router_table_mixin_from_dispatch():
     from core_runtime.pack_api_server import PackAPIHandler
 
-    assert PackAPIHandler._dispatch_api_route.__module__ == "core_runtime.api.router_table"
+    assert not hasattr(PackAPIHandler, "_dispatch_api_route")
+    assert not hasattr(PackAPIHandler, "load_api_routes")
 
 
 def test_pack_api_handler_uses_response_writer_mixin():

@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
-
 class SetupHandlersMixin:
     """Expose one finite setup transaction with no legacy Registry authority."""
 
     @staticmethod
     def _recommended_default_profile_preview() -> Dict[str, Any]:
         """Return the exact integrity-checked Defaults Profile selection."""
+
+        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
         bundle_root = (
             Path(__file__).resolve().parents[2]

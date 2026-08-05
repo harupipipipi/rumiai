@@ -111,6 +111,36 @@ VALID_MANIFEST_AUTHORITIES = frozenset(
     {"v4-authoritative"}
 )
 
+PACK_API_SOURCE = RUNTIME / "core_runtime" / "pack_api_server.py"
+PACK_API_AUTH_SOURCE = RUNTIME / "core_runtime" / "api" / "auth_gate.py"
+LEGACY_API_SYMBOLS = frozenset(
+    {
+        "APIRouteTableMixin",
+        "ContractToolCatalog",
+        "EcosystemNodeRegistry",
+        "discover_pack_locations",
+        "get_approval_manager",
+        "get_capability_executor",
+        "get_hmac_key_manager",
+        "HMACKeyManager",
+    }
+)
+LEGACY_API_ENV_AUTHORITY = frozenset(
+    {
+        "RUMI_ALLOW_LEGACY_REMOTE_BEARER",
+        "RUMI_API_BIND_ADDRESS",
+    }
+)
+LEGACY_LIVE_ROUTES = frozenset(
+    {
+        "/api/packs",
+        "/api/authority/events",
+        "/api/runtime/available",
+        "/api/packs/scan",
+        "/api/routes/reload",
+    }
+)
+
 AUTHORITY_ENV_NAMES = frozenset(
     {
         "RUMI_AUTO_APPROVE_LOCAL",
@@ -737,6 +767,64 @@ def _ast_legacy_runtime_findings() -> list[dict[str, Any]]:
     for path, tree in _reachable_python_trees().items():
         findings.extend(_ast_legacy_runtime_findings_for_tree(path, tree))
     return sorted(findings, key=lambda item: (item["path"], item["line"], item["rule"]))
+
+
+def _pack_api_hardcoded_legacy_findings() -> list[dict[str, Any]]:
+    """Reject legacy symbols, env authority, and per-route handler branches."""
+
+    findings: list[dict[str, Any]] = []
+    for source in (PACK_API_SOURCE, PACK_API_AUTH_SOURCE):
+        tree = _python_tree(source)
+        if tree is None:
+            findings.append(_finding(source, 1, "missing_pack_api_source"))
+            continue
+        parent_map = _parents(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in LEGACY_API_SYMBOLS:
+                        findings.append(
+                            _finding(
+                                source,
+                                node.lineno,
+                                "legacy_api_symbol_import",
+                                symbol=alias.name,
+                            )
+                        )
+            elif isinstance(node, ast.Call):
+                name = _called_name(node)
+                if name in LEGACY_API_SYMBOLS:
+                    findings.append(
+                        _finding(
+                            source,
+                            node.lineno,
+                            "legacy_api_symbol_call",
+                            symbol=name,
+                        )
+                    )
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value in LEGACY_API_ENV_AUTHORITY:
+                    findings.append(
+                        _finding(
+                            source,
+                            node.lineno,
+                            "legacy_api_environment_authority",
+                            symbol=node.value,
+                        )
+                    )
+                if node.value in LEGACY_LIVE_ROUTES:
+                    owner = _owner(node, parent_map)
+                    if owner in {"do_GET", "do_POST", "do_PUT", "do_DELETE"}:
+                        findings.append(
+                            _finding(
+                                source,
+                                node.lineno,
+                                "hardcoded_legacy_route_branch",
+                                symbol=node.value,
+                                owner=owner,
+                            )
+                        )
+    return findings
 
 
 def _ast_authority_bypass_findings() -> list[dict[str, Any]]:
@@ -1499,6 +1587,116 @@ def dispatch(registry):
         + _ast_fallback_findings()
         + _ast_projection_findings(),
     )
+
+
+def test_pack_api_has_no_hardcoded_legacy_handler_reachability() -> None:
+    """The production HTTP adapter contains no legacy route implementation."""
+
+    _assert_zero(
+        "hard-coded legacy Pack API reachability",
+        _pack_api_hardcoded_legacy_findings(),
+    )
+
+
+def test_fresh_home_legacy_api_probes_are_retired_without_manager_imports() -> None:
+    """A clean local server yields only typed retirement for legacy probes."""
+
+    script = r'''
+import http.client
+import json
+import os
+import sys
+
+from core_runtime.pack_api_server import PackAPIServer
+from core_runtime.panel_auth import PanelAuthManager
+
+os.environ["RUMI_API_BIND_ADDRESS"] = "0.0.0.0"
+os.environ["RUMI_ALLOW_LEGACY_REMOTE_BEARER"] = "1"
+server = PackAPIServer(
+    port=0,
+    panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-local"),
+)
+observed = []
+for cycle in (1, 2):
+    server.start()
+    try:
+        for method, path in (
+            ("GET", "/api/packs"),
+            ("GET", "/api/authority/events"),
+            ("GET", "/api/runtime/available"),
+            ("POST", "/api/packs/scan"),
+            ("POST", "/api/routes/reload"),
+            ("POST", "/api/setup/complete"),
+        ):
+            connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+            connection.request(
+                method,
+                path,
+                body="{}" if method == "POST" else None,
+                headers={
+                    "Authorization": "Bearer fresh-valid-internal-token",
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read().decode("utf-8"))
+            observed.append(
+                (
+                    cycle,
+                    method,
+                    path,
+                    response.status,
+                    payload.get("data", {}).get("state"),
+                    payload.get("data", {}).get("write_set"),
+                )
+            )
+            connection.close()
+    finally:
+        server.stop()
+blocked_modules = sorted(
+    name
+    for name in sys.modules
+    if name in {
+        "core_runtime.approval_manager",
+        "core_runtime.capability_executor",
+        "core_runtime.ecosystem_nodes",
+        "core_runtime.manifest_loader",
+        "core_runtime.api.control_panel_handlers",
+        "core_runtime.api.router_table",
+    }
+)
+print(
+    json.dumps(
+        {
+            "observed": observed,
+            "blocked_modules": blocked_modules,
+            "bound_host": server.host,
+        }
+    )
+)
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=RUNTIME,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    evidence = json.loads(completed.stdout)
+    assert evidence["blocked_modules"] == []
+    assert evidence["bound_host"] == "127.0.0.1"
+    expected_cycle = [
+        [1, "GET", "/api/packs", 410, "legacy_api_retired", []],
+        [1, "GET", "/api/authority/events", 410, "legacy_api_retired", []],
+        [1, "GET", "/api/runtime/available", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/packs/scan", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/routes/reload", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/setup/complete", 410, "legacy_setup_retired", []],
+    ]
+    assert evidence["observed"] == expected_cycle + [
+        [2, *item[1:]] for item in expected_cycle
+    ]
 
 
 def test_double_authority_is_zero_by_production_reachability() -> None:

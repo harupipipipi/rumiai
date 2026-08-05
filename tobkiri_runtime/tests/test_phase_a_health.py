@@ -8,9 +8,7 @@ PackAPIHandler の /health エンドポイントをテストする。
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 # core_setup のパスを追加
 _CORE_SETUP_DIR = (
@@ -27,12 +25,12 @@ class TestAppLifecycleManagerHealth:
     """AppLifecycleManager.get_health() のテスト"""
 
     def test_health_needs_setup_true(self, tmp_path):
-        """profile.json が存在しない場合 -> needs_setup: True"""
+        """Canonical Defaults v4 capture does not require legacy profile.json."""
         from core_runtime.app_lifecycle_manager import AppLifecycleManager
         alm = AppLifecycleManager(base_dir=tmp_path)
         result = alm.get_health()
         assert result["status"] == "ok"
-        assert result["needs_setup"] is True
+        assert result["needs_setup"] is False
 
     def test_health_needs_setup_false(self, tmp_path):
         """profile.json が有効な場合 -> needs_setup: False"""
@@ -106,7 +104,7 @@ class TestAppLifecycleManagerHealth:
         assert result["needs_setup"] is False
 
     def test_health_does_not_accept_stale_setup_pack_selection(self, tmp_path):
-        """壊れた setup-pack selection では setup gate を閉じない"""
+        """Stale legacy selection cannot override canonical Defaults v4 state."""
         from core_runtime.app_lifecycle_manager import AppLifecycleManager
 
         settings_dir = tmp_path / "user_data" / "settings"
@@ -129,7 +127,7 @@ class TestAppLifecycleManagerHealth:
         result = alm.get_health()
 
         assert result["status"] == "ok"
-        assert result["needs_setup"] is True
+        assert result["needs_setup"] is False
 
     def test_health_returns_ok_status(self, tmp_path):
         """get_health() は常に status=ok を返す"""

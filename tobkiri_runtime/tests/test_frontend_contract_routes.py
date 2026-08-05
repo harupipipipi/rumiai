@@ -106,36 +106,7 @@ def test_encoded_identifier_is_left_for_normal_route_matching() -> None:
     assert resolved.path.endswith("operations%2Fcompany")
 
 
-def test_pack_handler_rewrites_valid_operations_and_reports_invalid_tokens() -> None:
+def test_pack_handler_does_not_rewrite_frontend_operations() -> None:
     from core_runtime.pack_api_server import PackAPIHandler
 
-    handler = object.__new__(PackAPIHandler)
-    handler._api_route_exact = {("GET", "/api/ui/catalog"): {}}
-    handler._api_route_patterns = ()
-    responses: list[tuple[dict[str, object], int]] = []
-    handler._send_raw_json = lambda payload, status=200, **_kwargs: responses.append((payload, status))
-
-    resolved = handler._resolve_frontend_contract_target(
-        "GET",
-        _operation("GET", "/api/ui/catalog?include_skills=true"),
-        {"existing": "value"},
-    )
-    assert resolved == ("/api/ui/catalog", {"existing": "value", "include_skills": "true"})
-
-    assert handler._resolve_frontend_contract_target(
-        "GET",
-        _operation("POST", "/api/ui/catalog"),
-        {},
-    ) is None
-    assert responses == [
-        (
-            {
-                "status": "error",
-                "error": {
-                    "code": "CONTRACT_METHOD_MISMATCH",
-                    "message": "Contract operation method mismatch",
-                },
-            },
-            405,
-        )
-    ]
+    assert not hasattr(PackAPIHandler, "_resolve_frontend_contract_target")

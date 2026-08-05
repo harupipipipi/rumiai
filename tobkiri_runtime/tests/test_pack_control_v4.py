@@ -15,13 +15,9 @@ from core_runtime.pack_control_v4 import (
     PackControlDenied,
     capture_pack_control_session,
 )
-from core_runtime.pack_api_server import PackAPIHandler, PackAPIServer
-from core_runtime.panel_auth import (
-    PanelAuthManager,
-    reset_panel_auth_manager_for_tests,
-)
+from core_runtime.pack_api_server import PackAPIServer
+from core_runtime.panel_auth import PanelAuthManager
 import core_runtime.pack_control_v4 as pack_control
-from tobkiri_host.runtime import install_dispatch_session
 
 
 TARGET_PACK = "rumi_git_read_pack"
@@ -213,24 +209,21 @@ def test_profile_identity_traversal_fails_before_control_state_access(
 
 
 def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
-    captured_session, monkeypatch: pytest.MonkeyPatch
+    captured_session,
 ) -> None:
     """Production-shaped HTTP auth/CSRF transport never calls a legacy route."""
     session, _state_path, _user_data = captured_session
-    from core_runtime.di_container import get_container
-
-    install_dispatch_session(get_container(), session)
-    auth = reset_panel_auth_manager_for_tests(
-        PanelAuthManager(bootstrap_secret="desktop-bootstrap")
+    auth = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
+    server = PackAPIServer(
+        host="127.0.0.1",
+        port=0,
+        panel_auth_manager=auth,
+        dispatch_session=session,
     )
-    server = PackAPIServer(host="127.0.0.1", port=0, internal_token="test-token")
-    server._panel_auth_manager = auth
     server.start()
     assert server.server is not None
     port = int(server.server.server_address[1])
     origin = f"http://127.0.0.1:{port}"
-    monkeypatch.setenv("RUMI_CORS_ORIGINS", origin)
-    PackAPIHandler._allowed_origins_cache_key = None
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
@@ -268,6 +261,12 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
             "payload": {},
         }
         assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
+        assert_post_denied(
+            "/api/v4/dispatch",
+            dispatch_body,
+            401,
+            {"Authorization": "Bearer formerly-valid-internal-token"},
+        )
         bootstrap = post(
             "/api/panel/auth/bootstrap",
             {},
@@ -279,15 +278,6 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
         )
         csrf = exchange["data"]["csrf_token"]
         assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
-        get_container().reset("v4_dispatch_session")
-        assert_post_denied(
-            "/api/v4/dispatch",
-            dispatch_body,
-            503,
-            {"X-Rumi-CSRF": csrf},
-        )
-        install_dispatch_session(get_container(), session)
-
         def dispatch(operation_id: str, payload: dict | None = None) -> dict:
             envelope = post(
                 "/api/v4/dispatch",
@@ -315,7 +305,6 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
             dispatch("pack.enable", {"pack_id": TARGET_PACK})
         assert conflict.value.code == 409
         assert dispatch("runtime.restart")["restart_requested"] is True
-        install_dispatch_session(get_container(), capture_pack_control_session())
         restarted_status = dispatch(
             "pack.status",
             {"pack_id": TARGET_PACK},
@@ -331,4 +320,3 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
 
         clear_kernel_restart_request()
         server.stop()
-        get_container().reset("v4_dispatch_session")
