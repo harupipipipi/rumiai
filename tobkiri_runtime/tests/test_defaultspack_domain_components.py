@@ -66,8 +66,8 @@ def test_component_roots_include_selected_sibling_ecosystem_packs(tmp_path, monk
     ecosystem = tmp_path / "ecosystem"
     defaultspack = ecosystem / "defaultspack"
     catalog = ecosystem / "rumi_model_catalog_pack"
-    _write_json(defaultspack / "ecosystem.json", {"pack_id": "defaultspack"})
-    _write_json(catalog / "ecosystem.json", {"pack_id": "rumi_model_catalog_pack"})
+    _write_json(defaultspack / "pack.v4.json", {"pack": {"id": "defaultspack"}})
+    _write_json(catalog / "pack.v4.json", {"pack": {"id": "rumi_model_catalog_pack"}})
     (catalog / "domain").mkdir(parents=True)
     monkeypatch.setattr(
         "domain.components.registry.effective_pack_ids",
@@ -92,8 +92,8 @@ def test_component_roots_skip_unreadable_sibling_pack_candidates(tmp_path, monke
     defaultspack = ecosystem / "defaultspack"
     catalog = ecosystem / "rumi_model_catalog_pack"
     restricted = ecosystem / "restricted"
-    _write_json(defaultspack / "ecosystem.json", {"pack_id": "defaultspack"})
-    _write_json(catalog / "ecosystem.json", {"pack_id": "rumi_model_catalog_pack"})
+    _write_json(defaultspack / "pack.v4.json", {"pack": {"id": "defaultspack"}})
+    _write_json(catalog / "pack.v4.json", {"pack": {"id": "rumi_model_catalog_pack"}})
     (catalog / "domain").mkdir(parents=True)
     restricted.mkdir(parents=True)
     monkeypatch.setattr(
@@ -104,7 +104,7 @@ def test_component_roots_skip_unreadable_sibling_pack_candidates(tmp_path, monke
     original_is_file = Path.is_file
 
     def fake_is_file(path: Path) -> bool:
-        if path == restricted / "ecosystem.json":
+        if path == restricted / "pack.v4.json":
             raise PermissionError("blocked test path")
         return original_is_file(path)
 

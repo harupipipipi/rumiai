@@ -28,7 +28,6 @@ _TOOL_SEARCH_METADATA_KEYS = {
     "skills",
     "triggers",
 }
-_DISCOVERY_ONLY_PACK_IDS = frozenset({"rumi_default_tools_pack"})
 
 
 class ToolRegistrationError(ValueError):
@@ -271,11 +270,6 @@ class ToolRegistry:
         roots: list[Path] = []
         effective = effective_pack_ids()
         candidate_pack_ids = set(effective)
-        own_pack_id = self._pack_id_from_root(self._pack_root())
-        if own_pack_id:
-            candidate_pack_ids.add(own_pack_id)
-        if not effective:
-            candidate_pack_ids.update(_DISCOVERY_ONLY_PACK_IDS)
         for pack_id in sorted(candidate_pack_ids):
             path = ecosystem_dir / pack_id
             if (
@@ -301,13 +295,7 @@ class ToolRegistry:
                 continue
             if declared == pack_id:
                 return True
-        try:
-            legacy = json.loads(
-                (pack_root / "ecosystem.json").read_text(encoding="utf-8")
-            )
-        except (OSError, UnicodeError, ValueError, TypeError):
-            return False
-        return str(legacy.get("pack_id") or "").strip() == pack_id
+        return False
 
     def _load_pack_tools(self):
         loaded = self._load_extension_tools()
@@ -490,13 +478,18 @@ class ToolRegistry:
 
     @staticmethod
     def _pack_id_from_root(pack_root: Path) -> str:
-        try:
-            raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-            pack_id = str(raw.get("pack_id") or "").strip()
-            if pack_id:
-                return pack_id
-        except Exception:
-            pass
+        candidates = (
+            pack_root / "pack.v4.json",
+            pack_root / "v4" / "packs" / f"{pack_root.name}.pack.v4.json",
+        )
+        for manifest_path in candidates:
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                pack_id = str((raw.get("pack") or {}).get("id") or "").strip()
+                if pack_id:
+                    return pack_id
+            except (OSError, UnicodeError, ValueError, TypeError):
+                continue
         return pack_root.name
 
     def _load_extension_tools(self):

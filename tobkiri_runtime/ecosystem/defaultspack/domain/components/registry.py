@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 from typing import Iterable, List
@@ -11,11 +10,6 @@ from core_runtime.resolved_profile_scope import effective_pack_ids
 
 _LOCK = threading.Lock()
 _REGISTRY: "DomainComponentRegistry | None" = None
-_EXTRA_DOMAIN_ROOTS_ENV = "RUMI_DEFAULTSPACK_DOMAIN_COMPONENT_ROOTS"
-# These components are part of the reviewed default-tools compatibility
-# surface.  They may be listed before a profile has selected the pack, but
-# execution remains gated by the canonical Capability Plan.
-_DISCOVERY_ONLY_PACK_IDS = frozenset({"rumi_default_tools_pack"})
 
 
 def _default_pack_root() -> Path:
@@ -38,7 +32,7 @@ def _is_file(path: Path) -> bool:
 
 def _coerce_domain_root(path: Path | str) -> Path:
     candidate = Path(path).expanduser()
-    if _is_file(candidate / "ecosystem.json"):
+    if _is_file(candidate / "pack.v4.json"):
         return candidate / "domain"
     return candidate
 
@@ -49,14 +43,21 @@ def _append_unique(roots: list[Path], root: Path | str) -> None:
         roots.append(candidate)
 
 
-def _env_roots(raw: str | None = None) -> list[Path]:
-    value = os.environ.get(_EXTRA_DOMAIN_ROOTS_ENV, "") if raw is None else raw
-    roots: list[Path] = []
-    for item in value.split(os.pathsep):
-        item = item.strip()
-        if item:
-            _append_unique(roots, item)
-    return roots
+def _has_v4_pack(pack_root: Path, pack_id: str) -> bool:
+    import json
+
+    candidates = (
+        pack_root / "pack.v4.json",
+        pack_root / "v4" / "packs" / f"{pack_id}.pack.v4.json",
+    )
+    for manifest_path in candidates:
+        try:
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if str((raw.get("pack") or {}).get("id") or "").strip() == pack_id:
+                return True
+        except (OSError, UnicodeError, ValueError, TypeError):
+            continue
+    return False
 
 
 def build_domain_component_roots(
@@ -72,33 +73,20 @@ def build_domain_component_roots(
     if _is_dir(ecosystem_dir):
         effective = effective_pack_ids()
         candidate_pack_ids = set(effective)
-        try:
-            pack_manifest = pack_root / "ecosystem.json"
-            if _is_file(pack_manifest):
-                import json
-
-                pack_id = str(json.loads(pack_manifest.read_text(encoding="utf-8")).get("pack_id") or "").strip()
-                if pack_id:
-                    candidate_pack_ids.add(pack_id)
-        except (OSError, ValueError, TypeError):
-            pass
-        if not effective:
-            candidate_pack_ids.update(_DISCOVERY_ONLY_PACK_IDS)
         siblings = [ecosystem_dir / pack_id for pack_id in sorted(candidate_pack_ids)]
         for sibling in siblings:
             if sibling == pack_root:
                 continue
-            if _is_dir(sibling) and _is_file(sibling / "ecosystem.json") and _is_dir(sibling / "domain"):
+            if _is_dir(sibling) and _has_v4_pack(sibling, sibling.name) and _is_dir(sibling / "domain"):
                 _append_unique(roots, sibling / "domain")
 
-    _append_unique(roots, pack_root / "user_data" / "shared" / "domain_components")
     for root in extra_roots or ():
         _append_unique(roots, root)
     return roots
 
 
 def get_domain_component_roots() -> list[Path]:
-    return build_domain_component_roots(_default_pack_root(), extra_roots=_env_roots())
+    return build_domain_component_roots(_default_pack_root())
 
 
 class DomainComponentRegistry:

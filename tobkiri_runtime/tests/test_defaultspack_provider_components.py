@@ -151,11 +151,11 @@ def test_untrusted_provider_component_manifest_is_not_promoted_or_imported(tmp_p
     try:
         get_domain_component_registry(force_reload=True)
 
-        metadata = provider_component_metadata_map()["evil_validation"]
+        metadata = provider_component_metadata_map()
         manifests = provider_manifests_from_components()
         available = detect_available_providers()
 
-        assert metadata["provider_manifest"] == {}
+        assert "evil_validation" not in metadata
         assert "evil_validation" not in manifests
         assert "evil_validation" not in available
         assert not (tmp_path / "sentinel.txt").exists()

@@ -19,7 +19,6 @@ from ecosystem.defaultspack.domain.extensions.manifest import (
     validate_manifest,
 )
 from ecosystem.defaultspack.domain.extensions.registry import ExtensionRegistry
-from ecosystem.defaultspack.domain.extensions.runtime import build_extensions_roots
 from ecosystem.defaultspack.domain.prompt.manager import PromptManager
 from ecosystem.defaultspack.domain.tool.broker import ToolBroker
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
@@ -94,7 +93,7 @@ def _openrouter_catalog_models():
 
 def _make_extension_pack(ecosystem_root: Path, pack_id: str) -> Path:
     pack_root = ecosystem_root / pack_id
-    _write_json(pack_root / "ecosystem.json", {"pack_id": pack_id})
+    _write_json(pack_root / "pack.v4.json", {"pack": {"id": pack_id}})
     (pack_root / "extensions").mkdir(parents=True, exist_ok=True)
     return pack_root
 
@@ -339,21 +338,23 @@ def test_extension_registry_lists_rumi_bundle_ui_surface():
     assert surfaces["rumi_bundle"]["config"]["port_source"]["default"] == 8766
 
 
-def test_build_extensions_roots_includes_all_packs_without_setup_selection(tmp_path: Path):
+def test_build_extensions_roots_ignores_unselected_packs(tmp_path: Path, monkeypatch):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
     rumi_root = tmp_path / "tobkiri_runtime"
     ecosystem_root = rumi_root / "ecosystem"
     defaultspack = _make_extension_pack(ecosystem_root, "defaultspack")
     pack_a = _make_extension_pack(ecosystem_root, "pack_a")
     pack_b = _make_extension_pack(ecosystem_root, "pack_b")
 
-    roots = {path.resolve() for path in build_extensions_roots(defaultspack)}
+    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda _root: set())
+    roots = {path.resolve() for path in runtime.build_extensions_roots(defaultspack)}
 
     assert (defaultspack / "extensions").resolve() in roots
-    assert (pack_a / "extensions").resolve() in roots
-    assert (pack_b / "extensions").resolve() in roots
+    assert (pack_a / "extensions").resolve() not in roots
+    assert (pack_b / "extensions").resolve() not in roots
 
 
-def test_build_extensions_roots_includes_app_catalog_pack_for_managed_defaultspack(
+def test_build_extensions_roots_ignores_ambient_app_catalog(
     monkeypatch, tmp_path: Path
 ):
     import ecosystem.defaultspack.domain.extensions.runtime as runtime
@@ -370,40 +371,35 @@ def test_build_extensions_roots_includes_app_catalog_pack_for_managed_defaultspa
     model_catalog_pack = _make_extension_pack(app_ecosystem_root, "rumi_model_catalog_pack")
 
     monkeypatch.setenv("RUMI_APP_DIR", str(app_dir))
-    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda pack_root: None)
+    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda pack_root: set())
 
     roots = {path.resolve() for path in runtime.build_extensions_roots(managed_defaultspack)}
 
     assert (managed_defaultspack / "extensions").resolve() in roots
-    assert (model_catalog_pack / "extensions").resolve() in roots
+    assert (model_catalog_pack / "extensions").resolve() not in roots
     assert (app_defaultspack / "extensions").resolve() not in roots
 
 
-def test_build_extensions_roots_filters_to_selected_setup_targets(tmp_path: Path):
+def test_build_extensions_roots_filters_to_v4_effective_set(tmp_path: Path, monkeypatch):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
     rumi_root = tmp_path / "tobkiri_runtime"
     ecosystem_root = rumi_root / "ecosystem"
     defaultspack = _make_extension_pack(ecosystem_root, "defaultspack")
     pack_a = _make_extension_pack(ecosystem_root, "pack_a")
     pack_b = _make_extension_pack(ecosystem_root, "pack_b")
     extra_root = tmp_path / "loose_extensions"
-    _write_json(
-        rumi_root / "user_data" / "settings" / "setup_pack_selection.json",
-        {
-            "target_pack_ids": ["pack_a"],
-            "active_target_pack_id": "pack_a",
-        },
-    )
+    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda _root: {"pack_a"})
 
-    roots = {path.resolve() for path in build_extensions_roots(defaultspack, extra_roots=[extra_root])}
+    roots = {path.resolve() for path in runtime.build_extensions_roots(defaultspack, extra_roots=[extra_root])}
 
     assert (defaultspack / "extensions").resolve() in roots
     assert (pack_a / "extensions").resolve() in roots
     assert (pack_b / "extensions").resolve() not in roots
-    assert (defaultspack / "user_data" / "shared" / "extensions").resolve() in roots
     assert extra_root.resolve() in roots
 
 
-def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path: Path):
+def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path: Path, monkeypatch):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
     rumi_root = tmp_path / "tobkiri_runtime"
     ecosystem_root = rumi_root / "ecosystem"
     defaultspack = _make_extension_pack(ecosystem_root, "defaultspack")
@@ -412,7 +408,8 @@ def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path
     selection_path.parent.mkdir(parents=True, exist_ok=True)
     selection_path.write_text("{broken", encoding="utf-8")
 
-    roots = {path.resolve() for path in build_extensions_roots(defaultspack)}
+    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda _root: set())
+    roots = {path.resolve() for path in runtime.build_extensions_roots(defaultspack)}
 
     assert (defaultspack / "extensions").resolve() in roots
     assert (pack_a / "extensions").resolve() not in roots

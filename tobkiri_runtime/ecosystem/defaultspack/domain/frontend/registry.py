@@ -78,8 +78,6 @@ class FrontendRegistry:
 
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
-        self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
-        self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         settings_owner = pack_root if pack_root is not None else None
         self._settings_path = defaultspack_frontend_settings_path(settings_owner)
         self._settings_store = FrontendSettingsStore(self._settings_path)
@@ -2432,38 +2430,45 @@ class FrontendRegistry:
         ecosystem_root = self._ecosystem_root()
         selected_pack_ids = selected_extension_pack_ids(self._pack_root)
         if ecosystem_root.exists():
-            for pack_root in sorted(ecosystem_root.iterdir()):
-                if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                    continue
-                if selected_pack_ids is not None and pack_root.name not in selected_pack_ids:
+            for pack_id in sorted(selected_pack_ids):
+                pack_root = ecosystem_root / pack_id
+                if not pack_root.is_dir() or self._v4_pack_id(pack_root) != pack_id:
                     continue
                 dirs.append(pack_root / "frontend_extensions")
-        dirs.append(self._extensions_dir)
         return dirs
 
     def _ecosystem_root(self) -> Path:
-        if (self._pack_root / "ecosystem.json").exists() and self._pack_root.parent.name == "ecosystem":
+        if self._v4_pack_id(self._pack_root) and self._pack_root.parent.name == "ecosystem":
             return self._pack_root.parent
         return Path(__file__).resolve().parents[3]
 
     def _source_pack_id(self, path: Path) -> str:
         for parent in path.parents:
-            if (parent / "ecosystem.json").exists():
-                return parent.name
-        return "user_data"
+            pack_id = self._v4_pack_id(parent)
+            if pack_id:
+                return pack_id
+        return ""
+
+    @staticmethod
+    def _v4_pack_id(pack_root: Path) -> str:
+        candidates = (
+            pack_root / "pack.v4.json",
+            pack_root / "v4" / "packs" / f"{pack_root.name}.pack.v4.json",
+        )
+        for manifest_path in candidates:
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                pack_id = str((raw.get("pack") or {}).get("id") or "").strip()
+                if pack_id:
+                    return pack_id
+            except (OSError, UnicodeError, ValueError, TypeError):
+                continue
+        return ""
 
     def _load_shell_config(self) -> dict[str, Any]:
-        if not self._shell_path.exists():
-            return {}
-        try:
-            config = json.loads(self._shell_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            self._add_diagnostic("warning", "frontend_shell_invalid_json", str(exc), str(self._shell_path))
-            return {}
-        if not isinstance(config, dict):
-            self._add_diagnostic("warning", "frontend_shell_not_object", "frontend_shell.json must contain a JSON object.", str(self._shell_path))
-            return {}
-        return config
+        # Shell selection is bound by the verified v4 Profile/ShellDefinition.
+        # Mutable user_data shell JSON is not a layout authority.
+        return {}
 
     def _template_catalog_metadata(self) -> dict[str, Any]:
         try:

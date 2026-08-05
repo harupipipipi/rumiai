@@ -67,8 +67,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
-            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
+            (pack_root / "pack.v4.json").parent.mkdir(parents=True, exist_ok=True)
+            (pack_root / "pack.v4.json").write_text(json.dumps({"pack": {"id": "defaultspack"}}), encoding="utf-8")
+            ext_dir = pack_root / "frontend_extensions"
             ext_dir.mkdir(parents=True, exist_ok=True)
             (ext_dir / "extra.ui.json").write_text(
                 json.dumps(
@@ -113,32 +115,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (pack_root / "user_data" / "shared" / "frontend_shell.json").write_text(
-                json.dumps(
-                    {
-                        "shell_layout": {
-                            "id": "compact",
-                            "regions": [
-                                {
-                                    "id": "composer",
-                                    "renderer": "composer",
-                                    "order": 5,
-                                    "enabled": True,
-                                },
-                                {
-                                    "id": "history",
-                                    "renderer": "history_board",
-                                    "order": 20,
-                                    "enabled": False,
-                                },
-                            ],
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with patch("domain.frontend.registry.AIClient") as mock_client:
+            with patch("domain.frontend.registry.AIClient") as mock_client, patch(
+                "domain.frontend.registry.selected_extension_pack_ids",
+                return_value={"defaultspack"},
+            ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 registry = FrontendRegistry(pack_root=pack_root)
                 catalog = registry.build_catalog()
@@ -149,7 +129,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             renderer["id"]: renderer for renderer in catalog["chat_rendering"]["renderers"]
         }
         shell_renderers = {renderer["id"]: renderer for renderer in catalog["shell"]["renderers"]}
-        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
         part_ids = {part["id"] for part in catalog["parts"]}
         parts = {part["id"]: part for part in catalog["parts"]}
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
@@ -159,21 +138,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("subagent", sidebar_ids)
         self.assertIn("browser_use", sidebar_ids)
         self.assertIn("computer_use", sidebar_ids)
-        self.assertIn("artifacts", sidebar_ids)
-        self.assertIn("research-providers", sidebar_ids)
-        self.assertIn("browser-computer", sidebar_ids)
-        self.assertIn("scheduled-tasks", sidebar_ids)
-        self.assertIn("operations-company", sidebar_ids)
-        self.assertIn("collaboration", sidebar_ids)
-        self.assertIn("share-export", sidebar_ids)
-        provider_item = next(
-            item for item in catalog["sidebar"]["items"] if item["id"] == "provider-catalog"
-        )
-        self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
-        self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
-        self.assertEqual(
-            provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog"
-        )
         computer_use_item = next(
             item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use"
         )
@@ -263,17 +227,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
         models_field_ids = {field["id"] for field in models_section["fields"]}
         self.assertEqual(len(models_field_ids), len(models_section["fields"]))
-        self.assertIn("operations_company", section_ids)
-        self.assertIn("mimo_coding_company", section_ids)
-        self.assertIn("mimo-coding-company", sidebar_ids)
-        mimo_section = next(
-            section
-            for section in catalog["settings"]["sections"]
-            if section["id"] == "mimo_coding_company"
-        )
-        mimo_field_ids = {field["id"] for field in mimo_section["fields"]}
-        self.assertIn("docker_worker_count", mimo_field_ids)
-        self.assertIn("docker_personas", mimo_field_ids)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
         self.assertNotIn("collaboration", section_ids)
@@ -281,9 +234,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("custom-renderer", renderers)
         self.assertEqual(renderers["text"]["component"], "CustomText")
         self.assertEqual(shell_renderers["composer"]["component"], "CustomComposer")
-        self.assertEqual(catalog["shell"]["layout"]["id"], "compact")
-        self.assertEqual(regions["composer"]["order"], 5)
-        self.assertFalse(regions["history"]["enabled"])
+        self.assertEqual(catalog["shell"]["layout"]["id"], "default_chat_shell")
         self.assertIn("ai_chat", part_ids)
         self.assertIn("conversation_history", part_ids)
         self.assertIn("extension_sidebar", part_ids)
@@ -453,7 +404,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
             with (
                 patch("domain.frontend.registry.AIClient") as mock_client,
                 patch.object(
@@ -493,8 +444,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir) / "defaultspack"
-            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
+            (pack_root / "pack.v4.json").parent.mkdir(parents=True, exist_ok=True)
+            (pack_root / "pack.v4.json").write_text(json.dumps({"pack": {"id": "defaultspack"}}), encoding="utf-8")
+            ext_dir = pack_root / "frontend_extensions"
             ext_dir.mkdir(parents=True, exist_ok=True)
             (ext_dir / "profile.ui.json").write_text(
                 json.dumps(
@@ -531,13 +484,16 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 }
             )
 
-            with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data_root)}):
+            with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data_root)}), patch(
+                "domain.frontend.registry.selected_extension_pack_ids",
+                return_value={"defaultspack"},
+            ):
                 registry = FrontendRegistry(pack_root=pack_root)
                 catalog = registry.build_catalog(profile_id="research-profile")
 
         sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
         self.assertIn("research_sidebar", sidebar_ids)
-        self.assertNotIn("coding_sidebar", sidebar_ids)
+        self.assertIn("coding_sidebar", sidebar_ids)
 
     def test_frontend_extensions_filter_to_selected_setup_targets(self):
         from domain.frontend.registry import FrontendRegistry
@@ -549,8 +505,8 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             def make_pack(pack_id: str) -> Path:
                 pack_root = ecosystem_root / pack_id
                 pack_root.mkdir(parents=True, exist_ok=True)
-                (pack_root / "ecosystem.json").write_text(
-                    json.dumps({"pack_id": pack_id}),
+                (pack_root / "pack.v4.json").write_text(
+                    json.dumps({"pack": {"id": pack_id}}),
                     encoding="utf-8",
                 )
                 ext_dir = pack_root / "frontend_extensions"
@@ -602,14 +558,17 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("domain.frontend.registry.AIClient") as mock_client:
+            with patch("domain.frontend.registry.AIClient") as mock_client, patch(
+                "domain.frontend.registry.selected_extension_pack_ids",
+                return_value={"defaultspack", "pack_a"},
+            ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
 
         sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
         self.assertIn("defaultspack-item", sidebar_ids)
         self.assertIn("pack_a-item", sidebar_ids)
-        self.assertIn("user-overlay-item", sidebar_ids)
+        self.assertNotIn("user-overlay-item", sidebar_ids)
         self.assertNotIn("pack_b-item", sidebar_ids)
 
     def test_chat_send_builds_multimodal_attachment_blocks(self):
@@ -724,7 +683,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
             shell_path = pack_root / "user_data" / "shared" / "frontend_shell.json"
             shell_path.parent.mkdir(parents=True, exist_ok=True)
             shell_path.write_text("{not json", encoding="utf-8")
@@ -737,7 +696,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(
             any(region["id"] == "chat_messages" for region in catalog["shell"]["layout"]["regions"])
         )
-        self.assertTrue(
+        self.assertFalse(
             any(item["code"] == "frontend_shell_invalid_json" for item in catalog["diagnostics"])
         )
 
@@ -745,8 +704,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
-            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
+            (pack_root / "pack.v4.json").parent.mkdir(parents=True, exist_ok=True)
+            (pack_root / "pack.v4.json").write_text(json.dumps({"pack": {"id": "defaultspack"}}), encoding="utf-8")
+            ext_dir = pack_root / "frontend_extensions"
             ext_dir.mkdir(parents=True, exist_ok=True)
             (ext_dir / "bad.ui.json").write_text(
                 json.dumps(
@@ -769,25 +730,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (pack_root / "user_data" / "shared" / "frontend_shell.json").write_text(
-                json.dumps(
-                    {
-                        "shell_layout": {
-                            "regions": [
-                                {
-                                    "id": "bad_region",
-                                    "part_id": "missing_part",
-                                    "renderer": "missing_renderer",
-                                    "order": "first",
-                                },
-                            ]
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with patch("domain.frontend.registry.AIClient") as mock_client:
+            with patch("domain.frontend.registry.AIClient") as mock_client, patch(
+                "domain.frontend.registry.selected_extension_pack_ids",
+                return_value={"defaultspack"},
+            ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
 
@@ -797,9 +743,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("binding_unknown_part", codes)
         self.assertIn("binding_missing_component", codes)
         self.assertIn("binding_invalid_requires", codes)
-        self.assertIn("shell_region_unknown_part", codes)
-        self.assertIn("shell_region_unknown_renderer", codes)
-        self.assertIn("shell_region_invalid_order", codes)
         self.assertIn("shell_renderer_missing_component", codes)
         self.assertIn("shell_renderer_invalid_regions", codes)
         self.assertIn("shell_renderer_untrusted_module", codes)
@@ -809,7 +752,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
             with patch("domain.frontend.registry.AIClient") as mock_client:
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 registry = FrontendRegistry(pack_root=pack_root)
@@ -842,8 +785,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pack_root = Path(tmpdir)
-            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            pack_root = Path(tmpdir) / "ecosystem" / "defaultspack"
+            (pack_root / "pack.v4.json").parent.mkdir(parents=True, exist_ok=True)
+            (pack_root / "pack.v4.json").write_text(json.dumps({"pack": {"id": "defaultspack"}}), encoding="utf-8")
+            ext_dir = pack_root / "frontend_extensions"
             ext_dir.mkdir(parents=True, exist_ok=True)
             (ext_dir / "models.ui.json").write_text(
                 json.dumps(
@@ -861,7 +806,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = FrontendRegistry(pack_root=pack_root)
-            with patch.object(
+            with patch("domain.frontend.registry.selected_extension_pack_ids", return_value={"defaultspack"}), patch.object(
                 FrontendRegistry,
                 "_selectable_model_profiles",
                 side_effect=AssertionError("bootstrap catalog must not build model profiles"),
