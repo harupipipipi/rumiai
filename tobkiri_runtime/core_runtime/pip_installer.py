@@ -1192,7 +1192,8 @@ def get_pip_installer() -> PipInstaller:
     return _global_pip_installer
 
 
-def reset_pip_installer(requests_dir: str = None, ecosystem_dir: str = None) -> PipInstaller:
+def reset_pip_installer(requests_dir: str | None = None,
+                        ecosystem_dir: str | None = None) -> PipInstaller:
     """PipInstaller をリセット（テスト用）"""
     global _global_pip_installer
     with _pip_lock:

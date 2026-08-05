@@ -94,11 +94,11 @@ class SetupPackManager:
     def _definition_files(self) -> List[Path]:
         if not self.root.is_dir():
             return []
-        return tuple(
+        return [
             path
             for path in finite_files(self.root, (".json",), recursive=True)
             if path.name == "pack.json" and path.parent.parent == self.root
-        )
+        ]
 
     def _load_definitions(self) -> Dict[str, SetupPackDefinition]:
         result: Dict[str, SetupPackDefinition] = {}

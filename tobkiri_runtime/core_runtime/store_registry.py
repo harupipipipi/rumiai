@@ -1080,7 +1080,7 @@ def get_store_registry() -> StoreRegistry:
     return get_container().get("store_registry")
 
 
-def reset_store_registry(db_path: str = None) -> StoreRegistry:
+def reset_store_registry(db_path: str | None = None) -> StoreRegistry:
     """
     StoreRegistry をリセットする（テスト用）。
 

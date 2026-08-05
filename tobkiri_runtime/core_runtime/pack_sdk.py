@@ -425,11 +425,11 @@ def _render_command_protocol_models(
         "commandProtocolError",
         "commandInvocationResult",
     )
-    models = {
-        name: definitions.get(name)
-        for name in names
-        if isinstance(definitions.get(name), dict)
-    }
+    models: dict[str, dict[str, Any]] = {}
+    for name in names:
+        model = definitions.get(name)
+        if isinstance(model, dict):
+            models[name] = model
     if set(models) != set(names):
         raise PackSdkError(
             "command protocol schema is missing SDK model definitions"

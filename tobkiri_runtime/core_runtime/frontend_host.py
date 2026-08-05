@@ -143,7 +143,7 @@ class FrontendHostRegistry:
 
         accepted_list, collision_diagnostics = _reject_collisions(contributions)
         diagnostics.extend(collision_diagnostics)
-        accepted = tuple(
+        sorted_accepted = tuple(
             sorted(
                 accepted_list,
                 key=lambda item: (
@@ -159,7 +159,7 @@ class FrontendHostRegistry:
             "profile_id": self.plan.profile_id,
             "profile_revision": self.plan.profile_revision,
             "plan_hash": self.plan.plan_hash,
-            "contributions": tuple(asdict(item) for item in accepted),
+            "contributions": tuple(asdict(item) for item in sorted_accepted),
             "diagnostics": tuple(asdict(item) for item in diagnostics),
             "quarantined_pack_ids": tuple(sorted(quarantined)),
         }
@@ -168,7 +168,7 @@ class FrontendHostRegistry:
             profile_id=self.plan.profile_id,
             profile_revision=self.plan.profile_revision,
             plan_hash=self.plan.plan_hash,
-            contributions=accepted,
+            contributions=sorted_accepted,
             diagnostics=tuple(diagnostics),
             quarantined_pack_ids=tuple(sorted(quarantined)),
             catalog_hash=content_identity(payload),

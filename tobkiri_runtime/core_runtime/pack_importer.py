@@ -376,7 +376,7 @@ class PackImporter:
             Returns True if validation passed, False otherwise.
             """
             valid, err, data = self._validate_ecosystem_json(eco_path)
-            if not valid:
+            if not valid or data is None:
                 warnings.append(
                     f"Pack '{pack_id}' skipped: {err}"
                 )
@@ -440,7 +440,7 @@ class PackImporter:
             return None
 
     def list_stagings(self) -> List[Dict[str, Any]]:
-        results = []
+        results: List[Dict[str, Any]] = []
         if not self._staging_root.exists():
             return results
         for d in finite_children(self._staging_root, directories_only=True):
@@ -487,7 +487,7 @@ def get_pack_importer() -> PackImporter:
     return _global_importer
 
 
-def reset_pack_importer(staging_root: str = None) -> PackImporter:
+def reset_pack_importer(staging_root: str | None = None) -> PackImporter:
     global _global_importer
     with _importer_lock:
         _global_importer = PackImporter(staging_root)

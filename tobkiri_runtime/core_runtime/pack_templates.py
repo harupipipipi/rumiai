@@ -141,7 +141,7 @@ def scaffold_component(
             f"rumi.pack.v3.json is required in Pack root: {root}"
         )
     if normalized_kind == "activity":
-        files = {
+        files: dict[Path, dict[str, Any] | str] = {
             root / "extensions" / "activities" / slug / "manifest.json":
                 _activity_manifest(normalized_id, "", "")
         }
