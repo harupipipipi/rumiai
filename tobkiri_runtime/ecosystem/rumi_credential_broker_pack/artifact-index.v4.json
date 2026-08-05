@@ -1,13 +1,13 @@
 {
-  "artifact_set_digest": "sha256:563dc5e4d0c1a4dfc8ca1ed42f7b83515cea59d385855eb6ad0138e26b9b2de7",
+  "artifact_set_digest": "sha256:51685eca7e5605d9e3c20c78d8a8c4636deca3f775c9912ba4b147e3ad3c7d10",
   "artifacts": [
     {
-      "digest": "sha256:2ab0bbdcd24c5735da508b7e6b9962a7bbbbb6ba21657dbc8d73c2ac56cfb382",
+      "digest": "sha256:cc0a0ed793aa882f053bca777d33cead8fdfc27e90257d39aab8e53f0a7595c0",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:41399b9ab89ef5d3724dd275733ba4e2495588513fd26beccd870b56c9c851b0",
+      "digest": "sha256:0fdc8bd640acd42ea74c526a6725086d8437eeae0467fc91e549d56251cc149b",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -27,7 +27,7 @@
       "role": "runtime"
     },
     {
-      "digest": "sha256:cc0f64968efa5170dc4ba1e55b15aa5351aaf896374f81e28c617737a192aa20",
+      "digest": "sha256:58b2e68c5b62852c01234d805e7025ddf5018ca3043dcbe1bf46d66e8b36f1b2",
       "path": "runtime/store.py",
       "role": "runtime"
     }
@@ -35,8 +35,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:3897bc40222adb2afff315b5067b80b8c8e06601f8d6dff78306548ce10b4932"
+    "signed_digest": "sha256:f13e979af5e622c1c174c9b89b47f773c6bfa8c28ba3b00b34661b85b63576a8"
   },
   "pack_id": "rumi_credential_broker_pack",
-  "source_identity": "sha256:112d83586603e703c42de4a597c113289a4f75a99f4931a76844a5dcd92ea581"
+  "source_identity": "sha256:9decff72413d66180dc5f022e4c74e9ba355a4f52c32f062fe02f2a33f6871fd"
 }

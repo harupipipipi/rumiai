@@ -24,9 +24,6 @@ from core_runtime.authority.v4 import (
     FunctionPrincipal,
     LeaseState,
 )
-from ecosystem.rumi_credential_broker_pack.runtime.store import (
-    CredentialBrokerStore,
-)
 from tobkiri_host.broker import RequestEnvelope
 
 
@@ -42,6 +39,23 @@ class JsonResponse(Protocol):
     def __exit__(self, *args: object) -> None: ...
 
     def read(self) -> bytes: ...
+
+
+class CredentialMaterialStore(Protocol):
+    """Host-injected credential capability; no concrete Pack import is allowed."""
+
+    def resolve(
+        self,
+        handle: str,
+        *,
+        consumer_pack_id: str,
+        provider_instance_id: str,
+        scope: str,
+        profile_id: str,
+        key_version: str = "",
+        purpose: str = "provider.invoke",
+    ) -> dict[str, Any]:
+        """Resolve material only inside the Host transport boundary."""
 
 
 @dataclass(frozen=True)
@@ -103,7 +117,7 @@ class HostBoundCredentialTransport:
     def __init__(
         self,
         *,
-        store: CredentialBrokerStore,
+        store: CredentialMaterialStore,
         authority_store: AuthorityStore,
         invocation_token: str,
         binding: CredentialTransportBinding,
@@ -129,7 +143,7 @@ class HostBoundCredentialTransport:
         envelope: RequestEnvelope,
         *,
         provider_principal: FunctionPrincipal,
-        store: CredentialBrokerStore,
+        store: CredentialMaterialStore,
         authority_store: AuthorityStore,
         credential_handle: str,
         credential_key_version: str,

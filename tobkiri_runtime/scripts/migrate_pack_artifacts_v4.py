@@ -407,10 +407,15 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
 
 def _import_bundled_record(pack_id: str) -> dict[str, Any]:
     """Import the two finite Defaults v4 sources without legacy authority."""
-    if pack_id == "tobkiri_host_pack_control":
-        source_path = (
-            ECOSYSTEM / "defaultspack" / "v4" / "packs" / "tobkiri-host-pack-control.pack.v4.json"
-        )
+    exact_source_path = (
+        ECOSYSTEM
+        / "defaultspack"
+        / "v4"
+        / "packs"
+        / f"{pack_id.replace('_', '-')}.pack.v4.json"
+    )
+    if exact_source_path.is_file():
+        source_path = exact_source_path
         source = json.loads(source_path.read_text(encoding="utf-8"))
         executable = json.loads(
             (ECOSYSTEM / pack_id / "executables.v4.json").read_text(encoding="utf-8")

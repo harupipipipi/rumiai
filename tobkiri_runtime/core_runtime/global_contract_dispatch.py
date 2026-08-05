@@ -158,10 +158,7 @@ class GlobalContractClient:
         deadline: float,
     ) -> dict[str, Any]:
         """Use the finite Host transport capability; never resolve material."""
-        if (
-            self.consumer_pack_id != "rumi_provider_adapters_pack"
-            or self.host_credential_transport is None
-        ):
+        if self.host_credential_transport is None:
             raise PermissionError("Host credential transport is unavailable")
         value = self.host_credential_transport.post_json(
             endpoint=endpoint,

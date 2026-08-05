@@ -5130,7 +5130,7 @@
           "path": "runtime/service.py"
         },
         {
-          "digest": "sha256:cc0f64968efa5170dc4ba1e55b15aa5351aaf896374f81e28c617737a192aa20",
+          "digest": "sha256:58b2e68c5b62852c01234d805e7025ddf5018ca3043dcbe1bf46d66e8b36f1b2",
           "kind": "executable",
           "path": "runtime/store.py"
         }
