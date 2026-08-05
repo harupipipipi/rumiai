@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import json
 import re
 from pathlib import Path
 from typing import Any
-
-import importlib
 
 from ..capability.catalog import CapabilityCatalog
 from .renderer import render
@@ -33,11 +32,17 @@ def _read_mapping(path: Path | None) -> dict[str, Any]:
         return {}
     try:
         yaml_module = importlib.import_module("yaml")
-        safe_load = getattr(yaml_module, "safe_load", None)
-        if not callable(safe_load):
-            return {}
+    except ImportError:
+        return {}
+    safe_load = getattr(yaml_module, "safe_load", None)
+    yaml_error = getattr(yaml_module, "YAMLError", ValueError)
+    if not callable(safe_load):
+        return {}
+    try:
         data = safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
+    except (OSError, UnicodeDecodeError):
+        return {}
+    except yaml_error:
         return {}
     return data if isinstance(data, dict) else {}
 
