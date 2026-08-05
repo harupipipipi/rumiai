@@ -71,7 +71,7 @@ def test_frontend_capability_uses_persisted_plan_and_exact_catalog(
         "payload": {"operation": "read", "input": {"id": "feature"}},
     }
 
-    result = frontend_capability.run(request, {"interface_registry": object()})
+    result = frontend_capability.run(request, {"v4_dispatch_session": object()})
 
     assert result["status"] == "ok"
     assert result["data"]["payload"] == {
@@ -114,7 +114,7 @@ def test_frontend_capability_rejects_a_catalog_not_seen_by_the_host(
         "payload": {"operation": "read", "input": {}},
     }
 
-    result = frontend_capability.run(request, {"interface_registry": object()})
+    result = frontend_capability.run(request, {"v4_dispatch_session": object()})
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "STALE_CATALOG"

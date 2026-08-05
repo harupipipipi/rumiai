@@ -14,7 +14,6 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 _DIAGNOSTIC_ENV_KEYS = (
     "DEFAULTS_HTTP_HOST",
@@ -229,35 +228,13 @@ def _parse_cli_args(argv: list[str]) -> None:
     parser.parse_args(argv)
 
 
-def _local_auth_token() -> str:
-    """Read the launcher-issued local token without exposing it to logs."""
-    from core_runtime.host_contract import host_contract_value
-
-    token = host_contract_value("desktop_api_token")
-    if token:
-        return token
-    user_data = os.environ.get("RUMI_USER_DATA", "").strip()
-    if not user_data:
-        return ""
-    try:
-        return (Path(user_data).expanduser().parent / ".desktop_api_token").read_text(
-            encoding="utf-8"
-        ).strip()
-    except OSError:
-        return ""
-
-
 def _surface_url(url: str) -> str:
-    """Attach local auth as a browser-only fragment for the desktop surface.
+    """Return a token-free URL for the desktop surface.
 
-    The fragment is never sent to the HTTP server and is consumed into session
-    storage by the frontend.  Diagnostic events continue to record only the
-    token-free base URL.
+    Local credentials belong to the captured Host session.  They must never be
+    serialized into browser history, diagnostics, or a URL fragment.
     """
-    token = _local_auth_token()
-    if not token:
-        return url
-    return f"{url}#rumi_local_auth={quote(token, safe='')}"
+    return url.partition("#")[0]
 
 
 def _restore_active_profile_contracts() -> None:

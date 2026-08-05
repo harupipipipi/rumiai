@@ -89,10 +89,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         ):
             url = desktop_app._surface_url("http://localhost:8766/chat")
 
-        self.assertEqual(
-            url,
-            "http://localhost:8766/chat#rumi_local_auth=local-token",
-        )
+        self.assertEqual(url, "http://localhost:8766/chat")
+        self.assertNotIn("local-token", url)
+        self.assertNotIn("#", url)
         self.assertNotIn("?", url)
 
     def test_surface_url_reads_launcher_token_file(self):
@@ -111,10 +110,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             ):
                 url = desktop_app._surface_url("http://localhost:8766/chat")
 
-        self.assertEqual(
-            url,
-            "http://localhost:8766/chat#rumi_local_auth=local%20token",
-        )
+        self.assertEqual(url, "http://localhost:8766/chat")
+        self.assertNotIn("local token", url)
+        self.assertNotIn("#", url)
 
     def test_desktop_state_migration_moves_bundle_local_settings_and_secrets(self):
         from defaultspack import desktop_app

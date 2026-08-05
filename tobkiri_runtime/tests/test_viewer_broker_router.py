@@ -141,11 +141,22 @@ def test_debug_status_rejects_fake_broker_with_same_bearer_token():
 
 def test_viewer_broker_client_reads_env_url_and_token(monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from core_runtime.host_contract import bind_host_contract
 
-    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_URL", "http://127.0.0.1:8770")
-    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_TOKEN", "secret-token")
+    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_URL", "http://ambient.invalid:8770")
+    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_TOKEN", "ambient-token")
 
-    client = ViewerBrokerClient.from_environment()
+    with bind_host_contract(
+        {
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "default",
+            "values": {
+                "viewer_broker_url": "http://127.0.0.1:8770",
+                "viewer_broker_token": "secret-token",
+            },
+        }
+    ):
+        client = ViewerBrokerClient.from_environment()
 
     assert client.available() is True
     assert client.url == "http://127.0.0.1:8770"
@@ -222,6 +233,7 @@ def test_viewer_broker_client_does_not_fallback_when_explicit_url_pair_is_incomp
     tmp_path, monkeypatch
 ):
     from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+    from core_runtime.host_contract import bind_host_contract
 
     connection = tmp_path / "connection.json"
     connection.write_text(
@@ -236,11 +248,18 @@ def test_viewer_broker_client_does_not_fallback_when_explicit_url_pair_is_incomp
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_URL", "http://127.0.0.1:8771")
-    monkeypatch.delenv("RUMI_VIEWER_HOST_BROKER_TOKEN", raising=False)
+    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_URL", "http://ambient.invalid:8771")
+    monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_TOKEN", "ambient-token")
     monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_CONNECTION", str(connection))
 
-    assert ViewerBrokerClient.from_environment().available() is False
+    with bind_host_contract(
+        {
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "default",
+            "values": {"viewer_broker_url": "http://127.0.0.1:8771"},
+        }
+    ):
+        assert ViewerBrokerClient.from_environment().available() is False
 
 
 def test_viewer_broker_client_waits_longer_than_helper_timeout(monkeypatch):
@@ -494,19 +513,28 @@ def test_computer_router_does_not_add_text_guidance_to_viewer_approval_result(mo
 
 def test_computer_router_skips_viewer_for_internal_host_execution(tmp_path, monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge import computer_router
-    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     captured: dict[str, object] = {}
 
-    def fake_run(self, action, payload, *, yolo_mode=False):
+    def fake_run(action, payload, *, source_function_id):
         captured["action"] = action
         captured["payload"] = dict(payload)
-        captured["yolo_mode"] = yolo_mode
+        captured["source_function_id"] = source_function_id
         return {"action": action, "local": True}
 
     monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
     monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+    monkeypatch.setattr(computer_router, "run_host_contract_action", fake_run)
+
+    def unexpected_viewer_call(cls):
+        del cls
+        raise AssertionError("internal host execution must not use Viewer")
+
+    monkeypatch.setattr(
+        computer_router.ViewerBrokerClient,
+        "from_environment",
+        classmethod(unexpected_viewer_call),
+    )
 
     result = computer_router.run_computer_action(
         "computer.type",
@@ -518,8 +546,12 @@ def test_computer_router_skips_viewer_for_internal_host_execution(tmp_path, monk
 
     assert result["local"] is True
     assert captured["action"] == "computer.type"
-    assert captured["payload"] == {"text": "hello"}
-    assert captured["yolo_mode"] is True
+    assert captured["payload"] == {
+        "text": "hello",
+        "artifact_root": str(tmp_path),
+        "yolo_mode": True,
+    }
+    assert captured["source_function_id"] == "defaultspack.domain.host_bridge.computer_router"
 
 
 def test_computer_router_returns_recovery_when_viewer_is_unavailable(monkeypatch):
