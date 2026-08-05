@@ -237,13 +237,21 @@ class PackAPIHandler(
         }
 
     def _send_mapping_result(self, result: Mapping[str, object]) -> None:
+        response, status_code = self._mapping_response(result)
+        self._send_response(response, status_code)
+
+    @staticmethod
+    def _mapping_response(
+        result: Mapping[str, object],
+    ) -> tuple[APIResponse, int]:
+        """Convert one typed handler result into its HTTP envelope and status."""
+
         error = result.get("error")
         status = result.get("status_code", 500 if error is not None else 200)
         status_code = status if isinstance(status, int) else 500
         if error is None:
-            self._send_response(APIResponse(True, data=dict(result)), status_code)
-            return
-        self._send_response(
+            return APIResponse(True, data=dict(result)), status_code
+        return (
             APIResponse(
                 False,
                 data={
@@ -255,6 +263,29 @@ class PackAPIHandler(
             ),
             status_code,
         )
+
+    def _is_retired_setup_complete_path(self) -> bool:
+        """Match only the canonical retired path, with any query string."""
+
+        return urlparse(self.path).path == "/api/setup/complete"
+
+    def _handle_retired_setup_complete(self, *, head_only: bool = False) -> None:
+        """Return the method-independent no-write retirement contract."""
+
+        self._discard_request_body()
+        result = self._retired_setup_complete_state()
+        if not head_only:
+            self._send_mapping_result(result)
+            return
+        response, status = self._mapping_response(result)
+        data = response.to_json().encode("utf-8")
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
 
     def _handle_health(self) -> None:
         lifecycle = self.__class__.app_lifecycle_manager
@@ -432,6 +463,9 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
         """Answer local panel preflight without widening the origin set."""
 
         self._reset_request_state()
+        if self._is_retired_setup_complete_path():
+            self._handle_retired_setup_complete()
+            return
         origin = self._get_cors_origin(self.headers.get("Origin", ""))
         if not origin:
             self._send_response(APIResponse(False, error="Forbidden origin"), 403)
@@ -455,6 +489,9 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._is_retired_setup_complete_path():
+            self._handle_retired_setup_complete()
+            return
         if path == "/health":
             self._handle_health()
             return
@@ -500,9 +537,8 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
-        if path == "/api/setup/complete":
-            self._discard_request_body()
-            self._send_mapping_result(self._retired_setup_complete_state())
+        if self._is_retired_setup_complete_path():
+            self._handle_retired_setup_complete()
             return
         if path == "/api/panel/auth/bootstrap":
             self._handle_panel_bootstrap()
@@ -542,6 +578,9 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._is_retired_setup_complete_path():
+            self._handle_retired_setup_complete()
+            return
         self._discard_request_body()
         if self._retired_api_path(path):
             self._send_retired_api(path)
@@ -557,6 +596,15 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
         """Retire historical partial mutations without manager access."""
 
         self.do_PUT()
+
+    def do_HEAD(self) -> None:
+        """Expose standard header-only semantics for the retired exact path."""
+
+        self._reset_request_state()
+        if self._is_retired_setup_complete_path():
+            self._handle_retired_setup_complete(head_only=True)
+            return
+        self._send_not_found()
 
 
 class PackAPIServer:

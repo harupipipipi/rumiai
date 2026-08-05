@@ -1626,20 +1626,28 @@ for cycle in (1, 2):
             ("GET", "/api/runtime/available"),
             ("POST", "/api/packs/scan"),
             ("POST", "/api/routes/reload"),
+            ("GET", "/api/setup/complete"),
             ("POST", "/api/setup/complete"),
+            ("PUT", "/api/setup/complete"),
+            ("PATCH", "/api/setup/complete"),
+            ("DELETE", "/api/setup/complete"),
+            ("OPTIONS", "/api/setup/complete"),
+            ("HEAD", "/api/setup/complete"),
+            ("GET", "/api/setup/complete?probe=fresh-home"),
         ):
             connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
             connection.request(
                 method,
                 path,
-                body="{}" if method == "POST" else None,
+                body="{}" if method in {"POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else None,
                 headers={
                     "Authorization": "Bearer fresh-valid-internal-token",
                     "Content-Type": "application/json",
                 },
             )
             response = connection.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read()
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
             observed.append(
                 (
                     cycle,
@@ -1692,7 +1700,21 @@ print(
         [1, "GET", "/api/runtime/available", 410, "legacy_api_retired", []],
         [1, "POST", "/api/packs/scan", 410, "legacy_api_retired", []],
         [1, "POST", "/api/routes/reload", 410, "legacy_api_retired", []],
+        [1, "GET", "/api/setup/complete", 410, "legacy_setup_retired", []],
         [1, "POST", "/api/setup/complete", 410, "legacy_setup_retired", []],
+        [1, "PUT", "/api/setup/complete", 410, "legacy_setup_retired", []],
+        [1, "PATCH", "/api/setup/complete", 410, "legacy_setup_retired", []],
+        [1, "DELETE", "/api/setup/complete", 410, "legacy_setup_retired", []],
+        [1, "OPTIONS", "/api/setup/complete", 410, "legacy_setup_retired", []],
+        [1, "HEAD", "/api/setup/complete", 410, None, None],
+        [
+            1,
+            "GET",
+            "/api/setup/complete?probe=fresh-home",
+            410,
+            "legacy_setup_retired",
+            [],
+        ],
     ]
     assert evidence["observed"] == expected_cycle + [
         [2, *item[1:]] for item in expected_cycle

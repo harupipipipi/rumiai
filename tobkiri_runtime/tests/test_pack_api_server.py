@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 from collections.abc import Iterator, Mapping
+from pathlib import Path
 
 import pytest
 
@@ -180,20 +181,107 @@ def test_legacy_api_roots_have_one_typed_retirement(
     }
 
 
-def test_setup_complete_is_unconditional_410_no_write(
+@pytest.mark.parametrize(
+    "method",
+    ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+def test_setup_complete_is_method_independent_410_no_write(
     live_server: tuple[PackAPIServer, _Dispatch],
+    method: str,
 ) -> None:
     server, _ = live_server
     status, payload, _ = _request(
         server,
-        "POST",
+        method,
         "/api/setup/complete",
-        body={"username": "must-not-write"},
+        body={"username": "must-not-write"} if method != "GET" else None,
         headers={"Authorization": "Bearer formerly-valid-root"},
     )
     assert status == 410
     assert payload["data"]["state"] == "legacy_setup_retired"
     assert payload["data"]["write_set"] == []
+
+
+def test_setup_complete_head_uses_header_only_410_semantics(
+    live_server: tuple[PackAPIServer, _Dispatch],
+) -> None:
+    server, _ = live_server
+    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    connection.request(
+        "HEAD",
+        "/api/setup/complete",
+        headers={"Authorization": "Bearer formerly-valid-root"},
+    )
+    response = connection.getresponse()
+    assert response.status == 410
+    assert response.getheader("Content-Type") == "application/json; charset=utf-8"
+    assert int(response.getheader("Content-Length", "0")) > 0
+    assert response.read() == b""
+    connection.close()
+
+
+def test_setup_complete_query_is_retired_but_trailing_slash_is_absent(
+    live_server: tuple[PackAPIServer, _Dispatch],
+) -> None:
+    server, _ = live_server
+    status, payload, _ = _request(
+        server,
+        "GET",
+        "/api/setup/complete?source=legacy",
+    )
+    assert status == 410
+    assert payload["data"]["retired_route"] == "/api/setup/complete"
+    status, payload, _ = _request(server, "GET", "/api/setup/complete/")
+    assert status == 404
+    assert payload["error"] == "Not found"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api//setup/complete",
+        "/api/setup/./complete",
+        "/api/setup/%63omplete",
+        "/api/setup/complete%2F",
+    ],
+)
+def test_setup_complete_noncanonical_variants_remain_absent(
+    live_server: tuple[PackAPIServer, _Dispatch],
+    path: str,
+) -> None:
+    server, _ = live_server
+    status, _, _ = _request(server, "GET", path)
+    assert status == 404
+
+
+def test_setup_complete_method_matrix_is_filesystem_immutable_across_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "fresh-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    try:
+        for _cycle in (1, 2):
+            server.start()
+            for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"):
+                status, payload, _ = _request(
+                    server,
+                    method,
+                    "/api/setup/complete?invalid_credential=yes",
+                    body={"mutation": True} if method != "GET" else None,
+                    headers={"Authorization": "Bearer invalid"},
+                )
+                assert status == 410
+                assert payload["data"]["write_set"] == []
+            server.stop()
+        assert not user_data.exists()
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        server.stop()
 
 
 def test_unknown_api_route_is_physically_absent(
