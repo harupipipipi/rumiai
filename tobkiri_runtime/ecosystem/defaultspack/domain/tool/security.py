@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .normalizers import list_or_empty, mapping_or_empty
+
 
 TRUSTED_TOOL_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 SUPPORTED_AUTHORABLE_EXECUTION_TYPES = {
@@ -138,7 +140,7 @@ def unsupported_execution_reason(tool_def: dict[str, Any] | None) -> str | None:
     if not isinstance(tool_def, dict):
         return "tool definition must be an object"
     exec_type = execution_type(tool_def) or "local"
-    execution = tool_def.get("execution") if isinstance(tool_def.get("execution"), dict) else {}
+    execution = mapping_or_empty(tool_def.get("execution"))
     if exec_type in SUPPORTED_AUTHORABLE_EXECUTION_TYPES:
         if exec_type == "rumi_function" and not str(execution.get("qualified_name") or "").strip():
             return "rumi_function tools must declare execution.qualified_name"
@@ -165,7 +167,7 @@ def untrusted_tool_security_rejection(tool_def: dict[str, Any]) -> str | None:
     if is_sandbox_capability_tool(tool_def):
         return None
 
-    execution = tool_def.get("execution") if isinstance(tool_def.get("execution"), dict) else {}
+    execution = mapping_or_empty(tool_def.get("execution"))
     exec_type = str(execution.get("type") or "").strip().lower()
     grants = capability_grants(tool_def)
     if any(_is_host_capability_grant(grant) for grant in grants):
@@ -222,7 +224,7 @@ def is_sandbox_capability_tool(tool_def: dict[str, Any]) -> bool:
     grants = capability_grants(tool_def)
     if not grants or any(not grant.startswith(SANDBOX_CAPABILITY_PREFIX) for grant in grants):
         return False
-    execution = tool_def.get("execution") if isinstance(tool_def.get("execution"), dict) else {}
+    execution = mapping_or_empty(tool_def.get("execution"))
     exec_type = str(execution.get("type") or "").strip().lower()
     if exec_type == "rumi_function":
         qualified_name = str(execution.get("qualified_name") or "").strip()
@@ -302,7 +304,7 @@ def is_safe_first_party_memo_tool(tool_def: dict[str, Any]) -> bool:
             tool_def.get("summary"),
         )
     )
-    tags = tool_def.get("tags") if isinstance(tool_def.get("tags"), list) else []
+    tags = list_or_empty(tool_def.get("tags"))
     tag_text = " ".join(str(tag or "").strip().lower() for tag in tags)
     return category == "memory" and ("memo" in name or "memo" in tag_text)
 

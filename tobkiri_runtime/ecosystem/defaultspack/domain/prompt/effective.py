@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import yaml
+import importlib
 
 from ..capability.catalog import CapabilityCatalog
 from .renderer import render
@@ -15,6 +15,14 @@ from .trust import is_trusted_prompt_pack
 
 
 _VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
+
+
+def _mapping_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_or_empty(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 _BRACED_PATTERN = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 _VALID_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 _SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -24,8 +32,12 @@ def _read_mapping(path: Path | None) -> dict[str, Any]:
     if path is None or not path.is_file():
         return {}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        yaml_module = importlib.import_module("yaml")
+        safe_load = getattr(yaml_module, "safe_load", None)
+        if not callable(safe_load):
+            return {}
+        data = safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -141,7 +153,7 @@ def _catalog_profile(profile_id: Any) -> dict[str, Any]:
 
 
 def _source_pack_id(data: dict[str, Any], profile: dict[str, Any]) -> str:
-    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    metadata = _mapping_or_empty(profile.get("metadata"))
     raw_pack = (
         data.get("source_pack_id")
         or profile.get("source_pack_id")
@@ -389,8 +401,8 @@ def _effective_payload(
 def _prompt_manifest_metadata(manifest: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         return {}
-    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
-    metadata = manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {}
+    config = _mapping_or_empty(manifest.get("config"))
+    metadata = _mapping_or_empty(manifest.get("metadata"))
     output = dict(metadata)
     for key in ("allow_disable", "safety_boundary", "owner", "source_path"):
         if key in manifest:
@@ -443,9 +455,12 @@ def _conversation_variables(
     if isinstance(raw_variables, dict):
         variables.update(raw_variables)
 
-    messages = data.get("messages")
-    if not isinstance(messages, list):
-        messages = context.get("messages") if isinstance(context.get("messages"), list) else []
+    raw_messages = data.get("messages")
+    messages = (
+        _list_or_empty(raw_messages)
+        if isinstance(raw_messages, list)
+        else _list_or_empty(context.get("messages"))
+    )
     messages_text = json.dumps(messages, ensure_ascii=False) if messages else ""
     variables.update(
         {

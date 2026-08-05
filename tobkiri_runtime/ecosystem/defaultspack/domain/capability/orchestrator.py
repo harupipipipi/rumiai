@@ -22,6 +22,14 @@ from domain.mention import extract_mention_values
 from domain.skill_trigger import RuntimeSkillTriggerService
 
 
+def _mapping_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_or_empty(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 class CapabilityOrchestrator:
     """Compile one Capability Plan for runtime and dry-run consumers."""
 
@@ -447,9 +455,8 @@ def _select_tools(
         prefilter=len(tools) > limit,
     )
     recommendations = (
-        result.get("recommended_tools")
+        _list_or_empty(result.get("recommended_tools"))
         if isinstance(result, dict)
-        and isinstance(result.get("recommended_tools"), list)
         else []
     )
     selected = [
@@ -541,11 +548,7 @@ def _tool_id(tool: dict[str, Any]) -> str:
 
 def _tool_capability_grants(tool: dict[str, Any]) -> list[str]:
     direct = tool.get("capability_grants")
-    requirements = (
-        tool.get("capability_requirements")
-        if isinstance(tool.get("capability_requirements"), dict)
-        else {}
-    )
+    requirements = _mapping_or_empty(tool.get("capability_requirements"))
     values = list(direct) if isinstance(direct, list) else []
     for key in ("runtime", "connections"):
         raw = requirements.get(key)
@@ -682,16 +685,8 @@ def _capability_snapshot(
     diagnostics: list[tuple[str, str]] = []
     for activity in activities:
         activity_id = str(activity.get("id") or "").strip()
-        members = (
-            activity.get("members")
-            if isinstance(activity.get("members"), dict)
-            else {}
-        )
-        skill_members = (
-            members.get("skills")
-            if isinstance(members.get("skills"), dict)
-            else {}
-        )
+        members = _mapping_or_empty(activity.get("members"))
+        skill_members = _mapping_or_empty(members.get("skills"))
         required = _unique(
             [
                 *(skill_members.get("safety") or []),
