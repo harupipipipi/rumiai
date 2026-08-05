@@ -77,29 +77,8 @@ REQUIRED_RUNTIME_BOOTSTRAP_FILES = (
     Path("core_runtime/app_lifecycle_manager.py"),
     Path("core_runtime/pack_api_server.py"),
 )
-CANONICAL_HOST_FILES = tuple(
-    Path("tobkiri_host") / filename
-    for filename in (
-        "README.md",
-        "__init__.py",
-        "admission.py",
-        "artifact_compiler.py",
-        "authority_v4.py",
-        "backends.py",
-        "broker.py",
-        "composition.py",
-        "contracts.py",
-        "effects.py",
-        "errors.py",
-        "materialization.py",
-        "models.py",
-        "ports.py",
-        "resources.py",
-        "runtime.py",
-        "shells.py",
-        "triggers.py",
-    )
-)
+CANONICAL_HOST_INVENTORY = Path("tobkiri_host/canonical-files.v1.json")
+CANONICAL_HOST_INVENTORY_SCHEMA = "io.tobkiri.host-file-inventory.v1"
 UV_PINNED_VERSION = "0.11.14"
 UV_SHA256_BY_TARGET = {
     "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
@@ -190,6 +169,53 @@ def copy_tracked_runtime_files(repo_root: Path, source_root: Path, dest_root: Pa
     return copied
 
 
+def canonical_host_files(source_root: Path) -> tuple[Path, ...]:
+    """Load and strictly validate the authoritative closed Host inventory."""
+
+    inventory = source_root / CANONICAL_HOST_INVENTORY
+    if inventory.is_symlink() or not inventory.is_file():
+        raise FileNotFoundError(
+            f"Canonical Host inventory is missing or unsafe: {inventory}"
+        )
+    try:
+        document = json.loads(inventory.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Canonical Host inventory is malformed: {exc}") from exc
+    if not isinstance(document, dict) or set(document) != {"schema", "files"}:
+        raise RuntimeError("Canonical Host inventory has an invalid document shape")
+    if document["schema"] != CANONICAL_HOST_INVENTORY_SCHEMA:
+        raise RuntimeError("Canonical Host inventory schema is unsupported")
+    raw_files = document["files"]
+    if not isinstance(raw_files, list) or not raw_files:
+        raise RuntimeError("Canonical Host inventory files must be a non-empty list")
+    if any(not isinstance(filename, str) for filename in raw_files):
+        raise RuntimeError("Canonical Host inventory filenames must be strings")
+    if raw_files != sorted(set(raw_files)):
+        raise RuntimeError("Canonical Host inventory must be sorted and unique")
+    inventory_name = CANONICAL_HOST_INVENTORY.name
+    if inventory_name not in raw_files:
+        raise RuntimeError("Canonical Host inventory must include itself")
+    for filename in raw_files:
+        if Path(filename).parts != (filename,) or filename in {"", ".", ".."}:
+            raise RuntimeError(
+                f"Canonical Host inventory filename is unsafe: {filename!r}"
+            )
+    host_root = source_root / "tobkiri_host"
+    actual_source_files = set()
+    for source in host_root.iterdir():
+        if source.is_symlink():
+            raise RuntimeError(f"Canonical Host source is a symlink: {source}")
+        if source.is_file():
+            actual_source_files.add(source.name)
+    if actual_source_files != set(raw_files):
+        raise RuntimeError(
+            "Canonical Host source inventory mismatch: "
+            f"missing={sorted(set(raw_files) - actual_source_files)}, "
+            f"unlisted={sorted(actual_source_files - set(raw_files))}"
+        )
+    return tuple(Path("tobkiri_host") / filename for filename in raw_files)
+
+
 def stage_canonical_host_package(source_root: Path, dest_root: Path) -> None:
     """Stage the closed canonical Host package from regular source files."""
     host_root = dest_root / "tobkiri_host"
@@ -197,7 +223,7 @@ def stage_canonical_host_package(source_root: Path, dest_root: Path) -> None:
         if host_root.is_symlink() or not host_root.is_dir():
             raise RuntimeError("Refusing unsafe staged tobkiri_host package")
         shutil.rmtree(host_root)
-    for relative in CANONICAL_HOST_FILES:
+    for relative in canonical_host_files(source_root):
         source = source_root / relative
         if source.is_symlink() or not source.is_file():
             raise FileNotFoundError(
@@ -212,7 +238,8 @@ def verify_canonical_host_package(
 ) -> None:
     """Require the staged Host inventory and bytes to equal canonical source."""
     source_root = repository_root / APP_SOURCE_DIR
-    expected = {path.as_posix() for path in CANONICAL_HOST_FILES}
+    canonical_files = canonical_host_files(source_root)
+    expected = {path.as_posix() for path in canonical_files}
     host_root = dest_root / "tobkiri_host"
     if host_root.is_symlink() or not host_root.is_dir():
         raise FileNotFoundError("Staged canonical Host package is missing or unsafe")
@@ -230,7 +257,7 @@ def verify_canonical_host_package(
             "Staged canonical Host inventory mismatch: "
             f"missing={missing[:20]}, unlisted={unlisted[:20]}"
         )
-    for relative in CANONICAL_HOST_FILES:
+    for relative in canonical_files:
         source = source_root / relative
         staged = dest_root / relative
         if source.is_symlink() or not source.is_file():
@@ -343,15 +370,19 @@ def verify_runtime_resource_manifest(dest_root: Path) -> None:
 
 
 def verify_staged_bootstrap_import(dest_root: Path) -> None:
-    """Import the public bootstrap using only the staged runtime tree."""
+    """Import bootstrap and Host SDK surfaces using only the staged tree."""
     code = (
         "import pathlib,sys; "
         f"root=pathlib.Path({str(dest_root.resolve())!r}); "
         "sys.path.insert(0,str(root)); "
         "from core_runtime import Kernel; "
-        "module=sys.modules[Kernel.__module__]; "
-        "origin=pathlib.Path(module.__file__).resolve(); "
-        "origin.relative_to(root.resolve())"
+        "from tobkiri_host.extension_sdk import HostExtensionSDK; "
+        "from tobkiri_host.platform_backends import MacOSVZBackend; "
+        "from tobkiri_host.tauri_roles import validate_production_tauri_roles; "
+        "objects=(Kernel,HostExtensionSDK,MacOSVZBackend,"
+        "validate_production_tauri_roles); "
+        "[pathlib.Path(sys.modules[obj.__module__].__file__).resolve()"
+        ".relative_to(root.resolve()) for obj in objects]"
     )
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", code],

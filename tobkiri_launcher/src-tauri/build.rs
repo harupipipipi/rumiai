@@ -19,29 +19,8 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "ecosystem/defaultspack/ui",
     "bundled",
 ];
-const CANONICAL_HOST_FILES: &[&str] = &[
-    "README.md",
-    "__init__.py",
-    "admission.py",
-    "artifact_compiler.py",
-    "authority_v4.py",
-    "backends.py",
-    "broker.py",
-    "composition.py",
-    "contracts.py",
-    "effects.py",
-    "errors.py",
-    "extension_sdk.py",
-    "materialization.py",
-    "models.py",
-    "platform_backends.py",
-    "ports.py",
-    "resources.py",
-    "runtime.py",
-    "shells.py",
-    "tauri_roles.py",
-    "triggers.py",
-];
+const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
+const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
 
 #[cfg(not(test))]
 fn main() {
@@ -137,7 +116,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
             ),
         ));
     }
-    verify_canonical_host_package(&staged_root)
+    verify_canonical_host_package(&staged_root, &runtime_root)
         .map_err(|error| stage_error("verify canonical Host package", error))?;
     copy_generated_resource_dirs(&runtime_root, &staged_root)
         .map_err(|error| stage_error("copy generated resources", error))?;
@@ -208,8 +187,106 @@ fn portable_relative_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn verify_canonical_host_package(staged_root: &Path) -> io::Result<()> {
+fn canonical_host_files(source_root: &Path) -> io::Result<Vec<String>> {
+    let inventory = source_root
+        .join("tobkiri_host")
+        .join(CANONICAL_HOST_INVENTORY);
+    let metadata = fs::symlink_metadata(&inventory)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host inventory is missing or unsafe",
+        ));
+    }
+    let document: serde_json::Value = serde_json::from_slice(&fs::read(&inventory)?)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let object = document.as_object().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host inventory must be an object",
+        )
+    })?;
+    let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+    keys.sort_unstable();
+    if keys != ["files", "schema"]
+        || object.get("schema").and_then(serde_json::Value::as_str)
+            != Some(CANONICAL_HOST_INVENTORY_SCHEMA)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host inventory shape or schema is invalid",
+        ));
+    }
+    let files = object
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "canonical Host inventory files must be an array",
+            )
+        })?
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "canonical Host inventory filenames must be strings",
+                )
+            })
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut sorted = files.clone();
+    sorted.sort();
+    sorted.dedup();
+    if files.is_empty()
+        || files != sorted
+        || !files.iter().any(|name| name == CANONICAL_HOST_INVENTORY)
+        || files.iter().any(|name| {
+            Path::new(name).components().count() != 1
+                || matches!(
+                    Path::new(name).components().next(),
+                    Some(Component::CurDir | Component::ParentDir | Component::RootDir)
+                )
+        })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host inventory must be safe, sorted, unique, and self-listed",
+        ));
+    }
+    let host_root = source_root.join("tobkiri_host");
+    let mut actual_source_files = Vec::new();
+    for entry in fs::read_dir(&host_root)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "canonical Host source is a symlink: {}",
+                    entry.path().display()
+                ),
+            ));
+        }
+        if metadata.is_file() {
+            actual_source_files.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    actual_source_files.sort();
+    if actual_source_files != files {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host source inventory mismatch",
+        ));
+    }
+    Ok(files)
+}
+
+fn verify_canonical_host_package(staged_root: &Path, source_root: &Path) -> io::Result<()> {
     let host_root = staged_root.join("tobkiri_host");
+    let source_host_root = source_root.join("tobkiri_host");
+    let expected = canonical_host_files(source_root)?;
     let mut actual = Vec::new();
     for entry in fs::read_dir(&host_root)? {
         let entry = entry?;
@@ -223,16 +300,28 @@ fn verify_canonical_host_package(staged_root: &Path) -> io::Result<()> {
         actual.push(entry.file_name().to_string_lossy().into_owned());
     }
     actual.sort();
-    let mut expected = CANONICAL_HOST_FILES
-        .iter()
-        .map(|name| (*name).to_owned())
-        .collect::<Vec<_>>();
-    expected.sort();
     if actual != expected {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "canonical Host resource inventory mismatch",
         ));
+    }
+    for filename in expected {
+        let source = source_host_root.join(&filename);
+        let staged = host_root.join(&filename);
+        let source_metadata = fs::symlink_metadata(&source)?;
+        if source_metadata.file_type().is_symlink() || !source_metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsafe canonical Host source: {}", source.display()),
+            ));
+        }
+        if fs::read(&source)? != fs::read(&staged)? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("canonical Host resource byte mismatch: {filename}"),
+            ));
+        }
     }
     Ok(())
 }
@@ -1508,38 +1597,49 @@ mod tests {
         (release_root, staged_root, catalog)
     }
 
-    fn host_fixture(tree: &TestTree) -> PathBuf {
+    fn host_fixture(tree: &TestTree) -> (PathBuf, PathBuf) {
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("Launcher should live under the repository")
+            .join(APP_SOURCE_DIR);
         let staged_root = tree.path().join("staged-host");
         let host_root = staged_root.join("tobkiri_host");
         fs::create_dir_all(&host_root).expect("Host package should be creatable");
-        for filename in CANONICAL_HOST_FILES {
-            fs::write(host_root.join(filename), b"canonical Host resource")
-                .expect("Host resource should be writable");
+        for filename in
+            canonical_host_files(&source_root).expect("Host inventory should be readable")
+        {
+            fs::copy(
+                source_root.join("tobkiri_host").join(&filename),
+                host_root.join(filename),
+            )
+            .expect("Host resource should be copied exactly");
         }
-        staged_root
+        (staged_root, source_root)
     }
 
     #[test]
     fn canonical_host_inventory_is_exact() {
         let tree = TestTree::new("host-inventory");
-        let staged_root = host_fixture(&tree);
-        verify_canonical_host_package(&staged_root).expect("exact Host package should be accepted");
+        let (staged_root, source_root) = host_fixture(&tree);
+        verify_canonical_host_package(&staged_root, &source_root)
+            .expect("exact Host package should be accepted");
 
         fs::write(staged_root.join("tobkiri_host/unlisted.py"), b"pass\n")
             .expect("unlisted resource should be writable");
-        assert!(verify_canonical_host_package(&staged_root).is_err());
+        assert!(verify_canonical_host_package(&staged_root, &source_root).is_err());
     }
 
     #[cfg(unix)]
     #[test]
     fn canonical_host_inventory_rejects_symlink() {
         let tree = TestTree::new("host-symlink");
-        let staged_root = host_fixture(&tree);
+        let (staged_root, source_root) = host_fixture(&tree);
         let runtime = staged_root.join("tobkiri_host/runtime.py");
         fs::remove_file(&runtime).expect("runtime fixture should be removable");
         std::os::unix::fs::symlink(tree.path(), &runtime)
             .expect("Host symlink should be creatable");
-        assert!(verify_canonical_host_package(&staged_root).is_err());
+        assert!(verify_canonical_host_package(&staged_root, &source_root).is_err());
     }
 
     #[test]

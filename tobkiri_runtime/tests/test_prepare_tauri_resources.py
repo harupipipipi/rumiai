@@ -128,6 +128,11 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
         pack_root / "runtime",
         ignore=shutil.ignore_patterns(*module.EXCLUDED_DIR_NAMES, "*.pyc"),
     )
+    shutil.copytree(
+        DEFAULTSPACK_ROOT / "domain",
+        pack_root / "domain",
+        ignore=shutil.ignore_patterns(*module.EXCLUDED_DIR_NAMES, "*.pyc"),
+    )
     shutil.copytree(DEFAULTSPACK_ROOT / "v4", pack_root / "v4")
     return stage
 
@@ -333,6 +338,10 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
     assert "core_runtime/bootstrap/runtime.py" in paths
     assert "tobkiri_host/runtime.py" in paths
     assert "tobkiri_host/composition.py" in paths
+    assert "tobkiri_host/extension_sdk.py" in paths
+    assert "tobkiri_host/platform_backends.py" in paths
+    assert "tobkiri_host/tauri_roles.py" in paths
+    assert "tobkiri_host/canonical-files.v1.json" in paths
     assert not any(path.endswith((".pyc", ".pyo")) for path in paths)
     assert not list(stage.rglob("__pycache__"))
 
@@ -343,6 +352,7 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
             path.chmod(0o555 if path.is_dir() else 0o444)
         relocated.chmod(0o555)
         module.verify_runtime_resource_manifest(relocated)
+        module.verify_staged_bootstrap_import(relocated)
         module.verify_staged_bootstrap_import(relocated)
         assert not list(relocated.rglob("__pycache__"))
     finally:
