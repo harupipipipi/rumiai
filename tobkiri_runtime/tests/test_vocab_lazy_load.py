@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tests.legacy_authority_contracts import assert_retired_module_absent
+from tests.v4_bundle_support import assert_verified_pack_inventory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +19,7 @@ def test_component_lifecycle_authority_is_physically_absent() -> None:
 
 def test_v4_catalog_is_loaded_from_verified_artifacts() -> None:
     catalog = BundledCatalog.load(BUNDLE)
-    assert len(catalog.packs) == 6
+    assert_verified_pack_inventory(BUNDLE, catalog.packs)
 
 
 def test_v4_pack_functions_have_explicit_contracts() -> None:

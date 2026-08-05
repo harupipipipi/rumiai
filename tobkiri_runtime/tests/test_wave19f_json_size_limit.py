@@ -8,6 +8,7 @@ import pytest
 
 from ecosystem.defaultspack.domain.runtime_v4 import BundleIntegrityError, BundledCatalog
 from tests.v4_batch_support import assert_legacy_registry_fails_closed
+from tests.v4_bundle_support import assert_verified_pack_inventory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ def test_legacy_registry_json_guard_is_not_importable() -> None:
 
 def test_v4_catalog_validates_each_manifest_digest() -> None:
     catalog = BundledCatalog.load(BUNDLE)
-    assert len(catalog.packs) == 6
+    assert_verified_pack_inventory(BUNDLE, catalog.packs)
     assert all(item["pack"]["artifact_digest"].startswith("sha256:") for item in catalog.packs.values())
 
 

@@ -8,7 +8,6 @@ import pytest
 import yaml
 
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
-from core_runtime.setup_pack import SetupPackManager
 from ecosystem.setup_pack.pack_selector import PackSelector
 
 pytestmark = pytest.mark.contract
@@ -337,20 +336,20 @@ def test_setup_pack_discoverable_and_overlap_scoped() -> None:
     assert candidate.signing["verified"] is True
 
 
-def test_setup_pack_manager_installs_pack_with_declared_dependencies(tmp_path: Path) -> None:
-    manager = SetupPackManager(
-        root=ROOT / "ecosystem" / "setup_pack",
-        selection_file=tmp_path / "setup_pack_selection.json",
-        ecosystem_dir=ROOT / "ecosystem",
-    )
-    result = manager.install(PACK_ID)
-    assert result["success"] is True
-    assert result["installed_setup_pack_ids"] == ["defaultspack", PACK_ID]
-    assert result["installed_target_pack_ids"] == ["defaultspack", PACK_ID]
-    assert result["active_setup_pack_id"] == "defaultspack"
-    assert result["active_target_pack_id"] == "defaultspack"
-    assert result["granted_all_ok_target_pack_ids"] == ["defaultspack"]
-    assert result["skipped_all_ok_setup_pack_ids"] == [PACK_ID]
+def test_pack_v4_contract_carries_setup_dependencies() -> None:
+    setup = read_json(SETUP_PACK_JSON)
+    manifest = read_json(PACK_DIR / "pack.v4.json")
+    setup_dependencies = {
+        item["pack_id"]: item["version"] for item in setup["depends_on"]
+    }
+
+    assert manifest["pack"]["id"] == PACK_ID
+    assert manifest["requirements"]["pack_dependencies"] == setup_dependencies
+    assert manifest["requirements"]["network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
+    assert manifest["requirements"]["secrets"] == []
 
 
 def test_schema_workflow_quality_policy_contracts() -> None:
