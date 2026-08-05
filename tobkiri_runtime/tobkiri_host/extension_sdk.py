@@ -132,6 +132,17 @@ class HostExtensionSDK:
             )
             """
         )
+        self._database.execute(
+            """
+            CREATE TABLE IF NOT EXISTS host_extension_registration_state (
+                registration_id TEXT PRIMARY KEY,
+                trust_id TEXT NOT NULL,
+                artifact_digest TEXT NOT NULL,
+                provider_record_ids TEXT NOT NULL,
+                active INTEGER NOT NULL
+            )
+            """
+        )
         self._database.commit()
         self._active: dict[str, tuple[str, tuple[str, ...], str]] = {}
 
@@ -144,6 +155,21 @@ class HostExtensionSDK:
                 raise AuthorizationError("Host Extension registration already exists")
             self._store.put_records_atomically(records)
             record_ids = tuple(item.record_id for item in authorities)
+            with self._database:
+                self._database.execute(
+                    """
+                    INSERT INTO host_extension_registration_state (
+                        registration_id, trust_id, artifact_digest,
+                        provider_record_ids, active
+                    ) VALUES (?, ?, ?, ?, 1)
+                    """,
+                    (
+                        request.registration_id,
+                        request.trust_id,
+                        request.artifact.digest,
+                        json.dumps(record_ids, separators=(",", ":")),
+                    ),
+                )
             self._active[request.registration_id] = (
                 request.trust_id,
                 record_ids,
@@ -162,7 +188,21 @@ class HostExtensionSDK:
         with self._lock:
             active = self._active.pop(registration_id, None)
             if active is None:
-                raise AuthorizationError("Host Extension registration is not active")
+                row = self._database.execute(
+                    """
+                    SELECT trust_id, provider_record_ids, artifact_digest
+                    FROM host_extension_registration_state
+                    WHERE registration_id = ? AND active = 1
+                    """,
+                    (registration_id,),
+                ).fetchone()
+                if row is None:
+                    raise AuthorizationError("Host Extension registration is not active")
+                active = (
+                    str(row[0]),
+                    tuple(str(item) for item in json.loads(str(row[1]))),
+                    str(row[2]),
+                )
             trust_id, record_ids, artifact_digest = active
             for record_id in record_ids:
                 self._authority.revoke(
@@ -175,6 +215,14 @@ class HostExtensionSDK:
                 target_id=trust_id,
                 reason=reason,
             )
+            with self._database:
+                self._database.execute(
+                    """
+                    UPDATE host_extension_registration_state SET active = 0
+                    WHERE registration_id = ?
+                    """,
+                    (registration_id,),
+                )
             self._audit(registration_id, "revoked", artifact_digest, record_ids)
 
     def update(

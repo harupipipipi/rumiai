@@ -278,16 +278,21 @@ def extension_registration(
 
 def test_host_extension_sdk_exact_registration_revoke_and_normal_pack_denial() -> None:
     authority = Authority()
-    sdk = HostExtensionSDK(authority, sqlite3.connect(":memory:"), clock=lambda: 2.0)
+    database = sqlite3.connect(":memory:")
+    sdk = HostExtensionSDK(authority, database, clock=lambda: 2.0)
     ids = sdk.register(extension_registration())
     assert ids == ("provider-authority.registration.files.v1.0",)
     assert len(authority.store.records) == 3
-    sdk.revoke("registration.files.v1", reason="operator revoke")
+    restarted = HostExtensionSDK(authority, database, clock=lambda: 3.0)
+    restarted.revoke("registration.files.v1", reason="operator revoke")
     assert authority.revocations == [
         ("provider_authority", ids[0]),
         ("host_extension", "trust.extension.files.v1"),
     ]
-    assert [event["event_type"] for event in sdk.audit_events("registration.files.v1")] == [
+    assert [
+        event["event_type"]
+        for event in restarted.audit_events("registration.files.v1")
+    ] == [
         "registered",
         "revoked",
     ]
