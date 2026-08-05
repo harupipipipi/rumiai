@@ -2168,6 +2168,130 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function hasNonEmptyString(record: Record<string, unknown>, key: string): boolean {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSidebarFieldShape(value: unknown): boolean {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && hasNonEmptyString(record, "id")
+    && hasNonEmptyString(record, "label")
+    && hasNonEmptyString(record, "type")
+  );
+}
+
+function isSettingsSectionShape(value: unknown): boolean {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && hasNonEmptyString(record, "id")
+    && hasNonEmptyString(record, "label")
+    && Array.isArray(record.fields)
+    && record.fields.every(isSidebarFieldShape)
+  );
+}
+
+function isRecordOfRecords(value: unknown): boolean {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && Object.values(record).every((item) => objectRecord(item) !== null)
+  );
+}
+
+/** Validate the required Pack v4 UI catalog shape before ChatApp consumes it. */
+export function isUICatalog(value: unknown): value is UICatalog {
+  const record = objectRecord(value);
+  if (!record) return false;
+
+  const app = record.app === undefined ? null : objectRecord(record.app);
+  const sidebar = objectRecord(record.sidebar);
+  const settings = objectRecord(record.settings);
+  const chatRendering = objectRecord(record.chat_rendering);
+  const extensionPoints = record.extension_points;
+  if (
+    (record.app !== undefined && (!app || !hasNonEmptyString(app, "id") || !hasNonEmptyString(app, "name")))
+    || !sidebar
+    || !Array.isArray(sidebar.filters)
+    || !sidebar.filters.every((filter) => {
+      const item = objectRecord(filter);
+      return Boolean(item && hasNonEmptyString(item, "id") && hasNonEmptyString(item, "label"));
+    })
+    || !Array.isArray(sidebar.items)
+    || !sidebar.items.every((item) => {
+      const sidebarItem = objectRecord(item);
+      return Boolean(
+        sidebarItem
+        && hasNonEmptyString(sidebarItem, "id")
+        && hasNonEmptyString(sidebarItem, "label")
+        && hasNonEmptyString(sidebarItem, "category")
+      );
+    })
+    || !settings
+    || !Array.isArray(settings.sections)
+    || !settings.sections.every(isSettingsSectionShape)
+    || !isRecordOfRecords(settings.values)
+    || !chatRendering
+    || !Array.isArray(chatRendering.renderers)
+    || !chatRendering.renderers.every((renderer) => {
+      const item = objectRecord(renderer);
+      return Boolean(item && hasNonEmptyString(item, "id") && hasNonEmptyString(item, "component"));
+    })
+    || !Array.isArray(extensionPoints)
+    || !extensionPoints.every((extensionPoint) => {
+      const item = objectRecord(extensionPoint);
+      return Boolean(
+        item
+        && hasNonEmptyString(item, "id")
+        && hasNonEmptyString(item, "path")
+        && hasNonEmptyString(item, "description")
+      );
+    })
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/** Validate the Pack v4 settings response used during startup. */
+export function isUiSettingsResponse(
+  value: unknown,
+): value is { sections: SettingsSection[]; values: Record<string, Record<string, unknown>> } {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && Array.isArray(record.sections)
+    && record.sections.every(isSettingsSectionShape)
+    && isRecordOfRecords(record.values)
+  );
+}
+
+/** Validate the model profile list before Profile controls receive it. */
+export function isModelProfilesResponse(
+  value: unknown,
+): value is { profiles: ModelProfile[]; count: number } {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && Array.isArray(record.profiles)
+    && record.profiles.every((profile) => {
+      const item = objectRecord(profile);
+      return Boolean(
+        item
+        && hasNonEmptyString(item, "profile_id")
+        && hasNonEmptyString(item, "display_name")
+      );
+    })
+    && typeof record.count === "number"
+    && Number.isInteger(record.count)
+    && record.count >= 0
+  );
+}
+
 function nonEmptyString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -2221,6 +2345,27 @@ type ApiError = {
 };
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
+
+function isApiOkEnvelope(value: unknown): value is ApiOk<unknown> {
+  const record = objectRecord(value);
+  return Boolean(
+    record
+    && record.status === "ok"
+    && Object.prototype.hasOwnProperty.call(record, "data")
+  );
+}
+
+function isApiErrorEnvelope(value: unknown): value is ApiError {
+  const record = objectRecord(value);
+  const error = record ? objectRecord(record.error) : null;
+  return Boolean(
+    record
+    && record.status === "error"
+    && error
+    && hasNonEmptyString(error, "code")
+    && hasNonEmptyString(error, "message")
+  );
+}
 
 export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
 export type ToolSelectionScope = "turn" | "conversation";
@@ -2758,14 +2903,28 @@ export function explainDefaultspackApiError(
 
 type DefaultspackApiPath = string | DefaultspackContractRoute;
 
-async function request<T>(path: DefaultspackApiPath, init?: RequestInit): Promise<T> {
+type ResponseShapeGuard<T> = (value: unknown) => value is T;
+
+function apiPathLabel(path: DefaultspackApiPath): string {
+  return typeof path === "string" ? path : path.apiPath;
+}
+
+function invalidApiContractResponse(path: DefaultspackApiPath, detail: string): Error {
+  return new Error(`invalid Pack v4 response for ${apiPathLabel(path)}: ${detail}`);
+}
+
+async function request<T>(
+  path: DefaultspackApiPath,
+  init?: RequestInit,
+  responseShape?: ResponseShapeGuard<T>,
+): Promise<T> {
   const response = await defaultspackApiFetch(path, {
     ...init,
   });
 
-  let payload: ApiEnvelope<T>;
+  let payload: unknown;
   try {
-    payload = (await response.json()) as ApiEnvelope<T>;
+    payload = await response.json();
   } catch {
     if (!response.ok) {
       throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
@@ -2773,15 +2932,27 @@ async function request<T>(path: DefaultspackApiPath, init?: RequestInit): Promis
     throw new Error("defaultspack API returned an invalid JSON response");
   }
 
-  if (!response.ok || payload.status === "error") {
+  if (isApiErrorEnvelope(payload)) {
     throw new Error(explainDefaultspackApiError(
       response.status,
-      payload.status === "error" ? payload.error : undefined,
+      payload.error,
       response.statusText,
     ));
   }
+  if (!isApiOkEnvelope(payload)) {
+    if (!response.ok) {
+      throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+    }
+    throw invalidApiContractResponse(path, "missing status/data envelope");
+  }
+  if (!response.ok) {
+    throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+  }
+  if (responseShape && !responseShape(payload.data)) {
+    throw invalidApiContractResponse(path, "data does not match the endpoint schema");
+  }
 
-  return payload.data;
+  return payload.data as T;
 }
 
 function encodeQueryValue(value: unknown): string | null {
@@ -3265,7 +3436,7 @@ export const api = {
   listModelProfiles() {
     return request<{ profiles: ModelProfile[]; count: number }>(defaultspackContractRoute("api/ai/profiles"), {
       cache: "no-store",
-    });
+    }, isModelProfilesResponse);
   },
 
   searchModels(filters: Record<string, unknown>) {
@@ -3287,7 +3458,11 @@ export const api = {
   },
 
   uiCatalog() {
-    return request<UICatalog>(defaultspackContractRoute("api/ui/catalog?include_skills=true"));
+    return request<UICatalog>(
+      defaultspackContractRoute("api/ui/catalog?include_skills=true"),
+      undefined,
+      isUICatalog,
+    );
   },
 
   uiSettings(options: { full?: boolean } = {}) {
@@ -3295,6 +3470,7 @@ export const api = {
     return request<{ sections: SettingsSection[]; values: Record<string, Record<string, unknown>> }>(
       defaultspackContractRoute(`api/ui/settings${query}`),
       { cache: "no-store" },
+      isUiSettingsResponse,
     );
   },
 

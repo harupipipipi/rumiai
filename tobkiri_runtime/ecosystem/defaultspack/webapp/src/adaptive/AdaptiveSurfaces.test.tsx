@@ -137,7 +137,7 @@ test("onboarding compile posts current draft answers to the API", async (t) => {
   );
   const result = await compileAdaptiveOnboardingAnswers(answers);
 
-  assert.equal(String(calls[0]?.input), routeKey("api/onboarding/compile"));
+  assert.equal(requestTarget(calls[0]?.input ?? ""), routeKey("api/onboarding/compile"));
   const body = JSON.parse(String(calls[0]?.init?.body));
   assert.equal(body.answers.preset_id, "discussion_only");
   assert.equal(body.answers.actions.terminal, "deny");
@@ -194,7 +194,7 @@ test("automation updates use the local automation route without high-risk prepar
 
   assert.equal(automation.enabled, true);
   assert.equal(calls.length, 1);
-  assert.equal(String(calls[0]?.input), routeKey("api/automations/automation_daily_context"));
+  assert.equal(requestTarget(calls[0]?.input ?? ""), routeKey("api/automations/automation_daily_context"));
   assert.equal(calls[0]?.init?.method, "PUT");
   assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { patch: { enabled: true } });
 });

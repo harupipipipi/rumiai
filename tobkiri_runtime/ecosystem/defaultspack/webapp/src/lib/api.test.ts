@@ -1158,6 +1158,60 @@ test("listModelProfiles bypasses browser cache", async () => {
   assert.equal(requestCache, "no-store");
 });
 
+const validUiCatalogFixture = {
+  app: { id: "defaultspack", name: "Tobkiri" },
+  sidebar: { filters: [], items: [] },
+  settings: { sections: [], values: {} },
+  chat_rendering: { renderers: [] },
+  extension_points: [],
+};
+
+async function assertUiCatalogResponseRejected(payload: unknown): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  })) as typeof fetch;
+  try {
+    await assert.rejects(api.uiCatalog(), /invalid Pack v4 response/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("uiCatalog accepts the canonical Pack v4 response envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: validUiCatalogFixture,
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+  try {
+    const catalog = await api.uiCatalog();
+    assert.equal(catalog.app?.id, "defaultspack");
+    assert.deepEqual(catalog.sidebar.items, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uiCatalog rejects a missing Pack v4 data envelope", async () => {
+  await assertUiCatalogResponseRejected({ status: "ok" });
+});
+
+test("uiCatalog rejects malformed data instead of exposing missing sidebar items", async () => {
+  await assertUiCatalogResponseRejected({
+    status: "ok",
+    data: { ...validUiCatalogFixture, sidebar: { filters: [] } },
+  });
+});
+
+test("uiCatalog rejects the stale unwrapped catalog response", async () => {
+  await assertUiCatalogResponseRejected({
+    status: "ok",
+    ...validUiCatalogFixture,
+  });
+});
+
 test("defaultspack API errors include status and recovery context", () => {
   const message = explainDefaultspackApiError(403, {
     code: "FORBIDDEN",

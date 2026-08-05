@@ -16,7 +16,9 @@ function requestTarget(url: URL): string {
   if (!url.pathname.startsWith(marker)) return url.pathname;
   const operation = decodeURIComponent(url.pathname.slice(marker.length));
   const separator = operation.indexOf(" ");
-  return separator < 0 ? operation : operation.slice(separator + 1);
+  const target = separator < 0 ? operation : operation.slice(separator + 1);
+  const queryIndex = target.indexOf("?");
+  return queryIndex < 0 ? target : target.slice(0, queryIndex);
 }
 
 test("bootstrap loading state uses the Tobkiri Launcher animation and honors reduced motion", async ({ page }) => {
