@@ -203,16 +203,21 @@ def _semantic_diagnostics(
                 validate_opaque_reference(value, field=key)
             except ProtocolError as exc:
                 diagnostics.append(f"{path}: {exc}")
-        if reject_authority_fields and schema_name in {
-            "profile",
-            "profile_v4.schema.json",
-            "pack",
-            "pack_manifest",
-            "pack_manifest_v4.schema.json",
-            "request",
-            "request_frame",
-            "request_frame_v1.schema.json",
-        } and key in _FORBIDDEN_AUTHORITY_KEYS:
+        if (
+            reject_authority_fields
+            and schema_name
+            in {
+                "profile",
+                "profile_v4.schema.json",
+                "pack",
+                "pack_manifest",
+                "pack_manifest_v4.schema.json",
+                "request",
+                "request_frame",
+                "request_frame_v1.schema.json",
+            }
+            and key in _FORBIDDEN_AUTHORITY_KEYS
+        ):
             diagnostics.append(f"{path}: forbidden authority-bearing field: {key}")
 
     if not inventory_document:
@@ -231,6 +236,47 @@ def _duplicate_identity_diagnostics(document: Mapping[str, Any]) -> list[str]:
     identity_keys = _ID_FIELDS | {"contract_id"}
     for path, value in _walk_containers(document):
         if not isinstance(value, list):
+            continue
+        if path in {"$.requested_edges", "$.bindings"}:
+            seen_edges: dict[tuple[str, ...], int] = {}
+            for index, item in enumerate(value):
+                if not isinstance(item, Mapping):
+                    continue
+                keys = (
+                    (
+                        "caller_function_id",
+                        "target_provider_id",
+                        "contract_id",
+                        "operation_id",
+                    )
+                    if path == "$.requested_edges"
+                    else ("contract_id", "operation_id")
+                )
+                identity = tuple(str(item.get(key) or "") for key in keys)
+                previous = seen_edges.get(identity)
+                if previous is not None:
+                    diagnostics.append(
+                        f"{path}[{index}]: duplicate operation binding; first at index {previous}"
+                    )
+                else:
+                    seen_edges[identity] = index
+            continue
+        if path == "$.operation_catalog" or path.endswith(".operations"):
+            seen_operations: dict[str, int] = {}
+            for index, item in enumerate(value):
+                if not isinstance(item, Mapping):
+                    continue
+                operation_id = item.get("operation_id")
+                if not isinstance(operation_id, str):
+                    continue
+                previous = seen_operations.get(operation_id)
+                if previous is not None:
+                    diagnostics.append(
+                        f"{path}[{index}].operation_id: duplicate identity; "
+                        f"first at index {previous}"
+                    )
+                else:
+                    seen_operations[operation_id] = index
             continue
         seen: dict[tuple[str, str], int] = {}
         for index, item in enumerate(value):
@@ -326,7 +372,11 @@ def _principal_digest_diagnostics(document: Mapping[str, Any]) -> list[str]:
     from .canonical import canonical_digest
 
     expected = canonical_digest(components)
-    return [] if supplied == expected else ["$.principal_digest: digest does not match principal components"]
+    return (
+        []
+        if supplied == expected
+        else ["$.principal_digest: digest does not match principal components"]
+    )
 
 
 def _walk(value: Any, path: str = "$") -> Iterable[tuple[str, str, Any]]:

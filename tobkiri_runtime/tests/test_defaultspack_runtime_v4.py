@@ -33,6 +33,21 @@ AUTHORITY_BINDINGS = {
         "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
     ): "authority-ref:file.inspect.default",
 }
+for _operation_id in (
+    "pack.install",
+    "dashboard.read",
+    "approval.candidate",
+    "approval.approve",
+    "pack.enable",
+    "pack.disable",
+    "pack.status",
+    "profile.reload",
+    "runtime.restart",
+):
+    AUTHORITY_BINDINGS[
+        "shell.tauri.pack-control|tobkiri.host.pack-control|"
+        f"tobkiri.host.pack-control.v4|{_operation_id}"
+    ] = f"authority-ref:pack-control.{_operation_id}"
 
 
 def _catalog() -> BundledCatalog:
@@ -98,6 +113,15 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     }
     assert [item["function_principal"]["function_id"] for item in resolved.plan["bindings"]] == [
         "defaultspack.conversation",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
+        "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
     ]

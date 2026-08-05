@@ -10,6 +10,9 @@ frontend never gets to select an arbitrary URL or handler.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
 import re
 from typing import Any, Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -36,6 +39,147 @@ class ResolvedContractRoute:
     method: str
     path: str
     query: dict[str, str]
+
+
+@dataclass(frozen=True)
+class FrontendContractTarget:
+    """One exact committed contribution mapped to a Broker operation."""
+
+    contribution_id: str
+    contract_id: str
+    operation_id: str
+    provider_id: str
+    function_id: str
+    allowed_payload_keys: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class FrontendContractBinding:
+    """One exact frontend route and its selected contribution targets."""
+
+    method: str
+    path: str
+    presentation: str
+    targets: tuple[FrontendContractTarget, ...]
+
+
+def load_frontend_contract_bindings(
+    map_path: Path,
+    application_manifest: Mapping[str, Any],
+) -> tuple[FrontendContractBinding, ...]:
+    """Load the digest-pinned application map without discovery or fallback."""
+
+    expected_artifact = next(
+        (
+            artifact
+            for artifact in application_manifest.get("artifacts", ())
+            if isinstance(artifact, Mapping)
+            and artifact.get("path") == "defaultspack/frontend_contract_map.v4.json"
+            and artifact.get("kind") == "asset"
+        ),
+        None,
+    )
+    if expected_artifact is None:
+        raise ContractRouteError(
+            "CONTRACT_MAP_UNAVAILABLE", "Frontend contract map is not committed", 500
+        )
+    raw = map_path.read_bytes()
+    actual_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if actual_digest != expected_artifact.get("digest"):
+        raise ContractRouteError("CONTRACT_MAP_STALE", "Frontend contract map digest changed", 500)
+    try:
+        document = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ContractRouteError(
+            "CONTRACT_MAP_INVALID", "Frontend contract map is invalid", 500
+        ) from error
+    if not isinstance(document, dict) or set(document) != {
+        "schema",
+        "pack_id",
+        "routes",
+    }:
+        raise ContractRouteError(
+            "CONTRACT_MAP_INVALID", "Frontend contract map fields are invalid", 500
+        )
+    if (
+        document.get("schema") != "io.tobkiri.frontend-contract-map.v4"
+        or document.get("pack_id") != "defaultspack"
+        or not isinstance(document.get("routes"), list)
+    ):
+        raise ContractRouteError(
+            "CONTRACT_MAP_INVALID", "Frontend contract map identity is invalid", 500
+        )
+    bindings: list[FrontendContractBinding] = []
+    for route in document["routes"]:
+        if not isinstance(route, dict) or set(route) != {
+            "method",
+            "path",
+            "presentation",
+            "targets",
+        }:
+            raise ContractRouteError(
+                "CONTRACT_MAP_INVALID", "Frontend route fields are invalid", 500
+            )
+        targets: list[FrontendContractTarget] = []
+        if not isinstance(route["targets"], list) or not route["targets"]:
+            raise ContractRouteError("CONTRACT_MAP_INVALID", "Frontend route has no targets", 500)
+        for target in route["targets"]:
+            if not isinstance(target, dict) or set(target) != {
+                "contribution_id",
+                "contract_id",
+                "operation_id",
+                "provider_id",
+                "function_id",
+                "allowed_payload_keys",
+            }:
+                raise ContractRouteError(
+                    "CONTRACT_MAP_INVALID", "Frontend target fields are invalid", 500
+                )
+            allowed = target["allowed_payload_keys"]
+            if not isinstance(allowed, list) or any(
+                not isinstance(key, str) or not key for key in allowed
+            ):
+                raise ContractRouteError(
+                    "CONTRACT_MAP_INVALID", "Frontend target payload is invalid", 500
+                )
+            targets.append(
+                FrontendContractTarget(
+                    contribution_id=str(target["contribution_id"]),
+                    contract_id=str(target["contract_id"]),
+                    operation_id=str(target["operation_id"]),
+                    provider_id=str(target["provider_id"]),
+                    function_id=str(target["function_id"]),
+                    allowed_payload_keys=frozenset(allowed),
+                )
+            )
+        bindings.append(
+            FrontendContractBinding(
+                method=str(route["method"]).upper(),
+                path=str(route["path"]),
+                presentation=str(route["presentation"]),
+                targets=tuple(targets),
+            )
+        )
+    contract_binding_map(tuple(bindings))
+    return tuple(bindings)
+
+
+def contract_binding_map(
+    bindings: tuple[FrontendContractBinding, ...],
+) -> dict[tuple[str, str], FrontendContractBinding]:
+    """Build an exact route map, rejecting ambiguous Host ownership."""
+
+    result: dict[tuple[str, str], FrontendContractBinding] = {}
+    for binding in bindings:
+        key = (binding.method.upper(), binding.path)
+        if key in result:
+            raise ContractRouteError(
+                "CONTRACT_OPERATION_DUPLICATE",
+                "Frontend contract operation is duplicated",
+                500,
+            )
+        result[key] = binding
+    return result
 
 
 def is_contract_route_path(path: str) -> bool:
@@ -165,16 +309,22 @@ def resolve_contract_route(
     try:
         decoded = unquote(token)
     except Exception as exc:  # pragma: no cover - urllib is defensive here
-        raise ContractRouteError("CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400) from exc
+        raise ContractRouteError(
+            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
+        ) from exc
     if " " not in decoded:
         raise ContractRouteError("CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400)
     encoded_method, encoded_target = decoded.split(" ", 1)
     operation_method = encoded_method.upper().strip()
     request_method = str(method or "").upper().strip()
     if operation_method != request_method:
-        raise ContractRouteError("CONTRACT_METHOD_MISMATCH", "Contract operation method mismatch", 405)
+        raise ContractRouteError(
+            "CONTRACT_METHOD_MISMATCH", "Contract operation method mismatch", 405
+        )
     if operation_method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-        raise ContractRouteError("CONTRACT_METHOD_UNSUPPORTED", "Unsupported contract operation method", 405)
+        raise ContractRouteError(
+            "CONTRACT_METHOD_UNSUPPORTED", "Unsupported contract operation method", 405
+        )
 
     parsed = urlsplit(encoded_target)
     if parsed.scheme or parsed.netloc or parsed.fragment:
@@ -188,9 +338,25 @@ def resolve_contract_route(
         target_path,
         families=route_families,
     ):
-        raise ContractRouteError("CONTRACT_OPERATION_UNKNOWN", "Unknown frontend contract operation", 404)
+        raise ContractRouteError(
+            "CONTRACT_OPERATION_UNKNOWN", "Unknown frontend contract operation", 404
+        )
     parsed_query = parse_qs(parsed.query, keep_blank_values=True)
     if any(len(values) != 1 for values in parsed_query.values()):
         raise ContractRouteError("CONTRACT_QUERY_INVALID", "Invalid contract target query", 400)
     query = {key: values[0] for key, values in parsed_query.items() if values}
     return ResolvedContractRoute(operation_method, target_path, query)
+
+
+__all__ = [
+    "CONTRACT_ROUTE_PREFIX",
+    "ContractRouteError",
+    "FrontendContractBinding",
+    "FrontendContractTarget",
+    "ResolvedContractRoute",
+    "contract_binding_map",
+    "contract_route_prefix",
+    "is_contract_route_path",
+    "load_frontend_contract_bindings",
+    "resolve_contract_route",
+]

@@ -385,7 +385,7 @@ def test_authenticated_http_catalog_uses_production_broker_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real panel route reaches only the finite production catalog binding."""
+    """The real panel route reaches only selected production Broker bindings."""
     user_data = tmp_path / "clean-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
@@ -435,12 +435,9 @@ def test_authenticated_http_catalog_uses_production_broker_only(
             },
             headers=headers,
         )
-        assert status == 409
-        assert payload["data"] == {
-            "state": "broker_dispatch_denied",
-            "code": "invalid_dispatch",
-        }
-        assert payload["error"] == ("('tobkiri.host.pack-control.v4', 'pack.install')")
+        assert status == 200
+        assert payload["data"]["pack_id"] == "rumi_git_read_pack"
+        assert payload["data"]["installed"] is True
     finally:
         server.stop()
 

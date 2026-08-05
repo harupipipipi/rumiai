@@ -461,20 +461,18 @@ test('apiFetch deduplicates concurrent GET requests for the same URL', async () 
   assert.deepEqual(second, {ok: true});
 });
 
-test('Pack production transport uses only qualified v4 dispatch operations', async () => {
-  const operations: Array<{operation_id: string; payload: Record<string, unknown>}> = [];
+test('Pack production transport uses only canonical contract routes', async () => {
+  const operations: Array<{route: string; payload: Record<string, unknown>}> = [];
   fetchHandler = async (input, init) => {
-    assert.equal(String(input), '/api/v4/dispatch');
-    const body = JSON.parse(String(init?.body ?? '{}')) as {
-      contract_id: string;
-      operation_id: string;
-      payload: Record<string, unknown>;
-    };
-    assert.equal(body.contract_id, 'tobkiri.host.pack-control.v4');
-    operations.push({operation_id: body.operation_id, payload: body.payload});
-    const data = body.operation_id === 'approval.candidate'
+    const route = decodeURIComponent(
+      String(input).replace('/api/contracts/defaultspack/', ''),
+    );
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    assert.match(String(new Headers(init?.headers).get('X-Tobkiri-Request-ID')), /^[0-9a-f-]{36}$/);
+    operations.push({route, payload: body});
+    const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one'}
-      : body.operation_id === 'catalog.read'
+      : route === 'GET /api/pack-control/catalog'
         ? {packs: [], count: 0}
         : {pack_id: 'pack-a', enabled: true, approved: true, restart_requested: true};
     return new Response(JSON.stringify({data, success: true}), {
@@ -490,15 +488,15 @@ test('Pack production transport uses only qualified v4 dispatch operations', asy
   await restartKernel();
 
   assert.deepEqual(
-    operations.map((item) => item.operation_id),
+    operations.map((item) => item.route),
     [
-      'catalog.read',
-      'pack.install',
-      'approval.candidate',
-      'approval.approve',
-      'pack.enable',
-      'pack.disable',
-      'runtime.restart',
+      'GET /api/pack-control/catalog',
+      'POST /api/pack-control/install',
+      'POST /api/pack-control/approval-candidate',
+      'POST /api/pack-control/approval-approve',
+      'POST /api/pack-control/enable',
+      'POST /api/pack-control/disable',
+      'POST /api/pack-control/restart',
     ],
   );
   assert.deepEqual(operations[3]?.payload, {

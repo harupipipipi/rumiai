@@ -295,9 +295,19 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
 
     session = capture()
     providers = session.provider_metadata("tobkiri.host.pack-control.v4")
-    assert len(providers) == 1
-    assert providers[0]["provider_id"] == "tobkiri.host.pack-control"
-    assert providers[0]["operation_id"] == "catalog.read"
+    assert {provider["operation_id"] for provider in providers} == {
+        "approval.approve",
+        "approval.candidate",
+        "catalog.read",
+        "dashboard.read",
+        "pack.disable",
+        "pack.enable",
+        "pack.install",
+        "pack.status",
+        "profile.reload",
+        "runtime.restart",
+    }
+    assert {provider["provider_id"] for provider in providers} == {"tobkiri.host.pack-control"}
     result = session.invoke(
         "tobkiri.host.pack-control.v4",
         "catalog.read",
@@ -311,19 +321,6 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
         "dispatched",
         "committed",
     ]
-
-    for denied_operation in (
-        "pack.install",
-        "approval.approve",
-        "pack.enable",
-        "pack.disable",
-    ):
-        with pytest.raises(KeyError):
-            session.invoke(
-                "tobkiri.host.pack-control.v4",
-                denied_operation,
-                {"_session_id": "session.panel.first-start"},
-            )
 
     context = session.context_for(
         "tobkiri.host.pack-control.v4",
@@ -388,6 +385,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
         item
         for item in store.list_grants()
         if item.target.function_id == "tobkiri.host.pack-control"
+        and item.scope.dimensions["operation"] == ("catalog.read",)
     )
     restarted.authority_control.revoke(
         target_kind="grant",

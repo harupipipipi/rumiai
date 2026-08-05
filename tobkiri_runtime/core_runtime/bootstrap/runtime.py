@@ -20,6 +20,10 @@ from ..app_lifecycle_manager import (
 )
 from ..authority.v4 import AuthorityStore
 from ..pack_api_server import PackAPIServer, initialize_pack_api_server
+from ..frontend_contract_routes import (
+    FrontendContractBinding,
+    load_frontend_contract_bindings,
+)
 from ..runtime_port import resolve_runtime_port
 from tobkiri_host.runtime import install_dispatch_session
 from .production_v4 import capture_production_dispatch
@@ -28,6 +32,7 @@ from .profile_capture import (
     capture_default_profile,
     runtime_user_data_root,
 )
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
 
 logger = logging.getLogger(__name__)
@@ -62,25 +67,32 @@ class Kernel:
             runtime_root = Path(__file__).resolve().parents[2]
             user_data = runtime_user_data_root()
             dispatch_session = None
+            contract_bindings: tuple[FrontendContractBinding, ...] = ()
             if active_default_profile_exists():
                 active = capture_default_profile()
                 dispatch_session = capture_production_dispatch(
                     active,
-                    bundle_root=(
-                        runtime_root / "ecosystem" / "defaultspack" / "v4"
-                    ),
+                    bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
                     ecosystem_root=runtime_root / "ecosystem",
-                    authority_store=AuthorityStore(
-                        user_data / "authority" / "v4.sqlite3"
-                    ),
+                    authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
                 )
                 install_dispatch_session(get_container(), dispatch_session)
+                catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+                contract_bindings = load_frontend_contract_bindings(
+                    runtime_root
+                    / "ecosystem"
+                    / "defaultspack"
+                    / "defaultspack"
+                    / "frontend_contract_map.v4.json",
+                    catalog.packs["runtime.tauri.application.default"],
+                )
             port = resolve_runtime_port()
             self._server = initialize_pack_api_server(
                 host="127.0.0.1",
                 port=port,
                 dispatch_session=dispatch_session,
                 app_lifecycle_manager=self._lifecycle,
+                contract_bindings=contract_bindings,
             )
             mark_panel_ready()
             return {"status": "ok", "step_id": step_id, "port": port}
@@ -95,6 +107,31 @@ class Kernel:
                     "status": "setup_required",
                     "runtime_ready": False,
                 }
+            if self._server is not None and not self._server._contract_routes:
+                from ..di_container import get_container
+
+                session = get_container().get_or_none("v4_dispatch_session")
+                if session is None:
+                    raise RuntimeError("captured v4 dispatch session is unavailable")
+                runtime_root = Path(__file__).resolve().parents[2]
+                catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+                bindings = load_frontend_contract_bindings(
+                    runtime_root
+                    / "ecosystem"
+                    / "defaultspack"
+                    / "defaultspack"
+                    / "frontend_contract_map.v4.json",
+                    catalog.packs["runtime.tauri.application.default"],
+                )
+                port = self._server.port
+                self._server.stop()
+                self._server = initialize_pack_api_server(
+                    host="127.0.0.1",
+                    port=port,
+                    dispatch_session=session,
+                    app_lifecycle_manager=self._lifecycle,
+                    contract_bindings=bindings,
+                )
             mark_runtime_ready()
             return {"status": "ok", "runtime_ready": True}
 

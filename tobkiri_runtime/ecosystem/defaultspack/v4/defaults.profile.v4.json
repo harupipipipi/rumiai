@@ -65,6 +65,96 @@
       "target_provider_id": "tobkiri.host.pack-control"
     },
     {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "pack.install",
+      "requested_scope_template": {
+        "ceremony": "explicit_install",
+        "resource_namespace": "pack.catalog"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "dashboard.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "panel.dashboard"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "approval.candidate",
+      "requested_scope_template": {
+        "ceremony": "approval_prepare",
+        "resource_namespace": "pack.approval"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "approval.approve",
+      "requested_scope_template": {
+        "ceremony": "approval_commit",
+        "resource_namespace": "pack.approval"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "pack.enable",
+      "requested_scope_template": {
+        "ceremony": "profile_activation",
+        "resource_namespace": "profile.pack-set"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "pack.disable",
+      "requested_scope_template": {
+        "ceremony": "profile_revocation",
+        "resource_namespace": "profile.pack-set"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "pack.status",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "pack.status"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "profile.reload",
+      "requested_scope_template": {
+        "ceremony": "explicit_reload",
+        "resource_namespace": "profile.activation"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "runtime.restart",
+      "requested_scope_template": {
+        "ceremony": "explicit_restart",
+        "resource_namespace": "runtime.lifecycle"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
       "caller_function_id": "defaultspack.conversation",
       "contract_id": "tobkiri.service.file.inspect.v1",
       "operation_id": "rumi_file_inspect_pack.file-inspect",

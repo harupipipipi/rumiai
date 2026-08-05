@@ -7,6 +7,8 @@ import hmac
 import logging
 import re
 import threading
+import time
+import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping, Protocol
@@ -18,6 +20,16 @@ from .api.http_response import ResponseWriterMixin
 from .api.request_body import RequestBodyMixin
 from .api.setup_handlers import SetupHandlersMixin
 from .api.web_mounts import WebMountMixin
+from .api.web_mounts import WebMountEntry
+from .frontend_contract_routes import (
+    ContractRouteError,
+    FrontendContractBinding,
+    FrontendContractTarget,
+    contract_binding_map,
+    is_contract_route_path,
+    resolve_contract_route,
+)
+from tobkiri_protocol.canonical import canonical_digest
 from .host_contract import host_contract_value
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
 from tobkiri_host.errors import HostCoreError
@@ -69,6 +81,23 @@ class DispatchSession(Protocol):
     ) -> Mapping[str, object]:
         """Invoke one exact qualified operation through RequestBroker."""
 
+    def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, object], ...]:
+        """Return the providers pinned into the captured activation."""
+
+    def assert_current(self) -> None:
+        """Reject a stale, revoked, or replaced capture."""
+
+    def assert_operation_ready(self, contract_id: str, operation_id: str) -> None:
+        """Reject a selected operation without a production backend."""
+
+    @property
+    def profile_id(self) -> str:
+        """Return the exact captured Profile identity."""
+
+    @property
+    def plan_digest(self) -> str:
+        """Return the exact captured ResolvedPlan digest."""
+
 
 class LifecyclePort(Protocol):
     """Read-only lifecycle surface required by the HTTP shell."""
@@ -107,6 +136,31 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
     request_queue_size = 128
 
 
+class _RequestReplayGuard:
+    """Consume browser request identities once per authenticated server."""
+
+    _REQUEST_ID = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._consumed: set[tuple[str, str]] = set()
+
+    def consume(self, session_id: str, request_id: str) -> bool:
+        """Return true only for a fresh canonical request identity."""
+
+        if not session_id or self._REQUEST_ID.fullmatch(request_id) is None:
+            return False
+        key = (session_id, request_id)
+        with self._lock:
+            if key in self._consumed:
+                return False
+            self._consumed.add(key)
+        return True
+
+
 class PackAPIHandler(
     ResponseWriterMixin,
     AuthGateMixin,
@@ -124,6 +178,9 @@ class PackAPIHandler(
     )
     _panel_auth_manager: PanelAuthManager | None = None
     _dispatch_session: DispatchSession | None = None
+    _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
+    _contract_replay_guard: _RequestReplayGuard | None = None
+    _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
     app_lifecycle_manager: LifecyclePort | None = None
     _runtime_port = 8765
     _request_auth_mode: str | None = None
@@ -137,17 +194,32 @@ class PackAPIHandler(
         panel_auth_manager: PanelAuthManager,
         dispatch_session: DispatchSession | None,
         app_lifecycle_manager: LifecyclePort | None,
+        contract_routes: Mapping[tuple[str, str], FrontendContractBinding] | None = None,
+        replay_guard: _RequestReplayGuard | None = None,
+        web_mounts: tuple[WebMountEntry, ...] | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
         bound_panel_auth = panel_auth_manager
         bound_dispatch = dispatch_session
         bound_lifecycle = app_lifecycle_manager
+        bound_contract_routes = dict(contract_routes or {})
+        bound_replay_guard = replay_guard
+        bound_web_mounts = web_mounts
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
             _dispatch_session = bound_dispatch
             app_lifecycle_manager = bound_lifecycle
+            _contract_routes = bound_contract_routes
+            _contract_replay_guard = bound_replay_guard
+            _instance_web_mounts = bound_web_mounts
+
+            @staticmethod
+            def _fixed_web_mounts() -> tuple[WebMountEntry, ...]:
+                if bound_web_mounts is not None:
+                    return bound_web_mounts
+                return WebMountMixin._fixed_web_mounts()
 
         BoundPackAPIHandler.__name__ = "PackAPIHandlerV4Instance"
         return BoundPackAPIHandler
@@ -175,9 +247,7 @@ class PackAPIHandler(
     def _is_loopback_client(client_address: object) -> bool:
         if not isinstance(client_address, tuple) or not client_address:
             return False
-        return str(client_address[0]).lower() in _LOOPBACK_HOSTS | {
-            "::ffff:127.0.0.1"
-        }
+        return str(client_address[0]).lower() in _LOOPBACK_HOSTS | {"::ffff:127.0.0.1"}
 
     def _reset_request_state(self) -> None:
         self._request_auth_mode = None
@@ -218,23 +288,295 @@ class PackAPIHandler(
     def _send_not_found(self) -> None:
         self._send_response(APIResponse(False, error="Not found"), 404)
 
+    def _send_contract_error(self, error: ContractRouteError) -> None:
+        self._send_response(
+            APIResponse(
+                False,
+                data={"state": "contract_dispatch_denied", "code": error.code},
+                error=str(error),
+            ),
+            error.status,
+        )
+
+    def _handle_contract_request(self, method: str) -> bool:
+        """Resolve, authenticate, and dispatch one exact frontend operation."""
+
+        if not is_contract_route_path(urlparse(self.path).path):
+            return False
+        try:
+            resolved = resolve_contract_route(self, method, self.path)
+        except ContractRouteError as error:
+            self._discard_request_body()
+            self._send_contract_error(error)
+            return True
+        if resolved is None:  # pragma: no cover - prefix was checked above
+            return False
+        route_binding = self._contract_routes.get((resolved.method, resolved.path))
+        if route_binding is None:
+            self._discard_request_body()
+            self._send_contract_error(
+                ContractRouteError(
+                    "CONTRACT_OPERATION_UNKNOWN",
+                    "Unknown frontend contract operation",
+                    404,
+                )
+            )
+            return True
+        if not self._check_auth(method, urlparse(self.path).path):
+            self._discard_request_body()
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return True
+        panel_session = self._panel_session
+        session_id = panel_session.get("session_id") if panel_session else None
+        request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
+        replay_guard = self._contract_replay_guard
+        if (
+            not isinstance(session_id, str)
+            or replay_guard is None
+            or not replay_guard.consume(session_id, request_id)
+        ):
+            self._discard_request_body()
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        "state": "contract_dispatch_denied",
+                        "code": "invalid_or_replayed_request",
+                    },
+                    error="Canonical request identity is missing or replayed",
+                ),
+                409,
+            )
+            return True
+        outer_body: dict[str, object] = {}
+        if method.upper() == "GET":
+            self._discard_request_body()
+            payload: dict[str, object] = dict(resolved.query)
+        else:
+            body = self._parse_object_body()
+            if body is None:
+                return True
+            if len(route_binding.targets) == 1:
+                payload = {**resolved.query, **body}
+            else:
+                outer_body = body
+                nested = body.get("payload")
+                if not isinstance(nested, dict) or any(not isinstance(key, str) for key in nested):
+                    self._send_response(
+                        APIResponse(False, error="Contract payload must be an object"),
+                        400,
+                    )
+                    return True
+                payload = {**resolved.query, **nested}
+        target = self._select_contract_target(route_binding, outer_body)
+        if target is None:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        "state": "contract_dispatch_denied",
+                        "code": "unselected_contract_contribution",
+                    },
+                    error="Contract contribution is not selected",
+                ),
+                404,
+            )
+            return True
+        if set(payload) - target.allowed_payload_keys:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        "state": "contract_dispatch_denied",
+                        "code": "invalid_contract_payload",
+                    },
+                    error="Contract payload contains unknown fields",
+                ),
+                400,
+            )
+            return True
+        session = self._dispatch_session
+        if session is None:
+            self._send_response(
+                APIResponse(False, error="Captured v4 dispatch session is unavailable"),
+                503,
+            )
+            return True
+        payload["_session_id"] = session_id
+        try:
+            session.assert_current()
+            result = session.invoke(
+                target.contract_id,
+                target.operation_id,
+                payload,
+            )
+        except (HostCoreError, KeyError, RuntimeError, ValueError) as error:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        "state": "contract_dispatch_denied",
+                        "code": str(getattr(error, "code", "invalid_dispatch")),
+                    },
+                    error=str(error),
+                ),
+                409,
+            )
+            return True
+        presented = self._present_contract_result(route_binding, result)
+        self._send_response(APIResponse(True, data=presented))
+        return True
+
+    def _select_contract_target(
+        self,
+        binding: FrontendContractBinding,
+        body: Mapping[str, object],
+    ) -> FrontendContractTarget | None:
+        """Select only a contribution committed in the captured application map."""
+
+        if len(binding.targets) == 1 and not body:
+            return binding.targets[0]
+        expected_fields = {
+            "request_id",
+            "expires_at",
+            "profile_id",
+            "plan_hash",
+            "catalog_hash",
+            "contribution_id",
+            "owner_pack_id",
+            "contract_id",
+            "payload",
+        }
+        if set(body) != expected_fields:
+            return None
+        capability_request_id = body.get("request_id")
+        expires_at = body.get("expires_at")
+        try:
+            valid_request_id = (
+                isinstance(capability_request_id, str)
+                and str(uuid.UUID(capability_request_id)) == capability_request_id
+            )
+        except ValueError:
+            valid_request_id = False
+        now = time.time()
+        valid_expiry = (
+            isinstance(expires_at, (int, float))
+            and not isinstance(expires_at, bool)
+            and now < float(expires_at) <= now + 60
+        )
+        if not valid_request_id or not valid_expiry:
+            return None
+        session = self._dispatch_session
+        if session is None or (
+            body.get("profile_id") != session.profile_id
+            or body.get("plan_hash") != session.plan_digest
+            or body.get("owner_pack_id") != "defaultspack"
+            or body.get("catalog_hash") != self._frontend_catalog_hash(binding)
+        ):
+            return None
+        contribution_id = body.get("contribution_id")
+        contract_id = body.get("contract_id")
+        return next(
+            (
+                target
+                for target in binding.targets
+                if target.contribution_id == contribution_id and target.contract_id == contract_id
+            ),
+            None,
+        )
+
+    def _frontend_catalog_hash(self, binding: FrontendContractBinding) -> str:
+        session = self._dispatch_session
+        return canonical_digest(
+            {
+                "profile_id": session.profile_id if session is not None else "",
+                "plan_digest": session.plan_digest if session is not None else "",
+                "contributions": [
+                    {
+                        "contribution_id": target.contribution_id,
+                        "contract_id": target.contract_id,
+                        "operation_id": target.operation_id,
+                        "provider_id": target.provider_id,
+                        "function_id": target.function_id,
+                    }
+                    for target in binding.targets
+                ],
+            }
+        )
+
+    def _present_contract_result(
+        self,
+        binding: FrontendContractBinding,
+        result: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Apply the presentation named by the committed application artifact."""
+
+        if binding.presentation != "dynamic_pack_catalog":
+            return dict(result)
+        capability_binding = self._contract_routes.get(("POST", "/api/ui/capability/invoke"))
+        contributions = capability_binding.targets if capability_binding else ()
+        session = self._dispatch_session
+        catalog_hash = (
+            self._frontend_catalog_hash(capability_binding)
+            if capability_binding is not None
+            else canonical_digest({"contributions": []})
+        )
+        return {
+            **dict(result),
+            "dynamic_host": {
+                "version": "rumi.ui.contribution.v1",
+                "profile_id": session.profile_id if session is not None else "",
+                "profile_revision": session.plan_digest if session is not None else "",
+                "plan_hash": session.plan_digest if session is not None else "",
+                "contributions": [
+                    {
+                        "contribution_id": target.contribution_id,
+                        "kind": "action",
+                        "mode": "same_origin_builtin",
+                        "label": target.operation_id,
+                        "priority": index,
+                        "owner_pack_id": "defaultspack",
+                        "owner_pack_hash": session.plan_digest if session is not None else "",
+                        "build_identity": target.function_id,
+                        "resolved_profile_revision": session.plan_digest
+                        if session is not None
+                        else "",
+                        "resolved_plan_hash": session.plan_digest if session is not None else "",
+                        "descriptor_hash": canonical_digest(
+                            {
+                                "contribution_id": target.contribution_id,
+                                "operation_id": target.operation_id,
+                            }
+                        ),
+                        "route": "/packs",
+                        "action_contract": target.contract_id,
+                        "localization": {},
+                        "accessibility": {
+                            "name": target.operation_id,
+                            "keyboard": True,
+                        },
+                    }
+                    for index, target in enumerate(contributions)
+                ],
+                "diagnostics": [],
+                "quarantined_pack_ids": [],
+                "catalog_hash": catalog_hash,
+            },
+        }
+
     def _parse_object_body(self) -> dict[str, object] | None:
         """Parse one JSON object and reject every other JSON root type."""
 
         parsed: object = self._parse_body()
         if parsed is None:
             return None
-        if not isinstance(parsed, dict) or any(
-            not isinstance(key, str) for key in parsed
-        ):
+        if not isinstance(parsed, dict) or any(not isinstance(key, str) for key in parsed):
             self._send_response(
                 APIResponse(False, error="Request body must be a JSON object"),
                 400,
             )
             return None
-        return {
-            key: value for key, value in parsed.items() if isinstance(key, str)
-        }
+        return {key: value for key, value in parsed.items() if isinstance(key, str)}
 
     def _send_mapping_result(self, result: Mapping[str, object]) -> None:
         response, status_code = self._mapping_response(result)
@@ -328,10 +670,7 @@ class PackAPIHandler(
 
     def _handle_panel_exchange(self, body: Mapping[str, object]) -> None:
         manager = self._panel_auth_manager
-        if (
-            not self._is_loopback_client(self.client_address)
-            or not self._check_panel_origin()
-        ):
+        if not self._is_loopback_client(self.client_address) or not self._check_panel_origin():
             self._send_response(APIResponse(False, error="Forbidden origin"), 403)
             return
         code_value = body.get("code")
@@ -459,6 +798,30 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
             self.close_connection = True
 
+    def _serve_mount_bootstrap_page(self, target: str) -> None:
+        """Exchange a one-time desktop code before serving an authenticated mount."""
+
+        safe_target = target if target in {"/chat", "/panel/"} else "/panel/"
+        document = f"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
+<script>
+const code=new URL(location.href).searchParams.get('code');
+if(!code){{document.body.textContent='Tobkiri Launcher authentication required';}}
+else fetch('/api/panel/auth/exchange',{{method:'POST',credentials:'same-origin',
+headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
+.then(r=>{{if(!r.ok)throw new Error('authentication failed');return r.json()}})
+.then(v=>{{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('{safe_target}')}})
+.catch(()=>{{document.body.textContent='Tobkiri Launcher authentication failed';}});
+</script>""".encode("utf-8")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(document)))
+            self.end_headers()
+            self.wfile.write(document)
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
+
     def do_OPTIONS(self) -> None:
         """Answer local panel preflight without widening the origin set."""
 
@@ -477,7 +840,7 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap",
+                "Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap, X-Tobkiri-Request-ID",
             )
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -489,6 +852,8 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._handle_contract_request("GET"):
+            return
         if self._is_retired_setup_complete_path():
             self._handle_retired_setup_complete()
             return
@@ -516,7 +881,9 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
         mount = self._match_web_mount(path)
         if mount is not None:
             if mount["auth_required"] and not self._check_auth("GET", path):
-                if mount["path_prefix"] == "/panel" and path in {
+                if mount["path_prefix"] == "/chat" and path in {"/chat", "/chat/"}:
+                    self._serve_mount_bootstrap_page("/chat")
+                elif mount["path_prefix"] == "/panel" and path in {
                     "/panel",
                     "/panel/",
                     "/panel/index.html",
@@ -537,6 +904,8 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._handle_contract_request("POST"):
+            return
         if self._is_retired_setup_complete_path():
             self._handle_retired_setup_complete()
             return
@@ -578,6 +947,8 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._handle_contract_request("PUT"):
+            return
         if self._is_retired_setup_complete_path():
             self._handle_retired_setup_complete()
             return
@@ -589,12 +960,16 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 
     def do_DELETE(self) -> None:
         """Retire historical deletion routes without manager access."""
-
+        self._reset_request_state()
+        if self._handle_contract_request("DELETE"):
+            return
         self.do_PUT()
 
     def do_PATCH(self) -> None:
         """Retire historical partial mutations without manager access."""
-
+        self._reset_request_state()
+        if self._handle_contract_request("PATCH"):
+            return
         self.do_PUT()
 
     def do_HEAD(self) -> None:
@@ -618,6 +993,8 @@ class PackAPIServer:
         panel_auth_manager: PanelAuthManager | None = None,
         dispatch_session: DispatchSession | None = None,
         app_lifecycle_manager: LifecyclePort | None = None,
+        contract_bindings: tuple[FrontendContractBinding, ...] = (),
+        web_mounts: tuple[WebMountEntry, ...] | None = None,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -625,6 +1002,9 @@ class PackAPIServer:
         self._panel_auth_manager = panel_auth_manager or get_panel_auth_manager()
         self._dispatch_session = dispatch_session
         self.app_lifecycle_manager = app_lifecycle_manager
+        self._contract_routes = contract_binding_map(contract_bindings)
+        self._web_mounts = web_mounts
+        self._replay_guard = _RequestReplayGuard()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.handler_class: type[PackAPIHandler] | None = None
@@ -636,10 +1016,14 @@ class PackAPIServer:
         with self._lifecycle_lock:
             if self.is_running():
                 return
+            self._validate_contract_runtime()
             handler = PackAPIHandler.canonical_v4_server_handler(
                 panel_auth_manager=self._panel_auth_manager,
                 dispatch_session=self._dispatch_session,
                 app_lifecycle_manager=self.app_lifecycle_manager,
+                contract_routes=self._contract_routes,
+                replay_guard=self._replay_guard,
+                web_mounts=self._web_mounts,
             )
             server = _PackThreadingHTTPServer((self.host, self.port), handler)
             actual_port = int(server.server_address[1])
@@ -651,6 +1035,40 @@ class PackAPIServer:
             self.thread = thread
             thread.start()
         logger.info("Pack v4 API server started on http://%s:%s", self.host, self.port)
+
+    def _validate_contract_runtime(self) -> None:
+        """Verify the exact capture and route ownership before binding a socket."""
+
+        if not self._contract_routes:
+            return
+        session = self._dispatch_session
+        if session is None:
+            raise RuntimeError("frontend contracts require a captured v4 session")
+        session.assert_current()
+        if session.profile_id != "defaults" or not session.plan_digest.startswith("sha256:"):
+            raise RuntimeError("frontend contracts require the exact Defaults Profile")
+        for binding in self._contract_routes.values():
+            for target in binding.targets:
+                providers = session.provider_metadata(target.contract_id)
+                exact = tuple(
+                    provider
+                    for provider in providers
+                    if provider.get("provider_id") == target.provider_id
+                    and provider.get("operation_id") == target.operation_id
+                    and provider.get("profile_id") == session.profile_id
+                    and provider.get("plan_digest") == session.plan_digest
+                )
+                if len(exact) != 1 or target.function_id != target.provider_id:
+                    raise RuntimeError("frontend contract Provider identity is unavailable")
+                session.assert_operation_ready(
+                    target.contract_id,
+                    target.operation_id,
+                )
+        if self._web_mounts is not None:
+            for mount in self._web_mounts:
+                root = mount["web_root"]
+                if not root.is_dir() or not (root / mount["index_file"]).is_file():
+                    raise RuntimeError("frontend contract web mount is unavailable")
 
     def stop(self) -> None:
         """Stop the server and discard its captured handler bindings."""
@@ -671,11 +1089,7 @@ class PackAPIServer:
     def is_running(self) -> bool:
         """Return whether the serving thread is alive."""
 
-        return (
-            self.server is not None
-            and self.thread is not None
-            and self.thread.is_alive()
-        )
+        return self.server is not None and self.thread is not None and self.thread.is_alive()
 
 
 _api_server: PackAPIServer | None = None
@@ -694,6 +1108,8 @@ def initialize_pack_api_server(
     panel_auth_manager: PanelAuthManager | None = None,
     dispatch_session: DispatchSession | None = None,
     app_lifecycle_manager: LifecyclePort | None = None,
+    contract_bindings: tuple[FrontendContractBinding, ...] = (),
+    web_mounts: tuple[WebMountEntry, ...] | None = None,
 ) -> PackAPIServer:
     """Replace the process-local server with one verified v4 instance."""
 
@@ -706,6 +1122,8 @@ def initialize_pack_api_server(
         panel_auth_manager=panel_auth_manager,
         dispatch_session=dispatch_session,
         app_lifecycle_manager=app_lifecycle_manager,
+        contract_bindings=contract_bindings,
+        web_mounts=web_mounts,
     )
     server.start()
     _api_server = server

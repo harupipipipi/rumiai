@@ -56,6 +56,7 @@ TAURI_ROLE_PACKS = {
     },
 }
 DEFAULTSPACK_DESKTOP_ENTRYPOINT = "defaultspack/desktop_app.py"
+DEFAULTSPACK_FRONTEND_CONTRACT_MAP = "defaultspack/frontend_contract_map.v4.json"
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -63,9 +64,23 @@ def _pretty(document: dict[str, Any]) -> bytes:
 
 
 def _requirements(pack_id: str, kind: str) -> dict[str, Any]:
-    capabilities = (
-        ["file.inspect", "workspace.metadata.read"] if pack_id == "rumi-file-inspect" else []
-    )
+    if pack_id == "rumi-file-inspect":
+        capabilities = ["file.inspect", "workspace.metadata.read"]
+    elif pack_id == "tobkiri_host_pack_control":
+        capabilities = [
+            "pack.approval.commit",
+            "pack.approval.prepare",
+            "pack.catalog.read",
+            "dashboard.read",
+            "pack.disable",
+            "pack.enable",
+            "pack.install",
+            "pack.status.read",
+            "profile.reload",
+            "runtime.restart",
+        ]
+    else:
+        capabilities = []
     return {
         "pack_dependencies": {},
         "contract_dependencies": [],
@@ -145,7 +160,9 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
     contract_digest = canonical_digest({"contract_id": contract_id, "operations": [operation_id]})
     if pack_id == "runtime.tauri.application.default":
         entrypoint = ROOT / "ecosystem" / "defaultspack" / DEFAULTSPACK_DESKTOP_ENTRYPOINT
+        contract_map = ROOT / "ecosystem" / "defaultspack" / DEFAULTSPACK_FRONTEND_CONTRACT_MAP
         implementation_digest = "sha256:" + hashlib.sha256(entrypoint.read_bytes()).hexdigest()
+        contract_map_digest = "sha256:" + hashlib.sha256(contract_map.read_bytes()).hexdigest()
         artifacts = [
             {
                 "path": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
@@ -154,7 +171,13 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
                 "platform": "host",
                 "entrypoint": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
                 "argv": [],
-            }
+            },
+            {
+                "path": DEFAULTSPACK_FRONTEND_CONTRACT_MAP,
+                "digest": contract_map_digest,
+                "kind": "asset",
+                "platform": "host",
+            },
         ]
         artifact_digest = canonical_digest(artifacts)
     else:

@@ -17,13 +17,13 @@ from typing import Any, Mapping
 from tobkiri_host.errors import HostCoreError
 
 from .pack_boundary import load_pack_catalog, resolve_pack_root
-from .paths import USER_DATA_DIR
 
 
 PACK_CONTROL_CONTRACT = "tobkiri.host.pack-control.v4"
 PACK_CONTROL_OPERATIONS = frozenset(
     {
         "catalog.read",
+        "dashboard.read",
         "pack.install",
         "approval.candidate",
         "approval.approve",
@@ -122,6 +122,8 @@ class CapturedPackControlSession:
             self._require_current_binding()
             if operation_id == "catalog.read":
                 return self._catalog_payload()
+            if operation_id == "dashboard.read":
+                return self._dashboard()
             if operation_id == "pack.install":
                 return self._install(arguments)
             if operation_id == "approval.candidate":
@@ -233,6 +235,10 @@ class CapturedPackControlSession:
             raise PackControlDenied(reason or "Pack approval is required")
         state, profile = _active_profile()
         packs = [str(item) for item in profile.get("packs") or []]
+        if enabled and pack_id in packs:
+            return {"pack_id": pack_id, "enabled": True, **self._binding_payload()}
+        if not enabled and pack_id not in packs:
+            return {"pack_id": pack_id, "enabled": False, **self._binding_payload()}
         if enabled and pack_id not in packs:
             packs.append(pack_id)
         if not enabled and pack_id in packs:
@@ -254,6 +260,25 @@ class CapturedPackControlSession:
         if match is None:
             raise PackControlDenied("Pack is absent from the canonical v4 catalog")
         return match
+
+    def _dashboard(self) -> dict[str, Any]:
+        """Return the finite Home projection from the captured Pack state."""
+
+        catalog = self._catalog_payload()
+        packs = catalog["packs"]
+        enabled = sum(1 for item in packs if item["enabled"] is True)
+        return {
+            "packs": {
+                "total": len(packs),
+                "enabled": enabled,
+                "disabled": len(packs) - enabled,
+            },
+            "flows": {"total": 0},
+            "kernel": {"status": "running", "uptime": None},
+            "profile": None,
+            "supervisor": None,
+            **self._binding_payload(),
+        }
 
     def _binding_payload(self) -> dict[str, str]:
         return {
@@ -404,7 +429,7 @@ def _save_active_profile(state: dict[str, Any], profile: dict[str, Any]) -> None
 
 def _control_state_path(profile_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
-    return Path(USER_DATA_DIR) / "pack_control" / f"{profile_id}.v4.json"
+    return _user_data_root() / "pack_control" / f"{profile_id}.v4.json"
 
 
 def _read_control_state(profile_id: str) -> dict[str, Any]:
@@ -495,13 +520,21 @@ def _require_install_binding(
 def _approval_path(profile_id: str, pack_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
     _safe_identity(pack_id, "Pack ID")
-    return Path(USER_DATA_DIR) / "pack_control" / "approvals" / profile_id / f"{pack_id}.json"
+    return _user_data_root() / "pack_control" / "approvals" / profile_id / f"{pack_id}.json"
 
 
 def _authority_key() -> bytes:
     from .hmac_key_manager import generate_or_load_signing_key
 
-    return generate_or_load_signing_key(Path(USER_DATA_DIR) / "pack_control" / ".authority_key")
+    return generate_or_load_signing_key(_user_data_root() / "pack_control" / ".authority_key")
+
+
+def _user_data_root() -> Path:
+    """Return the same Host-owned state root as the captured activation."""
+
+    from .bootstrap.profile_capture import runtime_user_data_root
+
+    return runtime_user_data_root()
 
 
 def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> None:

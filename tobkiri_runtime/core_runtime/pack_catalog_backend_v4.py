@@ -14,6 +14,7 @@ from tobkiri_host.models import ExecutionKind, OpaqueAuthorityRef, RuntimeEviden
 from .pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
     CapturedPackCatalogReader,
+    CapturedPackControlSession,
     PackControlDenied,
 )
 
@@ -95,4 +96,89 @@ class PackCatalogBackendV4:
             raise PackControlDenied("Pack catalog Provider domain is invalid")
 
 
-__all__ = ["PACK_CATALOG_BACKEND_ID", "PackCatalogBackendV4"]
+class PackControlBackendV4:
+    """Execute only the Profile-selected finite Pack control operations."""
+
+    def __init__(
+        self,
+        *,
+        session: CapturedPackControlSession,
+        targets: dict[str, tuple[str, str, str]],
+        backend_digest: str,
+    ) -> None:
+        self._session = session
+        self._targets = dict(targets)
+        self.status = BackendStatus(
+            backend_id=PACK_CATALOG_BACKEND_ID,
+            execution_kind=ExecutionKind.HOST_EXTENSION,
+            platform="any-any",
+            backend_digest=backend_digest,
+            production_enabled=True,
+            conformance_only=False,
+            satisfied_gates=REQUIRED_PRODUCTION_GATES,
+        )
+
+    def materialize(
+        self,
+        binding: ResolvedOperationBinding,
+        reservation_id: str,
+    ) -> RuntimeEvidence:
+        """Return evidence only for an exact selected Function principal."""
+
+        expected = self._targets.get(binding.operation.operation_id)
+        if (
+            not reservation_id
+            or binding.operation.contract_id != PACK_CONTROL_CONTRACT
+            or expected is None
+            or expected[0] != binding.principal_ref.value
+            or expected[1] != binding.function.implementation_digest
+        ):
+            raise PackControlDenied("Pack control backend binding is unavailable")
+        return RuntimeEvidence(
+            domain_ref=OpaqueAuthorityRef(expected[2]),
+            executable_digest=expected[1],
+            backend_digest=self.status.backend_digest,
+            authenticated_channel=True,
+            nonce_fresh=True,
+        )
+
+    def invoke(self, request: object) -> ProviderOutcome:
+        """Invoke the finite Provider after exact Broker envelope validation."""
+
+        if not isinstance(request, RequestEnvelope):
+            raise PackControlDenied("Pack control Provider envelope is invalid")
+        expected = self._targets.get(request.operation_id)
+        if (
+            request.contract_id != PACK_CONTROL_CONTRACT
+            or expected is None
+            or request.target_principal.value != expected[0]
+            or request.target_domain.value != expected[2]
+        ):
+            raise PackControlDenied("Pack control Provider envelope is invalid")
+        result = self._session.invoke(
+            request.contract_id,
+            request.operation_id,
+            {
+                **dict(request.payload),
+                "_session_id": request.context.caller_session_id,
+            },
+        )
+        return ProviderOutcome(result)
+
+    def cancel(self, request_id: str) -> None:
+        """Accept Broker cancellation without creating another authority path."""
+
+        del request_id
+
+    def terminate(self, domain_id: str) -> None:
+        """Accept a Host fence only for one captured Provider domain."""
+
+        if domain_id not in {target[2] for target in self._targets.values()}:
+            raise PackControlDenied("Pack control Provider domain is invalid")
+
+
+__all__ = [
+    "PACK_CATALOG_BACKEND_ID",
+    "PackCatalogBackendV4",
+    "PackControlBackendV4",
+]

@@ -2754,10 +2754,14 @@ export function defaultspackApiFetch(
   const requestInput = isDefaultspackContractRoute(input)
     ? defaultspackContractUrl(input, method)
     : input;
+  const headers = defaultspackApiHeaders(method, init.headers);
+  if (isDefaultspackContractRoute(input)) {
+    headers.set("X-Tobkiri-Request-ID", crypto.randomUUID());
+  }
   return fetch(requestInput, {
     ...init,
     method,
-    headers: defaultspackApiHeaders(method, init.headers),
+    headers,
   });
 }
 

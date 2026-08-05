@@ -100,8 +100,18 @@ function isV4DispatchApiPath(path: string): boolean {
   return path === '/api/v4/dispatch';
 }
 
+function isFrontendContractPath(path: string): boolean {
+  return path.startsWith('/api/contracts/defaultspack/');
+}
+
 function isPanelSessionApiPath(path: string): boolean {
-  return isPanelApiPath(path) || isSetupApiPath(path) || isV4DispatchApiPath(path);
+  return isPanelApiPath(path) || isSetupApiPath(path) || isV4DispatchApiPath(path)
+    || isFrontendContractPath(path);
+}
+
+function frontendContractPath(method: string, target: string): string {
+  const operation = `${method.toUpperCase()} ${target}`;
+  return `/api/contracts/defaultspack/${encodeURIComponent(operation)}`;
 }
 
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
@@ -412,6 +422,10 @@ export async function apiFetch<T>(
       ...(options.headers as Record<string, string> | undefined),
     };
 
+    if (isFrontendContractPath(path)) {
+      headers['X-Tobkiri-Request-ID'] = crypto.randomUUID();
+    }
+
     if (isUnsafeMethod(method)) {
       const csrfToken = getStoredPanelCsrfToken();
       if (csrfToken) {
@@ -528,23 +542,32 @@ export function getApiRequestCacheSnapshot(): GetRequestSnapshot {
 // ============================================================
 
 export function fetchDashboard(): Promise<ApiDashboard> {
-  return apiFetch<ApiDashboard>('/api/panel/dashboard');
+  return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
 }
 
 // ============================================================
 // Packs
 // ============================================================
 
-const PACK_CONTROL_CONTRACT = 'tobkiri.host.pack-control.v4';
-
 function dispatchPackControl<T>(operationId: string, payload: Record<string, unknown> = {}): Promise<T> {
-  return apiFetch<T>('/api/v4/dispatch', {
+  const targets: Record<string, string> = {
+    'approval.approve': '/api/pack-control/approval-approve',
+    'approval.candidate': '/api/pack-control/approval-candidate',
+    'pack.disable': '/api/pack-control/disable',
+    'pack.enable': '/api/pack-control/enable',
+    'pack.install': '/api/pack-control/install',
+    'runtime.restart': '/api/pack-control/restart',
+  };
+  if (operationId === 'catalog.read') {
+    return apiFetch<T>(frontendContractPath('GET', '/api/pack-control/catalog'));
+  }
+  const target = targets[operationId];
+  if (!target) {
+    throw new Error(`Unselected Pack control operation: ${operationId}`);
+  }
+  return apiFetch<T>(frontendContractPath('POST', target), {
     method: 'POST',
-    body: JSON.stringify({
-      contract_id: PACK_CONTROL_CONTRACT,
-      operation_id: operationId,
-      payload,
-    }),
+    body: JSON.stringify(payload),
   });
 }
 

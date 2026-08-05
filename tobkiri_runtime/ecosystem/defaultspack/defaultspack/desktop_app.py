@@ -12,6 +12,7 @@ import time
 import types
 import urllib.error
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,12 +45,8 @@ def _configure_persistent_user_state() -> None:
 
     persistent_root = Path(user_data).expanduser()
     legacy_root = _pack_root() / "user_data"
-    agent_runtime_dir = (
-        persistent_root / "defaultspack" / "shared" / "agent_runtime"
-    )
-    os.environ.setdefault(
-        "RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(agent_runtime_dir)
-    )
+    agent_runtime_dir = persistent_root / "defaultspack" / "shared" / "agent_runtime"
+    os.environ.setdefault("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(agent_runtime_dir))
     os.environ.setdefault(
         "RUMI_DEFAULTSPACK_AGENT_TRANSCRIPT_DIR",
         str(agent_runtime_dir / "transcripts"),
@@ -65,9 +62,7 @@ def _configure_persistent_user_state() -> None:
         if legacy_key.exists() and not persistent_key.exists():
             shutil.copy2(legacy_key, persistent_key)
 
-    configured_settings = os.environ.get(
-        "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", ""
-    ).strip()
+    configured_settings = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
     settings_path = (
         Path(configured_settings).expanduser()
         if configured_settings
@@ -77,9 +72,7 @@ def _configure_persistent_user_state() -> None:
     if legacy_settings_path.exists() and not settings_path.exists():
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(legacy_settings_path, settings_path)
-        legacy_backup = legacy_settings_path.with_suffix(
-            f"{legacy_settings_path.suffix}.bak"
-        )
+        legacy_backup = legacy_settings_path.with_suffix(f"{legacy_settings_path.suffix}.bak")
         if legacy_backup.exists():
             shutil.copy2(
                 legacy_backup,
@@ -181,9 +174,7 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
 
 def _url() -> str:
     port = (
-        os.environ.get("DEFAULTS_HTTP_PORT")
-        or os.environ.get("RUMI_DEFAULTSPACK_PORT")
-        or "8766"
+        os.environ.get("DEFAULTS_HTTP_PORT") or os.environ.get("RUMI_DEFAULTSPACK_PORT") or "8766"
     )
     return f"http://127.0.0.1:{port}/chat"
 
@@ -199,9 +190,7 @@ def _require_own_bind() -> bool:
 def _configure_http_environment() -> None:
     """Normalize loopback HTTP settings and validate isolated debug ports."""
     port = (
-        os.environ.get("RUMI_DEFAULTSPACK_PORT")
-        or os.environ.get("DEFAULTS_HTTP_PORT")
-        or "8766"
+        os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
     )
     os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
     os.environ["DEFAULTS_HTTP_PORT"] = port
@@ -210,8 +199,7 @@ def _configure_http_environment() -> None:
         return
     if os.environ["DEFAULTS_HTTP_HOST"] != "127.0.0.1":
         raise RuntimeError(
-            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires "
-            "DEFAULTS_HTTP_HOST=127.0.0.1"
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND requires DEFAULTS_HTTP_HOST=127.0.0.1"
         )
     if not port.isascii() or not port.isdecimal() or not 1 <= int(port) <= 65535:
         raise RuntimeError(
@@ -222,9 +210,7 @@ def _configure_http_environment() -> None:
 
 def _parse_cli_args(argv: list[str]) -> None:
     """Parse launcher arguments before runtime setup or imports."""
-    parser = argparse.ArgumentParser(
-        description="Launch the Tobkiri Defaultspack desktop app."
-    )
+    parser = argparse.ArgumentParser(description="Launch the Tobkiri Defaultspack desktop app.")
     parser.parse_args(argv)
 
 
@@ -237,20 +223,51 @@ def _surface_url(url: str) -> str:
     return url.partition("#")[0]
 
 
-def _restore_active_profile_contracts() -> None:
-    """Require the Launcher-captured Pack v4 dispatch snapshot."""
-    try:
-        from core_runtime.di_container import get_container
+def _restore_active_profile_contracts():
+    """Capture and verify the exact persisted Defaults activation and UI map."""
 
-        session = get_container().get_or_none("v4_dispatch_session")
-        if session is None:
-            raise RuntimeError("Pack v4 dispatch snapshot was not injected")
-        _write_launch_event(
-            "profile_contract_restore_complete",
-            snapshot_type=type(session).__name__,
-        )
-    except Exception as exc:
-        _write_launch_event("profile_contract_restore_failed", error=repr(exc))
+    from core_runtime.authority.v4 import AuthorityStore
+    from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+    from core_runtime.bootstrap.profile_capture import (
+        active_default_profile_exists,
+        capture_default_profile,
+        runtime_user_data_root,
+    )
+    from core_runtime.di_container import get_container
+    from core_runtime.frontend_contract_routes import (
+        load_frontend_contract_bindings,
+    )
+    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+    from tobkiri_host.runtime import install_dispatch_session
+
+    if not active_default_profile_exists():
+        raise RuntimeError("Defaults v4 activation is not committed")
+    bundle_root = _pack_root() / "v4"
+    ecosystem_root = _pack_root().parent
+    active = capture_default_profile()
+    catalog = BundledCatalog.load(bundle_root)
+    application = catalog.packs.get("runtime.tauri.application.default")
+    if application is None:
+        raise RuntimeError("Defaults application Pack is not selected")
+    session = capture_production_dispatch(
+        active,
+        bundle_root=bundle_root,
+        ecosystem_root=ecosystem_root,
+        authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
+    )
+    bindings = load_frontend_contract_bindings(
+        Path(__file__).with_name("frontend_contract_map.v4.json"),
+        application,
+    )
+    install_dispatch_session(get_container(), session)
+    _write_launch_event(
+        "profile_contract_restore_complete",
+        profile_id=session.profile_id,
+        plan_digest=session.plan_digest,
+        route_count=len(bindings),
+        snapshot_type=type(session).__name__,
+    )
+    return session, bindings
 
 
 def _diagnostic_log_path() -> Path:
@@ -343,7 +360,7 @@ def _port_from_url(url: str) -> str:
 
 def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
     deadline = time.time() + timeout
-    health_url = url.split("/chat", 1)[0].rstrip("/") + "/api/health"
+    health_url = url.split("/chat", 1)[0].rstrip("/") + "/health"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(health_url, timeout=1.0) as response:
@@ -382,55 +399,58 @@ def main(argv: list[str] | None = None) -> int:
         port=port,
         url=url,
     )
-    _restore_active_profile_contracts()
+    dispatch_session, contract_bindings = _restore_active_profile_contracts()
     try:
         from domain.integrations.secrets import load_integration_secrets_into_env
 
         load_integration_secrets_into_env()
     except Exception as exc:
         _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
-    from transport.http import DefaultsHttpServer
+    from core_runtime.api.web_mounts import WebMountEntry
+    from core_runtime.pack_api_server import PackAPIServer
+    from core_runtime.panel_auth import PanelAuthManager
 
-    server = DefaultsHttpServer(facade=None)
-    reused_existing_server = False
+    ui_root = _pack_root() / "ui"
+    web_mounts: tuple[WebMountEntry, ...] = (
+        {
+            "path_prefix": "/chat",
+            "web_root": ui_root,
+            "spa_fallback": True,
+            "index_file": "shell.html",
+            "auth_required": True,
+        },
+        {
+            "path_prefix": "/static",
+            "web_root": ui_root,
+            "spa_fallback": False,
+            "index_file": "shell.html",
+            "auth_required": True,
+        },
+    )
+    auth = PanelAuthManager()
+    server = PackAPIServer(
+        host="127.0.0.1",
+        port=int(port),
+        panel_auth_manager=auth,
+        dispatch_session=dispatch_session,
+        contract_bindings=contract_bindings,
+        web_mounts=web_mounts,
+    )
+    _write_launch_event("server_start_attempt", port=port, url=url)
     try:
-        _write_launch_event("server_start_attempt", port=port, url=url)
         server.start()
-        _write_launch_event("server_started", port=port, url=url)
     except OSError as exc:
-        if _require_own_bind():
-            _write_launch_event(
-                "server_start_oserror",
-                error=repr(exc),
-                existing_ready=False,
-                own_bind_required=True,
-                port=port,
-                port_owners=_port_owner_snapshot(port),
-                url=url,
-            )
-            raise
-        existing_ready = _wait_until_ready(url, timeout=1.0)
         _write_launch_event(
             "server_start_oserror",
             error=repr(exc),
-            existing_ready=existing_ready,
+            existing_ready=False,
+            own_bind_required=True,
             port=port,
             port_owners=_port_owner_snapshot(port),
             url=url,
         )
-        if not existing_ready:
-            raise
-        server = None
-        reused_existing_server = True
-
-    try:
-        from domain.scheduler.daemon import start_scheduler_daemon
-
-        start_scheduler_daemon()
-    except Exception as exc:
-        _write_launch_event(
-            "scheduler_start_skipped", error=repr(exc), port=port, url=url
-        )
+        raise
+    _write_launch_event("server_started", port=port, url=url)
 
     health_ready = _wait_until_ready(url)
     chat_ready = _wait_until_chat_ready(url)
@@ -444,11 +464,13 @@ def main(argv: list[str] | None = None) -> int:
 
     from defaultspack.native_webview import open_desktop_surface
 
-    surface_result = open_desktop_surface(_surface_url(url), title="Tobkiri")
+    login_code = str(auth.issue_login_code()["code"])
+    launch_url = f"{url}?{urllib.parse.urlencode({'code': login_code})}"
+    surface_result = open_desktop_surface(launch_url, title="Tobkiri")
     _write_launch_event(
         "surface_opened",
         port=port,
-        reused_existing_server=reused_existing_server,
+        reused_existing_server=False,
         surface_result=surface_result,
         url=url,
     )
@@ -457,10 +479,6 @@ def main(argv: list[str] | None = None) -> int:
             server.stop()
             _write_launch_event("server_stopped_after_webview", port=port, url=url)
         return 0
-    if server is None:
-        _write_launch_event("duplicate_launcher_exit", port=port, url=url)
-        return 0
-
     stop = False
 
     def _handle_signal(_signum, _frame):
@@ -474,9 +492,8 @@ def main(argv: list[str] | None = None) -> int:
         while not stop:
             time.sleep(0.5)
     finally:
-        if server is not None:
-            server.stop()
-            _write_launch_event("server_stopped", port=port, url=url)
+        server.stop()
+        _write_launch_event("server_stopped", port=port, url=url)
     return 0
 
 

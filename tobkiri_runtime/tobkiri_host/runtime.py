@@ -44,12 +44,9 @@ class ProductionRuntimeV4:
         if set(pack_roots) != binding_pack_ids:
             raise ValueError("Pack roots must exactly equal ResolvedPlan binding Packs")
         compiled: tuple[CompiledPack, ...] = tuple(
-            compile_pack_root(pack_roots[pack_id])
-            for pack_id in sorted(binding_pack_ids)
+            compile_pack_root(pack_roots[pack_id]) for pack_id in sorted(binding_pack_ids)
         )
-        artifacts = tuple(item.artifact for item in compiled) + tuple(
-            supporting_artifacts
-        )
+        artifacts = tuple(item.artifact for item in compiled) + tuple(supporting_artifacts)
         routes = routes_for_plan(plan, compiled)
         composition = HostV4Composition.capture(
             profile=profile,
@@ -97,11 +94,10 @@ class ProductionRuntimeV4:
         *,
         broker: RequestBroker,
         context_for: Callable[..., RequestContext],
-        effect_scope_for: Callable[
-            [str, str, Mapping[str, Any]], Mapping[str, Any]
-        ],
+        effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]],
         providers: Mapping[str, tuple[Mapping[str, Any], ...]],
         authority_control: AuthorityV4Adapter | None = None,
+        current_capture_check: Callable[[], None] | None = None,
     ) -> "V4DispatchSession":
         """Bind request ports to identities from this captured composition."""
         return V4DispatchSession(
@@ -112,6 +108,7 @@ class ProductionRuntimeV4:
             profile_id=str(self.composition.profile["profile_id"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
             authority_control=authority_control,
+            current_capture_check=current_capture_check,
         )
 
 
@@ -126,12 +123,48 @@ class V4DispatchSession:
     profile_id: str
     plan_digest: str
     authority_control: AuthorityV4Adapter | None = None
+    current_capture_check: Callable[[], None] | None = None
 
-    def provider_metadata(
-        self, contract_id: str
-    ) -> tuple[Mapping[str, Any], ...]:
+    def assert_current(self) -> None:
+        """Fail closed when the persisted activation no longer matches."""
+
+        if self.current_capture_check is None:
+            raise RuntimeError("v4 dispatch session has no current-capture verifier")
+        self.current_capture_check()
+
+    def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, Any], ...]:
         """Return metadata pinned when this session was constructed."""
         return self.providers.get(contract_id, ())
+
+    def assert_operation_ready(self, contract_id: str, operation_id: str) -> None:
+        """Require an exact selected binding and production-ready backend."""
+
+        binding = self.broker._catalog.resolve(
+            contract_id,
+            operation_id,
+            ">=1,<2",
+        )
+        backend = self.broker._backends.select(binding)
+        providers = tuple(
+            item
+            for item in self.provider_metadata(contract_id)
+            if item.get("operation_id") == operation_id
+        )
+        if len(providers) != 1:
+            raise RuntimeError("selected Provider metadata is unavailable")
+        provider = providers[0]
+        expected = {
+            "provider_id": binding.function.function_id,
+            "function_id": binding.function.function_id,
+            "principal_id": binding.principal_ref.value,
+            "implementation_digest": binding.function.implementation_digest,
+            "backend_id": backend.status.backend_id,
+            "backend_digest": backend.status.backend_digest,
+            "profile_id": self.profile_id,
+            "plan_digest": self.plan_digest,
+        }
+        if any(provider.get(key) != value for key, value in expected.items()):
+            raise RuntimeError("selected Provider/backend metadata is stale or wrong")
 
     def invoke(
         self,
@@ -159,9 +192,7 @@ class V4DispatchSession:
                 payload=arguments,
             ),
             context,
-            effect_scope=self.effect_scope_for(
-                contract_id, operation_id, arguments
-            ),
+            effect_scope=self.effect_scope_for(contract_id, operation_id, arguments),
         )
 
 

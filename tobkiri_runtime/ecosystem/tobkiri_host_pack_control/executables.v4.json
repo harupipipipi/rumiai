@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:98894630ad10c2ba058896b5a00366faede284f39b295de61c3664f2ebd4d871",
+  "catalog_digest": "sha256:b8c9349c04bfb7e308c646b55eef70f8cd8a2b2bf1f7c057193369e79602237a",
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:2173a6821605e25888f5c11fd8cae1c956b6d70ff17e37fd70ef6525a2d7bc88",
+  "source_identity": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
   "variants": [
     {
       "architecture": "any",
@@ -37,13 +37,390 @@
           "idempotency": "none",
           "input_schema": {
             "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "approval.approve",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "approval.candidate",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
             "type": "object"
           },
           "operation_id": "catalog.read",
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:c11130f0c00321def68baa9933dba47b1d742ade627dea8dbd97c246f67ee8d9",
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "dashboard.read",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "pack.disable",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "pack.enable",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "pack.install",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "pack.status",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "profile.reload",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "runtime.restart",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }

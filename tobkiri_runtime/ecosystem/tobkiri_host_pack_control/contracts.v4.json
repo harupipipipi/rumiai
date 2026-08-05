@@ -7,15 +7,231 @@
       "operations": [
         {
           "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
             "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
             "host:brokered-execution"
           ],
           "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
           "idempotency": {
             "mode": "none"
           },
-          "input_schema_digest": "sha256:cd1a463c46d6264134447db17a8c3c7abe5b9a2488c6d759fea66da1f96b133e",
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "approval.approve",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "approval.candidate",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
           "operation_id": "catalog.read",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "dashboard.read",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "pack.disable",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "pack.enable",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "pack.install",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "pack.status",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "profile.reload",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "runtime.restart",
           "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "scope_semantics": "host_broker"
         }
@@ -24,7 +240,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:2173a6821605e25888f5c11fd8cae1c956b6d70ff17e37fd70ef6525a2d7bc88",
+            "digest": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -35,7 +251,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:2173a6821605e25888f5c11fd8cae1c956b6d70ff17e37fd70ef6525a2d7bc88",
+        "source_digest": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/tobkiri_host_pack_control"
       },
@@ -49,17 +265,34 @@
         },
         "provider_id": "tobkiri.host.pack-control",
         "required_capabilities": [
-          "pack.catalog.read"
+          "dashboard.read",
+          "pack.approval.commit",
+          "pack.approval.prepare",
+          "pack.catalog.read",
+          "pack.disable",
+          "pack.enable",
+          "pack.install",
+          "pack.status.read",
+          "profile.reload",
+          "runtime.restart"
         ],
         "security": "sensitive"
       },
-      "revision_digest": "sha256:c11130f0c00321def68baa9933dba47b1d742ade627dea8dbd97c246f67ee8d9",
+      "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
       "schema_catalog": {
-        "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0": {
+        "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5": {
+          "additionalProperties": false,
+          "properties": {
+            "candidate_id": {
+              "type": "string"
+            },
+            "pack_id": {
+              "type": "string"
+            }
+          },
           "type": "object"
         },
-        "sha256:cd1a463c46d6264134447db17a8c3c7abe5b9a2488c6d759fea66da1f96b133e": {
-          "additionalProperties": false,
+        "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0": {
           "type": "object"
         },
         "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44": {
@@ -84,5 +317,5 @@
     }
   ],
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:2173a6821605e25888f5c11fd8cae1c956b6d70ff17e37fd70ef6525a2d7bc88"
+  "source_identity": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda"
 }

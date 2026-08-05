@@ -15077,7 +15077,16 @@
       "approval_policy": "capability_gated",
       "authority": "v4-authoritative",
       "capabilities": [
-        "pack.catalog.read"
+        "dashboard.read",
+        "pack.approval.commit",
+        "pack.approval.prepare",
+        "pack.catalog.read",
+        "pack.disable",
+        "pack.enable",
+        "pack.install",
+        "pack.status.read",
+        "profile.reload",
+        "runtime.restart"
       ],
       "dependencies": {},
       "description": "Finite read-only Pack catalog provider for the selected control-panel UI.",
@@ -15108,15 +15117,69 @@
           },
           "operations": [
             {
+              "entrypoint_id": "approval.approve",
+              "id": "approval.approve",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "approval.candidate",
+              "id": "approval.candidate",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
               "entrypoint_id": "catalog.read",
               "id": "catalog.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "dashboard.read",
+              "id": "dashboard.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.disable",
+              "id": "pack.disable",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.enable",
+              "id": "pack.enable",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.install",
+              "id": "pack.install",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.status",
+              "id": "pack.status",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "profile.reload",
+              "id": "profile.reload",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "runtime.restart",
+              "id": "runtime.restart",
               "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
             }
           ],
           "owner": "tobkiri_host_pack_control",
           "provider_id": "tobkiri.host.pack-control",
           "required_capabilities": [
-            "pack.catalog.read"
+            "dashboard.read",
+            "pack.approval.commit",
+            "pack.approval.prepare",
+            "pack.catalog.read",
+            "pack.disable",
+            "pack.enable",
+            "pack.install",
+            "pack.status.read",
+            "profile.reload",
+            "runtime.restart"
           ],
           "schemas": {
             "error": {
@@ -15137,6 +15200,14 @@
             },
             "input": {
               "additionalProperties": false,
+              "properties": {
+                "candidate_id": {
+                  "type": "string"
+                },
+                "pack_id": {
+                  "type": "string"
+                }
+              },
               "type": "object"
             },
             "output": {
