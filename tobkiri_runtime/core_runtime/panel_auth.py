@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import threading
 import time
@@ -124,6 +123,7 @@ class PanelAuthManager:
                 return None
             session_info["expires_at"] = now + self._session_ttl_seconds
             return {
+                "session_id": session_hash,
                 "csrf_token": session_info["csrf_token"],
                 "expires_in": self._session_ttl_seconds,
             }

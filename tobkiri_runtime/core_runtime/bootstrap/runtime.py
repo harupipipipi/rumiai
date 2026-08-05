@@ -7,6 +7,7 @@ Launcher-captured Pack v4 activation.
 
 from __future__ import annotations
 
+import logging
 import os
 from threading import RLock
 from typing import Any
@@ -18,6 +19,11 @@ from ..app_lifecycle_manager import (
     reset_runtime_readiness,
 )
 from ..pack_api_server import PackAPIServer, initialize_pack_api_server
+from ..pack_control_v4 import capture_pack_control_session
+from tobkiri_host.runtime import install_dispatch_session
+
+
+logger = logging.getLogger(__name__)
 
 
 class Kernel:
@@ -44,6 +50,22 @@ class Kernel:
             if self._server is not None and self._server.is_running():
                 return {"status": "already_running", "step_id": step_id}
             reset_runtime_readiness()
+            from ..di_container import get_container
+
+            try:
+                install_dispatch_session(
+                    get_container(),
+                    capture_pack_control_session(),
+                )
+            except Exception:
+                # First-run setup has no resolved Profile yet. The Host surface
+                # remains available, while /api/v4/dispatch fails closed until
+                # setup commits a Profile and the Launcher restarts the runtime.
+                get_container().reset("v4_dispatch_session")
+                logger.warning(
+                    "Pack v4 control session was not captured",
+                    exc_info=True,
+                )
             port = int(os.environ.get("RUMI_PORT", "8765"))
             self._server = initialize_pack_api_server(
                 host="127.0.0.1",

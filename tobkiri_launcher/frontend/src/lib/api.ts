@@ -96,8 +96,12 @@ function isSetupApiPath(path: string): boolean {
   return path === '/api/setup' || path.startsWith('/api/setup/');
 }
 
+function isV4DispatchApiPath(path: string): boolean {
+  return path === '/api/v4/dispatch';
+}
+
 function isPanelSessionApiPath(path: string): boolean {
-  return isPanelApiPath(path) || isSetupApiPath(path);
+  return isPanelApiPath(path) || isSetupApiPath(path) || isV4DispatchApiPath(path);
 }
 
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
@@ -531,29 +535,42 @@ export function fetchDashboard(): Promise<ApiDashboard> {
 // Packs
 // ============================================================
 
-export function fetchPacks(): Promise<PacksResponseData> {
-  return apiFetch<PacksResponseData>('/api/panel/packs');
+const PACK_CONTROL_CONTRACT = 'tobkiri.host.pack-control.v4';
+
+function dispatchPackControl<T>(operationId: string, payload: Record<string, unknown> = {}): Promise<T> {
+  return apiFetch<T>('/api/v4/dispatch', {
+    method: 'POST',
+    body: JSON.stringify({
+      contract_id: PACK_CONTROL_CONTRACT,
+      operation_id: operationId,
+      payload,
+    }),
+  });
 }
 
-export function approvePack(id: string): Promise<PackApprovalResponseData> {
-  return apiFetch<PackApprovalResponseData>(
-    `/api/panel/packs/${encodeURIComponent(id)}/approve`,
-    { method: 'POST' },
-  );
+export function fetchPacks(): Promise<PacksResponseData> {
+  return dispatchPackControl<PacksResponseData>('catalog.read');
+}
+
+export async function installPack(id: string): Promise<{pack_id: string; installed: boolean}> {
+  return dispatchPackControl('pack.install', {pack_id: id});
+}
+
+export async function approvePack(id: string): Promise<PackApprovalResponseData> {
+  await installPack(id);
+  const candidate = await dispatchPackControl<{candidate_id: string}>('approval.candidate', {pack_id: id});
+  return dispatchPackControl<PackApprovalResponseData>('approval.approve', {
+    pack_id: id,
+    candidate_id: candidate.candidate_id,
+  });
 }
 
 export function enablePack(id: string): Promise<PackToggleResponseData> {
-  return apiFetch<PackToggleResponseData>(
-    `/api/panel/packs/${encodeURIComponent(id)}/enable`,
-    { method: 'POST' },
-  );
+  return dispatchPackControl<PackToggleResponseData>('pack.enable', {pack_id: id});
 }
 
 export function disablePack(id: string): Promise<PackToggleResponseData> {
-  return apiFetch<PackToggleResponseData>(
-    `/api/panel/packs/${encodeURIComponent(id)}/disable`,
-    { method: 'POST' },
-  );
+  return dispatchPackControl<PackToggleResponseData>('pack.disable', {pack_id: id});
 }
 
 // ============================================================
@@ -889,9 +906,7 @@ export function applyUpdate(target: ApiUpdateTarget): Promise<UpdateApplyRespons
 }
 
 export function restartKernel(): Promise<KernelRestartResponseData> {
-  return apiFetch<KernelRestartResponseData>('/api/panel/kernel/restart', {
-    method: 'POST',
-  });
+  return dispatchPackControl<KernelRestartResponseData>('runtime.restart');
 }
 
 // ============================================================

@@ -178,7 +178,6 @@ async function prefetchAdvancedData(): Promise<void> {
   // and startup-profile requests; API Map and update checks can be large or
   // externally network-bound and are intentionally left to explicit intent.
   const firstWave = [
-    '/api/panel/packs',
     '/api/panel/flows',
     '/api/panel/settings/profile',
     '/api/panel/version',

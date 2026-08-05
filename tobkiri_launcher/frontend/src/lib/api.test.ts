@@ -20,11 +20,16 @@ import {
   fetchDesktopSystemInfo,
   fetchDebugApprovalStatus,
   fetchPresentationState,
+  fetchPacks,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   launchDefaultspackDesktop,
   launchSelectedPresentation,
   openExternalUrl,
+  approvePack,
+  enablePack,
+  disablePack,
+  restartKernel,
   prefetchApiGet,
   sendToBackground,
   selectPresentation,
@@ -456,6 +461,52 @@ test('apiFetch deduplicates concurrent GET requests for the same URL', async () 
   assert.deepEqual(second, {ok: true});
 });
 
+test('Pack production transport uses only qualified v4 dispatch operations', async () => {
+  const operations: Array<{operation_id: string; payload: Record<string, unknown>}> = [];
+  fetchHandler = async (input, init) => {
+    assert.equal(String(input), '/api/v4/dispatch');
+    const body = JSON.parse(String(init?.body ?? '{}')) as {
+      contract_id: string;
+      operation_id: string;
+      payload: Record<string, unknown>;
+    };
+    assert.equal(body.contract_id, 'tobkiri.host.pack-control.v4');
+    operations.push({operation_id: body.operation_id, payload: body.payload});
+    const data = body.operation_id === 'approval.candidate'
+      ? {candidate_id: 'candidate-one'}
+      : body.operation_id === 'catalog.read'
+        ? {packs: [], count: 0}
+        : {pack_id: 'pack-a', enabled: true, approved: true, restart_requested: true};
+    return new Response(JSON.stringify({data, success: true}), {
+      headers: {'Content-Type': 'application/json'},
+      status: 200,
+    });
+  };
+
+  await fetchPacks();
+  await approvePack('pack-a');
+  await enablePack('pack-a');
+  await disablePack('pack-a');
+  await restartKernel();
+
+  assert.deepEqual(
+    operations.map((item) => item.operation_id),
+    [
+      'catalog.read',
+      'pack.install',
+      'approval.candidate',
+      'approval.approve',
+      'pack.enable',
+      'pack.disable',
+      'runtime.restart',
+    ],
+  );
+  assert.deepEqual(operations[3]?.payload, {
+    pack_id: 'pack-a',
+    candidate_id: 'candidate-one',
+  });
+});
+
 test('apiFetch recovers an expired panel session through the desktop shell and retries once', async () => {
   installBrowser('http://127.0.0.1:8765/panel/packs?v=42');
 
@@ -504,7 +555,14 @@ test('apiFetch recovers an expired panel session through the desktop shell and r
     );
   };
 
-  const response = await apiFetch<{ok: boolean}>('/api/panel/packs');
+  const response = await apiFetch<{ok: boolean}>('/api/v4/dispatch', {
+    method: 'POST',
+    body: JSON.stringify({
+      contract_id: 'tobkiri.host.pack-control.v4',
+      operation_id: 'catalog.read',
+      payload: {},
+    }),
+  });
 
   assert.deepEqual(response, {ok: true});
   assert.equal(requestCount, 2);

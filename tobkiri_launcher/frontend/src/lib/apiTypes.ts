@@ -19,7 +19,7 @@ export interface ApiResponse<T> {
 // Backend data types (as returned inside envelope's `data`)
 // ============================================================
 
-/** GET /api/panel/packs → data.packs[] */
+/** POST /api/v4/dispatch catalog.read → data.packs[] */
 export interface ApiPack {
   pack_id: string;
   name: string;

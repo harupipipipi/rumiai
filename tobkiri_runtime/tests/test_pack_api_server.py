@@ -1624,13 +1624,14 @@ class TestPackAPIServer:
             server.stop()
 
     @patch("core_runtime.pack_api_server.get_hmac_key_manager")
-    def test_start_preloads_core_control_panel_api_routes(self, mock_get_hmac, monkeypatch) -> None:
-        """runtime-ready 前でも panel API が 404 にならないよう core_control_panel の api_routes を先読みする。"""
+    def test_start_does_not_restore_legacy_control_panel_api_routes(
+        self, mock_get_hmac, monkeypatch
+    ) -> None:
+        """Startup leaves retired registry Pack routes completely disabled."""
         mock_get_hmac.return_value = MagicMock()
         server = PackAPIServer(host="127.0.0.1", port=0, internal_token="token")
-        fake_registry = object()
 
-        get_registry = MagicMock(return_value=fake_registry)
+        get_registry = MagicMock()
         load_web_mounts = MagicMock()
         load_pre_auth_routes = MagicMock()
         load_api_routes = MagicMock()
@@ -1642,15 +1643,12 @@ class TestPackAPIServer:
 
         try:
             server.start()
-            assert get_registry.call_count >= 1
-            get_registry.assert_any_call()
-            load_web_mounts.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
-            load_pre_auth_routes.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
-            load_api_routes.assert_any_call(
-                fake_registry,
-                pack_ids={"core_control_panel"},
-                include_builtin_core_control_panel=True,
-            )
+            get_registry.assert_not_called()
+            load_web_mounts.assert_not_called()
+            load_pre_auth_routes.assert_not_called()
+            load_api_routes.assert_not_called()
+            assert PackAPIHandler._api_route_exact == {}
+            assert PackAPIHandler._api_route_patterns == []
         finally:
             server.stop()
 

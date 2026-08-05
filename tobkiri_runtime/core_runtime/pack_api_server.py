@@ -1838,6 +1838,46 @@ class PackAPIHandler(
                 self._auth_issue_access_token(body)
                 return
 
+            if path == "/api/v4/dispatch":
+                from .di_container import get_container
+                from .pack_control_v4 import PackControlDenied
+
+                if self._request_auth_mode != "panel_session":
+                    self._send_response(
+                        APIResponse(False, error="Panel session is required"),
+                        403,
+                    )
+                    return
+                session = get_container().get_or_none("v4_dispatch_session")
+                if session is None:
+                    self._send_response(
+                        APIResponse(False, error="Captured v4 dispatch session is unavailable"),
+                        503,
+                    )
+                    return
+                principal = getattr(self, "_authenticated_principal", None)
+                session_id = str(getattr(principal, "token_id", "") or "").strip()
+                if not session_id:
+                    self._send_response(
+                        APIResponse(False, error="Session binding is unavailable"),
+                        401,
+                    )
+                    return
+                try:
+                    dispatch_payload = body.get("payload")
+                    if not isinstance(dispatch_payload, dict):
+                        raise PackControlDenied("dispatch payload must be an object")
+                    result = session.invoke(
+                        str(body.get("contract_id") or ""),
+                        str(body.get("operation_id") or ""),
+                        {**dispatch_payload, "_session_id": session_id},
+                    )
+                except PackControlDenied as error:
+                    self._send_response(APIResponse(False, error=str(error)), 409)
+                    return
+                self._send_response(APIResponse(True, data=dict(result)))
+                return
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body, query=query):
                 return

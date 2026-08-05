@@ -158,8 +158,15 @@ class DispatchContainer(Protocol):
         """Install an already-constructed immutable service instance."""
 
 
+class CapturedDispatchSession(Protocol):
+    """Common Host port for immutable runtime and Authority-control sessions."""
+
+    profile_id: str
+    plan_digest: str
+
+
 def install_dispatch_session(
-    container: DispatchContainer, session: V4DispatchSession
+    container: DispatchContainer, session: CapturedDispatchSession
 ) -> None:
     """Publish the exact captured activation to worker, HTTP, and chat code."""
     if not session.profile_id.strip():
@@ -170,6 +177,7 @@ def install_dispatch_session(
 
 
 __all__ = [
+    "CapturedDispatchSession",
     "DispatchContainer",
     "ProductionRuntimeV4",
     "V4DispatchSession",
