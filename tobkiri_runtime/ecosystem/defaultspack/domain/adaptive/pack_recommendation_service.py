@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from .context import coerce_int
@@ -249,10 +247,5 @@ class PackRecommendationServiceMixin:
         return recommendations
 
     def _component_manifest(self) -> dict[str, Any]:
-        manifest_path = Path(__file__).resolve().parents[2] / "ecosystem.json"
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        components = manifest.get("components")
-        return components if isinstance(components, dict) else {}
+        # Legacy ecosystem components are not Pack v4 recommendation authority.
+        return {}

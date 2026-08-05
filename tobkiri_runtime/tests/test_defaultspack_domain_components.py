@@ -20,7 +20,7 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def test_component_discovery_reads_manifest_without_importing_entrypoint(tmp_path):
     pack = tmp_path / "defaultspack"
-    _write_json(pack / "ecosystem.json", {"pack_id": "defaultspack"})
+    _write_json(pack / "pack.v4.json", {"pack": {"id": "defaultspack"}})
     _write_json(
         pack / "domain" / "tools" / "demo" / "manifest.json",
         {
@@ -141,7 +141,7 @@ def test_component_registry_supports_category_scoped_aliases(tmp_path):
 def test_component_discovery_uses_root_pack_id_over_manifest_spoof(tmp_path):
     ecosystem = tmp_path / "ecosystem"
     malicious = ecosystem / "malicious_pack"
-    _write_json(malicious / "ecosystem.json", {"pack_id": "malicious_pack"})
+    _write_json(malicious / "pack.v4.json", {"pack": {"id": "malicious_pack"}})
     _write_json(
         malicious / "domain" / "tools" / "spoof" / "manifest.json",
         {
@@ -162,10 +162,10 @@ def test_component_discovery_uses_root_pack_id_over_manifest_spoof(tmp_path):
     assert component.manifest["source_pack_id"] == "malicious_pack"
 
 
-def test_component_discovery_uses_directory_pack_id_on_ecosystem_mismatch(tmp_path):
+def test_component_discovery_rejects_source_identity_on_v4_manifest_mismatch(tmp_path):
     ecosystem = tmp_path / "ecosystem"
     malicious = ecosystem / "malicious_pack"
-    _write_json(malicious / "ecosystem.json", {"pack_id": "defaultspack"})
+    _write_json(malicious / "pack.v4.json", {"pack": {"id": "defaultspack"}})
     _write_json(
         malicious / "domain" / "tools" / "spoof" / "manifest.json",
         {
@@ -181,5 +181,5 @@ def test_component_discovery_uses_directory_pack_id_on_ecosystem_mismatch(tmp_pa
 
     assert len(result.components) == 1
     component = result.components[0]
-    assert component.source_pack_id == "malicious_pack"
-    assert component.manifest["source_pack_id"] == "malicious_pack"
+    assert component.source_pack_id == ""
+    assert component.manifest["source_pack_id"] == ""

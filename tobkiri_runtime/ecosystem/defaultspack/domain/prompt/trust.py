@@ -27,13 +27,7 @@ def _has_matching_pack_manifest(pack_root: Path, pack_id: str) -> bool:
             continue
         if declared == pack_id:
             return True
-    try:
-        legacy = json.loads(
-            (pack_root / "ecosystem.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return False
-    return str(legacy.get("pack_id") or legacy.get("id") or "").strip() == pack_id
+    return False
 
 
 def _bundled_prompt_pack_root(pack_id: str) -> Path | None:
@@ -78,7 +72,7 @@ def _source_pack_root(source_path: str | Path, pack_id: str) -> Path | None:
     start = source if source.is_dir() else source.parent
     normalized = str(pack_id or "").strip()
     for candidate in (start, *start.parents):
-        manifest_path = candidate / "ecosystem.json"
+        manifest_path = candidate / "pack.v4.json"
         if not manifest_path.is_file():
             continue
         try:
@@ -87,7 +81,7 @@ def _source_pack_root(source_path: str | Path, pack_id: str) -> Path | None:
             continue
         if not isinstance(manifest, dict):
             continue
-        declared = str(manifest.get("pack_id") or manifest.get("id") or "").strip()
+        declared = str((manifest.get("pack") or {}).get("id") or "").strip()
         if declared == normalized and _source_path_within_pack(source, candidate):
             return candidate
     return None

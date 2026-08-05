@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from core_runtime.resolved_profile_scope import effective_pack_ids
+
 from ..extensions.runtime import get_extension_registry, get_extensions_root
 from .component_prompts import component_prompt_records
 from .studio_client import authored_prompts, write_authored_prompt
@@ -50,13 +52,13 @@ def _legacy_prompt(record: dict[str, Any]) -> dict[str, Any]:
 
 def _read_pack_id(pack_root: Path) -> str:
     try:
-        raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-        pack_id = str(raw.get("pack_id") or "").strip()
+        raw = json.loads((pack_root / "pack.v4.json").read_text(encoding="utf-8"))
+        pack_id = str((raw.get("pack") or {}).get("id") or "").strip()
         if pack_id:
             return pack_id
     except Exception:
         pass
-    return pack_root.name
+    return ""
 
 
 def _safe_extension_prompt_path(
@@ -198,13 +200,14 @@ class PromptManager:
         ecosystem_root = Path(__file__).resolve().parents[3]
         if not ecosystem_root.exists():
             return prompts
-        for pack_root in sorted(ecosystem_root.iterdir()):
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+        for pack_id in sorted(effective_pack_ids()):
+            pack_root = ecosystem_root / pack_id
+            if not pack_root.is_dir() or _read_pack_id(pack_root) != pack_id:
                 continue
             prompt_dir = pack_root / "prompts"
             if not prompt_dir.exists():
                 continue
-            source_pack_id = _read_pack_id(pack_root)
+            source_pack_id = pack_id
             if not prompt_pack_is_trusted(source_pack_id):
                 continue
             for prompt_path in sorted(prompt_dir.glob("*.system.md")):
