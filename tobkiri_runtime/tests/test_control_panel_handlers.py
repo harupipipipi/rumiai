@@ -428,7 +428,7 @@ class TestPanelEnableDisablePack(unittest.TestCase):
 
 
 class TestStartupProfileHandlers(unittest.TestCase):
-    def test_startup_profile_manager_uses_kernel_runtime_dependencies_as_fallback(self):
+    def test_startup_profile_manager_does_not_inherit_legacy_kernel_authority(self):
         handler = _FakeHandler()
         interface_registry = object()
         approval_manager = object()
@@ -440,9 +440,9 @@ class TestStartupProfileHandlers(unittest.TestCase):
 
         manager = handler._panel_startup_profile_manager()
 
-        self.assertIs(manager.interface_registry, interface_registry)
-        self.assertIs(manager.approval_manager, approval_manager)
-        self.assertEqual(manager.ecosystem_dir, "/tmp/fake-ecosystem")
+        self.assertFalse(hasattr(manager, "interface_registry"))
+        self.assertFalse(hasattr(manager, "approval_manager"))
+        self.assertFalse(hasattr(manager, "ecosystem_dir"))
 
     def test_get_startup_profiles_returns_manager_payload(self):
         handler = _FakeHandler()

@@ -137,14 +137,11 @@ class ControlPanelHandlersMixin(_CapabilityGraphBase):
 
     def _panel_startup_profile_manager(self):
         from ..startup_profiles import StartupProfileManager
-        kernel = getattr(self, "kernel", None)
 
-        return StartupProfileManager(
-            interface_registry=getattr(self, "interface_registry", None) or getattr(kernel, "interface_registry", None),
-            approval_manager=getattr(self, "approval_manager", None) or getattr(kernel, "approval_manager", None),
-            ecosystem_dir=getattr(self, "ecosystem_dir", None) or getattr(kernel, "ecosystem_dir", None),
-            profile_workspace_manager=getattr(self, "profile_workspace_manager", None),
-        )
+        # The retirement facade deliberately receives no registry, approval,
+        # ecosystem, or workspace object.  Only Profile v4 activation state is
+        # authoritative at this boundary.
+        return StartupProfileManager()
 
     # ------------------------------------------------------------------
     # Dashboard

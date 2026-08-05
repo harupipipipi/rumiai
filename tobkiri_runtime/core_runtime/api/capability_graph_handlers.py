@@ -91,12 +91,12 @@ class CapabilityGraphHandlersMixin:
 
     def _capability_startup_relationship(self) -> Dict[str, Any]:
         return {
-            "launch_time_source_of_truth": "StartupProfileManager",
+            "launch_time_source_of_truth": "io.tobkiri.profile.v4",
             "capability_graph_profiles_role": "graph_runtime_presets",
             "bridge_policy": (
                 "Capability Graph profiles do not supersede startup profiles. "
                 "They are exposed as graph/runtime presets until an explicit "
-                "migration or bridge writes startup-profile state."
+                "migration or bridge writes Profile v4 activation state."
             ),
             "startup_profile_api": "/api/panel/startup/profiles",
         }

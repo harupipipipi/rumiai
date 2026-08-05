@@ -5759,21 +5759,21 @@
       },
       {
         "evidence": "InterfaceRegistry",
-        "line": 1200,
+        "line": 1197,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
       },
       {
         "evidence": "InterfaceRegistry",
-        "line": 1313,
+        "line": 1310,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
       },
       {
         "evidence": "InterfaceRegistry",
-        "line": 1352,
+        "line": 1349,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
@@ -5867,13 +5867,6 @@
         "line": 20,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/kernel_flow_execution.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence": "InterfaceRegistry",
-        "line": 1812,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/startup_profiles.py",
         "rule_id": "legacy_interface_registry"
       },
       {
@@ -6455,13 +6448,6 @@
         "line": 717,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence": "rumi.pack.v3",
-        "line": 1466,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/startup_profiles.py",
         "rule_id": "legacy_v3_manifest"
       },
       {
@@ -14937,20 +14923,20 @@
         "rule_id": "legacy_host_execution_env"
       },
       {
-        "evidence_digest": "sha256:97249db22d0a9e593241060053987a9bdf98769557333e049f4d5cc0da3adbf2",
-        "line": 1200,
+        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
+        "line": 1197,
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:97249db22d0a9e593241060053987a9bdf98769557333e049f4d5cc0da3adbf2",
-        "line": 1313,
+        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
+        "line": 1310,
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:97249db22d0a9e593241060053987a9bdf98769557333e049f4d5cc0da3adbf2",
-        "line": 1352,
+        "evidence_digest": "sha256:feafe8486768cb7adcc5db4b85b7578f27bd1d0e0f888e80d5126da0ec29579b",
+        "line": 1349,
         "path": "tobkiri_runtime/core_runtime/api/control_panel_handlers.py",
         "rule_id": "legacy_interface_registry"
       },
@@ -15030,12 +15016,6 @@
         "evidence_digest": "sha256:5bf6e37fbcf218515ff8094b9ab240c377c8e4c0313e81f4bb953e767899acd8",
         "line": 20,
         "path": "tobkiri_runtime/core_runtime/kernel_flow_execution.py",
-        "rule_id": "legacy_interface_registry"
-      },
-      {
-        "evidence_digest": "sha256:24cce3196a33423f0ac5652ca11c727b349c7e430cf66c8e20203c4d691a57e0",
-        "line": 1812,
-        "path": "tobkiri_runtime/core_runtime/startup_profiles.py",
         "rule_id": "legacy_interface_registry"
       },
       {
@@ -15534,12 +15514,6 @@
         "evidence_digest": "sha256:07a0d46225130e981fe9428c23dbfb57fb49a3ca9a3d51061fa35f7d317042dc",
         "line": 717,
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence_digest": "sha256:24cce3196a33423f0ac5652ca11c727b349c7e430cf66c8e20203c4d691a57e0",
-        "line": 1466,
-        "path": "tobkiri_runtime/core_runtime/startup_profiles.py",
         "rule_id": "legacy_v3_manifest"
       },
       {
@@ -18496,7 +18470,7 @@
     ]
   },
   "repository": {
-    "commit": "58a3176e76695c8048840c4ad3220aeb74b167bf",
+    "commit": "85cc506ec19d221f33e29d67acea63ea859275fc",
     "tree_digest": "200da88015a60a4291fb89366592eb6333399fcf406de86f28a3c7e67de0ca63"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

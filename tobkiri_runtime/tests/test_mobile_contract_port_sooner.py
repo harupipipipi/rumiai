@@ -100,8 +100,14 @@ def test_mobile_manifest_route_handler_smoke(monkeypatch):
 
 
 def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp_path):
+    from types import SimpleNamespace
+
     from blocks.p2p.pairing_start import run as pairing_start_run
     from blocks.mobile.pairing import run
+    from core_runtime.resolved_profile_scope import (
+        activate_resolved_profile,
+        restore_resolved_profile,
+    )
     from domain.p2p.device_store import DeviceStore
 
     store_path = str(tmp_path)
@@ -153,16 +159,20 @@ def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp
     )
     assert review["status"] == "ok"
 
-    approved = run(
-        {
-            "action": "approve",
-            "store_path": store_path,
-            "pairing_id": pairing_id,
-            "claim_hash": review["data"]["claim_hash"],
-            "scopes": review["data"]["claim"]["requested_scopes"],
-        },
-        None,
-    )
+    token = activate_resolved_profile(SimpleNamespace(profile_id="defaults"))
+    try:
+        approved = run(
+            {
+                "action": "approve",
+                "store_path": store_path,
+                "pairing_id": pairing_id,
+                "claim_hash": review["data"]["claim_hash"],
+                "scopes": review["data"]["claim"]["requested_scopes"],
+            },
+            {"profile_id": "defaults"},
+        )
+    finally:
+        restore_resolved_profile(token)
     assert approved["status"] == "ok"
     public_approval = json.dumps(approved["data"], sort_keys=True)
     assert "dtk_" not in public_approval

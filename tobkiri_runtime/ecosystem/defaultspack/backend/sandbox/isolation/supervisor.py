@@ -419,7 +419,7 @@ class ManagedSandboxSupervisor:
         active_profile_id = _validated_profile_context(
             request.get("active_profile_id")
         )
-        data_scope = f"{active_profile_id or 'legacy'}--{pack_id}"
+        data_scope = f"{active_profile_id or 'unbound'}--{pack_id}"
         with tempfile.TemporaryDirectory(prefix="rumi-pack-process-") as tmp:
             workspace = Path(tmp)
             target = workspace / "ecosystem" / pack_id
@@ -504,11 +504,6 @@ class ManagedSandboxSupervisor:
                     read_only=False,
                 )
                 sandbox_env["RUMI_USER_DATA"] = "/data"
-            active_profile = _validated_profile_context(
-                request.get("active_profile_id")
-            )
-            if active_profile:
-                sandbox_env["RUMI_ACTIVE_PROFILE_ID"] = active_profile
             spec = BubblewrapSandboxSpec(
                 sandbox_id=sandbox_id,
                 profile_id=str(request.get("profile_runtime") or request.get("principal_id") or "coding"),
@@ -628,11 +623,6 @@ class ManagedSandboxSupervisor:
             sandbox_env = _coding_sandbox_env(sandbox_id)
             if guest_data_dir is not None:
                 sandbox_env["RUMI_USER_DATA"] = "/data"
-            active_profile = _validated_profile_context(
-                request.get("active_profile_id")
-            )
-            if active_profile:
-                sandbox_env["RUMI_ACTIVE_PROFILE_ID"] = active_profile
             guest_argv = build_guest_bwrap_argv(
                 workspace=remote_root,
                 cwd=remote_cwd,

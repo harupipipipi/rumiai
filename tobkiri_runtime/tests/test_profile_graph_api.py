@@ -14,7 +14,6 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
 
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
 from core_runtime.profile_graph_builder import (
-    _startup_catalog_nodes,
     build_startup_profile_graph_response,
 )
 from core_runtime.profile_graph_models import normalize_profile_graph_document
@@ -276,17 +275,7 @@ def test_profile_graph_get_includes_available_tools_webhooks_api_prompts_fronten
 def test_profile_graph_projects_only_selected_pack_contract_candidates(
     tmp_path: Path,
 ) -> None:
-    class _ApprovedPacks:
-        @staticmethod
-        def get_approval(_pack_id: str) -> object:
-            return object()
-
-        @staticmethod
-        def is_pack_approved_and_verified(
-            _pack_id: str,
-        ) -> tuple[bool, str]:
-            return True, "verified fixture"
-
+    """Legacy ecosystem/v3 files cannot become Profile graph authority."""
     ecosystem = tmp_path / "ecosystem"
     selected_pack = ecosystem / "rumi_file_inspect_pack"
     unrelated_pack = ecosystem / "unrelated_pack"
@@ -316,37 +305,14 @@ def test_profile_graph_projects_only_selected_pack_contract_candidates(
         json.dumps({"pack_id": "unrelated_pack"}),
         encoding="utf-8",
     )
-    manager = StartupProfileManager(
-        storage_path=tmp_path / "startup_profiles.json",
-        ecosystem_dir=str(ecosystem),
-        approval_manager=_ApprovedPacks(),
-        seed_default_profile=False,
-    )
-    catalog = manager._build_catalog()
-
-    candidates = _startup_catalog_nodes(
-        catalog,
-        {
-            "base_pack": "defaultspack",
-            "packs": ["defaultspack", "rumi_file_inspect_pack"],
-        },
-    )
-
-    inspect_candidate = next(
-        item
-        for item in candidates
-        if item["source_pack_id"] == "rumi_file_inspect_pack"
-        and item["metadata"].get("contract_id")
-    )
-    assert inspect_candidate["id"] == (
-        "rumi_file_inspect_pack.contract.file-inspect.service"
-    )
-    assert inspect_candidate["metadata"]["contract_id"] == (
-        "rumi.service.file.inspect.v1"
-    )
-    assert not any(
-        item["source_pack_id"] == "unrelated_pack" for item in candidates
-    )
+    manager = StartupProfileManager(ecosystem_dir=str(ecosystem))
+    assert not hasattr(manager, "_build_catalog")
+    assert manager.create_profile({"packs": ["rumi_file_inspect_pack"]}) == {
+        "error": "Legacy Startup Profile mutation is retired; use Profile v4 activation",
+        "code": "LEGACY_STARTUP_PROFILE_RETIRED",
+        "operation": "create",
+        "status_code": 410,
+    }
 
 
 def test_profile_graph_update_persists_metadata_selected_and_projects_policy(

@@ -1,7 +1,7 @@
 """
 Capability Profile models for Capability Graph runtime/workspace presets.
 
-Capability profiles are intentionally separate from StartupProfileManager.
+Capability graph presets are non-authoritative projections of Profile v4.
 Existing startup profiles remain the launch-time source of truth until a later
 explicit bridge or migration PR.
 """
@@ -135,7 +135,7 @@ def load_profile_document(
 
 
 # Compatibility alias for the initial Capability Graph PRs. New code should use
-# CapabilityProfileDefinition to keep it distinct from StartupProfileManager's
+# CapabilityProfileDefinition remains distinct from the authoritative Profile v4
 # launch-time startup profiles.
 ProfileDefinition = CapabilityProfileDefinition
 

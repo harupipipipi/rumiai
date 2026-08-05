@@ -44,18 +44,26 @@ def _settings(input_data, context):
 
 
 def _profile_id(input_data, context) -> str:
+    from core_runtime.resolved_profile_scope import active_resolved_profile
+
+    active = active_resolved_profile()
+    if active is None:
+        raise ValueError("verified Pack v4 Profile context is required")
+    expected = str(active.profile_id).strip()
+    if not expected:
+        raise ValueError("verified Pack v4 Profile identity is empty")
     args = _merged(input_data)
     for value in (
         args.get("profile_id"),
         args.get("runtime_profile_id"),
         (context or {}).get("profile_id") if isinstance(context, dict) else None,
-        os.environ.get("RUMI_PROFILE_ID"),
-        os.environ.get("RUMI_ACTIVE_PROFILE_ID"),
     ):
         cleaned = str(value or "").strip()
         if cleaned:
-            return cleaned
-    return "default"
+            if cleaned != expected:
+                raise ValueError("Profile context does not match the active v4 Profile")
+            return expected
+    return expected
 
 
 def _register_authority_device_key(*, profile_id: str, device_id: str, public_key: str) -> dict:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -169,23 +170,24 @@ def test_operating_profile_activate_honors_route_id_without_body_profile(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
-    from core_runtime import startup_profiles
     from domain.adaptive.service import dispatch
 
-    activated: dict[str, str] = {}
-
-    class FakeStartupProfileManager:
-        def activate_profile(self, profile_id: str) -> dict[str, str]:
-            activated["profile_id"] = profile_id
-            return {"profile_id": profile_id, "activated": True}
-
-    monkeypatch.setattr(startup_profiles, "StartupProfileManager", FakeStartupProfileManager)
+    active = SimpleNamespace(
+        activation={"activation_id": "activation:defaults-test"},
+        resolved=SimpleNamespace(
+            profile={"profile_id": "defaults"},
+            plan={"plan_digest": "sha256:" + "1" * 64},
+        ),
+    )
+    monkeypatch.setattr(
+        "core_runtime.bootstrap.profile_capture.capture_default_profile",
+        lambda: active,
+    )
 
     result = dispatch("operating_profiles_activate", {"id": "route-profile"}, {})
 
-    assert result["status"] == "ok"
-    assert activated == {"profile_id": "route-profile"}
-    assert result["data"]["profile_id"] == "route-profile"
+    assert result["status"] == "error"
+    assert result["code"] == "PROFILE_NOT_FOUND"
 
 
 def test_adaptive_freeze_blocks_real_tool_and_public_function_dispatch(
