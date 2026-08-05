@@ -18,6 +18,26 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "ecosystem/defaultspack/ui",
     "bundled",
 ];
+const CANONICAL_HOST_FILES: &[&str] = &[
+    "README.md",
+    "__init__.py",
+    "admission.py",
+    "artifact_compiler.py",
+    "authority_v4.py",
+    "backends.py",
+    "broker.py",
+    "composition.py",
+    "contracts.py",
+    "effects.py",
+    "errors.py",
+    "materialization.py",
+    "models.py",
+    "ports.py",
+    "resources.py",
+    "runtime.py",
+    "shells.py",
+    "triggers.py",
+];
 
 #[cfg(not(test))]
 fn main() {
@@ -28,6 +48,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../pack-shell/src");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/app.py");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/core_runtime");
+    println!("cargo:rerun-if-changed=../../tobkiri_runtime/tobkiri_host");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/ecosystem");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/flows");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/lang");
@@ -104,9 +125,16 @@ fn stage_runtime_bundle() -> io::Result<()> {
     if !copy_tracked_runtime_tree(repo_root, &staged_root)
         .map_err(|error| stage_error("copy tracked runtime", error))?
     {
-        copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)
-            .map_err(|error| stage_error("copy runtime tree", error))?;
+        return Err(stage_error(
+            "copy tracked runtime",
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "git tracked runtime inventory is unavailable",
+            ),
+        ));
     }
+    verify_canonical_host_package(&staged_root)
+        .map_err(|error| stage_error("verify canonical Host package", error))?;
     copy_generated_resource_dirs(&runtime_root, &staged_root)
         .map_err(|error| stage_error("copy generated resources", error))?;
     stage_setup_brand_icon(&repo_root, &staged_root)
@@ -170,6 +198,35 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
     }
     files.sort();
     Ok(files)
+}
+
+fn verify_canonical_host_package(staged_root: &Path) -> io::Result<()> {
+    let host_root = staged_root.join("tobkiri_host");
+    let mut actual = Vec::new();
+    for entry in fs::read_dir(&host_root)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsafe canonical Host resource: {}", entry.path().display()),
+            ));
+        }
+        actual.push(entry.file_name().to_string_lossy().into_owned());
+    }
+    actual.sort();
+    let mut expected = CANONICAL_HOST_FILES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<Vec<_>>();
+    expected.sort();
+    if actual != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "canonical Host resource inventory mismatch",
+        ));
+    }
+    Ok(())
 }
 
 fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
@@ -548,40 +605,6 @@ fn copy_generated_resource_dirs(runtime_root: &Path, staged_root: &Path) -> io::
     Ok(())
 }
 
-fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let file_type = entry.file_type()?;
-        let target_path = dst.join(entry.file_name());
-        let relative = source_path
-            .strip_prefix(runtime_root)
-            .unwrap_or(&source_path);
-
-        if should_skip(relative, file_type.is_dir()) {
-            continue;
-        }
-
-        if file_type.is_symlink() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "runtime source may not be a symlink: {}",
-                    source_path.display()
-                ),
-            ));
-        }
-
-        if file_type.is_dir() {
-            copy_dir_recursive_filtered(&source_path, &target_path, runtime_root)?;
-        } else if file_type.is_file() {
-            copy_file(&source_path, &target_path)?;
-        }
-    }
-
-    Ok(())
-}
-
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -824,6 +847,40 @@ mod tests {
         fs::write(artifacts.join("verified-shell"), b"verified shell artifact")
             .expect("release artifact should be writable");
         (release_root, staged_root, catalog)
+    }
+
+    fn host_fixture(tree: &TestTree) -> PathBuf {
+        let staged_root = tree.path().join("staged-host");
+        let host_root = staged_root.join("tobkiri_host");
+        fs::create_dir_all(&host_root).expect("Host package should be creatable");
+        for filename in CANONICAL_HOST_FILES {
+            fs::write(host_root.join(filename), b"canonical Host resource")
+                .expect("Host resource should be writable");
+        }
+        staged_root
+    }
+
+    #[test]
+    fn canonical_host_inventory_is_exact() {
+        let tree = TestTree::new("host-inventory");
+        let staged_root = host_fixture(&tree);
+        verify_canonical_host_package(&staged_root).expect("exact Host package should be accepted");
+
+        fs::write(staged_root.join("tobkiri_host/unlisted.py"), b"pass\n")
+            .expect("unlisted resource should be writable");
+        assert!(verify_canonical_host_package(&staged_root).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_host_inventory_rejects_symlink() {
+        let tree = TestTree::new("host-symlink");
+        let staged_root = host_fixture(&tree);
+        let runtime = staged_root.join("tobkiri_host/runtime.py");
+        fs::remove_file(&runtime).expect("runtime fixture should be removable");
+        std::os::unix::fs::symlink(tree.path(), &runtime)
+            .expect("Host symlink should be creatable");
+        assert!(verify_canonical_host_package(&staged_root).is_err());
     }
 
     #[test]

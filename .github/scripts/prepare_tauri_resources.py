@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare bundled Rumi runtime resources for the Tauri desktop app."""
+"""Prepare bundled Tobkiri runtime resources for the Tauri desktop app."""
 
 from __future__ import annotations
 
@@ -74,6 +74,29 @@ REQUIRED_RUNTIME_BOOTSTRAP_FILES = (
     Path("core_runtime/bootstrap/runtime.py"),
     Path("core_runtime/app_lifecycle_manager.py"),
     Path("core_runtime/pack_api_server.py"),
+)
+CANONICAL_HOST_FILES = tuple(
+    Path("tobkiri_host") / filename
+    for filename in (
+        "README.md",
+        "__init__.py",
+        "admission.py",
+        "artifact_compiler.py",
+        "authority_v4.py",
+        "backends.py",
+        "broker.py",
+        "composition.py",
+        "contracts.py",
+        "effects.py",
+        "errors.py",
+        "materialization.py",
+        "models.py",
+        "ports.py",
+        "resources.py",
+        "runtime.py",
+        "shells.py",
+        "triggers.py",
+    )
 )
 UV_PINNED_VERSION = "0.11.14"
 UV_SHA256_BY_TARGET = {
@@ -163,6 +186,59 @@ def copy_tracked_runtime_files(repo_root: Path, source_root: Path, dest_root: Pa
         copy_file(src, dest_root / rel_under_app)
         copied += 1
     return copied
+
+
+def stage_canonical_host_package(source_root: Path, dest_root: Path) -> None:
+    """Stage the closed canonical Host package from regular source files."""
+    host_root = dest_root / "tobkiri_host"
+    if host_root.exists():
+        if host_root.is_symlink() or not host_root.is_dir():
+            raise RuntimeError("Refusing unsafe staged tobkiri_host package")
+        shutil.rmtree(host_root)
+    for relative in CANONICAL_HOST_FILES:
+        source = source_root / relative
+        if source.is_symlink() or not source.is_file():
+            raise FileNotFoundError(
+                f"Canonical Host source is missing or unsafe: {source}"
+            )
+        copy_file(source, dest_root / relative)
+
+
+def verify_canonical_host_package(
+    dest_root: Path,
+    repository_root: Path,
+) -> None:
+    """Require the staged Host inventory and bytes to equal canonical source."""
+    source_root = repository_root / APP_SOURCE_DIR
+    expected = {path.as_posix() for path in CANONICAL_HOST_FILES}
+    host_root = dest_root / "tobkiri_host"
+    if host_root.is_symlink() or not host_root.is_dir():
+        raise FileNotFoundError("Staged canonical Host package is missing or unsafe")
+    actual = set()
+    for staged in host_root.rglob("*"):
+        relative = staged.relative_to(dest_root)
+        if staged.is_symlink():
+            raise RuntimeError(f"Staged canonical Host resource is a symlink: {relative}")
+        if staged.is_file():
+            actual.add(relative.as_posix())
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unlisted = sorted(actual - expected)
+        raise RuntimeError(
+            "Staged canonical Host inventory mismatch: "
+            f"missing={missing[:20]}, unlisted={unlisted[:20]}"
+        )
+    for relative in CANONICAL_HOST_FILES:
+        source = source_root / relative
+        staged = dest_root / relative
+        if source.is_symlink() or not source.is_file():
+            raise FileNotFoundError(
+                f"Canonical Host source is missing or unsafe: {source}"
+            )
+        if compute_sha256(staged) != compute_sha256(source):
+            raise RuntimeError(
+                f"Staged canonical Host resource hash mismatch: {relative}"
+            )
 
 
 def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
@@ -565,6 +641,7 @@ def validate_bundle(
         raise RuntimeError("Forbidden generated bundle directories: " + ", ".join(forbidden[:20]))
 
     _validate_defaultspack_v4(dest_root, repository_root)
+    verify_canonical_host_package(dest_root, repository_root)
     verify_staged_bootstrap_import(dest_root)
     verify_no_python_bytecode(dest_root)
 
@@ -646,6 +723,7 @@ def main() -> int:
     dest_root.mkdir(parents=True, exist_ok=True)
 
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
+    stage_canonical_host_package(source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
 
     validate_bundle(

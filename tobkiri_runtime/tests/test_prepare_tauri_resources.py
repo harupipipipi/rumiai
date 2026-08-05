@@ -62,6 +62,12 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
             "rumi.pack.v3.json",
         ),
     )
+    module.stage_canonical_host_package(ROOT / "tobkiri_runtime", stage)
+    shutil.copytree(
+        ROOT / "tobkiri_runtime/tobkiri_protocol",
+        stage / "tobkiri_protocol",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
     for relative in module.REQUIRED_RUNTIME_BOOTSTRAP_FILES:
         source = ROOT / "tobkiri_runtime" / relative
         target = stage / relative
@@ -151,8 +157,44 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
     paths = {entry["path"] for entry in manifest["entries"]}
     assert "core_runtime/__init__.py" in paths
     assert "core_runtime/bootstrap/runtime.py" in paths
+    assert "tobkiri_host/runtime.py" in paths
+    assert "tobkiri_host/composition.py" in paths
     assert not any(path.endswith((".pyc", ".pyo")) for path in paths)
     assert not list(stage.rglob("__pycache__"))
+
+    relocated = tmp_path / "isolated" / "app"
+    shutil.copytree(stage, relocated)
+    try:
+        for path in sorted(relocated.rglob("*"), reverse=True):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        relocated.chmod(0o555)
+        module.verify_runtime_resource_manifest(relocated)
+        module.verify_staged_bootstrap_import(relocated)
+        assert not list(relocated.rglob("__pycache__"))
+    finally:
+        relocated.chmod(0o755)
+        for path in relocated.rglob("*"):
+            path.chmod(0o755 if path.is_dir() else 0o644)
+
+
+@pytest.mark.parametrize("case", ("missing", "tampered", "symlink", "unlisted"))
+def test_validate_bundle_rejects_host_package_drift(tmp_path, case):
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    target = stage / "tobkiri_host/runtime.py"
+
+    if case == "missing":
+        target.unlink()
+    elif case == "tampered":
+        target.write_bytes(target.read_bytes() + b"\n# tampered\n")
+    elif case == "symlink":
+        target.unlink()
+        target.symlink_to(ROOT / "tobkiri_runtime/tobkiri_host/runtime.py")
+    else:
+        (stage / "tobkiri_host/unlisted.py").write_text("pass\n", encoding="utf-8")
+
+    with pytest.raises((FileNotFoundError, RuntimeError)):
+        module.validate_bundle(stage, False, None, repository_root=ROOT)
 
 
 @pytest.mark.parametrize(
