@@ -14,7 +14,7 @@ import hashlib
 import secrets
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 
 class ViewerCapabilityHandler:
@@ -74,7 +74,7 @@ class ViewerCapabilityHandler:
 
     def _audit_log(
         self,
-        severity: str,
+        severity: Literal["info", "warning", "error", "critical"],
         action: str,
         success: bool,
         principal_id: str,

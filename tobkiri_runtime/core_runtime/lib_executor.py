@@ -318,7 +318,7 @@ class LibExecutor:
                 executed_at=self._now_ts(),
                 file_hash=file_hash,
                 success=success,
-                error=error
+                error=error or ""
             )
             self._save_records()
     
@@ -335,7 +335,7 @@ class LibExecutor:
                     "lib_type": lib_type,
                     "execution_mode": execution_mode
                 },
-                error=error
+                error=error or ""
             )
         except Exception:
             pass

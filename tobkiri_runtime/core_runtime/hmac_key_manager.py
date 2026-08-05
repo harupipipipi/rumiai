@@ -29,19 +29,41 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .compat import safe_chmod
 
 logger = logging.getLogger(__name__)
 
 # Fernet 暗号化の可用性 (W21-B)
-_FERNET_AVAILABLE = False
+if TYPE_CHECKING:
+    from cryptography.fernet import Fernet as _FernetType
+
+_Fernet: type[_FernetType] | None
 try:
-    from cryptography.fernet import Fernet as _Fernet
+    from cryptography.fernet import Fernet as _FernetImplementation
+
+    _Fernet = _FernetImplementation
     _FERNET_AVAILABLE = True
 except ImportError:
     _Fernet = None
+    _FERNET_AVAILABLE = False
+
+
+def _new_fernet(key: bytes):
+    """Construct Fernet only after the optional dependency was detected."""
+    fernet_type = _Fernet
+    if fernet_type is None:
+        raise RuntimeError("cryptography is required for Fernet encryption")
+    return fernet_type(key)
+
+
+def _generate_fernet_key() -> bytes:
+    """Generate an encryption key through the optional Fernet backend."""
+    fernet_type = _Fernet
+    if fernet_type is None:
+        raise RuntimeError("cryptography is required for Fernet encryption")
+    return fernet_type.generate_key()
 
 # 暗号化鍵ファイル名 (W21-B)
 _ENC_KEY_FILENAME = "hmac_keys.key"
@@ -327,12 +349,12 @@ class HMACKeyManager:
             try:
                 key_data = enc_key_path.read_bytes().strip()
                 # 有効な Fernet 鍵か検証
-                _Fernet(key_data)
+                _new_fernet(key_data)
                 return key_data
             except Exception:
                 pass
         # 新規生成
-        new_key = _Fernet.generate_key()
+        new_key = _generate_fernet_key()
         enc_key_path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(
             dir=str(enc_key_path.parent),
@@ -383,7 +405,7 @@ class HMACKeyManager:
             Base64 エンコードされた Fernet トークン文字列
         """
         enc_key = self._get_encryption_key()
-        f = _Fernet(enc_key)
+        f = _new_fernet(enc_key)
         token = f.encrypt(data_str.encode("utf-8"))
         return token.decode("ascii")
 
@@ -401,7 +423,7 @@ class HMACKeyManager:
             Exception: 復号に失敗した場合
         """
         enc_key = self._get_encryption_key()
-        f = _Fernet(enc_key)
+        f = _new_fernet(enc_key)
         return f.decrypt(payload.encode("ascii")).decode("utf-8")
 
     def _load_or_initialize(self) -> None:

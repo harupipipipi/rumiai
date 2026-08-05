@@ -24,7 +24,7 @@ import subprocess
 import sys
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
@@ -328,7 +328,7 @@ class DockerCapabilityHandler:
 
     def _audit_log(
         self,
-        severity: str,
+        severity: Literal["info", "warning", "error", "critical"],
         action: str,
         success: bool,
         principal_id: str,

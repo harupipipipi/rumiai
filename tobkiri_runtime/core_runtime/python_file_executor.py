@@ -565,8 +565,8 @@ class PythonFileExecutor:
                 success=result.success,
                 execution_mode=result.execution_mode,
                 execution_time_ms=result.execution_time_ms,
-                error=result.error,
-                error_type=result.error_type,
+                error=result.error or "",
+                error_type=result.error_type or "",
                 warnings=result.warnings
             )
         except Exception:
@@ -1368,7 +1368,7 @@ else:
                 event_type=f"python_file_call_{rejection_type}_rejected",
                 severity="warning",
                 description=result.error or f"Rejected due to {rejection_type}",
-                pack_id=context.owner_pack,
+                pack_id=context.owner_pack or "unknown",
                 details={
                     "flow_id": context.flow_id,
                     "step_id": context.step_id,

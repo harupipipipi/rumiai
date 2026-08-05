@@ -468,7 +468,7 @@ class PackImporter:
                 event_type=event_type,
                 success=success,
                 details=details,
-                error=details.get("error"),
+                error=str(details.get("error") or ""),
             )
         except Exception:
             pass

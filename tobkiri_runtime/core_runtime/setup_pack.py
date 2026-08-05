@@ -368,7 +368,7 @@ class SetupPackManager:
                 event_type=action,
                 success=success,
                 details=details or {},
-                error=error,
+                error=error or "",
             )
         except Exception:
             logger.debug("Failed to audit setup_pack system event", exc_info=True)
@@ -392,7 +392,7 @@ class SetupPackManager:
                 action=action,
                 success=success,
                 details=details or {},
-                rejection_reason=error,
+                rejection_reason=error or "",
             )
         except Exception:
             logger.debug("Failed to audit setup_pack permission event", exc_info=True)
