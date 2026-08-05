@@ -6,19 +6,6 @@ from pathlib import Path
 from typing import Any
 
 
-def resolved_provider_credential(tmp_path: Path, provider_id: str) -> str:
-    """Resolve one provider canary through the captured v4 Profile boundary."""
-    from tests.test_defaultspack_provider_program import _v4_provider_fixture
-
-    fixture, broker = _v4_provider_fixture(tmp_path, provider_id)
-    assert fixture.profile["profile_id"] == "defaults"
-    assert fixture.effective_provider_pack == "rumi_provider_adapters_pack"
-    assert fixture.dispatch.profile_id == "defaults"
-    value = fixture.resolve_api_key(broker)
-    assert value == f"{provider_id}-credential-canary"
-    return value
-
-
 def exercise_captured_provider_send(
     tmp_path: Path,
     monkeypatch: Any,
@@ -31,7 +18,9 @@ def exercise_captured_provider_send(
     from ecosystem.rumi_provider_adapters_pack.runtime import adapter as adapter_module
     from ecosystem.rumi_provider_adapters_pack.runtime.adapter import (
         CREDENTIAL_CONTRACT,
+        CREDENTIAL_OPERATION,
         REGISTRY_CONTRACT,
+        REGISTRY_OPERATION,
         create_generate_operation,
     )
     from tests.test_defaultspack_provider_program import _v4_provider_fixture
@@ -46,7 +35,7 @@ def exercise_captured_provider_send(
     )
     assert len(metadata) == 1
     assert metadata[0]["provider_instance_id"] == f"provider.{provider_id}"
-    canary = fixture.resolve_api_key(broker)
+    canary = f"{provider_id}-credential-canary"
     calls: list[tuple[str, str, dict[str, Any]]] = []
 
     class CapturedHostClient:
@@ -57,15 +46,20 @@ def exercise_captured_provider_send(
             payload: dict[str, Any],
         ) -> dict[str, Any]:
             calls.append((contract_id, operation, dict(payload)))
-            if contract_id == REGISTRY_CONTRACT and operation == "list":
+            if contract_id == REGISTRY_CONTRACT and operation == REGISTRY_OPERATION:
                 return {"providers": list(metadata)}
-            if contract_id == CREDENTIAL_CONTRACT and operation == "resolve":
+            if (
+                contract_id == CREDENTIAL_CONTRACT
+                and operation == CREDENTIAL_OPERATION
+            ):
                 assert payload == {
                     "handle": metadata[0]["credential_handle"],
                     "provider_instance_id": f"provider.{provider_id}",
                     "scope": "ai.generate",
                 }
-                return {"secret_material": {"api_key": canary}}
+                resolved = fixture.resolve_api_key(broker)
+                assert resolved == canary
+                return {"secret_material": {"api_key": resolved}}
             raise AssertionError("unexpected captured Host operation")
 
     captured: dict[str, Any] = {}
@@ -99,8 +93,12 @@ def exercise_captured_provider_send(
     assert captured["url"] == f"{endpoint.rstrip('/')}/chat/completions"
     assert captured["body"]["model"] == model_id
     assert captured["headers"]["Authorization"] == f"Bearer {canary}"
-    assert calls[0] == (REGISTRY_CONTRACT, "list", {"profile_id": "defaults"})
-    assert calls[1][0:2] == (CREDENTIAL_CONTRACT, "resolve")
+    assert calls[0] == (
+        REGISTRY_CONTRACT,
+        REGISTRY_OPERATION,
+        {"profile_id": "defaults"},
+    )
+    assert calls[1][0:2] == (CREDENTIAL_CONTRACT, CREDENTIAL_OPERATION)
     assert canary not in json.dumps(result, sort_keys=True)
     assert canary not in json.dumps(metadata, sort_keys=True)
     captured["headers"]["Authorization"] = "<redacted>"

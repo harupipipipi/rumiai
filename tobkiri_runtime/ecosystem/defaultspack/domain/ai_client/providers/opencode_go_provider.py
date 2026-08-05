@@ -284,12 +284,11 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     _tool_result_part = staticmethod(AnthropicProvider._tool_result_part)
     _content_parts = staticmethod(AnthropicProvider._content_parts)
 
-    def __init__(self, api_key: str = "") -> None:
+    def __init__(self) -> None:
         catalog_models = model_manifests_from_provider_components("opencode-go")
         super().__init__(
             provider_id="opencode-go",
             display_name="OpenCode Go",
-            api_key=api_key,
             api_key_env=["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"],
             base_url_env="OPENCODE_GO_BASE_URL",
             default_base_url=self.BASE_URL,

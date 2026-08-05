@@ -382,7 +382,39 @@ def test_authority_followup_metadata_carries_multiple_approval_tokens():
 
 
 def test_authority_context_accumulates_prior_hidden_followups_from_same_chain(tmp_path):
-    _assert_v4_authority_boundary(tmp_path)
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
+
+    authority = harness(
+        tmp_path,
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+        delegation_allowed=True,
+        max_delegation_depth=2,
+    )
+    hidden_followups = ("hidden:model-approval", "hidden:credential-approval")
+    context = authority.context(call_chain=hidden_followups)
+
+    authority.kernel.check_static_path(context, authority.scope)
+    result = authority.kernel.authorize(context, authority.scope)
+    stored = authority.store.get_lease(result.lease_id)
+
+    assert stored is not None
+    lease, _state = stored
+    assert lease.call_chain == hidden_followups
+    assert lease.request_id == context.request_id
+    assert lease.request_digest == context.request_digest
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.dispatch(
+            result.lease_token,
+            target_domain_id=authority.target_domain.domain_id,
+            target_boot_epoch=authority.target_domain.boot_epoch,
+            request_digest=_digest("different-chain-request"),
+        )
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
+
 
 def test_one_by_one_authority_approvals_resume_without_reasking_model(tmp_path):
     _assert_v4_authority_boundary(tmp_path)
@@ -431,13 +463,125 @@ def test_compiled_provider_respects_request_timeout_param(monkeypatch):
 
 
 def test_compiled_provider_does_not_consume_model_token_before_api_key_approval(tmp_path):
-    _assert_v4_authority_boundary(tmp_path)
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
+
+    model = harness(
+        tmp_path / "model",
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+    )
+    credential = harness(
+        tmp_path / "credential",
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+    )
+
+    model.kernel.check_static_path(model.context(), model.scope)
+    with pytest.raises(AuthorityDenied):
+        credential.kernel.check_static_path(
+            credential.context(plan_digest=_digest("forged-credential-plan")),
+            credential.scope,
+        )
+    assert model.store.grant_usage(model.grant.grant_id) == (0, 0)
+    assert credential.store.grant_usage(credential.grant.grant_id) == (0, 0)
+    assert not any(
+        event["event_state"] == "reserved"
+        for authority in (model, credential)
+        for event in authority.store.audit_events()
+    )
+
 
 def test_compiled_provider_preflight_does_not_consume_bundled_authority_tokens(tmp_path):
-    _assert_v4_authority_boundary(tmp_path)
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
+
+    bundled = tuple(
+        harness(
+            tmp_path / permission,
+            grant_lifetime=GrantLifetime.ONE_SHOT,
+            max_uses=1,
+        )
+        for permission in ("model", "credential", "network")
+    )
+
+    for authority in bundled:
+        authority.kernel.check_static_path(authority.context(), authority.scope)
+    with pytest.raises(AuthorityDenied):
+        bundled[-1].kernel.check_static_path(
+            bundled[-1].context(
+                activation_digest=_digest("mutated-bundle-activation")
+            ),
+            bundled[-1].scope,
+        )
+    for authority in bundled:
+        assert authority.store.grant_usage(authority.grant.grant_id) == (0, 0)
+        assert not any(
+            event["event_state"] == "reserved"
+            for event in authority.store.audit_events()
+        )
+
 
 def test_compiled_provider_consumes_bundled_one_shots_once_on_send(tmp_path):
-    _assert_v4_authority_boundary(tmp_path)
+    from core_runtime.authority.v4 import (
+        AuthorityDenied,
+        GrantLifetime,
+        LeaseState,
+    )
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
+
+    authority = harness(
+        tmp_path,
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+        delegation_allowed=True,
+        max_delegation_depth=1,
+    )
+    original_chain = ("hidden:provider-send",)
+    context = authority.context(call_chain=original_chain)
+    authority.kernel.check_static_path(context, authority.scope)
+    result = authority.kernel.authorize(context, authority.scope)
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
+
+    lease = authority.kernel.dispatch(
+        result.lease_token,
+        target_domain_id=authority.target_domain.domain_id,
+        target_boot_epoch=authority.target_domain.boot_epoch,
+        request_digest=context.request_digest,
+    )
+    authority.kernel.finish(
+        lease.lease_id,
+        state=LeaseState.COMMITTED,
+        outcome_digest=_digest("provider-send-outcome"),
+    )
+
+    assert authority.store.grant_usage(authority.grant.grant_id) == (0, 1)
+    assert [event["event_state"] for event in authority.store.audit_events()][-3:] == [
+        "reserved",
+        "dispatched",
+        "committed",
+    ]
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.dispatch(
+            result.lease_token,
+            target_domain_id=authority.target_domain.domain_id,
+            target_boot_epoch=authority.target_domain.boot_epoch,
+            request_digest=context.request_digest,
+        )
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.authorize(
+            authority.context(
+                request_id="request-cross-chain",
+                request_digest=_digest("cross-chain-request"),
+                call_chain=("hidden:other-chain",),
+            ),
+            authority.scope,
+        )
+    assert authority.store.grant_usage(authority.grant.grant_id) == (0, 1)
+
 
 def test_compiled_provider_uses_atomic_authority_token_consume(tmp_path):
     _assert_v4_authority_boundary(tmp_path)

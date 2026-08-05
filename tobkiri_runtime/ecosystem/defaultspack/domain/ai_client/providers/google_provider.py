@@ -179,12 +179,11 @@ class GoogleProvider(OpenAICompatibleProvider):
     _MODEL_INVENTORY_CACHE: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 
-    def __init__(self, api_key: str = "") -> None:
+    def __init__(self):
         catalog_models = model_manifests_from_provider_components("google")
         super().__init__(
             provider_id="google",
             display_name="Google",
-            api_key=api_key,
             api_key_env=["GOOGLE_API_KEY", "GEMINI_API_KEY"],
             base_url_env="GOOGLE_BASE_URL",
             default_base_url=self.BASE_URL,

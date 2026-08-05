@@ -189,7 +189,8 @@ def test_opengateway_does_not_client_filter_newly_provisioned_models():
         GitlawbOpengatewayProvider,
     )
 
-    provider = GitlawbOpengatewayProvider(api_key="test-ogw-token")
+    provider = GitlawbOpengatewayProvider()
+    provider._api_key = "test-ogw-token"
     provider._assert_supported_model("newly-provisioned-model")
 
 

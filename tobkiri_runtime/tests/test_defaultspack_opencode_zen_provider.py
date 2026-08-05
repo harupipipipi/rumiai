@@ -58,16 +58,13 @@ def _provider(monkeypatch):
     del monkeypatch
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
 
-    return OpencodeZenProvider(api_key="test-opencode-zen-key")
+    provider = OpencodeZenProvider()
+    provider._api_key = "test-opencode-zen-key"
+    return provider
 
 
-def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch, tmp_path):
-    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
-    from tests.v4_provider_runtime_support import resolved_provider_credential
-
-    provider = OpencodeZenProvider(
-        api_key=resolved_provider_credential(tmp_path, "opencode-zen")
-    )
+def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
+    provider = _provider(monkeypatch)
     response = _FakeJsonResponse(
         {
             "data": [
@@ -130,14 +127,8 @@ def test_opencode_zen_model_inventory_falls_back_on_network_failure(monkeypatch)
 
 def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure(
     monkeypatch,
-    tmp_path,
 ):
-    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
-    from tests.v4_provider_runtime_support import resolved_provider_credential
-
-    provider = OpencodeZenProvider(
-        api_key=resolved_provider_credential(tmp_path, "opencode-zen")
-    )
+    provider = _provider(monkeypatch)
     provider.MODEL_INVENTORY_TTL_SECONDS = 0
 
     with patch.object(

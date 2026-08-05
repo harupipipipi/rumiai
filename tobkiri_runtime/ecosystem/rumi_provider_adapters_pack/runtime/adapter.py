@@ -15,7 +15,9 @@ from core_runtime.global_contract_dispatch import (
 )
 
 REGISTRY_CONTRACT = "rumi.resource.ai.provider.registry.v1"
+REGISTRY_OPERATION = "rumi_provider_registry_pack.provider-registry-resource"
 CREDENTIAL_CONTRACT = "rumi.service.credential.resolve.v1"
+CREDENTIAL_OPERATION = "rumi_credential_broker_pack.credential-resolve"
 DEFAULT_JSON_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -103,7 +105,7 @@ def _connection(
     profile_id = str(request.get("profile_id") or "").strip()
     if profile_id:
         registry_payload["profile_id"] = profile_id
-    result = client.invoke(REGISTRY_CONTRACT, "list", registry_payload)
+    result = client.invoke(REGISTRY_CONTRACT, REGISTRY_OPERATION, registry_payload)
     providers = result.get("providers") if isinstance(result, Mapping) else None
     providers = providers if isinstance(providers, list) else []
     expected = f"provider.{provider_id}"
@@ -128,9 +130,12 @@ def _credential(
     *,
     scope: str,
 ) -> dict[str, Any]:
-    handle = request.get("credential_handle") or connection.get(
-        "credential_handle"
-    )
+    supplied_handle = request.get("credential_handle")
+    handle = connection.get("credential_handle")
+    if supplied_handle is not None:
+        raise GlobalContractInvocationError(
+            "denied", "credential handle is bound by the Host provider registry"
+        )
     if handle is None:
         return {}
     if not str(handle).startswith(("credential:", "opaque:")):
@@ -139,7 +144,7 @@ def _credential(
         )
     result = client.invoke(
         CREDENTIAL_CONTRACT,
-        "resolve",
+        CREDENTIAL_OPERATION,
         {
             "handle": handle,
             "provider_instance_id": connection["provider_instance_id"],

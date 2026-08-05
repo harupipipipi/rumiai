@@ -108,7 +108,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         captured = {}
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         def fake_request_json(path, body):
             captured["path"] = path
@@ -184,7 +185,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         calls = []
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         def fake_urlopen(request, context=None, timeout=None):
             calls.append((request, context, timeout))
@@ -214,7 +216,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         calls = []
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         def fake_urlopen(request, context=None, timeout=None):
             calls.append((request, context, timeout))
@@ -244,7 +247,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         calls = []
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         def fake_urlopen(request, context=None, timeout=None):
             calls.append((request, context, timeout))
@@ -267,7 +271,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         captured = {}
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         class FakeResponse:
             def __enter__(self):
@@ -309,7 +314,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         calls = []
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         class FakeResponse(io.BytesIO):
             def __enter__(self):
@@ -345,7 +351,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         calls = []
 
         with patch.dict(os.environ, {}, clear=True):
-            provider = GoogleProvider(api_key="gemini-key")
+            provider = GoogleProvider()
+        provider._api_key = "gemini-key"
 
         class FakeResponse(io.BytesIO):
             def __enter__(self):

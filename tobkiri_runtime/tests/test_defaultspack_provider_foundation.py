@@ -12,6 +12,62 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+def test_provider_adapter_rejects_caller_credential_handle_override():
+    from core_runtime.global_contract_dispatch import (
+        GlobalContractInvocationError,
+    )
+    from ecosystem.rumi_provider_adapters_pack.runtime.adapter import (
+        REGISTRY_CONTRACT,
+        REGISTRY_OPERATION,
+        create_generate_operation,
+    )
+
+    calls = []
+
+    class HostClient:
+        def invoke(self, contract_id, operation, payload):
+            calls.append((contract_id, operation, dict(payload)))
+            if (contract_id, operation) == (
+                REGISTRY_CONTRACT,
+                REGISTRY_OPERATION,
+            ):
+                return {
+                    "providers": [
+                        {
+                            "provider_instance_id": "provider.google",
+                            "adapter_id": "openai-compatible",
+                            "credential_handle": "credential:host-bound",
+                            "endpoint": "https://example.test/v1",
+                            "enabled": True,
+                        }
+                    ]
+                }
+            raise AssertionError("credential resolution must not run")
+
+    with pytest.raises(
+        GlobalContractInvocationError,
+        match="bound by the Host provider registry",
+    ):
+        create_generate_operation(HostClient())(
+            "generate",
+            {
+                "profile_id": "defaults",
+                "provider_id": "google",
+                "credential_handle": "opaque:caller-substitution",
+                "model_id": "google/account-visible-model",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+
+    assert calls == [
+        (
+            REGISTRY_CONTRACT,
+            REGISTRY_OPERATION,
+            {"profile_id": "defaults"},
+        )
+    ]
+
+
 class TestDefaultspackProviderCatalog(unittest.TestCase):
     def test_provider_catalog_contains_major_and_local_entries(self):
         from ecosystem.defaultspack.domain.ai_client.providers import (
