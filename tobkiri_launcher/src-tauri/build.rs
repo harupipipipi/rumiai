@@ -31,12 +31,15 @@ const CANONICAL_HOST_FILES: &[&str] = &[
     "contracts.py",
     "effects.py",
     "errors.py",
+    "extension_sdk.py",
     "materialization.py",
     "models.py",
+    "platform_backends.py",
     "ports.py",
     "resources.py",
     "runtime.py",
     "shells.py",
+    "tauri_roles.py",
     "triggers.py",
 ];
 
@@ -434,6 +437,7 @@ fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
     };
     let target = required_cargo_target()?;
     let (payload, permissions) = read_verified_pack_shell(&pack_shell, &target)?;
+    verify_prebuilt_pack_shell_digest(&pack_shell, &payload)?;
     let bundled_dir = staged_root.join("bundled");
     if bundled_dir.exists() {
         require_directory(&bundled_dir, "pack-shell staging directory")?;
@@ -489,38 +493,44 @@ fn ensure_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
         return Ok(None);
     }
 
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut command = Command::new(cargo);
-    command
-        .args(["build", "--locked", "--manifest-path"])
-        .arg(&manifest)
-        .current_dir(repo_root);
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "prebuilt verified pack-shell is required; production staging may not build source from {}",
+            manifest.display()
+        ),
+    ))
+}
 
-    let target = required_cargo_target()?;
-    command.arg("--target").arg(&target);
-
-    let profile = required_cargo_profile()?;
-    match profile.as_str() {
-        "debug" => {}
-        "release" => {
-            command.arg("--release");
-        }
-        _ => {
-            command.arg("--profile").arg(&profile);
-        }
+fn verify_prebuilt_pack_shell_digest(path: &Path, payload: &[u8]) -> io::Result<()> {
+    let mut digest_name = path.as_os_str().to_os_string();
+    digest_name.push(".sha256");
+    let digest_path = PathBuf::from(digest_name);
+    let expected = String::from_utf8(read_regular_file(
+        &digest_path,
+        "prebuilt pack-shell digest",
+    )?)
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "prebuilt pack-shell digest must be UTF-8",
+        )
+    })?;
+    let expected = expected.trim();
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "prebuilt pack-shell digest is malformed",
+        ));
     }
-
-    let output = command.output()?;
-    if output.status.success() {
-        return find_pack_shell_binary(repo_root);
+    let actual = format!("{:x}", Sha256::digest(payload));
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "prebuilt pack-shell digest mismatch",
+        ));
     }
-
-    Err(io::Error::other(format!(
-        "failed to build pack-shell with status {}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )))
+    Ok(())
 }
 
 fn find_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
@@ -1418,6 +1428,51 @@ mod tests {
             "pack-shell.exe"
         );
         assert_eq!(pack_shell_binary_name(arm_target), "pack-shell");
+    }
+
+    #[test]
+    fn production_pack_shell_requires_verified_prebuilt_digest() {
+        let tree = TestTree::new("pack-shell-prebuilt-digest");
+        let binary = tree.path().join("pack-shell");
+        let payload = b"prebuilt pack-shell";
+        fs::write(&binary, payload).expect("fixture binary should be writable");
+
+        let missing = verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect_err("missing digest must fail closed");
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+
+        let mut digest_name = binary.as_os_str().to_os_string();
+        digest_name.push(".sha256");
+        let digest_path = PathBuf::from(digest_name);
+        fs::write(&digest_path, "0".repeat(64)).expect("digest should be writable");
+        let mismatch = verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect_err("unverified payload must fail closed");
+        assert_eq!(mismatch.kind(), io::ErrorKind::InvalidData);
+
+        fs::write(&digest_path, format!("{:x}\n", Sha256::digest(payload)))
+            .expect("verified digest should be writable");
+        verify_prebuilt_pack_shell_digest(&binary, payload)
+            .expect("matching prebuilt digest should pass");
+    }
+
+    #[test]
+    fn production_pack_shell_never_builds_missing_source_artifact() {
+        let _environment_lock = environment_lock();
+        let tree = TestTree::new("pack-shell-no-source-build");
+        let _target = EnvironmentGuard::set_value("TARGET", "aarch64-apple-darwin");
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+        fs::create_dir_all(tree.path().join("pack-shell"))
+            .expect("source directory should be creatable");
+        fs::write(
+            tree.path().join("pack-shell").join("Cargo.toml"),
+            "[package]",
+        )
+        .expect("source manifest should be writable");
+
+        let error = ensure_pack_shell_binary(tree.path())
+            .expect_err("production source-build fallback must remain disabled");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("may not build source"));
     }
 
     fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {
