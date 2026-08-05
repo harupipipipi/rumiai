@@ -5,19 +5,41 @@ import hashlib
 import logging
 import os
 from http import cookies
-from typing import Any
+from typing import Any, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from http.server import BaseHTTPRequestHandler as _HTTPHandlerBase
+else:
+    _HTTPHandlerBase = object
 
 from .auth_principal import AuthenticatedPrincipal
 from .api_response import APIResponse
 from .request_authorizer import authorize_route
 from ..access_tokens import TOKEN_PREFIX, get_scoped_access_token_manager
+from ..hmac_key_manager import HMACKeyManager
 from ..panel_auth import PanelAuthManager
 
 
 logger = logging.getLogger(__name__)
 
 
-class AuthGateMixin:
+class AuthGateMixin(_HTTPHandlerBase):
+    _request_auth_mode: str | None
+    _panel_session_cookie: str | None
+    _panel_session: Mapping[str, object] | None
+    _hmac_key_manager: HMACKeyManager | None
+    _panel_auth_manager: PanelAuthManager | None
+    internal_token: str
+
+    if TYPE_CHECKING:
+        def _get_cors_origin(self, origin: str) -> str | None: ...
+        def _send_response(
+            self,
+            response: APIResponse,
+            status: int = 200,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None: ...
+
     @staticmethod
     def _authority_device_scope(method: str | None, path: str | None) -> str:
         method_upper = str(method or "").upper()
@@ -218,10 +240,16 @@ class AuthGateMixin:
         self._request_auth_mode = None
         return False
 
-    def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
+    def _check_web_mount_auth(
+        self,
+        method: str,
+        web_mount: Mapping[str, object],
+    ) -> bool:
         self._authenticated_principal = None
         self._authenticated_device_scope_authorized = False
-        if self._check_bearer_auth(method, web_mount.get("path_prefix", ""), allow_device=False):
+        path_prefix_value = web_mount.get("path_prefix")
+        path_prefix = path_prefix_value if isinstance(path_prefix_value, str) else ""
+        if self._check_bearer_auth(method, path_prefix, allow_device=False):
             self._request_auth_mode = "bearer"
             return True
         if self._check_panel_session(method):

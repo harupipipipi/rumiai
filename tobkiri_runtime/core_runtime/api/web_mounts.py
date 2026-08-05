@@ -3,7 +3,12 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from http.server import BaseHTTPRequestHandler as _HTTPHandlerBase
+else:
+    _HTTPHandlerBase = object
 
 from .api_response import APIResponse
 
@@ -11,7 +16,40 @@ from .api_response import APIResponse
 logger = logging.getLogger(__name__)
 
 
-class WebMountMixin:
+class WebMountEntry(TypedDict, total=False):
+    path_prefix: str
+    web_root: Path
+    spa_fallback: bool
+    index_file: str
+    auth_required: bool
+    pack_id: str
+
+
+class PreAuthRouteEntry(TypedDict, total=False):
+    method: str
+    path: str
+    path_prefix: str
+    pack_id: str
+    _source: str
+
+
+class WebMountMixin(_HTTPHandlerBase):
+    _web_mounts: list[WebMountEntry]
+    _pre_auth_table: list[PreAuthRouteEntry]
+    _CLIENT_DISCONNECT_EXCEPTIONS: tuple[type[OSError], ...]
+
+    if TYPE_CHECKING:
+        @classmethod
+        def _is_pack_approved_for_runtime_routes(cls, pack_id: str) -> bool: ...
+
+        def _send_response(
+            self,
+            response: APIResponse,
+            status: int = 200,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None: ...
+        def _get_cors_origin(self, origin: str) -> str | None: ...
+
     _TRUSTED_PRE_AUTH_PACKS = {
         "core_control_panel": "core:rumi/control_panel",
         "core_setup": "core:rumi/setup",
@@ -117,7 +155,10 @@ class WebMountMixin:
                         method = route.get("method", "").upper()
                         if not method:
                             continue
-                        entry = {"method": method, "pack_id": pack_id}
+                        entry: PreAuthRouteEntry = {
+                            "method": method,
+                            "pack_id": pack_id,
+                        }
                         if "path" in route:
                             entry["path"] = route["path"]
                         if "path_prefix" in route:
@@ -146,14 +187,14 @@ class WebMountMixin:
         logger.info("Loaded %d pre_auth_route entries", count)
         return count
 
-    def _match_web_mount(self, request_path: str):
+    def _match_web_mount(self, request_path: str) -> WebMountEntry | None:
         for wm in self._web_mounts:
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
                 if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
                     return wm
                 continue
-        fallback_mounts = {
+        fallback_mounts: dict[str, WebMountEntry] = {
             "/desktops": {
                 "web_root": Path(__file__).resolve().parent.parent.parent
                 / "ecosystem"
@@ -181,8 +222,11 @@ class WebMountMixin:
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                candidate = {"path_prefix": prefix, **mount}
-                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                candidate: WebMountEntry = {"path_prefix": prefix, **mount}
+                candidate_pack_id = candidate.get("pack_id")
+                if not isinstance(candidate_pack_id, str):
+                    continue
+                if self._is_pack_approved_for_runtime_routes(candidate_pack_id):
                     return candidate
         return None
 
@@ -209,7 +253,7 @@ class WebMountMixin:
     def _serve_static_file(
         self,
         request_path: str,
-        _wm: Optional[dict[str, Any]] = None,
+        _wm: Optional[WebMountEntry] = None,
     ) -> None:
         if _wm is None:
             _wm = self._match_web_mount(request_path)

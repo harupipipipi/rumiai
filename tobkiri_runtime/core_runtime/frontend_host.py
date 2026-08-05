@@ -141,11 +141,11 @@ class FrontendHostRegistry:
                 quarantined.add(location.pack_id)
             contributions.extend(loaded)
 
-        accepted, collision_diagnostics = _reject_collisions(contributions)
+        accepted_list, collision_diagnostics = _reject_collisions(contributions)
         diagnostics.extend(collision_diagnostics)
         accepted = tuple(
             sorted(
-                accepted,
+                accepted_list,
                 key=lambda item: (
                     item.kind,
                     -item.priority,

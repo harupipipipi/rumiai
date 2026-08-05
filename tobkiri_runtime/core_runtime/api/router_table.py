@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING, TypedDict
 from urllib.parse import unquote
 
 from ._helpers import _SAFE_ERROR_MSG, _log_internal_error
@@ -17,7 +18,61 @@ from ..validation import HANDLER_NAME_RE
 
 logger = logging.getLogger(__name__)
 
+
+class APIRouteEntry(TypedDict, total=False):
+    handler: str
+    function_id: str
+    pack_id: str
+    owner_pack_id: str
+    permission_id: str
+    provider_id: str
+    frontend_id: str
+    audience: str
+    core_only: bool
+    resource_template: dict[str, object]
+    auth_mode: str
+    principal: str
+    csrf_origin_required: bool
+    rate_limit: str
+    audit_category: str
+    legacy_until: str | None
+    pass_body: bool
+    pass_query: bool
+    response_mode: str
+    args: dict[str, object]
+    path_param_map: dict[str, object]
+
+
+APIRoutePattern = tuple[
+    str,
+    re.Pattern[str],
+    list[str],
+    APIRouteEntry,
+]
+
 class APIRouteTableMixin:
+    _api_route_exact: dict[tuple[str, str], APIRouteEntry]
+    _api_route_patterns: list[APIRoutePattern]
+
+    if TYPE_CHECKING:
+        def _send_response(
+            self,
+            response: APIResponse,
+            status: int = 200,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None: ...
+        def _is_safe_id(self, value: str) -> bool: ...
+        def _unwrap_defaultspack_function_envelope(self, result: object) -> object: ...
+        def _sse_events_from_result(self, result: object) -> object | None: ...
+        def _send_sse(self, events: object) -> None: ...
+        def _send_raw_json(
+            self,
+            payload: object,
+            status: int = 200,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None: ...
+        def _send_result(self, result: object, error_status: int = 500) -> None: ...
+
     @classmethod
     def _is_pack_approved_for_runtime_routes(cls, pack_id: str) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
@@ -96,7 +151,8 @@ class APIRouteTableMixin:
                 continue
             method = route.get("method", "").upper()
             handler_name = route.get("handler", "")
-            function_id = route.get("function_id", route.get("function", ""))
+            function_value = route.get("function_id", route.get("function", ""))
+            function_id = function_value if isinstance(function_value, str) else ""
             if not method or not (handler_name or function_id):
                 continue
             if function_id and not cls._pack_allows_in_process_api_metadata(pack_id, pack_info):
@@ -109,7 +165,7 @@ class APIRouteTableMixin:
             if handler_name and not HANDLER_NAME_RE.match(handler_name):
                 logger.warning("Invalid handler name in api_routes: %s", handler_name)
                 continue
-            entry = {
+            entry: APIRouteEntry = {
                 "handler": handler_name,
                 "function_id": function_id,
                 "pack_id": pack_id,
@@ -228,8 +284,11 @@ class APIRouteTableMixin:
             return False
 
         entry_for_auth = dict(entry)
+        resource_template_value = entry.get("resource_template")
         entry_for_auth["resource_template"] = self._resolve_api_route_resource_template(
-            entry.get("resource_template") if isinstance(entry.get("resource_template"), dict) else {},
+            resource_template_value
+            if isinstance(resource_template_value, dict)
+            else {},
             path_params=path_params,
             body=body,
             query=query,

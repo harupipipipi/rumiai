@@ -2,24 +2,32 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ...approval_manager import ApprovalManager
 
 
 
 class PackHandlersMixin:
     """Pack 承認 / スキャン / reject 関連のハンドラ"""
 
+    approval_manager: ApprovalManager | None
+
     def _get_all_packs(self) -> list:
         if not self.approval_manager:
             return []
         packs = self.approval_manager.scan_packs()
-        return [
-            {
-                "pack_id": p,
-                "status": self.approval_manager.get_status(p).value if self.approval_manager.get_status(p) else "unknown"
-            }
-            for p in packs
-        ]
+        result = []
+        for pack_id in packs:
+            status = self.approval_manager.get_status(pack_id)
+            result.append(
+                {
+                    "pack_id": pack_id,
+                    "status": status.value if status is not None else "unknown",
+                }
+            )
+        return result
 
     def _get_pending_packs(self) -> list:
         if not self.approval_manager:
@@ -106,7 +114,7 @@ class PackHandlersMixin:
         if not self.approval_manager:
             return {"error": "ApprovalManager not initialized", "status_code": 500}
 
-        runtimes = {}  # runtime_name -> list of provider pack_ids
+        runtimes: dict[str, list[str]] = {}
         approved_ids = self.approval_manager.get_approved_pack_ids()
 
         for pid in approved_ids:

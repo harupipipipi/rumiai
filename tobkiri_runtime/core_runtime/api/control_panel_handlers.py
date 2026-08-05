@@ -50,7 +50,14 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .capability_graph_handlers import (
+        CapabilityGraphHandlersMixin as _CapabilityGraphBase,
+    )
+else:
+    _CapabilityGraphBase = object
 
 from core_runtime.app_version import APP_DISPLAY_VERSION
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
@@ -106,23 +113,26 @@ def _ai_input_preview_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dic
 
 
 def _ai_input_total_tokens(payload: Dict[str, Any]) -> int:
-    estimate = payload.get("token_estimate") if isinstance(payload.get("token_estimate"), dict) else {}
+    estimate_value = payload.get("token_estimate")
+    estimate = estimate_value if isinstance(estimate_value, dict) else {}
     total = estimate.get("total")
     return int(total) if isinstance(total, int) else 0
 
 
 def _ai_input_segment_ids(payload: Dict[str, Any]) -> set[str]:
-    effective = payload.get("effective_input") if isinstance(payload.get("effective_input"), dict) else {}
+    effective_value = payload.get("effective_input")
+    effective = effective_value if isinstance(effective_value, dict) else {}
     result: set[str] = set()
     for key in ("system_segments", "developer_segments", "context_segments", "tool_schemas"):
-        entries = effective.get(key) if isinstance(effective.get(key), list) else []
+        entries_value = effective.get(key)
+        entries = entries_value if isinstance(entries_value, list) else []
         for entry in entries:
             if isinstance(entry, dict) and str(entry.get("id") or "").strip():
                 result.add(str(entry["id"]))
     return result
 
 
-class ControlPanelHandlersMixin:
+class ControlPanelHandlersMixin(_CapabilityGraphBase):
     """Control Panel API のハンドラ"""
 
     def _panel_startup_profile_manager(self):
@@ -630,13 +640,19 @@ class ControlPanelHandlersMixin:
                 "node_overrides": {},
             })
 
-            prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
+            prompts_value = document.selected.get("prompts")
+            prompts = prompts_value if isinstance(prompts_value, list) else []
+            first_prompt = next(iter(prompts), None)
+            system_prompt_id = first_prompt if isinstance(first_prompt, str) else None
+            node_overrides_value = derived.get("node_overrides")
             payload: Dict[str, Any] = {
                 "metadata": metadata,
                 "policy": policy,
-                "system_prompt_id": prompts[0] if prompts else None,
+                "system_prompt_id": system_prompt_id,
                 "node_overrides": dict(
-                    derived.get("node_overrides") if isinstance(derived.get("node_overrides"), dict) else {}
+                    node_overrides_value
+                    if isinstance(node_overrides_value, dict)
+                    else {}
                 ),
             }
 
@@ -696,13 +712,19 @@ class ControlPanelHandlersMixin:
                 "node_overrides": {},
             })
 
-            prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
+            prompts_value = document.selected.get("prompts")
+            prompts = prompts_value if isinstance(prompts_value, list) else []
+            first_prompt = next(iter(prompts), None)
+            system_prompt_id = first_prompt if isinstance(first_prompt, str) else None
+            node_overrides_value = derived.get("node_overrides")
             preview_payload: Dict[str, Any] = {
                 "metadata": metadata,
                 "policy": policy,
-                "system_prompt_id": prompts[0] if prompts else None,
+                "system_prompt_id": system_prompt_id,
                 "node_overrides": dict(
-                    derived.get("node_overrides") if isinstance(derived.get("node_overrides"), dict) else {}
+                    node_overrides_value
+                    if isinstance(node_overrides_value, dict)
+                    else {}
                 ),
             }
 
@@ -1491,10 +1513,14 @@ class ControlPanelHandlersMixin:
     def _panel_check_updates(self) -> Dict[str, Any]:
         """GET /api/panel/updates — rumiai/defaultspack の更新確認"""
         try:
-            from ..github_update_manager import GitHubUpdateError, get_github_update_manager
+            from ..github_update_manager import (
+                GitHubUpdateError,
+                UpdateTarget,
+                get_github_update_manager,
+            )
 
             manager = get_github_update_manager()
-            targets = ["tobkiri", "defaultspack"]
+            targets: list[UpdateTarget] = ["tobkiri", "defaultspack"]
             try:
                 checks = manager.check_many(targets)
             except GitHubUpdateError as e:

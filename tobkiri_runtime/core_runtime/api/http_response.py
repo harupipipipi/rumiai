@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from http.server import BaseHTTPRequestHandler as _HTTPHandlerBase
+else:
+    _HTTPHandlerBase = object
 
 from .api_response import APIResponse
 
 
-class ResponseWriterMixin:
+class ResponseWriterMixin(_HTTPHandlerBase):
+    _panel_session_cookie: str | None
+    _CLIENT_DISCONNECT_EXCEPTIONS: tuple[type[OSError], ...]
+
+    if TYPE_CHECKING:
+        def _get_cors_origin(self, origin: str) -> str | None: ...
+
     def _send_response(
         self,
         response: APIResponse,

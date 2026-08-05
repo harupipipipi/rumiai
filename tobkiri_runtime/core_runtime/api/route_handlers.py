@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
+
+from .api_response import APIResponse
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,21 @@ class RouteHandlersMixin:
     _exact_routes: dict = {}         # {(method, path): route_info} — 完全一致 O(1)
     _template_routes: list = []      # [(method, compiled_re, param_names, route_info), ...]
 
+    if TYPE_CHECKING:
+        def _run_flow(
+            self,
+            flow_id: str,
+            inputs: dict[str, object],
+            timeout: float,
+        ) -> dict[str, object]: ...
+
+        def _send_response(
+            self,
+            response: APIResponse,
+            status: int = 200,
+            extra_headers: list[tuple[str, str]] | None = None,
+        ) -> None: ...
+
     @classmethod
     def load_pack_routes(cls, registry) -> int:
         """Reject legacy route authority; v4 routes live in OperationCatalog."""
@@ -138,9 +156,12 @@ class RouteHandlersMixin:
         if result.get("success"):
             self._send_response(APIResponse(True, result))
         else:
-            status_code = result.get("status_code", 500)
+            status_value = result.get("status_code")
+            status_code = status_value if isinstance(status_value, int) else 500
+            error_value = result.get("error")
+            error = error_value if isinstance(error_value, str) else None
             self._send_response(
-                APIResponse(False, error=result.get("error")), status_code,
+                APIResponse(False, error=error), status_code,
             )
 
     def _get_registered_routes(self) -> dict:

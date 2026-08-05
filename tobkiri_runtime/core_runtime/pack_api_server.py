@@ -17,7 +17,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -36,6 +36,8 @@ from .validation import (
 )
 
 from .api.route_handlers import _is_safe_path_param
+from .api.router_table import APIRouteEntry, APIRoutePattern
+from .api.web_mounts import PreAuthRouteEntry, WebMountEntry
 
 from .api.api_response import APIResponse
 from .api.safe_headers import (
@@ -253,15 +255,15 @@ class PackAPIHandler(
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _request_auth_mode: Optional[str] = None
     _authenticated_principal: Optional[Any] = None
-    _panel_session: Optional[dict[str, Any]] = None
+    _panel_session: Optional[Mapping[str, object]] = None
     _panel_session_cookie: Optional[str] = None
     _authenticated_device_id: Optional[str] = None
     _authenticated_scopes: list[str] = []
     _authenticated_device_scope_authorized: bool = False
-    _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
-    _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
-    _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
-    _api_route_patterns: list[tuple[Any, Any, Any, dict[str, Any]]] = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
+    _web_mounts: list[WebMountEntry] = []           # web_mount テーブル（テーブル駆動静的配信）
+    _pre_auth_table: list[PreAuthRouteEntry] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
+    _api_route_exact: dict[tuple[str, str], APIRouteEntry] = {}
+    _api_route_patterns: list[APIRoutePattern] = []
 
     @classmethod
     def canonical_v4_server_handler(cls, **bindings: Any) -> type["PackAPIHandler"]:
@@ -273,17 +275,14 @@ class PackAPIHandler(
         isolated and makes every start/restart begin from the closed Pack v4
         HTTP surface.
         """
-        route_state = {
-            "_web_mounts": [],
-            "_pre_auth_table": [],
-            "_api_route_exact": {},
-            "_api_route_patterns": [],
-            "_pack_routes": {},
-            "_exact_routes": {},
-            "_template_routes": [],
-        }
-        namespace = {name: value.copy() for name, value in route_state.items()}
-        namespace.update(bindings)
+        namespace = dict(bindings)
+        namespace.setdefault("_web_mounts", [])
+        namespace.setdefault("_pre_auth_table", [])
+        namespace.setdefault("_api_route_exact", {})
+        namespace.setdefault("_api_route_patterns", [])
+        namespace.setdefault("_pack_routes", {})
+        namespace.setdefault("_exact_routes", {})
+        namespace.setdefault("_template_routes", [])
         return type(f"{cls.__name__}V4Instance", (cls,), namespace)
     
     def log_message(self, format: str, *args) -> None:
@@ -389,7 +388,10 @@ class PackAPIHandler(
                     method = route.get("method", "").upper()
                     if not method:
                         continue
-                    entry = {"method": method, "pack_id": pack_id}
+                    entry: PreAuthRouteEntry = {
+                        "method": method,
+                        "pack_id": pack_id,
+                    }
                     if "path" in route:
                         entry["path"] = route["path"]
                     if "path_prefix" in route:
@@ -412,7 +414,7 @@ class PackAPIHandler(
         logger.info("Loaded %d pre_auth_route entries", count)
         return count
 
-    def _match_web_mount(self, request_path: str):
+    def _match_web_mount(self, request_path: str) -> WebMountEntry | None:
         """リクエストパスが web_mount テーブルにマッチするか判定する。
 
         最長一致（テーブルは path_prefix 長の降順ソート済み）。
@@ -424,7 +426,7 @@ class PackAPIHandler(
                 if self._is_pack_approved_for_runtime_routes(wm.get("pack_id", "")):
                     return wm
                 continue
-        fallback_mounts = {
+        fallback_mounts: dict[str, WebMountEntry] = {
             "/panel": {
                 "web_root": Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web",
                 "spa_fallback": True,
@@ -442,8 +444,11 @@ class PackAPIHandler(
         }
         for prefix, mount in fallback_mounts.items():
             if request_path == prefix or request_path.startswith(prefix + "/"):
-                candidate = {"path_prefix": prefix, **mount}
-                if self._is_pack_approved_for_runtime_routes(candidate.get("pack_id", "")):
+                candidate: WebMountEntry = {"path_prefix": prefix, **mount}
+                candidate_pack_id = candidate.get("pack_id")
+                if not isinstance(candidate_pack_id, str):
+                    continue
+                if self._is_pack_approved_for_runtime_routes(candidate_pack_id):
                     return candidate
         return None
 
@@ -456,8 +461,7 @@ class PackAPIHandler(
         *,
         include_builtin_core_control_panel: bool = False,
     ) -> int:
-        return APIRouteTableMixin.load_api_routes.__func__(
-            cls,
+        return super().load_api_routes(
             registry,
             pack_ids,
             include_builtin_core_control_panel=include_builtin_core_control_panel,
@@ -947,7 +951,7 @@ class PackAPIHandler(
                 from .kernel_facade import KernelFacade
 
                 facade = KernelFacade(kernel)
-            registry_routes = []
+            registry_routes: list[object] = []
             if facade is not None:
                 try:
                     registry_routes = facade.get_interface("io.http.route", strategy="all") or []
@@ -1080,10 +1084,14 @@ class PackAPIHandler(
             error_value: Any = {"code": code, "message": message}
         else:
             error_value = str(error_payload or "error")
-        try:
-            status_int = int(result.get("status_code"))
-        except (TypeError, ValueError):
+        status_code = result.get("status_code")
+        if not isinstance(status_code, (str, int, float)):
             status_int = 500
+        else:
+            try:
+                status_int = int(status_code)
+            except (TypeError, ValueError):
+                status_int = 500
         return {"error": error_value, "status_code": status_int}
     
     @staticmethod
@@ -1183,11 +1191,14 @@ class PackAPIHandler(
         self._send_response(APIResponse(True, data={"token_id": token_id, "revoked": revoked}))
 
     @staticmethod
-    def _allows_public_bootstrap_page(request_path: str, web_mount: dict[str, Any]) -> bool:
+    def _allows_public_bootstrap_page(
+        request_path: str,
+        web_mount: Mapping[str, object],
+    ) -> bool:
         if web_mount.get("pack_id") != "core_control_panel":
             return False
-        prefix = web_mount.get("path_prefix", "")
-        if not prefix:
+        prefix = web_mount.get("path_prefix")
+        if not isinstance(prefix, str) or not prefix:
             return False
         return request_path in {prefix, f"{prefix}/", f"{prefix}/index.html"}
 
@@ -1372,7 +1383,7 @@ class PackAPIHandler(
 
         return False
 
-    def _handle_web_mount_get(self, path: str, web_mount: dict[str, Any]) -> None:
+    def _handle_web_mount_get(self, path: str, web_mount: WebMountEntry) -> None:
         if web_mount.get("auth_required", True):
             if self._check_web_mount_auth("GET", web_mount):
                 self._serve_static_file(path, web_mount)
@@ -1511,7 +1522,7 @@ class PackAPIHandler(
     def _serve_static_file(
         self,
         request_path: str,
-        _wm: Optional[dict[str, Any]] = None,
+        _wm: Optional[WebMountEntry] = None,
     ) -> None:
         """Pack が提供する Web UI の静的ファイルを配信する（認証不要）。
 
@@ -1725,21 +1736,21 @@ class PackAPIHandler(
                 self._send_result(result)
 
             elif path == "/api/packs":
-                result = self._get_all_packs()
-                self._send_result(result)
+                packs_result = self._get_all_packs()
+                self._send_result(packs_result)
 
             elif path == "/api/packs/pending":
-                result = self._get_pending_packs()
-                self._send_result(result)
+                pending_packs_result = self._get_pending_packs()
+                self._send_result(pending_packs_result)
 
             elif path.startswith("/api/packs/") and path.endswith("/status"):
                 pack_id = path.split("/")[3]
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                     return
-                result = self._get_pack_status(pack_id)
-                if result:
-                    self._send_result(result)
+                pack_status_result = self._get_pack_status(pack_id)
+                if pack_status_result:
+                    self._send_result(pack_status_result)
                 else:
                     self._send_response(APIResponse(False, error="Pack not found"), 404)
 
@@ -2576,6 +2587,7 @@ _PACK_API_HANDLER_CLASSMETHOD_MIXINS = (
 
 def _rebind_mixin_descriptor(target_cls, mixin_cls, method_name: str) -> None:
     descriptor = mixin_cls.__dict__[method_name]
+    rebound: object
     if isinstance(descriptor, classmethod):
         rebound = classmethod(descriptor.__func__)
     elif isinstance(descriptor, staticmethod):
@@ -2611,8 +2623,8 @@ _PACK_API_HANDLER_METHOD_MIXINS = (
     (RequestBodyMixin, "_discard_request_body"),
     (RequestBodyMixin, "_parse_query"),
 )
-for _mixin_cls, _method_name in _PACK_API_HANDLER_METHOD_MIXINS:
-    _rebind_mixin_descriptor(PackAPIHandler, _mixin_cls, _method_name)
+for _method_mixin_cls, _method_name in _PACK_API_HANDLER_METHOD_MIXINS:
+    _rebind_mixin_descriptor(PackAPIHandler, _method_mixin_cls, _method_name)
 PackAPIHandler._MIME_TYPES = WebMountMixin._MIME_TYPES
 
 class PackAPIServer:

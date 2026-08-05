@@ -1,10 +1,18 @@
 """Container / Docker ハンドラ Mixin"""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ...approval_manager import ApprovalManager
+    from ...container_orchestrator import ContainerOrchestrator
 
 
 class ContainerHandlersMixin:
     """コンテナ操作 + Docker ステータスのハンドラ"""
+
+    approval_manager: ApprovalManager | None
+    container_orchestrator: ContainerOrchestrator | None
 
     def _get_containers(self) -> list:
         if not self.container_orchestrator:

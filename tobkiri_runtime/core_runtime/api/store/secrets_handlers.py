@@ -309,8 +309,8 @@ def _secrets_grants_delete_key(self, pack_id: str, secret_key: str) -> dict:
 
 
 # Attach to SecretsHandlersMixin so PackAPIHandler inherits them
-SecretsHandlersMixin._secrets_grants_list = _secrets_grants_list
-SecretsHandlersMixin._secrets_grants_get = _secrets_grants_get
-SecretsHandlersMixin._secrets_grants_grant = _secrets_grants_grant
-SecretsHandlersMixin._secrets_grants_delete = _secrets_grants_delete
-SecretsHandlersMixin._secrets_grants_delete_key = _secrets_grants_delete_key
+setattr(SecretsHandlersMixin, "_secrets_grants_list", _secrets_grants_list)
+setattr(SecretsHandlersMixin, "_secrets_grants_get", _secrets_grants_get)
+setattr(SecretsHandlersMixin, "_secrets_grants_grant", _secrets_grants_grant)
+setattr(SecretsHandlersMixin, "_secrets_grants_delete", _secrets_grants_delete)
+setattr(SecretsHandlersMixin, "_secrets_grants_delete_key", _secrets_grants_delete_key)
