@@ -1115,7 +1115,6 @@ def _bind_v4_snapshot(
 
     token = resolved_profile_scope.activate_resolved_profile(snapshot)
     request.addfinalizer(lambda: resolved_profile_scope.restore_resolved_profile(token))
-    monkeypatch.setattr(resolved_profile_scope, "USER_DATA_DIR", user_data_root)
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data_root))
     compatibility_pack_ids = frozenset(
         set(snapshot.effective_pack_set) | _LEGACY_DEFAULTSPACK_EFFECTIVE_PACK_IDS

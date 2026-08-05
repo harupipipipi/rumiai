@@ -4,6 +4,7 @@ import json
 import importlib
 import os
 import sys
+from types import SimpleNamespace
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +19,6 @@ from core_runtime.resolved_profile import (
     rollback_legacy_selection_migration,
 )
 from core_runtime.resolved_profile_scope import (
-    _persisted_startup_pack_ids,
     invalidate_persisted_resolved_profile,
     persisted_resolved_profile,
 )
@@ -74,7 +74,6 @@ def _isolate_profile_resolution_from_pack_install_policy(
             scope_module = importlib.import_module(module_name)
         except ModuleNotFoundError:
             continue
-        monkeypatch.setattr(scope_module, "USER_DATA_DIR", tmp_path)
         monkeypatch.setattr(scope_module, "_PERSISTED_PROFILE_CACHE", None)
         monkeypatch.setattr(scope_module, "_PERSISTED_PROFILE_INVALIDATION_REVISION", 0)
         # A preceding startup-profile test can leave a ContextVar-bound plan
@@ -138,34 +137,6 @@ def captured_v4_profile(request: pytest.FixtureRequest):
     token = activate_resolved_profile(snapshot)
     request.addfinalizer(lambda: restore_resolved_profile(token))
     return snapshot
-
-
-def test_persisted_scope_reads_the_configured_user_data_root(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Worker fallback must not accidentally read the bundled app's data."""
-    import core_runtime.resolved_profile_scope as scope
-
-    observed: dict[str, str] = {}
-
-    class FakeActiveEcosystemManager:
-        def __init__(self, *, config_path: str) -> None:
-            observed["config_path"] = config_path
-
-        def get_metadata(self, key: str, default: object) -> list[str]:
-            assert key == "startup_packs"
-            assert default == []
-            return ["defaultspack", "rumi_browser_automation_pack"]
-
-    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
-    monkeypatch.setattr(scope, "ActiveEcosystemManager", FakeActiveEcosystemManager)
-
-    assert _persisted_startup_pack_ids() == [
-        "defaultspack",
-        "rumi_browser_automation_pack",
-    ]
-    assert observed["config_path"] == str(tmp_path / "active_ecosystem.json")
 
 
 def test_pack_content_hash_does_not_follow_projection_symlinks(tmp_path: Path) -> None:
@@ -288,12 +259,32 @@ def test_startup_profile_input_accepts_only_host_supplied_verified_trust() -> No
     )
 
 
-def test_persisted_profile_restores_verified_system_trust(
+def _fake_v4_activation(activation_id: str = "activation:defaults-test") -> object:
+    artifact = "sha256:" + "1" * 64
+    return SimpleNamespace(
+        activation={"activation_id": activation_id},
+        resolved=SimpleNamespace(
+            profile={"profile_id": "defaults"},
+            lock={
+                "effective_set": [
+                    {"identity": "defaultspack", "artifact_digest": artifact}
+                ]
+            },
+            plan={
+                "profile_revision": "sha256:" + "2" * 64,
+                "plan_digest": "sha256:" + "3" * 64,
+                "bindings": [],
+            },
+        ),
+    )
+
+
+def test_persisted_profile_uses_only_committed_v4_activation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import core_runtime.approval_manager as approval_module
     import core_runtime.resolved_profile_scope as scope
+    import core_runtime.bootstrap.profile_capture as capture_module
 
     settings_dir = tmp_path / "settings"
     settings_dir.mkdir()
@@ -313,36 +304,23 @@ def test_persisted_profile_restores_verified_system_trust(
         encoding="utf-8",
     )
 
-    class FakeApprovalManager:
-        def get_verified_pack_trust(
-            self, pack_ids: tuple[str, ...]
-        ) -> dict[str, str]:
-            return {pack_id: "system" for pack_id in pack_ids}
-
-    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
     monkeypatch.setattr(scope, "_PERSISTED_PROFILE_CACHE", None)
-    monkeypatch.setattr(
-        approval_module,
-        "get_approval_manager",
-        lambda: FakeApprovalManager(),
-    )
+    monkeypatch.setattr(capture_module, "capture_default_profile", _fake_v4_activation)
 
     plan = persisted_resolved_profile()
 
     assert plan is not None
-    defaultspack = next(
-        pack for pack in plan.packs if pack.pack_id == "defaultspack"
-    )
-    assert defaultspack.authorized is True
-    assert defaultspack.trust_class == "system"
+    assert plan.profile_id == "defaults"
+    assert plan.effective_pack_set == ("defaultspack",)
+    assert plan.plan_hash == "sha256:" + "3" * 64
 
 
-def test_persisted_profile_cache_tracks_host_authority_and_invalidation(
+def test_persisted_profile_cache_tracks_activation_and_invalidation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import core_runtime.approval_manager as approval_module
     import core_runtime.resolved_profile_scope as scope
+    import core_runtime.bootstrap.profile_capture as capture_module
 
     settings_dir = tmp_path / "settings"
     settings_dir.mkdir()
@@ -361,38 +339,26 @@ def test_persisted_profile_cache_tracks_host_authority_and_invalidation(
         ),
         encoding="utf-8",
     )
-    trust = {"enabled": True}
-
-    class FakeApprovalManager:
-        def get_verified_pack_trust(
-            self, pack_ids: tuple[str, ...]
-        ) -> dict[str, str]:
-            if not trust["enabled"]:
-                return {}
-            return {pack_id: "system" for pack_id in pack_ids}
-
-    monkeypatch.setattr(scope, "USER_DATA_DIR", tmp_path)
     monkeypatch.setattr(scope, "_PERSISTED_PROFILE_CACHE", None)
     monkeypatch.setattr(
         scope,
         "_PERSISTED_PROFILE_INVALIDATION_REVISION",
         0,
     )
+    activation = {"value": _fake_v4_activation()}
     monkeypatch.setattr(
-        approval_module,
-        "get_approval_manager",
-        lambda: FakeApprovalManager(),
+        capture_module,
+        "capture_default_profile",
+        lambda: activation["value"],
     )
 
     first = persisted_resolved_profile()
     cached = persisted_resolved_profile()
     assert first is cached
 
-    trust["enabled"] = False
+    activation["value"] = _fake_v4_activation("activation:defaults-next")
     authority_changed = persisted_resolved_profile()
-    assert authority_changed is not None
-    assert authority_changed is not first
-    assert not authority_changed.authorized_pack_ids
+    assert authority_changed is not None and authority_changed is not first
 
     invalidate_persisted_resolved_profile()
     invalidated = persisted_resolved_profile()
@@ -458,7 +424,7 @@ def test_runtime_scope_is_bound_to_one_plan_revision(captured_v4_profile) -> Non
     snapshot = captured_v4_profile
     assert active_resolved_profile() is snapshot
     require_effective_pack(snapshot.effective_pack_set[0])
-    with pytest.raises(PermissionError, match="outside resolved profile"):
+    with pytest.raises(PermissionError, match="outside resolved Profile"):
         require_effective_pack("unbound-test-pack")
 
 
