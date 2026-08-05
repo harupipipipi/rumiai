@@ -261,6 +261,7 @@ class PathValidator:
         """
         try:
             path = Path(file_path)
+            resolved: Path | None
 
             # owner_pack 未指定の場合は原則拒否（sandbox のみ許可）
             if not owner_pack:
@@ -477,7 +478,7 @@ class PythonFileExecutor:
 
         # 3. パス検証
         path_valid, path_error, resolved_path = self._path_validator.validate(file_path, resolved_pack)
-        if not path_valid:
+        if not path_valid or resolved_path is None:
             result.error = path_error
             result.error_type = "path_rejected"
             result.execution_mode = "rejected"
@@ -893,12 +894,17 @@ request = http_request
                     stderr=subprocess.PIPE,
                 )
 
+                stdout_pipe = proc.stdout
+                stderr_pipe = proc.stderr
+                if stdout_pipe is None or stderr_pipe is None:
+                    raise RuntimeError("executor output pipes were not created")
+
                 # タイムアウト付きで stdout を制限読み取り
                 deadline = _t14.monotonic() + timeout_seconds
 
                 # communicate に頼らず、stdout を制限付きで読む
                 # ただし stderr も回収する必要があるため Popen.communicate 的に処理
-                raw_stdout = proc.stdout.read(MAX_STDOUT_SIZE + 1)
+                raw_stdout = stdout_pipe.read(MAX_STDOUT_SIZE + 1)
                 if len(raw_stdout) > MAX_STDOUT_SIZE:
                     proc.kill()
                     proc.wait(timeout=5)
@@ -907,7 +913,7 @@ request = http_request
                 else:
                     remaining_timeout = max(0.1, deadline - _t14.monotonic())
                     try:
-                        raw_stderr = proc.stderr.read()
+                        raw_stderr = stderr_pipe.read()
                         proc.wait(timeout=remaining_timeout)
                     except subprocess.TimeoutExpired:
                         proc.kill()
@@ -1271,8 +1277,8 @@ else:
         def proxy_request(
             method: str,
             url: str,
-            headers: Dict[str, str] = None,
-            body: str = None,
+            headers: Dict[str, str] | None = None,
+            body: str | None = None,
             timeout_seconds: float = 30.0
         ) -> Dict[str, Any]:
             """

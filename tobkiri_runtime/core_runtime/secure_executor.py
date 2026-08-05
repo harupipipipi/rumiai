@@ -165,7 +165,7 @@ class SecureExecutor:
         phase: str,
         file_path: Path,
         context: Dict[str, Any],
-        component_dir: Path = None,
+        component_dir: Path | None = None,
         timeout: int = 60
     ) -> ExecutionResult:
         if not file_path.exists():
@@ -455,7 +455,7 @@ else:
         pack_id: str,
         lib_type: str,
         lib_file: Path,
-        context: Dict[str, Any] = None,
+        context: Dict[str, Any] | None = None,
         timeout: int = 120
     ) -> ExecutionResult:
         import time
@@ -509,6 +509,7 @@ else:
                 lib_type=lib_type
             )
         pack_data_dir = dir_result
+        execution_context = dict(context or {})
         
         if self.is_docker_available():
             return self._execute_lib_in_container(
@@ -516,7 +517,7 @@ else:
                 lib_type=lib_type,
                 lib_file=lib_file,
                 pack_data_dir=pack_data_dir,
-                context=context,
+                context=execution_context,
                 timeout=timeout,
                 start_time=start_time
             )
@@ -535,7 +536,7 @@ else:
             lib_type=lib_type,
             lib_file=lib_file,
             pack_data_dir=pack_data_dir,
-            context=context,
+            context=execution_context,
             start_time=start_time,
             timeout=timeout
         )

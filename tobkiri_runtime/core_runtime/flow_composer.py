@@ -82,7 +82,7 @@ class FlowComposer:
         """
         raw_modifiers = interface_registry.get("flow.modifier", strategy="all") or []
         
-        modifiers = []
+        modifiers: List[FlowModifier] = []
         for raw in raw_modifiers:
             if not isinstance(raw, dict):
                 continue
@@ -108,7 +108,7 @@ class FlowComposer:
         self,
         modifier: FlowModifier,
         interface_registry,
-        available_capabilities: Dict[str, Any] = None
+        available_capabilities: Dict[str, Any] | None = None
     ) -> bool:
         """
         修正の適用条件をチェック
@@ -157,7 +157,7 @@ class FlowComposer:
         flow_def: Dict[str, Any],
         modifiers: List[FlowModifier],
         interface_registry = None,
-        available_capabilities: Dict[str, Any] = None
+        available_capabilities: Dict[str, Any] | None = None
     ) -> Dict[str, Any]:
         """
         Flow定義に修正を適用

@@ -724,7 +724,8 @@ class HostBoundedProcessRunner:
             import ctypes
 
             buffer = ctypes.create_unicode_buffer(32768)
-            length = int(ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer)))
+            kernel32 = ctypes.CDLL("kernel32", use_last_error=True)
+            length = int(kernel32.GetSystemDirectoryW(buffer, len(buffer)))
             if length <= 0 or length >= len(buffer):
                 return None
             candidate = Path(buffer.value) / "taskkill.exe"
