@@ -262,6 +262,29 @@ class PackAPIHandler(
     _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
     _api_route_patterns: list[tuple[Any, Any, Any, dict[str, Any]]] = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
+
+    @classmethod
+    def canonical_v4_server_handler(cls, **bindings: Any) -> type["PackAPIHandler"]:
+        """Create an instance-local handler class with empty legacy route state.
+
+        ``BaseHTTPRequestHandler`` receives configuration through its class, so
+        reusing ``PackAPIHandler`` directly makes mutable route tables leak
+        between server lifecycles.  A fresh subclass keeps concurrent servers
+        isolated and makes every start/restart begin from the closed Pack v4
+        HTTP surface.
+        """
+        route_state = {
+            "_web_mounts": [],
+            "_pre_auth_table": [],
+            "_api_route_exact": {},
+            "_api_route_patterns": [],
+            "_pack_routes": {},
+            "_exact_routes": {},
+            "_template_routes": [],
+        }
+        namespace = {name: value.copy() for name, value in route_state.items()}
+        namespace.update(bindings)
+        return type(f"{cls.__name__}V4Instance", (cls,), namespace)
     
     def log_message(self, format: str, *args) -> None:
         sanitized_args = tuple(self._redact_log_value(arg) for arg in args)
@@ -2636,37 +2659,49 @@ class PackAPIServer:
         self.internal_token = internal_token
         self.server: Optional[_PackThreadingHTTPServer] = None
         self.thread: Optional[threading.Thread] = None
-        self._routes_load_lock = threading.Lock()
+        self.handler_class: type[PackAPIHandler] | None = None
+        self._lifecycle_lock = threading.RLock()
     
     def start(self) -> None:
-        PackAPIHandler.approval_manager = self.approval_manager
-        PackAPIHandler.container_orchestrator = self.container_orchestrator
-        PackAPIHandler.host_privilege_manager = self.host_privilege_manager
-        PackAPIHandler.internal_token = self.internal_token
-        PackAPIHandler._hmac_key_manager = self._hmac_key_manager
-        PackAPIHandler._panel_auth_manager = self._panel_auth_manager
-        PackAPIHandler.kernel = self.kernel
-        PackAPIHandler.app_lifecycle_manager = self.app_lifecycle_manager
-
-        # Pack v4 routes are captured by OperationCatalog before this server
-        # starts.  Never reconstruct executable routes from installed Packs.
-        self._routes_loaded = False
-        PackAPIHandler.load_pack_routes(None)
-        
-        self.server = _PackThreadingHTTPServer((self.host, self.port), PackAPIHandler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+        with self._lifecycle_lock:
+            if self.is_running():
+                return
+            handler_class = PackAPIHandler.canonical_v4_server_handler(
+                approval_manager=self.approval_manager,
+                container_orchestrator=self.container_orchestrator,
+                host_privilege_manager=self.host_privilege_manager,
+                internal_token=self.internal_token,
+                _hmac_key_manager=self._hmac_key_manager,
+                _panel_auth_manager=self._panel_auth_manager,
+                kernel=self.kernel,
+                app_lifecycle_manager=self.app_lifecycle_manager,
+            )
+            # Pack v4 routes are captured by OperationCatalog before this
+            # server starts. Never reconstruct routes from installed Packs.
+            handler_class.load_pack_routes(None)
+            server = _PackThreadingHTTPServer(
+                (self.host, self.port),
+                handler_class,
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            self.handler_class = handler_class
+            self.server = server
+            self.thread = thread
+            thread.start()
         logger.info("Pack API server started on http://%s:%s", self.host, self.port)
     
     def stop(self) -> None:
-        if self.server:
+        with self._lifecycle_lock:
             server = self.server
-            server.shutdown()
-            server.server_close()
-            self.server = None
-        if self.thread:
-            self.thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
-            self.thread = None
+            thread = self.thread
+            if server:
+                server.shutdown()
+                server.server_close()
+                self.server = None
+            if thread:
+                thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
+                self.thread = None
+            self.handler_class = None
         logger.info("Pack API server stopped")
     
     def is_running(self) -> bool:

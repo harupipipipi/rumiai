@@ -12,6 +12,7 @@ import io
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
@@ -1640,6 +1641,8 @@ class TestPackAPIServer:
         monkeypatch.setattr(PackAPIHandler, "load_web_mounts", load_web_mounts)
         monkeypatch.setattr(PackAPIHandler, "load_pre_auth_routes", load_pre_auth_routes)
         monkeypatch.setattr(PackAPIHandler, "load_api_routes", load_api_routes)
+        stale_routes = {("GET", "/api/stale"): {"handler": "_stale"}}
+        monkeypatch.setattr(PackAPIHandler, "_api_route_exact", stale_routes)
 
         try:
             server.start()
@@ -1647,10 +1650,61 @@ class TestPackAPIServer:
             load_web_mounts.assert_not_called()
             load_pre_auth_routes.assert_not_called()
             load_api_routes.assert_not_called()
-            assert PackAPIHandler._api_route_exact == {}
-            assert PackAPIHandler._api_route_patterns == []
+            assert server.handler_class is not None
+            assert server.handler_class._api_route_exact == {}
+            assert server.handler_class._api_route_patterns == []
+            assert PackAPIHandler._api_route_exact is stale_routes
         finally:
             server.stop()
+
+    @patch("core_runtime.pack_api_server.get_hmac_key_manager")
+    def test_start_restart_rebuilds_closed_v4_route_state(self, mock_get_hmac) -> None:
+        """A restart cannot replay routes injected into the prior handler."""
+        mock_get_hmac.return_value = MagicMock()
+        server = PackAPIServer(host="127.0.0.1", port=0, internal_token="token")
+
+        try:
+            PackAPIHandler._api_route_exact = {
+                ("GET", "/api/stale"): {"handler": "_stale"}
+            }
+            server.start()
+            first_handler = server.handler_class
+            assert first_handler is not None
+            assert first_handler._api_route_exact == {}
+            first_handler._api_route_exact[("GET", "/api/replay")] = {
+                "handler": "_replay"
+            }
+
+            server.stop()
+            server.start()
+            assert server.handler_class is not None
+            assert server.handler_class is not first_handler
+            assert server.handler_class._api_route_exact == {}
+            assert ("GET", "/api/stale") in PackAPIHandler._api_route_exact
+        finally:
+            server.stop()
+
+    @patch("core_runtime.pack_api_server.get_hmac_key_manager")
+    def test_two_servers_have_isolated_route_state(self, mock_get_hmac) -> None:
+        """Concurrent instances never share mutable route authority."""
+        mock_get_hmac.return_value = MagicMock()
+        first = PackAPIServer(host="127.0.0.1", port=0, internal_token="first")
+        second = PackAPIServer(host="127.0.0.1", port=0, internal_token="second")
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                list(executor.map(lambda item: item.start(), (first, second)))
+
+            assert first.handler_class is not None
+            assert second.handler_class is not None
+            assert first.handler_class is not second.handler_class
+            first.handler_class._api_route_exact[("GET", "/api/first-only")] = {}
+            assert second.handler_class._api_route_exact == {}
+            assert first.handler_class.internal_token == "first"
+            assert second.handler_class.internal_token == "second"
+        finally:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                list(executor.map(lambda item: item.stop(), (first, second)))
 
     def test_load_api_routes_falls_back_to_builtin_core_control_panel(self) -> None:
         """backend registry に core_control_panel がいない場合でも panel API を維持する。"""
