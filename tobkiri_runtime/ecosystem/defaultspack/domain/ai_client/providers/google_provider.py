@@ -441,13 +441,23 @@ class GoogleProvider(OpenAICompatibleProvider):
                 mime_type = header.replace("data:", "", 1) or "image/png"
                 return {"inlineData": {"mimeType": mime_type, "data": data}}
         if block_type in {"audio", "input_audio"}:
-            audio = (
-                value.get("input_audio") if isinstance(value.get("input_audio"), dict) else value
+            audio_value = value.get("input_audio")
+            audio: dict[str, object] = (
+                {str(key): item for key, item in audio_value.items()}
+                if isinstance(audio_value, dict)
+                else {
+                    str(key): item for key, item in value.items()
+                }
             )
-            data = audio.get("data") if isinstance(audio, dict) else None
-            audio_format = str(audio.get("format") or "webm") if isinstance(audio, dict) else "webm"
-            if isinstance(data, str) and data:
-                return {"inlineData": {"mimeType": f"audio/{audio_format}", "data": data}}
+            data_value = audio.get("data")
+            audio_format = str(audio.get("format") or "webm")
+            if isinstance(data_value, str) and data_value:
+                return {
+                    "inlineData": {
+                        "mimeType": f"audio/{audio_format}",
+                        "data": data_value,
+                    }
+                }
         return None
 
     @staticmethod
@@ -522,8 +532,11 @@ class GoogleProvider(OpenAICompatibleProvider):
     ) -> Dict[str, Any] | None:
         if not isinstance(tool_call, dict):
             return None
-        function_def = (
-            tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+        function_value = tool_call.get("function")
+        function_def: dict[str, object] = (
+            {str(key): value for key, value in function_value.items()}
+            if isinstance(function_value, dict)
+            else {}
         )
         name = str(function_def.get("name") or tool_call.get("name") or "").strip()
         if not name:
@@ -739,9 +752,14 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _request_timeout(params: Dict[str, Any] | None = None) -> float:
         params = params if isinstance(params, dict) else {}
         raw = params.get("request_timeout") or params.get("timeout")
-        try:
+        if isinstance(raw, bool):
             value = float(raw)
-        except (TypeError, ValueError):
+        elif isinstance(raw, (int, float, str)):
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                value = 120.0
+        else:
             value = 120.0
         return max(5.0, min(value, 120.0))
 
@@ -1028,8 +1046,11 @@ class GoogleProvider(OpenAICompatibleProvider):
                 block["text"] = visible
         if thinking_parts:
             metadata = dict(parsed.get("metadata") or {})
-            existing = (
-                metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+            existing_value = metadata.get("thinking")
+            existing: dict[str, object] = (
+                {str(key): value for key, value in existing_value.items()}
+                if isinstance(existing_value, dict)
+                else {}
             )
             metadata["thinking"] = {
                 **existing,
@@ -1173,7 +1194,7 @@ class GoogleProvider(OpenAICompatibleProvider):
         resp = self._request_stream(
             "/chat/completions", body, **self._request_timeout_kwargs(translated)
         )
-        tool_call_state = {}
+        tool_call_state: dict[str, dict[str, object]] = {}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:

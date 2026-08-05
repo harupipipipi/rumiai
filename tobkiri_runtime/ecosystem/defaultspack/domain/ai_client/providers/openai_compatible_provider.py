@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..model_metadata_schema import (
     context_window_value,
@@ -52,7 +52,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         *,
         provider_id: str = "",
         display_name: str = "",
-        api_key_env: str = "",
+        api_key_env: str | Sequence[str] | set[str] = "",
         base_url_env: str = "",
         default_base_url: str = "",
         credential_required: bool = True,
@@ -138,33 +138,35 @@ class OpenAICompatibleProvider(OpenAIProvider):
             pending_end.get("finish_reason") == "tool_calls"
             and not saw_tool_call
         ):
-            recovered = self.complete(model, messages, tools, params)
-            recovered_usage = (
-                recovered.get("usage")
-                if isinstance(recovered, dict)
-                and isinstance(recovered.get("usage"), dict)
+            recovered_raw = self.complete(model, messages, tools, params)
+            recovered: dict[str, object] = (
+                {str(key): value for key, value in recovered_raw.items()}
+                if isinstance(recovered_raw, dict)
                 else {}
             )
-            stream_usage = (
-                pending_end.get("usage")
-                if isinstance(pending_end.get("usage"), dict)
+            recovered_usage_value = recovered.get("usage")
+            recovered_usage: dict[str, object] = (
+                {str(key): value for key, value in recovered_usage_value.items()}
+                if isinstance(recovered_usage_value, dict)
+                else {}
+            )
+            stream_usage_value = pending_end.get("usage")
+            stream_usage: dict[str, object] = (
+                {str(key): value for key, value in stream_usage_value.items()}
+                if isinstance(stream_usage_value, dict)
                 else {}
             )
             pending_end["usage"] = {
-                key: int(stream_usage.get(key) or 0)
-                + int(recovered_usage.get(key) or 0)
+                key: self._usage_int(stream_usage.get(key))
+                + self._usage_int(recovered_usage.get(key))
                 for key in (
                     "input_tokens",
                     "output_tokens",
                     "total_tokens",
                 )
             }
-            content = (
-                recovered.get("content")
-                if isinstance(recovered, dict)
-                and isinstance(recovered.get("content"), list)
-                else []
-            )
+            content_value = recovered.get("content")
+            content = content_value if isinstance(content_value, list) else []
             for item in content:
                 if (
                     not isinstance(item, dict)
@@ -194,12 +196,23 @@ class OpenAICompatibleProvider(OpenAIProvider):
                             )
                         ),
                     }
+
                 yield {
                     "type": "tool_call_end",
                     "id": call_id,
                     "name": name,
                 }
         yield pending_end
+
+    @staticmethod
+    def _usage_int(value: object) -> int:
+        """Normalize a provider usage counter without trusting its payload type."""
+        if isinstance(value, (bool, int, float, str)):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+        return 0
 
     @classmethod
     def profile_dir(cls):
@@ -388,7 +401,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         if not qualified_model_id:
             qualified_model_id = f"{self.provider_id}/{model_id}"
         display_name = str(raw.get("display_name") or raw.get("name") or model_id)
-        normalized = {
+        normalized: Dict[str, object] = {
             "id": qualified_model_id,
             "model_id": model_id,
             "provider_id": self.provider_id,
@@ -505,9 +518,10 @@ class OpenAICompatibleProvider(OpenAIProvider):
         capability_map = self._capability_map(model_entry)
         if "thinking" in capability_map:
             return bool(capability_map.get("thinking"))
-        thinking = (
-            model_entry.get("thinking")
-            if isinstance(model_entry, dict) and isinstance(model_entry.get("thinking"), dict)
+        thinking_value = model_entry.get("thinking")
+        thinking: Dict[str, object] = (
+            {str(key): value for key, value in thinking_value.items()}
+            if isinstance(thinking_value, dict)
             else {}
         )
         if "supported" in thinking:
@@ -795,11 +809,24 @@ class OpenAICompatibleProvider(OpenAIProvider):
         if not isinstance(payload, dict):
             return raw_models, ""
         models = raw_models
-        pagination = (
-            payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        pagination_value = payload.get("pagination")
+        pagination: Dict[str, object] = (
+            {str(key): value for key, value in pagination_value.items()}
+            if isinstance(pagination_value, dict)
+            else {}
         )
-        links = payload.get("links") if isinstance(payload.get("links"), dict) else {}
-        page = payload.get("page") if isinstance(payload.get("page"), dict) else {}
+        links_value = payload.get("links")
+        links: Dict[str, object] = (
+            {str(key): value for key, value in links_value.items()}
+            if isinstance(links_value, dict)
+            else {}
+        )
+        page_value = payload.get("page")
+        page: Dict[str, object] = (
+            {str(key): value for key, value in page_value.items()}
+            if isinstance(page_value, dict)
+            else {}
+        )
         configured_field = str(self._remote_model_pagination.get("next_cursor_field") or "").strip()
         candidates = [
             payload.get(configured_field) if configured_field else None,
@@ -914,7 +941,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             value = raw.get(key)
             if value not in (None, ""):
                 metadata[f"remote_{key}"] = value
-        model = {
+        model: Dict[str, object] = {
             "id": qualified_model_id,
             "model_id": model_id,
             "provider_id": self.provider_id,

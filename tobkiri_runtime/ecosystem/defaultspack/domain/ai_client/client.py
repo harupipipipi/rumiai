@@ -1,8 +1,11 @@
-import os
-import sys
+from __future__ import annotations
+
 import json
+import os
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Protocol
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -34,6 +37,29 @@ from domain.ai_client.providers import (
 _HIDDEN_RUNTIME_LIST_PROVIDER_IDS = {"human-operator", "rumi"}
 
 
+class _RemovedAuthorityService(Protocol):
+    """Type-only shape for the deleted, fail-closed compatibility boundary."""
+
+    def one_shot_approval_issued(self, **kwargs: object) -> bool:
+        ...
+
+    def check(self, **kwargs: object) -> object:
+        ...
+
+    def consume_one_shot_approvals_atomically(
+        self, items: list[dict[str, object]]
+    ) -> object:
+        ...
+
+
+def _removed_authority_boundary() -> _RemovedAuthorityService:
+    """Preserve the deleted authority service's fail-closed runtime boundary."""
+    from core_runtime.legacy_runtime_removed import removed_authority_service
+
+    removed_authority_service()
+    raise RuntimeError("legacy authority workflow is unavailable")
+
+
 class AuthorityApprovalRequired(RuntimeError):
     def __init__(self, decision):
         self.decision = decision
@@ -43,7 +69,8 @@ class AuthorityApprovalRequired(RuntimeError):
 class AIClient:
     """AI Client - provider routing with profile and catalog compatibility."""
 
-    _instance = None
+    _instance: AIClient | None = None
+    _initialized: bool
 
     def __new__(cls):
         if cls._instance is None:
@@ -132,7 +159,7 @@ class AIClient:
         provider = self._providers.get(provider_name)
         if provider is None:
             return []
-        listed = []
+        listed: list[object] = []
         if callable(getattr(provider, "list_models", None)):
             try:
                 listed = provider.list_models() or []
@@ -150,7 +177,7 @@ class AIClient:
             display_name = model_id
             model_type = "chat"
             defaults = {}
-            metadata = {}
+            metadata: dict[str, object] = {}
             capabilities = []
             context_window = 0
             max_context = 0
@@ -183,19 +210,24 @@ class AIClient:
                 metadata["capabilities"] = capability_map
             context_window = context_window_value(raw, default=0)
             max_context = context_window
-            thinking = raw.get("thinking") if isinstance(raw.get("thinking"), dict) else {}
+            thinking_value = raw.get("thinking")
+            thinking: dict[str, object] = (
+                {str(key): value for key, value in thinking_value.items()}
+                if isinstance(thinking_value, dict)
+                else {}
+            )
             supports_thinking = bool(
                 raw.get("supports_thinking")
                 or capability_map.get("thinking")
                 or thinking.get("supported")
                 or metadata.get("supports_thinking")
             )
-            thinking_levels = list(
-                thinking.get("levels")
-                or raw.get("thinking_levels")
-                or metadata.get("thinking_levels")
-                or []
-            )
+            levels_value = thinking.get("levels")
+            if not isinstance(levels_value, list):
+                levels_value = raw.get("thinking_levels")
+            if not isinstance(levels_value, list):
+                levels_value = metadata.get("thinking_levels")
+            thinking_levels = list(levels_value) if isinstance(levels_value, list) else []
             if supports_thinking and not thinking_levels:
                 thinking_levels = ["low", "medium", "high", "xhigh"]
         else:
@@ -587,9 +619,7 @@ class AIClient:
             stream=stream,
         )
 
-        from core_runtime.legacy_runtime_removed import removed_authority_service
-
-        service = removed_authority_service()
+        service = _removed_authority_boundary()
         request_id, approval_token = self._authority_token_for_permission(context, permission_id)
         effective_request_id = request_id or str(context.get("request_id") or "").strip()
         if (
@@ -651,7 +681,7 @@ class AIClient:
             approval_token=approval_token,
             consume_approval_token=consume_approval_token,
         )
-        if not decision.allowed:
+        if not getattr(decision, "allowed", False):
             raise AuthorityApprovalRequired(decision)
         return decision
 
@@ -795,8 +825,8 @@ class AIClient:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
-        token_consumes = []
-        rechecks = []
+        token_consumes: list[dict[str, object]] = []
+        rechecks: list[Callable[..., object]] = []
         for permission_id, check_fn in checks:
             decision = check_fn(consume_approval_token=False)
             consume_item = self._authority_batch_consume_item(params, permission_id, decision)
@@ -807,10 +837,10 @@ class AIClient:
         for check in rechecks:
             check(consume_approval_token=True)
         if token_consumes:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            decision = removed_authority_service().consume_one_shot_approvals_atomically(token_consumes)
-            if not decision.allowed:
+            decision = _removed_authority_boundary().consume_one_shot_approvals_atomically(
+                token_consumes
+            )
+            if not getattr(decision, "allowed", False):
                 raise AuthorityApprovalRequired(decision)
             if isinstance(authority_context, dict):
                 current = authority_context.get("_provider_one_shot_verified_for_run")
@@ -1397,10 +1427,15 @@ class AIClient:
     @staticmethod
     def _review_chain_member(members, roles, default_index=0):
         for member in members:
-            metadata = member.get("metadata") if isinstance(member, dict) and isinstance(member.get("metadata"), dict) else {}
+            metadata_value = member.get("metadata") if isinstance(member, dict) else None
+            metadata: dict[str, object] = (
+                {str(key): value for key, value in metadata_value.items()}
+                if isinstance(metadata_value, dict)
+                else {}
+            )
             role_value = ""
             if isinstance(member, dict):
-                role_value = metadata.get("role") or member.get("role") or ""
+                role_value = str(metadata.get("role") or member.get("role") or "")
             role = str(role_value).strip().casefold()
             if role in roles:
                 return member

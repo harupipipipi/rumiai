@@ -814,8 +814,11 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     # a documentation table.  It supersedes legacy extension manifests that
     # still carry default-model or fixed-allowlist snapshots, so an API key
     # always enables the connected endpoint's complete /models inventory.
-    for provider_id, spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
-        manifests[provider_id] = _openai_compatible_spec_manifest(spec)
+    for raw_provider_id, raw_spec in OPENAI_COMPATIBLE_PROVIDER_SPECS.items():
+        provider_id = str(raw_provider_id).strip()
+        if not provider_id or not isinstance(raw_spec, dict):
+            continue
+        manifests[provider_id] = _openai_compatible_spec_manifest(dict(raw_spec))
     for provider_id, manifest in local_openai_runtime_manifests().items():
         # Local runtime endpoints report the exact models currently loaded by
         # that server.  Do not let an older extension manifest replace this
@@ -1714,7 +1717,7 @@ def _normalize_model_token(value: Any) -> str:
 
 
 def _annotate_model_collisions(models):
-    counts = {}
+    counts: Dict[str, int] = {}
     for item in models:
         key = _normalize_model_token(item.get("model_id"))
         counts[key] = counts.get(key, 0) + 1
@@ -2047,7 +2050,8 @@ def _instantiate_manifest_provider(
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     if adapter == "openai_compatible":
-        config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+        config_value = manifest.get("config")
+        config = dict(config_value) if isinstance(config_value, dict) else {}
         if config.get("custom_openai_compatible"):
             api_id = str(config.get("api_id") or "").strip()
             if not api_id:

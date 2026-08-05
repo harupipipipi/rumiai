@@ -564,7 +564,12 @@ def _provider_granted_capabilities(provider_id: str, token_metadata: dict[str, A
 
 def _read_provider_oauth_bundle_value(provider_id: str, suffix: str, *, pack_root: Path | None = None) -> str:
     payload = _read_connection_credential(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root)
-    credentials = payload.get("credentials") if isinstance(payload.get("credentials"), dict) else {}
+    credentials_value = payload.get("credentials")
+    credentials: dict[str, object] = (
+        {str(key): value for key, value in credentials_value.items()}
+        if isinstance(credentials_value, dict)
+        else {}
+    )
     lookup = {
         "ACCESS_TOKEN": "access_token",
         "REFRESH_TOKEN": "refresh_token",
@@ -650,14 +655,25 @@ def _google_scope_mode_rows(*, pack_root: Path | None = None) -> list[dict[str, 
         "google_gmail_readonly",
         "google_ai",
     ):
-        details = dict(_GOOGLE_SCOPE_MODE_DETAILS[mode])
+        details_value = _GOOGLE_SCOPE_MODE_DETAILS[mode]
+        details: dict[str, object] = (
+            {str(key): item for key, item in details_value.items()}
+            if isinstance(details_value, dict)
+            else {}
+        )
         rows.append(
             {
                 "id": mode,
                 "label": str(details.get("label") or mode),
                 "description": str(details.get("description") or ""),
                 "scopes": _default_scopes("google", mode, pack_root=pack_root),
-                "services": list(details.get("services") or []),
+                "services": (
+                    list(services_value)
+                    if isinstance(
+                        services_value := details.get("services"), list
+                    )
+                    else []
+                ),
                 "restricted": bool(details.get("restricted")),
                 "warning": str(details.get("warning") or ""),
                 "surface": str(details.get("surface") or ""),
@@ -892,8 +908,10 @@ def clear_provider_oauth_client_config(provider_id: str, *, pack_root: Path | No
 
 def _provider_bundle_metadata(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
     payload = _read_connection_credential(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root)
-    token_metadata = payload.get("token_metadata") if isinstance(payload.get("token_metadata"), dict) else {}
-    return dict(token_metadata)
+    token_metadata_value = payload.get("token_metadata")
+    if not isinstance(token_metadata_value, dict):
+        return {}
+    return {str(key): item for key, item in token_metadata_value.items()}
 
 
 def _provider_metadata(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
@@ -1111,7 +1129,13 @@ def start_provider_oauth(
         return {"success": False, "provider_id": provider_id, "error": "missing scope config", "status": "missing_scope_config"}
     requested_services = _normalize_requested_services(services)
     if provider_id == "google" and not requested_services:
-        requested_services = list(_GOOGLE_SCOPE_MODE_DETAILS.get(resolved_scope_mode, {}).get("services") or [])
+        scope_details = _GOOGLE_SCOPE_MODE_DETAILS.get(resolved_scope_mode)
+        if isinstance(scope_details, dict):
+            requested_services = [
+                str(item)
+                for item in scope_details.get("services", [])
+                if str(item or "").strip()
+            ]
     redirect_uri = _build_redirect_uri(provider_id, request_headers=request_headers, pack_root=pack_root)
     state = secrets.token_urlsafe(32)
     code_verifier = _generate_code_verifier() if provider.oauth.pkce_supported else ""
