@@ -66,13 +66,14 @@ def _run_bounded_process(
         raise ValueError("sandbox transport command is empty")
     executable = argv[0]
     if not Path(executable).is_absolute():
-        executable = (
+        resolved_executable = (
             shutil.which(executable, path=environment.get("PATH"))
             if environment is not None
             else shutil.which(executable)
         )
-        if executable is None:
+        if resolved_executable is None:
             raise FileNotFoundError(argv[0])
+        executable = resolved_executable
     executable = str(Path(executable).resolve())
     argv = (executable, *argv[1:])
     process_cwd = Path(cwd or Path.cwd()).resolve()
@@ -139,9 +140,10 @@ def _run_bounded_process_to_file(
         raise ValueError("sandbox transport command is empty")
     executable = argv[0]
     if not Path(executable).is_absolute():
-        executable = shutil.which(executable)
-        if executable is None:
+        resolved_executable = shutil.which(executable)
+        if resolved_executable is None:
             raise FileNotFoundError(argv[0])
+        executable = resolved_executable
     executable = str(Path(executable).resolve())
     argv = (executable, *argv[1:])
     cwd = Path.cwd().resolve()
@@ -1158,7 +1160,7 @@ def _lima_import_workspace(
     remote_root: str,
     archive: bytes,
     timeout: float,
-) -> subprocess.CompletedProcess[bytes]:
+) -> subprocess.CompletedProcess[str]:
     if not _is_lima_workspace_path(remote_root):
         raise ValueError("invalid Lima sandbox workspace path")
     import_script = (

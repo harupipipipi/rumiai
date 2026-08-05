@@ -54,6 +54,8 @@ def _source_path_within_pack(source_path: str | Path | None, pack_root: Path | N
         return False
     if source_path in (None, ""):
         return True
+    if not isinstance(source_path, (str, Path)):
+        return False
     try:
         Path(source_path).resolve().relative_to(pack_root.resolve())
         return True
@@ -116,4 +118,6 @@ def prompt_pack_source_is_trusted(
         return False
     if source_path in (None, ""):
         return True
+    if not isinstance(source_path, (str, Path)):
+        return False
     return _source_pack_root(source_path, normalized) is not None

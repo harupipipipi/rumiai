@@ -7,7 +7,12 @@ from .mcp_registry import McpRegistry
 from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .permission_resolver import ToolPermissionResolver
-from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from .schema_adapter import (
+    is_tool_rejected_by_policy,
+    list_or_empty,
+    mapping_or_empty,
+    policy_from_context,
+)
 from .service_catalog import infer_action_class
 from .security import (
     appears_write_or_execute_capable,
@@ -1823,8 +1828,8 @@ def _filtered_tool_rejection(tool_name, context):
                 continue
             if str(entry.get("status") or "") in {"blocked", "hidden"}:
                 return rejection_result(str(tool_name or ""), entry)
-    capability_graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
-    connected = capability_graph.get("connected_tools") if isinstance(capability_graph.get("connected_tools"), list) else []
+    capability_graph = mapping_or_empty(context.get("capability_graph"))
+    connected = list_or_empty(capability_graph.get("connected_tools"))
     if connected and str(tool_name or "") not in {str(item) for item in connected if str(item or "").strip()}:
         return rejection_result(
             str(tool_name or ""),
@@ -1843,7 +1848,7 @@ def _safe_calculate(expression):
     import ast
     import operator
 
-    operators = {
+    operators: dict[type[ast.AST], Callable[..., Any]] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
@@ -3080,7 +3085,7 @@ def _attach_tool_approval_token(context, tool_def, token_result):
         return context
     next_context = dict(context or {}) if isinstance(context, dict) else {}
     operation = str(token_result.get("operation") or _tool_approval_operation(tool_def))
-    tokens = dict(next_context.get("tool_approval_tokens") if isinstance(next_context.get("tool_approval_tokens"), dict) else {})
+    tokens = mapping_or_empty(next_context.get("tool_approval_tokens"))
     for key in _dedupe_approval_token_keys(tool_def, operation):
         tokens.setdefault(key, token)
     next_context["tool_approval_tokens"] = tokens
@@ -3236,7 +3241,7 @@ def _invalid_user_requested_computer_approval_response(tool_name, approval_argum
     if not isinstance(approval_arguments, dict):
         return None
     action = str(approval_arguments.get("action") or "").strip()
-    payload = approval_arguments.get("payload") if isinstance(approval_arguments.get("payload"), dict) else {}
+    payload = mapping_or_empty(approval_arguments.get("payload"))
     if action == "browser.open_url" and not str(payload.get("url") or "").strip():
         return _computer_use_invalid_arguments_result(
             tool_name,
@@ -3428,6 +3433,12 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
             break
         if verification is None:
             verification = candidate_verification
+    if verification is None:
+        return next_context, {
+            "result": "approval token could not be verified",
+            "is_error": True,
+            "widget": None,
+        }
     if verification.valid:
         mark_tool_server_approval_context(next_context)
         next_context["_tool_server_approval_token"] = token

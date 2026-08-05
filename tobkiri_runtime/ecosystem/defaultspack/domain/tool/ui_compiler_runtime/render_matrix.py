@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import struct
 import zlib
 from html import escape
@@ -11,6 +10,7 @@ from domain.ui_compiler import CandidateBundle, RenderMatrix, RenderSnapshot, UI
 
 from .candidate_generator import read_candidate_manifest
 from .project_writer import write_json, write_text
+from domain.tool.schema_adapter import list_or_empty, mapping_or_empty
 
 
 class RenderMatrixRunner:
@@ -223,7 +223,7 @@ def _metrics(
         "consoleErrors": 0,
         "primaryClipped": bool(manifest.get("forcePrimaryClipped")) or (scenario == "long" and bool(manifest.get("longTextClipped"))),
         "touchTargetMin": int(manifest.get("touchTargetMin") or 36),
-        "requiredStates": list(manifest.get("requiredStates") if isinstance(manifest.get("requiredStates"), list) else []),
+        "requiredStates": list_or_empty(manifest.get("requiredStates")),
         "visibleTextBlocks": visible_text_blocks,
         "visibleCharacters": visible_characters,
         "averageLineLength": int(manifest.get("averageLineLength") or min(84, max(28, visible_characters // max(visible_text_blocks, 1)))),
@@ -239,7 +239,6 @@ def _metrics(
         "cardCount": int(manifest.get("cardCount") or max(0, int(manifest.get("surfaceDepth") or 1) - 1)),
         "cardNestingDepth": int(manifest.get("cardNestingDepth") or int(manifest.get("surfaceDepth") or 1)),
         "radiusUniformity": float(manifest.get("radiusUniformity") or 0.45),
-        "shadowCount": int(manifest.get("shadowCount") or 0),
         "mobileBehavior": mobile_strategy,
         "desktopColumns": int(manifest.get("desktopColumns") or (2 if viewport >= 768 else 1)),
         "mobileDisclosureUsed": bool(manifest.get("mobileDisclosureUsed") or (viewport <= 390 and mobile_strategy in {"route", "sheet", "drawer", "stack"})),
@@ -354,7 +353,7 @@ def _capture_with_browser(
     browser_metrics["renderer"] = "playwright"
     browser_metrics["browserRenderRequested"] = True
     browser_metrics["browserRenderFallback"] = False
-    document = dom.get("document") if isinstance(dom, dict) and isinstance(dom.get("document"), dict) else {}
+    document = mapping_or_empty(dom.get("document") if isinstance(dom, dict) else None)
     browser_metrics["scrollWidth"] = int(document.get("scrollWidth") or browser_metrics.get("scrollWidth") or 0)
     browser_metrics["contentWidth"] = int(document.get("clientWidth") or browser_metrics.get("contentWidth") or 0)
     browser_metrics["horizontalOverflow"] = browser_metrics["scrollWidth"] > browser_metrics["contentWidth"]

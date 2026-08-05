@@ -164,7 +164,7 @@ def _run_tool_function(
     from domain.tool.executor import ToolExecutor, _filtered_tool_rejection
 
     tool_name, defaults = TOOL_FUNCTION_ACTIONS[function_id]
-    arguments = dict(defaults)
+    arguments: dict[str, Any] = dict(defaults)
     if tool_name == "browser_computer":
         payload = dict(args.get("payload") or {})
         for key, value in args.items():
@@ -307,11 +307,19 @@ def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dic
         return error("shared_secret is required", "INVALID_INPUT")
     ttl_seconds = args.get("ttl_seconds")
     try:
-        ttl_value = int(ttl_seconds) if ttl_seconds not in (None, "") else 3600
+        ttl_value = (
+            int(ttl_seconds)
+            if isinstance(ttl_seconds, (int, float, str)) and ttl_seconds not in (None, "")
+            else 3600
+        )
     except (TypeError, ValueError):
         ttl_value = 3600
     ttl_value = max(ttl_value, 1)
-    default_delivery = dict(args.get("default_delivery") if isinstance(args.get("default_delivery"), dict) else {})
+    default_delivery = (
+        dict(args["default_delivery"])
+        if isinstance(args.get("default_delivery"), dict)
+        else {}
+    )
     default_delivery.setdefault("action_id", str(args.get("action_id") or default_delivery.get("action_id") or "chat.message").strip() or "chat.message")
     allowed_delivery_actions = _normalize_delivery_actions(
         args.get("allowed_delivery_actions"),
@@ -322,7 +330,7 @@ def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dic
         "kind": str(args.get("kind") or "generic").strip() or "generic",
         "input_profile_id": str(args.get("input_profile_id") or "generic.webhook.default").strip() or "generic.webhook.default",
         "enabled": args.get("enabled", True) is not False,
-        "target": dict(args.get("target") if isinstance(args.get("target"), dict) else {}),
+        "target": dict(args["target"]) if isinstance(args.get("target"), dict) else {},
         "default_delivery": default_delivery,
         "allowed_delivery_actions": allowed_delivery_actions,
         "ttl_seconds": ttl_value,
@@ -331,7 +339,7 @@ def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dic
             "mode": "shared_secret",
             "header": str(args.get("header") or "x-rumi-webhook-token").strip() or "x-rumi-webhook-token",
         },
-        "metadata": dict(args.get("metadata") if isinstance(args.get("metadata"), dict) else {}),
+        "metadata": dict(args["metadata"]) if isinstance(args.get("metadata"), dict) else {},
     }
     created = WebhookEndpointStore().upsert(payload)
     endpoint = created.get("endpoint") if isinstance(created.get("endpoint"), dict) else {}

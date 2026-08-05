@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, List
 
 from .discovery import ComponentDiscoveryIssue, discover_components
 from .manifest import DomainComponent
@@ -166,7 +166,7 @@ class DomainComponentRegistry:
         items.sort(key=lambda item: (item.category, item.id))
         return items
 
-    def manifests(self, category: str | None = None) -> list[dict]:
+    def manifests(self, category: str | None = None) -> List[dict]:
         return [component.as_dict() for component in self.list(category)]
 
     def get(self, category: str, component_id: str) -> DomainComponent | None:

@@ -19,6 +19,7 @@ from domain.function_runtime.registry import function_id_for_block_module
 from domain.tool.catalog_contract_client import ContractToolCatalog as ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
 from transport.registry import canonical_http_route_specs
+from domain.tool.schema_adapter import list_or_empty, mapping_or_empty
 
 
 def build_api_map(*, profile_id: str | None = None, focus: str | None = None) -> Dict[str, Any]:
@@ -259,7 +260,7 @@ def _add_http_route(
             "defaults": dict(spec.defaults),
         },
     )
-    path = {
+    path: Dict[str, Any] = {
         "id": route_node_id,
         "label": route_id,
         "entrypoint": {
@@ -346,7 +347,7 @@ def _add_flow_steps(
     function_lookup: Dict[str, FunctionSpec],
 ) -> List[Dict[str, Any]]:
     flow_def = flow_defs.get(flow_id) if flow_id else None
-    steps = flow_def.get("steps") if isinstance(flow_def, dict) and isinstance(flow_def.get("steps"), list) else []
+    steps = list_or_empty(mapping_or_empty(flow_def).get("steps"))
     result: List[Dict[str, Any]] = []
     previous_step_node_id = ""
     for index, step in enumerate(steps):
@@ -431,7 +432,7 @@ def _add_tool_execution(
     tool: Dict[str, Any],
     function_lookup: Dict[str, FunctionSpec],
 ) -> None:
-    execution = tool.get("execution") if isinstance(tool.get("execution"), dict) else {}
+    execution = mapping_or_empty(tool.get("execution"))
     execution_type = str(execution.get("type") or "local").strip().lower()
     if execution_type == "rumi_function":
         qualified_name = str(execution.get("qualified_name") or "").strip()
@@ -546,10 +547,10 @@ def _profile_selection_edges(profile_id: str | None) -> Dict[str, Any]:
             "profile_runtime": {"profile_id": resolved_profile_id, "found": False},
         }
     profile = apply_profile_graph_selection(profile)
-    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
-    selected = metadata.get("selected") if isinstance(metadata.get("selected"), dict) else {}
-    policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
-    profile_node = {
+    metadata = mapping_or_empty(profile.get("metadata"))
+    selected = mapping_or_empty(metadata.get("selected"))
+    policy = mapping_or_empty(profile.get("policy"))
+    profile_node: Dict[str, Any] = {
         "id": f"profile:{resolved_profile_id}",
         "kind": "profile",
         "label": str(profile.get("name") or resolved_profile_id),
@@ -574,7 +575,7 @@ def _profile_selection_edges(profile_id: str | None) -> Dict[str, Any]:
         ("prompts", "prompt", "uses_prompt"),
         ("frontend", "frontend", "uses_frontend"),
     ):
-        for item in selected.get(category) if isinstance(selected.get(category), list) else []:
+        for item in list_or_empty(selected.get(category)):
             item_id = str(item or "").strip()
             if not item_id:
                 continue
@@ -641,7 +642,7 @@ def _add_node(
 ) -> None:
     if not node_id:
         return
-    next_node = {
+    next_node: Dict[str, Any] = {
         "id": node_id,
         "kind": kind,
         "label": str(label or ref or node_id),
@@ -652,7 +653,7 @@ def _add_node(
     if existing is None:
         nodes[node_id] = next_node
         return
-    existing_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+    existing_metadata = mapping_or_empty(existing.get("metadata"))
     nodes[node_id] = {
         **existing,
         "kind": existing.get("kind") or next_node["kind"],
@@ -738,8 +739,8 @@ def _function_metadata(spec: FunctionSpec) -> Dict[str, Any]:
 
 
 def _tool_metadata(tool: Dict[str, Any]) -> Dict[str, Any]:
-    execution = tool.get("execution") if isinstance(tool.get("execution"), dict) else {}
-    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    execution = mapping_or_empty(tool.get("execution"))
+    metadata = mapping_or_empty(tool.get("metadata"))
     return {
         **dict(tool),
         "runtime_role": "tool_facade",
@@ -775,9 +776,13 @@ def _load_flow_defs() -> Dict[str, Dict[str, Any]]:
 
 def _read_flow_yaml(path: Path) -> Dict[str, Any]:
     try:
-        import yaml
+        import importlib
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        yaml_module = importlib.import_module("yaml")
+        safe_load = getattr(yaml_module, "safe_load", None)
+        if not callable(safe_load):
+            return {}
+        data = safe_load(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -790,7 +795,7 @@ def _flow_metadata(flow_def: Dict[str, Any] | None) -> Dict[str, Any]:
         "resolved": True,
         "description": str(flow_def.get("description") or ""),
         "path": str(flow_def.get("_yaml_path") or ""),
-        "step_count": len(flow_def.get("steps") if isinstance(flow_def.get("steps"), list) else []),
+        "step_count": len(list_or_empty(flow_def.get("steps"))),
     }
 
 

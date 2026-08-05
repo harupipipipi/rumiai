@@ -315,8 +315,8 @@ def main():
     # --- ログ設定 ---
     import os
     from core_runtime.logging_utils import configure_logging
-    _log_level = read_migrated_env("TOBKIRI_LOG_LEVEL", "RUMI_LOG_LEVEL", "INFO")
-    _log_format = read_migrated_env("TOBKIRI_LOG_FORMAT", "RUMI_LOG_FORMAT", "json")
+    _log_level = read_migrated_env("TOBKIRI_LOG_LEVEL", "RUMI_LOG_LEVEL", "INFO") or "INFO"
+    _log_format = read_migrated_env("TOBKIRI_LOG_FORMAT", "RUMI_LOG_FORMAT", "json") or "json"
     configure_logging(level=_log_level, fmt=_log_format)
 
     # --- Health check mode (early exit) ---
@@ -394,7 +394,7 @@ def main():
             def reset_runtime_readiness() -> None:
                 return None
 
-            def mark_runtime_failed(_error: str) -> None:
+            def mark_runtime_failed(error: str) -> None:
                 return None
 
         try:
@@ -402,7 +402,8 @@ def main():
             global L
             L = _L
         except ImportError:
-            load_system_lang = lambda: None
+            def load_system_lang() -> None:
+                return None
 
         # Langシステム初期化
         load_system_lang()

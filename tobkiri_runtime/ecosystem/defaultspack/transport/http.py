@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 
@@ -17,6 +19,7 @@ import threading
 import http.server
 import urllib.parse
 from pathlib import Path
+from typing import Any, Callable
 
 from core_runtime.api.safe_headers import (
     RESERVED_REQUEST_CONTEXT_KEYS,
@@ -43,6 +46,10 @@ from transport.registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _mapping_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 _SAFE_GET_FALLBACK_BLOCKS = {
@@ -137,9 +144,9 @@ class DefaultsHttpServer:
         self.facade = None
         self.host = os.environ.get("DEFAULTS_HTTP_HOST", "127.0.0.1")
         self.port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
-        self._server = None
-        self._thread = None
-        self._routes = []
+        self._server: http.server.ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._routes: list[Any] = []
         self._load_runtime_secrets()
         self._setup_routes()
 
@@ -173,7 +180,7 @@ class DefaultsHttpServer:
             try:
                 raw = self.facade.get_interface("io.http.route", strategy="all")
                 if raw and isinstance(raw, list):
-                    route_entries = []
+                    route_entries: list[tuple[Any, Any, Callable[..., Any], Any, Any, dict[str, Any]]] = []
                     for index, entry in enumerate(raw):
                         if not isinstance(entry, dict):
                             continue
@@ -200,7 +207,7 @@ class DefaultsHttpServer:
                         if not isinstance(defaults, dict):
                             defaults = entry.get("default_args")
                         route_defaults = dict(defaults) if isinstance(defaults, dict) else {}
-                        route_authority = {
+                        route_authority: dict[str, Any] = {
                             "permission_id": str(entry.get("permission_id") or "").strip(),
                             "owner_pack_id": str(entry.get("owner_pack_id") or entry.get("pack_id") or "defaultspack").strip(),
                             "provider_id": str(entry.get("provider_id") or "").strip(),
@@ -254,7 +261,7 @@ class DefaultsHttpServer:
                                     fallback_block_module=route_fallback_block_module,
                                 )
 
-                            _flow_handler._defaultspack_flow_route_handler = True
+                            setattr(_flow_handler, "_defaultspack_flow_route_handler", True)
                             try:
                                 setattr(_flow_handler, "__rumi_route_sensitive__", route_sensitive)
                                 setattr(_flow_handler, "__rumi_route_pre_auth__", route_pre_auth)
@@ -289,7 +296,7 @@ class DefaultsHttpServer:
                                     fallback_block_module=route_fallback_block_module,
                                 )
 
-                            _function_handler._defaultspack_flow_route_handler = True
+                            setattr(_function_handler, "_defaultspack_flow_route_handler", True)
                             try:
                                 setattr(_function_handler, "__rumi_route_sensitive__", route_sensitive)
                                 setattr(_function_handler, "__rumi_route_pre_auth__", route_pre_auth)
@@ -694,7 +701,7 @@ class DefaultsHttpServer:
         explicit = payload.get("timeout_seconds") if isinstance(payload, dict) else None
         if explicit not in (None, ""):
             try:
-                return max(1.0, float(explicit))
+                return max(1.0, float(str(explicit)))
             except (TypeError, ValueError):
                 pass
         env_value = os.environ.get("RUMI_DEFAULTSPACK_HTTP_FALLBACK_TIMEOUT_SECONDS", "").strip()
@@ -731,7 +738,7 @@ class DefaultsHttpServer:
 
     def _invoke_safe_get_fallback_block(self, module_name, payload, context):
         timeout_seconds = self._safe_get_fallback_timeout_seconds()
-        result_queue = queue.Queue(maxsize=1)
+        result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
 
         def _target():
             try:
@@ -1467,6 +1474,7 @@ class DefaultsHttpServer:
             ".wasm": "application/wasm",
         }
         ct = content_types.get(ext, "application/octet-stream")
+        body: str | bytes
         if ct.startswith("text/") or ct.startswith("application/j"):
             with open(file_path, "r", encoding="utf-8") as f:
                 body = f.read()
@@ -1997,9 +2005,9 @@ def _apply_mimo_company_profile_authority_context(context, payload):
         return
     if context.get("_tool_server_approved") is not True:
         return
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
-    tool_policy = payload.get("tool_policy") if isinstance(payload.get("tool_policy"), dict) else {}
+    metadata = _mapping_or_empty(payload.get("metadata"))
+    params = _mapping_or_empty(payload.get("params"))
+    tool_policy = _mapping_or_empty(payload.get("tool_policy"))
     profile_id = str(
         payload.get("profile_id")
         or metadata.get("profile_id")
@@ -2055,7 +2063,7 @@ def _function_principal_from_context(context, default="defaultspack"):
 
 
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
-    server_ref = None
+    server_ref: DefaultsHttpServer | None = None
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
@@ -2149,8 +2157,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 ).items()
                 if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
             }
-            request_data = dict(query_params)
-            server_context = {
+            request_data: dict[str, Any] = dict(query_params)
+            server_context: dict[str, Any] = {
                 "_path": path,
                 "_query_params": dict(query_params),
                 "_headers": sanitized_forwarded_headers(self.headers),
@@ -2216,16 +2224,20 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             request_data["_method"] = method
             request_data["_actual_method"] = method
 
-            handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(
+            server = self.server_ref
+            if server is None:
+                self._send_json(503, error("HTTP server is not initialized", "SERVER_UNAVAILABLE"))
+                return
+            handler, path_params, source, path_inject, route_pattern = server._match_route(
                 method, path
             )
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
                 return
-            if route_pattern and not self.server_ref._route_allowed_by_active_profile(
+            if route_pattern and not server._route_allowed_by_active_profile(
                 method, route_pattern
             ):
-                self.server_ref._record_profile_blocked_route(method, route_pattern)
+                server._record_profile_blocked_route(method, route_pattern)
                 self._send_json(
                     403,
                     error(
@@ -2260,7 +2272,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         request_data[data_key] = path_params.get(url_param, "")
                 request_data["_method"] = method
                 request_data["_actual_method"] = method
-                result = self.server_ref._invoke_registry_handler(
+                result = server._invoke_registry_handler(
                     handler,
                     request_data,
                     path_params or {},

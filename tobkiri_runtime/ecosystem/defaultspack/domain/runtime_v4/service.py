@@ -577,10 +577,22 @@ class ActivationStore:
             raise ProfileResolutionDenied("activation envelope schema is unsupported")
         if envelope.get("workspace_digest") != self._workspace_digest:
             raise ProfileResolutionDenied("activation envelope belongs to another workspace")
-        profile = validate_document(envelope.get("profile"), "profile")
-        lock = validate_document(envelope.get("lock"), "profile_lock")
-        plan = validate_document(envelope.get("plan"), "resolved_plan")
-        activation = validate_document(envelope.get("activation"), "activation")
+        profile_value = envelope.get("profile")
+        lock_value = envelope.get("lock")
+        plan_value = envelope.get("plan")
+        activation_value = envelope.get("activation")
+        if not isinstance(profile_value, (dict, str, bytes)):
+            raise ProfileResolutionDenied("activation profile record is invalid")
+        if not isinstance(lock_value, (dict, str, bytes)):
+            raise ProfileResolutionDenied("activation lock record is invalid")
+        if not isinstance(plan_value, (dict, str, bytes)):
+            raise ProfileResolutionDenied("activation plan record is invalid")
+        if not isinstance(activation_value, (dict, str, bytes)):
+            raise ProfileResolutionDenied("activation envelope records are invalid")
+        profile = validate_document(profile_value, "profile")
+        lock = validate_document(lock_value, "profile_lock")
+        plan = validate_document(plan_value, "resolved_plan")
+        activation = validate_document(activation_value, "activation")
         self._validate_record_graph(profile, lock, plan)
         if activation["activation_id"] != pointer["activation_id"]:
             raise ProfileResolutionDenied("active pointer selects another activation")

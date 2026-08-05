@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import re
 from pathlib import Path
 from typing import Any, Mapping
@@ -13,10 +14,11 @@ from .ids import validate_canonical_id
 from .provenance import make_provenance
 from .validation import validate_document
 
+yaml: Any = None
 try:
-    import yaml
+    yaml = importlib.import_module("yaml")
 except ImportError:  # pragma: no cover - PyYAML is a project dependency.
-    yaml = None  # type: ignore[assignment]
+    pass
 
 
 LEGACY_MIGRATION_VERSION = "io.tobkiri.profile-migration.v1"

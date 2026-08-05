@@ -3,8 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 import re
 from dataclasses import dataclass, field
+import importlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ecosystem.defaultspack.domain.components import get_domain_component_registry
 from ecosystem.defaultspack.domain.extensions.runtime import get_extension_registry
@@ -262,7 +263,9 @@ def component_route_diagnostics() -> list[dict[str, str]]:
 # The prompt workspace template was retired, but its public routes remain a
 # finite compatibility surface. Project the old function identities through
 # the current contract adapter without restoring the retired local writers.
-_PROMPT_COMPATIBILITY_TEMPLATE_ROUTES = (
+_PROMPT_COMPATIBILITY_TEMPLATE_ROUTES: tuple[
+    tuple[str, str, str, str, dict[str, str]], ...
+] = (
     ("GET", "/api/prompts", "prompt_editor_load", "load", {}),
     ("GET", "/api/prompts/active", "prompt_active", "active", {}),
     ("GET", "/api/prompts/traces", "prompt_trace_list", "traces", {}),
@@ -434,9 +437,11 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     try:
-        import yaml
-
-        data = yaml.safe_load(text)
+        yaml_module = importlib.import_module("yaml")
+        safe_load = getattr(yaml_module, "safe_load", None)
+        if not callable(safe_load):
+            raise RuntimeError("yaml.safe_load is unavailable")
+        data = safe_load(text)
     except Exception:
         if path.name == "legacy_http_routes.yaml":
             return _read_legacy_routes_yaml_without_pyyaml(text)
@@ -923,9 +928,10 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     for spec in ordered_specs:
         compiled = compile_http_route_pattern(spec.pattern)
         require_legacy_route_allowlisted(spec)
+        handler: Callable[..., Any]
         if spec.flow_id:
 
-            def _handler(
+            def _flow_handler(
                 request_data,
                 path_params,
                 *,
@@ -946,10 +952,10 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                     fallback_block_module=fallback_block_module,
                 )
 
-            handler = _handler
+            handler = _flow_handler
         elif spec.function_id:
 
-            def _handler(
+            def _function_handler(
                 request_data,
                 path_params,
                 *,
@@ -982,10 +988,10 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                     )
                 raise AttributeError("_invoke_function_route")
 
-            handler = _handler
+            handler = _function_handler
         elif spec.legacy_block_module or spec.block_module:
 
-            def _handler(
+            def _block_handler(
                 request_data,
                 path_params,
                 *,
@@ -1004,7 +1010,7 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                     path_inject,
                 )
 
-            handler = _handler
+            handler = _block_handler
         else:
             handler = getattr(server, spec.handler_name)
         _set_http_route_handler_metadata(handler, spec)
@@ -1025,7 +1031,7 @@ def _set_http_route_handler_metadata(handler: Any, spec: HttpRouteSpec) -> None:
 
 
 def http_route_authority_metadata(spec: HttpRouteSpec) -> dict[str, Any]:
-    metadata = {
+    metadata: dict[str, Any] = {
         "permission_id": str(spec.permission_id or "").strip(),
         "owner_pack_id": str(spec.owner_pack_id or "").strip(),
         "provider_id": str(spec.provider_id or "").strip(),

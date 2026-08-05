@@ -550,13 +550,13 @@ class LinuxNativeGuestAgent:
 
     def _dispatch_input(self, request: DesktopInputRequest) -> dict[str, Any]:
         if request.action == "move":
-            return self._session.move(int(request.x), int(request.y))
+            return self._session.move(int(request.x or 0), int(request.y or 0))
         if request.action == "click":
-            return self._session.click(int(request.x), int(request.y), button=str(request.button or "left"))
+            return self._session.click(int(request.x or 0), int(request.y or 0), button=str(request.button or "left"))
         if request.action == "double_click":
-            return self._session.double_click(int(request.x), int(request.y), button=str(request.button or "left"))
+            return self._session.double_click(int(request.x or 0), int(request.y or 0), button=str(request.button or "left"))
         if request.action == "drag":
-            return self._session.drag(int(request.x), int(request.y), int(request.to_x), int(request.to_y), button=str(request.button or "left"))
+            return self._session.drag(int(request.x or 0), int(request.y or 0), int(request.to_x or 0), int(request.to_y or 0), button=str(request.button or "left"))
         if request.action == "scroll":
             direction = "down" if int(request.delta_y or 0) >= 0 else "up"
             clicks = max(1, abs(int(request.delta_y or request.delta_x or 1)))
@@ -747,7 +747,11 @@ def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: 
 
 def _positive_int(value: object, fallback: int) -> int:
     try:
-        parsed = int(value or 0)
+        parsed = int(_numeric_value(value) or 0)
     except (TypeError, ValueError):
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def _numeric_value(value: object) -> int | float | str:
+    return value if isinstance(value, (int, float, str)) else 0

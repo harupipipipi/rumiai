@@ -730,7 +730,7 @@ def _dedupe_diagnostics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _diagnostic_to_dict(diagnostic: TemplateDiagnostic) -> dict[str, Any]:
-    result = {
+    result: dict[str, Any] = {
         "level": diagnostic.severity,
         "severity": diagnostic.severity,
         "code": diagnostic.code,

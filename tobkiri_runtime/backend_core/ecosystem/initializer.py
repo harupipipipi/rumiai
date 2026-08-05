@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .mounts import MountManager, get_mount_manager
-from . import registry as registry_module
 from .registry import Registry, get_registry
 from .active_ecosystem import (
     ActiveEcosystemManager,
@@ -115,25 +114,9 @@ class EcosystemInitializer:
         result["mounts_initialized"] = True
     
     def _initialize_registry(self, result: Dict[str, Any]):
-        """レジストリを初期化"""
-        # Registry 内部の探索ロジック（ecosystem/* + ecosystem/packs/* 互換）に委ねる
-        actual_ecosystem_dir = self.ecosystem_dir
-        
-        if not actual_ecosystem_dir.exists():
-            result["errors"].append(f"エコシステムディレクトリが存在しません: {actual_ecosystem_dir}")
-            return
-        
-        # initializer指定のパスでRegistryを生成
-        self.registry = Registry(ecosystem_dir=str(actual_ecosystem_dir))
-        self.registry.load_all_packs()
-        
-        # グローバル変数に代入して既存コードとの互換性を維持
-        registry_module._global_registry = self.registry
-        
-        # 統計情報を収集
-        result["registry_loaded"] = True
-        result["packs_loaded"] = len(self.registry.packs)
-        result["components_loaded"] = len(self.registry.get_all_components())
+        """Keep the removed runtime Registry path fail closed."""
+        del result
+        self.registry = None
     
     def _initialize_active_ecosystem(self, result: Dict[str, Any]):
         """アクティブエコシステムを初期化"""
@@ -141,7 +124,7 @@ class EcosystemInitializer:
         
         # active_ecosystem.jsonが存在しない場合は作成
         if not active_file.exists():
-            default_data = {
+            default_data: Dict[str, Any] = {
                 "active_pack_identity": None,
                 "overrides": {},
                 "disabled_components": [],
@@ -204,72 +187,15 @@ class EcosystemInitializer:
         return copied_count
     
     def validate(self) -> Dict[str, Any]:
-        """
-        エコシステムの整合性を検証
-        
-        Returns:
-            検証結果
-        """
-        result = {
-            "valid": True,
+        """Report that the removed runtime Registry cannot validate Packs."""
+        return {
+            "valid": False,
             "warnings": [],
-            "errors": []
+            "errors": [
+                "Legacy ecosystem validation is disabled; use the v4 catalog "
+                "and Authority-resolved Profile"
+            ],
         }
-        
-        if not self.registry:
-            result["valid"] = False
-            result["errors"].append("レジストリが初期化されていません")
-            return result
-        
-        if not self.active_ecosystem:
-            result["valid"] = False
-            result["errors"].append("アクティブエコシステムが初期化されていません")
-            return result
-        
-        # アクティブなPackが存在するか確認
-        active_identity = self.active_ecosystem.active_pack_identity
-        # CR-4 fix: active_pack_identity が None の場合は早期リターン
-        if active_identity is None:
-            result["warnings"].append(
-                "アクティブな Pack Identity が設定されていません（active_pack_identity is None）"
-            )
-            return result
-        pack = self.registry.get_pack_by_identity(active_identity)
-        
-        if not pack:
-            result["valid"] = False
-            result["errors"].append(f"アクティブなPack '{active_identity}' が見つかりません")
-            return result
-        
-        # オーバーライドされたコンポーネントが存在するか確認
-        overrides = self.active_ecosystem.get_all_overrides()
-        for comp_type, comp_id in overrides.items():
-            override_value = str(comp_id).strip()
-            component = None
-            if override_value.count(":") >= 2:
-                override_pack_id, override_type, override_component_id = override_value.split(":", 2)
-                if override_type == comp_type:
-                    component = self.registry.get_component(
-                        override_pack_id,
-                        override_type,
-                        override_component_id,
-                    )
-            if component is None:
-                component = self.registry.get_component(pack.pack_id, comp_type, override_value)
-            if not component:
-                result["warnings"].append(
-                    f"オーバーライド '{comp_type}:{comp_id}' のコンポーネントが見つかりません"
-                )
-        
-        # 必須依存関係の確認
-        for component in self.registry.get_all_components():
-            connectivity = self.registry.resolve_connectivity(component)
-            for missing in connectivity.get('missing_requires', []):
-                result["warnings"].append(
-                    f"コンポーネント '{component.full_id}' の必須依存 '{missing}' が見つかりません"
-                )
-        
-        return result
 
 
 def initialize_ecosystem(
