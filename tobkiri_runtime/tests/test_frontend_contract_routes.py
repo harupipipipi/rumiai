@@ -9,6 +9,8 @@ from core_runtime.frontend_contract_routes import (
     resolve_contract_route,
 )
 
+pytestmark = pytest.mark.contract
+
 
 class _FakeHost:
     _api_route_exact = {("GET", "/api/ui/catalog"): {}}

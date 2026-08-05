@@ -279,8 +279,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install architecture validation dependencies
-        run: python -m pip install "jsonschema>=4.26.0" "PyYAML>=6.0.2"
+      - name: Install locked runtime dependencies
+        run: |
+          python -m pip install -r tobkiri_runtime/requirements.txt
+          python -m pip install --no-deps -e tobkiri_runtime
 
       - name: Run repository pack architecture boundary scan
         env:

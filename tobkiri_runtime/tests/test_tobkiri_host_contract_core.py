@@ -42,6 +42,8 @@ from tobkiri_host.shells import (
     ShellDefinition,
 )
 
+pytestmark = pytest.mark.contract
+
 
 def digest(character: str) -> str:
     return f"sha256:{hashlib.sha256(character.encode()).hexdigest()}"

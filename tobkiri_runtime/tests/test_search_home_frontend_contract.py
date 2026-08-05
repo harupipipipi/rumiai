@@ -6,6 +6,8 @@ import pytest
 
 from core_runtime.frontend_contract_routes import ContractRouteError, resolve_contract_route
 
+pytestmark = pytest.mark.contract
+
 
 SEARCH_HOME_ROUTES = {
     ("GET", "/api/models"): {"approval_required": False},
@@ -114,12 +116,18 @@ def test_search_home_handler_uses_contract_map_before_legacy_dispatch(tmp_path) 
     responses: list[tuple[dict[str, object], object]] = []
     handler._json_response = lambda payload, status=None: responses.append((payload, status))
 
-    assert handler._resolve_contract_path(
-        "GET",
-        _operation("GET", "/api/models"),
-    ) == "/api/models"
-    assert handler._resolve_contract_path(
-        "GET",
-        _operation("GET", "/api/context"),
-    ) is None
+    assert (
+        handler._resolve_contract_path(
+            "GET",
+            _operation("GET", "/api/models"),
+        )
+        == "/api/models"
+    )
+    assert (
+        handler._resolve_contract_path(
+            "GET",
+            _operation("GET", "/api/context"),
+        )
+        is None
+    )
     assert responses[0][0]["error"]["code"] == "CONTRACT_OPERATION_UNKNOWN"
