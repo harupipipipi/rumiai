@@ -2706,23 +2706,27 @@ def test_operations_heartbeat_requires_captured_operation(tmp_path, monkeypatch)
     )
 
 
-def test_rumi_api_tool_lists_routes_and_requires_mutation_approval():
+def test_rumi_api_tool_has_zero_legacy_routes_and_requires_dispatch_approval():
     from ecosystem.rumi_default_tools_pack.domain.tool.rumi_api import run
 
     listed = run({"action": "list_routes"}, {})
-    mutation = run(
+    pending = run(
         {
-            "action": "request",
-            "method": "POST",
-            "path": "/api/agent/company/bootstrap",
-            "body": {"start_nonstop": True},
-            "allow_mutation": True,
+            "action": "dispatch",
+            "contract_id": "company.operations.v1",
+            "operation_id": "company.bootstrap",
+            "payload": {"start_nonstop": True},
         },
         {"profile_policy": {"yolo_mode": False}},
     )
 
     assert listed["status"] == "ok"
-    assert any(route["path"] == "/api/agent/company/status" for route in listed["data"]["routes"])
-    assert any(route["path"] == "/api/agent/mimo-company/status" for route in listed["data"]["routes"])
-    assert mutation["status"] == "ok"
-    assert mutation["data"]["approval_required"] is True
+    assert listed["data"] == {
+        "routes": [],
+        "count": 0,
+        "dispatch": "captured_v4_qualified_operations_only",
+    }
+    assert pending["status"] == "ok"
+    assert pending["data"]["approval_required"] is True
+    assert pending["data"]["contract_id"] == "company.operations.v1"
+    assert pending["data"]["operation_id"] == "company.bootstrap"

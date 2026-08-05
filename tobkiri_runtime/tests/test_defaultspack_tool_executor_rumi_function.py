@@ -1932,41 +1932,89 @@ def test_rumi_api_manifest_and_executor_require_approval():
     assert result["widget"]["approval_required"] is True
 
 
-def test_rumi_api_request_action_requires_approved_context(monkeypatch):
+class _CapturedRumiApiSession:
+    profile_id = "profile:captured"
+
+    def __init__(self, result):
+        self.calls = []
+        self.result = result
+
+    def provider_metadata(self, contract_id):
+        return ({"contract_id": contract_id},)
+
+    def invoke(self, contract_id, operation_id, payload, *, version_range=">=1,<2"):
+        self.calls.append((contract_id, operation_id, payload, version_range))
+        return self.result
+
+
+def test_rumi_api_dispatch_requires_approved_context():
     from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
 
-    def fail_request(method, path, body):
-        raise AssertionError("rumi_api must not call local HTTP API without approval")
-
-    monkeypatch.setattr(rumi_api, "_request", fail_request)
+    session = _CapturedRumiApiSession({"unexpected": True})
 
     result = rumi_api.run(
-        {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
-        {},
+        {
+            "action": "dispatch",
+            "contract_id": "company.messaging.v1",
+            "operation_id": "channels.list",
+            "payload": {},
+        },
+        {"v4_dispatch_session": session},
     )
 
     assert result["status"] == "ok"
     assert result["data"]["approval_required"] is True
     assert result["data"]["tool_name"] == "rumi_api"
+    assert session.calls == []
 
 
-def test_rumi_api_request_action_allows_internal_approved_context(monkeypatch):
+def test_rumi_api_dispatch_uses_internal_approval_and_captured_session():
     from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
 
-    seen = {}
-
-    def fake_request(method, path, body):
-        seen["method"] = method
-        seen["path"] = path
-        seen["body"] = body
-        return {"ok": True}
-
-    monkeypatch.setattr(rumi_api, "_request", fake_request)
+    session = _CapturedRumiApiSession({"ok": True})
 
     result = rumi_api.run(
-        {"action": "request", "method": "GET", "path": "/api/health"},
-        {"_tool_server_approved": True, "principal_id": "defaultspack"},
+        {
+            "action": "dispatch",
+            "contract_id": "company.messaging.v1",
+            "operation_id": "channels.list",
+            "payload": {"workspace_id": "workspace:alpha"},
+        },
+        {
+            "_tool_server_approved": True,
+            "principal_id": "defaultspack",
+            "v4_dispatch_session": session,
+        },
     )
 
-    assert result == {"status": "ok", "data": {"ok": True}}
-    assert seen == {"method": "GET", "path": "/api/health", "body": None}
+    assert result == {
+        "status": "ok",
+        "data": {"profile_id": "profile:captured", "result": {"ok": True}},
+    }
+    assert session.calls == [
+        (
+            "company.messaging.v1",
+            "channels.list",
+            {
+                "workspace_id": "workspace:alpha",
+                "_contract_consumer_pack_id": "rumi_default_tools_pack",
+            },
+            ">=1,<2",
+        )
+    ]
+
+    forged = rumi_api.run(
+        {
+            "action": "dispatch",
+            "contract_id": "company.messaging.v1",
+            "operation_id": "channels.list",
+            "payload": {"_contract_consumer_pack_id": "forged"},
+        },
+        {
+            "_tool_server_approved": True,
+            "principal_id": "defaultspack",
+            "v4_dispatch_session": session,
+        },
+    )
+    assert forged["error"]["code"] == "FORGED_CONSUMER_IDENTITY"
+    assert len(session.calls) == 1
