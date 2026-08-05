@@ -162,29 +162,55 @@ class TestCompleteSetup:
         handler._send_response.assert_called_once()
         handler._check_auth.assert_not_called()
 
-    def test_setup_complete_no_auth_required(self):
-        """/api/setup/complete は認証前に処理されること。"""
+    def test_setup_complete_is_typed_retired_route_without_writes(self, tmp_path):
+        """The legacy completion route is 410 for every auth state and writes nothing."""
+        from core_runtime.app_lifecycle_manager import AppLifecycleManager
         from core_runtime.pack_api_server import PackAPIHandler
 
-        handler = object.__new__(PackAPIHandler)
-        handler.path = "/api/setup/complete"
-        handler.client_address = ("198.51.100.7", 12345)
-        handler._send_response = MagicMock()
-        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
-        handler._check_rate_limit = MagicMock(return_value=True)
-        handler._is_pre_auth_route = MagicMock(return_value=True)
-        handler._parse_body = MagicMock(return_value={"username": "testuser", "language": "ja"})
-        PackAPIHandler.app_lifecycle_manager = MagicMock()
-        PackAPIHandler.app_lifecycle_manager.complete_setup.return_value = {
-            "success": True,
-            "errors": [],
-        }
-        PackAPIHandler.kernel = None
+        lifecycle = AppLifecycleManager(base_dir=tmp_path)
+        lifecycle.complete_setup = MagicMock(
+            side_effect=AssertionError("retired route must not capture a profile")
+        )
+        PackAPIHandler.app_lifecycle_manager = lifecycle
 
-        PackAPIHandler.do_POST(handler)
+        for authorization in (None, "Bearer authenticated-test-token"):
+            handler = object.__new__(PackAPIHandler)
+            handler.path = "/api/setup/complete"
+            handler.headers = {
+                "Content-Length": "2",
+                **({"Authorization": authorization} if authorization else {}),
+            }
+            handler.client_address = ("198.51.100.7", 12345)
+            handler._send_response = MagicMock()
+            handler._check_auth = MagicMock(
+                side_effect=AssertionError("retired barrier runs before auth")
+            )
+            handler._check_rate_limit = MagicMock(return_value=True)
+            handler._discard_request_body = MagicMock()
+            handler._parse_body = MagicMock(
+                side_effect=AssertionError("retired body must not be parsed")
+            )
 
-        handler._send_response.assert_called_once()
-        handler._check_auth.assert_not_called()
+            PackAPIHandler.do_POST(handler)
+
+            response, status = handler._send_response.call_args.args
+            assert status == 410
+            assert response.success is False
+            assert response.data == {
+                "state": "legacy_setup_retired",
+                "action": "install_defaults_profile",
+                "setup_api_version": "io.tobkiri.setup-state.v4",
+                "retired_route": "/api/setup/complete",
+                "write_set": [],
+            }
+            handler._check_auth.assert_not_called()
+            handler._parse_body.assert_not_called()
+
+        lifecycle.complete_setup.assert_not_called()
+        assert list(tmp_path.rglob("*")) == []
+
+        actual_handler = object.__new__(PackAPIHandler)
+        assert not actual_handler._is_pre_auth_route("POST", "/api/setup/complete")
 
     def test_setup_packs_list_no_auth_required_during_initial_setup(self):
         from core_runtime.pack_api_server import PackAPIHandler

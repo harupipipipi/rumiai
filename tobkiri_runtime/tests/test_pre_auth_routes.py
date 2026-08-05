@@ -1,6 +1,4 @@
 """test_pre_auth_routes.py — pre_auth_routes テーブル構築のユニットテスト"""
-import sys
-import types
 import unittest
 from pathlib import Path
 

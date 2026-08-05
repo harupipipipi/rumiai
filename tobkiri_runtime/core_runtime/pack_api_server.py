@@ -483,6 +483,10 @@ class PackAPIHandler(
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
+        # This legacy mutation surface is retired unconditionally.  In
+        # particular, Pack metadata must never make it a pre-auth success path.
+        if method_upper == "POST" and path == "/api/setup/complete":
+            return False
         if self._setup_pack_pre_auth_allowed(method_upper, path):
             return True
         core_pre_auth_routes = {
@@ -491,7 +495,6 @@ class PackAPIHandler(
             ("GET", "/api/setup/status"),
             ("GET", "/api/setup/oauth/start"),
             ("GET", "/callback"),
-            ("POST", "/api/setup/complete"),
         }
         if (method_upper, path) in core_pre_auth_routes:
             return True
@@ -1790,6 +1793,27 @@ class PackAPIHandler(
         self._reset_request_auth_state()
         result: Any = None
 
+        # The legacy completion endpoint predates the reviewed Defaults v4
+        # transaction.  Retire it before authentication and body parsing so
+        # neither a pre-auth nor authenticated request can reach lifecycle
+        # capture or produce any write.
+        if _pre_auth_path_post == "/api/setup/complete":
+            self._discard_request_body()
+            retired = self._retired_setup_complete_state()
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        key: value
+                        for key, value in retired.items()
+                        if key not in {"error", "status_code"}
+                    },
+                    error=str(retired["error"]),
+                ),
+                int(retired["status_code"]),
+            )
+            return
+
         # --- テーブル駆動: pre-auth API ルート ---
         _is_pre_auth_post = self._is_pre_auth_route("POST", _pre_auth_path_post)
 
@@ -1804,31 +1828,6 @@ class PackAPIHandler(
                 if _body_exchange is None:
                     return
                 self._handle_panel_exchange(_body_exchange)
-                return
-
-            if _pre_auth_path_post == "/api/setup/complete":
-                _body_setup = self._parse_body()
-                if _body_setup is None:
-                    return
-                _alm = self.__class__.app_lifecycle_manager
-                if _alm is None:
-                    self._send_response(APIResponse(False, error="Lifecycle manager not initialized"), 500)
-                    return
-                _setup_result = _alm.complete_setup(_body_setup)
-                if _setup_result.get("success"):
-                    try:
-                        _k = self.__class__.kernel
-                        if _k and hasattr(_k, 'event_bus') and _k.event_bus:
-                            _k.event_bus.publish("setup.completed", {
-                                "username": _body_setup.get("username"),
-                                "language": _body_setup.get("language"),
-                            })
-                    except Exception:
-                        pass
-                    self._send_response(APIResponse(True, data=_setup_result))
-                else:
-                    _errors = _setup_result.get("errors", ["Setup failed"])
-                    self._send_response(APIResponse(False, error="; ".join(_errors)), 400)
                 return
 
             # pre-auth テーブルにマッチしたが上記に該当しない場合

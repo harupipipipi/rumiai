@@ -113,7 +113,7 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
             return_value=_preview(),
         ),
         patch(
-            "core_runtime.api.setup_handlers.capture_default_profile",
+            "core_runtime.bootstrap.profile_capture.capture_default_profile",
             return_value=_active(),
         ) as capture,
     ):
@@ -142,7 +142,7 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
 
 def test_non_v4_install_shape_is_retired_without_capture() -> None:
     with patch(
-        "core_runtime.api.setup_handlers.capture_default_profile"
+        "core_runtime.bootstrap.profile_capture.capture_default_profile"
     ) as capture:
         result = _Handler()._setup_install_pack({"setup_pack_ids": ["legacy"]})
 

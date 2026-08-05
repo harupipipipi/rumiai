@@ -7,9 +7,6 @@ from typing import Any, Dict
 
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
-from ..bootstrap.profile_capture import capture_default_profile
-
-
 class SetupHandlersMixin:
     """Expose one finite setup transaction with no legacy Registry authority."""
 
@@ -111,6 +108,8 @@ class SetupHandlersMixin:
                 "status_code": 409,
                 "state": "confirmation_required",
             }
+        from ..bootstrap.profile_capture import capture_default_profile
+
         active = capture_default_profile()
         return {
             "success": True,
@@ -132,6 +131,17 @@ class SetupHandlersMixin:
             "status_code": 410,
             "state": "legacy_setup_retired",
             "action": "install_defaults_profile",
+        }
+
+    @classmethod
+    def _retired_setup_complete_state(cls) -> Dict[str, Any]:
+        """Return the no-write contract for the retired setup completion route."""
+
+        return {
+            **cls._retired_state(),
+            "setup_api_version": "io.tobkiri.setup-state.v4",
+            "retired_route": "/api/setup/complete",
+            "write_set": [],
         }
 
     def _setup_grant_all_ok(self, _setup_pack_id: str) -> Dict[str, Any]:
