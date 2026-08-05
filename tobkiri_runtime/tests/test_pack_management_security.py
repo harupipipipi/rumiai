@@ -584,17 +584,12 @@ def test_extension_approval_applies_staging(monkeypatch, tmp_path):
     assert calls[-1] == ("apply", "a" * 16, "replace", "reviewer")
 
 
-def test_defaultspack_management_routes_are_fallback_http_routes():
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+def test_defaultspack_management_requires_captured_operation():
+    from tests.v4_batch_support import assert_route_cutover
 
-    routes = {
-        (spec.method, spec.pattern): spec.function_name
-        for spec in canonical_http_route_specs(include_always_available=False)
-    }
-
-    assert routes[("GET", "/api/defaultspack/modules")] == "defaultspack:management_list_modules"
-    assert routes[("GET", "/api/defaultspack/pack-requests")] == "defaultspack:pack_request_list"
-    assert (
-        routes[("GET", "/api/defaultspack/migration/status")]
-        == "defaultspack:management_get_migration_status"
+    assert_route_cutover(
+        "GET",
+        "/api/defaultspack/modules",
+        "tobkiri.pack-management.v1",
+        "defaultspack.pack-management.list-modules",
     )

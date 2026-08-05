@@ -14,7 +14,6 @@ from domain.tool.ui_compiler_runtime.fake_agent_backend import FakeUIAgentBacken
 from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
 from domain.ui_compiler import RenderMatrix, RenderSnapshot, UIAgentResult, UIAgentTask
 from domain.ui_compiler.planner import RecursiveUIPlanner
-from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
 
 def _disable_browser_renderer(monkeypatch) -> None:
@@ -427,11 +426,15 @@ def test_quality_audit_fails_missing_typography_role_map() -> None:
     assert any("missing typography roles" in issue["message"] for issue in audit["typography"]["issues"])
 
 
-def test_recursive_ui_http_routes_are_registered() -> None:
-    routes = {(spec.method, spec.pattern) for spec in canonical_http_route_specs()}
+def test_recursive_ui_requires_captured_operation() -> None:
+    from tests.v4_batch_support import assert_route_cutover
 
-    assert ("POST", "/api/ui/build-recursive") in routes
-    assert ("GET", "/api/ui/generation-status") in routes
+    assert_route_cutover(
+        "POST",
+        "/api/ui/build-recursive",
+        "tobkiri.ui-build.v1",
+        "defaultspack.ui-build.recursive",
+    )
 
 
 def test_subagent_tool_backend_runs_real_delegate_path(tmp_path: Path, monkeypatch) -> None:

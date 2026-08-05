@@ -166,7 +166,7 @@ def test_capability_plan_rejects_forged_alias_and_wrong_owner():
     assert owner_result["error_type"] == "capability_plan_owner_mismatch"
 
 
-def test_global_contract_tool_uses_host_registry_and_ignores_caller_model(
+def test_global_contract_tool_uses_captured_host_dispatch_and_ignores_caller_model(
     monkeypatch,
     tmp_path,
 ):
@@ -222,7 +222,16 @@ def test_global_contract_tool_uses_host_registry_and_ignores_caller_model(
         "core_runtime.global_contract_dispatch.invoke_global_contract",
         fake_global_invoke,
     )
-    registry = object()
+    class CapturedSession:
+        profile_id = "profile-test"
+
+        def invoke(self, contract_id, operation, payload, *, version_range=">=1,<2"):
+            return fake_global_invoke(self, contract_id, operation, payload)
+
+        def provider_metadata(self, contract_id):
+            return ()
+
+    registry = CapturedSession()
     tool_def = {
         "tool_id": "repository_context_prepare",
         "source_pack_id": "rumi_repository_context_pack",
@@ -241,7 +250,7 @@ def test_global_contract_tool_uses_host_registry_and_ignores_caller_model(
         tool_def,
         {"query": "find the implementation"},
         {
-            "interface_registry": registry,
+            "v4_dispatch_session": registry,
             "model": "opencode-zen/mimo-v2.5-free",
             "registry_revision": "registry-test",
             "workspace_id": "workspace-test",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pytest
 
@@ -100,6 +100,72 @@ def assert_legacy_registry_fails_closed() -> None:
         resolve_load_order(())
 
 
+def assert_route_cutover(
+    method: str,
+    path: str,
+    contract_id: str,
+    operation_id: str,
+) -> None:
+    """Require a retired HTTP route to dispatch only as one captured operation.
+
+    The route table is deliberately not used as an operation catalog.  This
+    helper also proves that caller-supplied identity and approval fields do not
+    replace the Host-captured context or effect scope.
+    """
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+    from tobkiri_host.runtime import V4DispatchSession
+
+    assert (method, path) not in {
+        (spec.method, spec.pattern) for spec in canonical_http_route_specs()
+    }
+    server = DefaultsHttpServer(facade=None)
+    assert server._match_route(method, path) == (None, None, None, None, None)
+
+    class Broker:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Any, Any, Mapping[str, Any]]] = []
+
+        def invoke(
+            self,
+            frame: Any,
+            context: Any,
+            *,
+            effect_scope: Mapping[str, Any],
+        ) -> Mapping[str, Any]:
+            if (frame.contract_id, frame.operation_id) != (
+                contract_id,
+                operation_id,
+            ):
+                raise RuntimeError("operation is not pinned by the captured plan")
+            self.calls.append((frame, context, effect_scope))
+            return {"status": "ok"}
+
+    broker = Broker()
+    captured_context = {"profile_id": "profile:captured", "session_id": "session:1"}
+    captured_scope = {"effect": operation_id, "approval": "host-bound"}
+    session = V4DispatchSession(
+        broker=broker,  # type: ignore[arg-type]
+        context_for=lambda _contract, _operation: captured_context,
+        effect_scope_for=lambda _contract, _operation, _payload: captured_scope,
+        providers={},
+        profile_id="profile:captured",
+        plan_digest="sha256:" + "7" * 64,
+    )
+    payload = {
+        "approved": True,
+        "profile_id": "profile:forged",
+        "session_id": "session:forged",
+    }
+    assert session.invoke(contract_id, operation_id, payload) == {"status": "ok"}
+    frame, context, effect_scope = broker.calls[0]
+    assert frame.payload == payload
+    assert context is captured_context
+    assert effect_scope is captured_scope
+    with pytest.raises(RuntimeError, match="not pinned"):
+        session.invoke(contract_id, f"{operation_id}.forged", {})
+
+
 __all__ = [
     "assert_lease_is_single_use",
     "assert_payload_mutations_denied",
@@ -107,4 +173,5 @@ __all__ = [
     "bounded_scope",
     "harness",
     "assert_legacy_registry_fails_closed",
+    "assert_route_cutover",
 ]

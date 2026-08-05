@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import builtins
 import json
 from pathlib import Path
 
@@ -24,11 +23,9 @@ from ecosystem.defaultspack.domain.extensions.runtime import build_extensions_ro
 from ecosystem.defaultspack.domain.prompt.manager import PromptManager
 from ecosystem.defaultspack.domain.tool.broker import ToolBroker
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
-from ecosystem.defaultspack.transport.registry import build_fallback_http_routes
 import ecosystem.defaultspack.domain.ai_client.providers as providers_module
 import ecosystem.defaultspack.domain.prompt.manager as prompt_manager_module
 import ecosystem.defaultspack.domain.tool.registry as tool_registry_module
-import ecosystem.defaultspack.transport.registry as transport_registry_module
 
 
 class _DummyProvider:
@@ -669,63 +666,23 @@ def test_import_entrypoint_normalizes_legacy_module_names():
     assert loaded is OpenAICompatibleProvider
 
 
-def test_build_fallback_http_routes_contains_core_routes():
-    class _Server:
-        def __getattr__(self, name):
-            if str(name).startswith("_handle_authority_"):
-                return lambda *_args, **_kwargs: {"status": "ok"}
-            raise AttributeError(name)
+def test_chat_http_route_requires_captured_conversation_operation():
+    from tests.v4_batch_support import assert_route_cutover
 
-        def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
-            return {
-                "block_module": block_module,
-                "inject": inject or {},
-                "path_params": path_params,
-            }
-
-        def _handle_health(self, request_data, path_params):
-            return {"status": "ok"}
-
-        def _handle_context_info(self, request_data, path_params):
-            return {"status": "ok"}
-
-        def _handle_desktop_system_info(self, request_data, path_params):
-            return {"status": "ok"}
-
-        def _handle_chat_redirect(self, request_data, path_params):
-            return {"status": "ok"}
-
-        def _handle_static(self, request_data, path_params):
-            return {"status": "ok"}
-
-        def _handle_static_file(self, request_data, path_params):
-            return {"status": "ok"}
-
-    routes = build_fallback_http_routes(_Server())
-    route_methods = {(method, compiled.pattern) for method, compiled, _, _, _ in routes}
-    assert ("POST", "^/v1/chat/completions$") in route_methods
-    assert ("GET", "^/api/health$") in route_methods
-    assert ("GET", "^/api/tools/mcp$") in route_methods
-    assert ("DELETE", "^/api/tools/mcp$") in route_methods
-    assert ("POST", "^/api/tools/mcp/connect$") in route_methods
+    assert_route_cutover(
+        "POST",
+        "/v1/chat/completions",
+        "conversation.turn.v1",
+        "complete",
+    )
 
 
-def test_legacy_http_route_allowlist_loads_without_pyyaml(monkeypatch):
-    real_import = builtins.__import__
+def test_legacy_http_route_allowlist_is_physically_absent(monkeypatch):
+    del monkeypatch
+    from ecosystem.defaultspack.transport.registry import (
+        _legacy_http_routes_path,
+        load_legacy_http_route_allowlist,
+    )
 
-    def _raise_for_yaml(name, *args, **kwargs):
-        if name == "yaml":
-            raise ImportError("No module named 'yaml'")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", _raise_for_yaml)
-    transport_registry_module.load_legacy_http_route_allowlist.cache_clear()
-    try:
-        allowlist = transport_registry_module.load_legacy_http_route_allowlist()
-        assert (
-            "DELETE",
-            "/api/tools/mcp",
-            "blocks.tool.mcp_registry",
-        ) in allowlist
-    finally:
-        transport_registry_module.load_legacy_http_route_allowlist.cache_clear()
+    assert not _legacy_http_routes_path().exists()
+    assert load_legacy_http_route_allowlist() == {}

@@ -64,31 +64,15 @@ def _decrypt_delivery_envelope(private_key, envelope: dict, *, pairing_id: str, 
     return json.loads(clear.decode("utf-8"))
 
 
-def test_mobile_contract_port_registers_minimal_pairing_and_chat_routes():
-    from ecosystem.defaultspack.domain.mobile.contract import mobile_route_manifest
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+def test_mobile_contract_requires_captured_scoped_operation():
+    from tests.v4_batch_support import assert_route_cutover
 
-    manifest = mobile_route_manifest()
-    patterns = {route["pattern"] for route in manifest}
-
-    assert "/api/mobile/v1/bootstrap" in patterns
-    assert "/api/mobile/v1/manifest" in patterns
-    assert "/api/mobile/v1/pairings/{id}/claim" in patterns
-    assert "/api/mobile/v1/conversations" in patterns
-    assert "/api/mobile/v1/conversations/{id}/messages" in patterns
-
-    assert "/api/mobile/v1/capabilities" not in patterns
-    assert "/api/mobile/v1/tools" not in patterns
-    assert "/api/mobile/v1/cloud/tools/invoke" not in patterns
-    assert not any(pattern.startswith("/api/mobile/v1/credential-transfers") for pattern in patterns)
-
-    registry_patterns = {
-        (spec.method, spec.pattern)
-        for spec in canonical_http_route_specs()
-        if spec.pattern.startswith("/api/mobile/v1/")
-    }
-    assert {("GET", "/api/mobile/v1/bootstrap"), ("POST", "/api/mobile/v1/pairings/{id}/claim")} <= registry_patterns
-    assert len(registry_patterns) == len(manifest)
+    assert_route_cutover(
+        "GET",
+        "/api/mobile/v1/bootstrap",
+        "tobkiri.mobile.v1",
+        "defaultspack.mobile.bootstrap",
+    )
 
 
 def test_mobile_manifest_route_handler_smoke(monkeypatch):

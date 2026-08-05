@@ -136,16 +136,15 @@ def test_ai_and_tool_setup_register_new_foundation_routes():
     assert ("POST", "/api/tools/permissions/check") in tool_routes
 
 
-def test_fallback_http_registry_exposes_tool_permission_routes():
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+def test_tool_permission_routes_require_captured_operation():
+    from tests.v4_batch_support import assert_route_cutover
 
-    routes = {(spec.method, spec.pattern, spec.block_module) for spec in canonical_http_route_specs()}
-
-    assert ("GET", "/api/tools/permissions", "blocks.tool.permissions") in routes
-    assert ("PUT", "/api/tools/permissions", "blocks.tool.permissions") in routes
-    assert ("POST", "/api/tools/permissions/check", "blocks.tool.permissions") in routes
-    assert ("GET", "/api/tools/{name}/permissions", "blocks.tool.permissions") in routes
-    assert ("PUT", "/api/tools/{name}/permissions", "blocks.tool.permissions") in routes
+    assert_route_cutover(
+        "GET",
+        "/api/tools/permissions",
+        "tobkiri.tool-permission.v1",
+        "defaultspack.tool-permission.list",
+    )
 
 
 def test_tool_permissions_run_dispatches_http_method_handlers(tmp_path, monkeypatch):

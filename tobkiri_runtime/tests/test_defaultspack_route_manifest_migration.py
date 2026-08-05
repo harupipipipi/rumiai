@@ -42,19 +42,15 @@ def test_chat_channel_family_is_manifest_declared_with_security_metadata():
     assert_profile_resolver_requires_authority_snapshot()
 
 
-def test_chat_channel_transport_routes_dispatch_without_legacy_block_fallback():
-    from transport.registry import canonical_http_route_specs
+def test_chat_channel_requires_captured_operation():
+    from tests.v4_batch_support import assert_route_cutover
 
-    specs = {
-        (spec.method, spec.pattern): spec
-        for spec in canonical_http_route_specs(include_always_available=False)
-    }
-    for key, function_id in CHANNEL_ROUTES.items():
-        spec = specs[key]
-        assert spec.function_id == function_id
-        assert spec.legacy_block_module == ""
-        assert spec.fallback_block_module == ""
-        assert spec.block_module == ""
+    assert_route_cutover(
+        "GET",
+        "/api/chat/channels",
+        "tobkiri.chat-channel.v1",
+        "defaultspack.chat-channel.list",
+    )
 
 
 def test_chat_channel_function_route_does_not_fall_back_to_block():
@@ -103,24 +99,14 @@ def test_manifest_security_metadata_survives_pack_api_route_registration(monkeyp
     assert_profile_resolver_requires_authority_snapshot()
 
 
-def test_all_defaultspack_legacy_routes_have_complete_allowlist_metadata():
-    from transport.registry import canonical_http_route_specs, legacy_http_route_metadata
+def test_all_defaultspack_legacy_routes_are_explicitly_rejected():
+    from ecosystem.defaultspack.transport.registry import (
+        _FALLBACK_HTTP_ROUTE_SPECS,
+        load_legacy_http_route_allowlist,
+    )
 
-    validated = 0
-    for spec in canonical_http_route_specs(include_always_available=False):
-        if not spec.legacy_block_module or spec.pattern.startswith("/api/mobile/v1/"):
-            continue
-        metadata = legacy_http_route_metadata(spec)
-        assert metadata["owner"]
-        assert metadata["auth_mode"]
-        assert metadata["principal"]
-        assert metadata["csrf_origin"]
-        assert metadata["rate_limit"]
-        assert metadata["audit_category"]
-        assert metadata["function_id"]
-        assert metadata["legacy_until"]
-        validated += 1
-    assert validated > 0
+    assert _FALLBACK_HTTP_ROUTE_SPECS == []
+    assert load_legacy_http_route_allowlist() == {}
 
 
 def test_legacy_allowlist_guard_rejects_incomplete_security_metadata(monkeypatch):
