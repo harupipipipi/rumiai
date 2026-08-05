@@ -392,7 +392,7 @@ def test_staging_and_manifest_reject_python_bytecode(
         module.write_runtime_resource_manifest(stage)
 
 
-@pytest.mark.parametrize("case", ("missing", "tampered", "symlink"))
+@pytest.mark.parametrize("case", ("missing", "extra", "tampered", "symlink"))
 def test_runtime_resource_manifest_rejects_unsafe_or_changed_tree(tmp_path, case):
     module = _load_prepare_tauri_resources()
     stage = _minimal_v4_stage(tmp_path)
@@ -401,6 +401,8 @@ def test_runtime_resource_manifest_rejects_unsafe_or_changed_tree(tmp_path, case
 
     if case == "missing":
         target.unlink()
+    elif case == "extra":
+        (stage / "unlisted-resource.txt").write_text("unlisted\n", encoding="utf-8")
     elif case == "tampered":
         target.write_bytes(target.read_bytes() + b"\n# tampered\n")
     else:

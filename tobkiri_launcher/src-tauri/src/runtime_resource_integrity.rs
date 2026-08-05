@@ -158,11 +158,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_and_tampered_resources() {
+    fn rejects_missing_extra_and_tampered_resources() {
         let missing = fixture();
         fs::remove_file(missing.join("core_runtime/bootstrap.py")).unwrap();
         assert!(verify(&missing).is_err());
         fs::remove_dir_all(missing).unwrap();
+
+        let extra = fixture();
+        fs::write(extra.join("unlisted-resource.txt"), b"unlisted\n").unwrap();
+        assert!(verify(&extra).is_err());
+        fs::remove_dir_all(extra).unwrap();
 
         let tampered = fixture();
         fs::write(tampered.join("core_runtime/bootstrap.py"), b"tampered").unwrap();

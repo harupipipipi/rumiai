@@ -197,8 +197,12 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
             files.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
         }
     }
-    files.sort();
+    files.sort_by_key(|path| portable_relative_path(path));
     Ok(files)
+}
+
+fn portable_relative_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn verify_canonical_host_package(staged_root: &Path) -> io::Result<()> {
@@ -236,7 +240,7 @@ fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
         .map(|relative| {
             let payload = fs::read(staged_root.join(&relative))?;
             Ok(serde_json::json!({
-                "path": relative.to_string_lossy().replace('\\', "/"),
+                "path": portable_relative_path(&relative),
                 "size": payload.len(),
                 "sha256": format!("{:x}", Sha256::digest(&payload)),
             }))
@@ -554,10 +558,12 @@ fn find_pack_shell_binary(repo_root: &Path) -> io::Result<Option<PathBuf>> {
     }
 
     #[cfg(unix)]
-    if {
+    let is_executable = {
         use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 == 0
-    } {
+        metadata.permissions().mode() & 0o111 != 0
+    };
+    #[cfg(unix)]
+    if !is_executable {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -1073,10 +1079,16 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
 mod tests {
     use super::*;
     use std::ffi::OsString;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+
+    fn environment_lock() -> MutexGuard<'static, ()> {
+        ENVIRONMENT_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     struct TestTree {
         root: PathBuf,
@@ -1088,7 +1100,14 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock must be after the Unix epoch")
                 .as_nanos();
-            let root = std::env::temp_dir().join(format!(
+            // macOS commonly exposes its temporary directory through the
+            // `/var` alias for canonical `/private/var`. Resolve only this
+            // trusted OS-provided base before adding fixture-controlled names;
+            // production target roots remain subject to strict symlink checks.
+            let temp_base = std::env::temp_dir()
+                .canonicalize()
+                .expect("system temporary directory should canonicalize");
+            let root = temp_base.join(format!(
                 "tobkiri-build-script-{label}-{}-{nonce}",
                 std::process::id()
             ));
@@ -1105,6 +1124,59 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn test_tree_resolves_only_the_trusted_system_temp_base() {
+        let tree = TestTree::new("canonical-temp-base");
+        assert_eq!(
+            tree.path(),
+            tree.path()
+                .canonicalize()
+                .expect("fixture path should remain canonical")
+        );
+    }
+
+    #[test]
+    fn runtime_manifest_uses_exact_portable_full_tree_order() {
+        let tree = TestTree::new("runtime-manifest-order");
+        for relative in [
+            "bootstrap/00_env_check.py",
+            "bootstrap.py",
+            "lib/i18n/index.ts",
+            "lib/i18n.test.ts",
+        ] {
+            let path = tree.path().join(relative);
+            fs::create_dir_all(path.parent().expect("fixture file should have a parent"))
+                .expect("fixture directory should be creatable");
+            fs::write(path, relative.as_bytes()).expect("fixture file should be writable");
+        }
+
+        write_runtime_resource_manifest(tree.path()).expect("manifest should be writable");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(tree.path().join(RUNTIME_RESOURCE_MANIFEST))
+                .expect("manifest should be readable"),
+        )
+        .expect("manifest should be valid JSON");
+        let paths = manifest["entries"]
+            .as_array()
+            .expect("manifest entries should be an array")
+            .iter()
+            .map(|entry| {
+                entry["path"]
+                    .as_str()
+                    .expect("entry path should be a string")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            [
+                "bootstrap.py",
+                "bootstrap/00_env_check.py",
+                "lib/i18n.test.ts",
+                "lib/i18n/index.ts",
+            ]
+        );
     }
 
     struct EnvironmentGuard {
@@ -1184,9 +1256,7 @@ mod tests {
 
     #[test]
     fn pack_shell_lookup_resolves_default_absolute_and_relative_target_dirs() {
-        let _environment_lock = ENVIRONMENT_LOCK
-            .lock()
-            .expect("environment test lock should not be poisoned");
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("pack-shell-target-dir");
         let target = "aarch64-apple-darwin";
         let profile = "release";
@@ -1230,9 +1300,7 @@ mod tests {
 
     #[test]
     fn pack_shell_lookup_rejects_missing_wrong_and_traversing_binary_paths() {
-        let _environment_lock = ENVIRONMENT_LOCK
-            .lock()
-            .expect("environment test lock should not be poisoned");
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("pack-shell-invalid-paths");
         let target = "aarch64-apple-darwin";
         let _target = EnvironmentGuard::set_value("TARGET", target);
@@ -1255,9 +1323,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pack_shell_lookup_rejects_symlinked_binary() {
-        let _environment_lock = ENVIRONMENT_LOCK
-            .lock()
-            .expect("environment test lock should not be poisoned");
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("pack-shell-symlink");
         let target = "aarch64-apple-darwin";
         let _target = EnvironmentGuard::set_value("TARGET", target);
@@ -1281,9 +1347,7 @@ mod tests {
 
     #[test]
     fn cargo_target_dir_rejects_parent_traversal_and_file_root() {
-        let _environment_lock = ENVIRONMENT_LOCK
-            .lock()
-            .expect("environment test lock should not be poisoned");
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("pack-shell-target-root-invalid");
         {
             let _target_dir = EnvironmentGuard::set_value(CARGO_TARGET_DIR_ENV, "../outside");
@@ -1304,9 +1368,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn cargo_target_dir_rejects_symlinked_root() {
-        let _environment_lock = ENVIRONMENT_LOCK
-            .lock()
-            .expect("environment test lock should not be poisoned");
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("pack-shell-target-root-symlink");
         let outside = tree.path().join("outside");
         fs::create_dir_all(&outside).expect("outside directory should be creatable");
@@ -1316,6 +1378,26 @@ mod tests {
         let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_link);
         let error = resolve_cargo_target_dir(tree.path())
             .expect_err("symlinked target root must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cargo_target_dir_rejects_user_controlled_macos_var_alias() {
+        let _environment_lock = environment_lock();
+        let tree = TestTree::new("pack-shell-macos-var-alias");
+        let alias = Path::new("/var");
+        assert_ne!(
+            alias
+                .canonicalize()
+                .expect("macOS /var alias should resolve"),
+            alias
+        );
+        let target_dir = alias.join(format!("tobkiri-user-target-{}", std::process::id()));
+        let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &target_dir);
+
+        let error = resolve_cargo_target_dir(tree.path())
+            .expect_err("a user-controlled system alias must remain rejected");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
