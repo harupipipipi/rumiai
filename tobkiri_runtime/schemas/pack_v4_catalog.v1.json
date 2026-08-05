@@ -313,7 +313,9 @@
         "rumi_agent_continuity_pack.restart_evidence_packet",
         "rumi_agent_continuity_pack.run_summary_for_resume"
       ],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Declarative continuity packets for long-running agent restarts, compaction handoffs, attention drift recovery, and resume evidence.",
       "display_name": "Rumi Agent Continuity Pack",
       "execution_boundary": "declarative_only",
@@ -2214,7 +2216,9 @@
         "rumi_browser_session_replay_pack.screenshot_evidence_bundle",
         "rumi_browser_session_replay_pack.selector_drift_report"
       ],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Declarative browser session trace, evidence bundle, replay manifest, selector drift, and redaction contracts.",
       "display_name": "Rumi Browser Session Replay Pack",
       "execution_boundary": "declarative_only",
@@ -2435,6 +2439,7 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
+        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -2480,7 +2485,9 @@
         "rumi_code_migration_pack.repo_inventory",
         "rumi_code_migration_pack.risk_ledger"
       ],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Declarative planning contracts for large codebase migrations, codemod plans, PR shards, risk gates, and rollback handoffs.",
       "display_name": "Rumi Code Migration Pack",
       "execution_boundary": "declarative_only",
@@ -5286,6 +5293,7 @@
       "approval_policy": "none",
       "capabilities": [],
       "dependencies": {
+        "defaultspack": ">=2.0.0",
         "rumi_default_tools_pack": ">=1.0.0"
       },
       "description": "",
@@ -7388,7 +7396,9 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Declarative local-first marketplace pack for tag-based capability requirements, provider-independent model tiers, capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
       "display_name": "Rumi Knowledge Marketplace Pack",
       "execution_boundary": "declarative_only",
@@ -9208,7 +9218,9 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Declarative local-first observability pack for run ledgers, event evidence, privacy-safe cost/latency summaries, and incident review handoffs.",
       "display_name": "Rumi Observability Pack",
       "execution_boundary": "declarative_only",
@@ -9258,7 +9270,9 @@
     {
       "approval_policy": "none",
       "capabilities": [],
-      "dependencies": {},
+      "dependencies": {
+        "defaultspack": ">=2.0.0"
+      },
       "description": "Office authoring workflow and UI content without host authority.",
       "display_name": "Rumi Office Authoring Content",
       "execution_boundary": "sandbox",

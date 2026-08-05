@@ -10,7 +10,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:2326a430894f7347ebd479b0efc45f2fdd3fd5d102caff9807cab24fd437da23"
+      "source_identity": "sha256:6f7a695701463b9e1c5af92770a2bd29ce981f4d77a7ee3014f4c2c226272605"
     },
     "description": "Declarative local-first DevOps and release operations pack for CI triage, release evidence, runbooks, rollback plans, GitHub Actions, and Cloudflare Workers-aware operations.",
     "legacy_annotations": {

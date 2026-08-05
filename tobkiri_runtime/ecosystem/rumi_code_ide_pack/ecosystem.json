@@ -10,7 +10,7 @@
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:f5b1b3cdfe697491b9248aef60f274688a1f9f58b9b070b9be402a76c52bfddb"
+      "source_identity": "sha256:1bc571744e5d5be7435c0635e64da425623f4cc34e5a1dd8f041ef0142fef95d"
     },
     "description": "Optional advanced code, CLI, and IDE workflow profiles, prompts, presets, command recipes, and tool scope metadata.",
     "legacy_annotations": {
