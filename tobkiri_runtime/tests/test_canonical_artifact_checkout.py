@@ -110,9 +110,20 @@ def test_windows_checkout_preserves_all_canonical_v4_bytes(tmp_path: Path) -> No
     _extract_index_blobs(archive, index_tree)
 
     checkout = tmp_path / "windows-checkout"
-    _run_git("clone", "--quiet", "--no-checkout", str(source_repo), str(checkout), cwd=tmp_path)
-    _run_git("config", "core.autocrlf", "true", cwd=checkout)
-    _run_git("checkout", "--quiet", "--force", cwd=checkout)
+    checkout.mkdir()
+    _run_git(
+        "--git-dir",
+        str(source_repo / ".git"),
+        "--work-tree",
+        str(checkout),
+        "-c",
+        "core.autocrlf=true",
+        "checkout",
+        "--quiet",
+        "--force",
+        "HEAD",
+        cwd=tmp_path,
+    )
 
     for original in paths:
         relative = original.relative_to(REPOSITORY_ROOT)

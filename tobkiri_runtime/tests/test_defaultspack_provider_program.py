@@ -128,6 +128,22 @@ def _v4_provider_fixture(
         ),
         edge_key: "authority-ref:provider.generate",
     }
+    for requested_edge in source_profile["requested_edges"]:
+        if requested_edge["target_provider_id"] != "tobkiri.host.pack-control":
+            continue
+        requested_edge_key = "|".join(
+            requested_edge[field]
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        )
+        authority_bindings.setdefault(
+            requested_edge_key,
+            f"authority-ref:pack-control.{requested_edge['operation_id']}",
+        )
     resolved = resolve_default_profile(
         catalog,
         "defaults",

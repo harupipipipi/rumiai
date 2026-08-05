@@ -63,24 +63,12 @@ def _pretty(document: dict[str, Any]) -> bytes:
     return json.dumps(document, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
 
 
-def _requirements(pack_id: str, kind: str) -> dict[str, Any]:
-    if pack_id == "rumi-file-inspect":
-        capabilities = ["file.inspect", "workspace.metadata.read"]
-    elif pack_id == "tobkiri_host_pack_control":
-        capabilities = [
-            "pack.approval.commit",
-            "pack.approval.prepare",
-            "pack.catalog.read",
-            "dashboard.read",
-            "pack.disable",
-            "pack.enable",
-            "pack.install",
-            "pack.status.read",
-            "profile.reload",
-            "runtime.restart",
-        ]
-    else:
-        capabilities = []
+def _requirements(kind: str, existing: Any) -> dict[str, Any]:
+    """Preserve Pack-owned requirements without branching on a Pack identity."""
+
+    if isinstance(existing, dict):
+        return dict(existing)
+    capabilities: list[str] = []
     return {
         "pack_dependencies": {},
         "contract_dependencies": [],
@@ -90,9 +78,7 @@ def _requirements(pack_id: str, kind: str) -> dict[str, Any]:
         "execution_boundary": (
             "declarative_only"
             if kind == "base"
-            else "host_brokered"
-            if kind == "shell" or pack_id == "rumi-file-inspect"
-            else "sandbox"
+            else "host_brokered" if kind == "shell" else "sandbox"
         ),
         "approval_policy": "capability_gated" if capabilities else "none",
         "workspace_boundary": "host_brokered" if capabilities else "pack_local",
@@ -126,7 +112,9 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
                     "effect_ceiling": [],
                 }
             )
-    document["requirements"] = _requirements(pack_id, document["pack"]["kind"])
+    document["requirements"] = _requirements(
+        document["pack"]["kind"], document.get("requirements")
+    )
     document["operation_catalog"] = operations
     document["provider_catalog"] = providers
     identity_source = {
