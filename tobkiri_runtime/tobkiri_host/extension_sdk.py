@@ -149,7 +149,10 @@ class HostExtensionSDK:
     def register(self, request: HostExtensionRegistration) -> tuple[str, ...]:
         """Atomically register exact Provider identities or fail closed."""
         trust, domains, authorities = self._compile(request)
-        records: tuple[object, ...] = (trust, *domains, *authorities)
+        records: tuple[
+            HostExtensionTrustRecord | ExecutionDomain | ProviderAuthorityRecord,
+            ...,
+        ] = (trust, *domains, *authorities)
         with self._lock:
             if request.registration_id in self._active:
                 raise AuthorizationError("Host Extension registration already exists")

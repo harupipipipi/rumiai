@@ -766,7 +766,9 @@ def _flow_candidates(
             if not path.name.endswith(".flow.yaml"):
                 continue
             try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                data = _dict_or_empty(
+                    yaml.safe_load(path.read_text(encoding="utf-8"))
+                )
             except (OSError, yaml.YAMLError):
                 data = {}
             flow_id = str(data.get("flow_id") or path.name[: -len(".flow.yaml")]).strip()

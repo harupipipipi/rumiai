@@ -119,6 +119,8 @@ def _load_graph_from_yaml(path: Path) -> Optional[Any]:
         return None
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
         from .graph_models import load_graph_document
         return load_graph_document(data, source_path=str(path))
     except Exception:
