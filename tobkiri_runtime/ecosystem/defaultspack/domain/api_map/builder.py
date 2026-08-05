@@ -8,9 +8,6 @@ _DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parents[2]
 if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
 
-from core_runtime.profile_paths import active_profile_id
-from core_runtime.profile_workspace import ProfileWorkspaceManager
-from core_runtime.profile_runtime_selection import apply_profile_graph_selection
 from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
 from domain.external.input_profile_registry import InputProfileRegistry
@@ -534,89 +531,60 @@ def _add_function_reference(
 
 
 def _profile_selection_edges(profile_id: str | None) -> Dict[str, Any]:
-    resolved_profile_id = str(profile_id or active_profile_id() or "").strip()
-    if not resolved_profile_id:
-        return {"nodes": [], "edges": [], "diagnostics": [], "selected": {}, "profile_runtime": {}}
-    profile = ProfileWorkspaceManager().load_profile_yaml(resolved_profile_id)
-    if not profile:
+    plan = persisted_resolved_profile()
+    if plan is None:
         return {
             "nodes": [],
             "edges": [],
-            "diagnostics": [{"level": "warning", "code": "profile_not_found", "message": f"Profile '{resolved_profile_id}' was not found."}],
+            "diagnostics": [{"level": "error", "code": "v4_profile_not_active", "message": "Pack v4 resolved Profile is not active."}],
             "selected": {},
-            "profile_runtime": {"profile_id": resolved_profile_id, "found": False},
+            "profile_runtime": {"found": False},
         }
-    profile = apply_profile_graph_selection(profile)
-    metadata = mapping_or_empty(profile.get("metadata"))
-    selected = mapping_or_empty(metadata.get("selected"))
-    policy = mapping_or_empty(profile.get("policy"))
+    resolved_profile_id = str(plan.profile_id)
+    requested_profile_id = str(profile_id or resolved_profile_id).strip()
+    if requested_profile_id != resolved_profile_id:
+        return {
+            "nodes": [],
+            "edges": [],
+            "diagnostics": [{"level": "error", "code": "profile_not_active", "message": f"Profile '{requested_profile_id}' is not the verified v4 activation."}],
+            "selected": {},
+            "profile_runtime": {"profile_id": requested_profile_id, "found": False},
+        }
     profile_node: Dict[str, Any] = {
         "id": f"profile:{resolved_profile_id}",
         "kind": "profile",
-        "label": str(profile.get("name") or resolved_profile_id),
+        "label": resolved_profile_id,
         "ref": resolved_profile_id,
         "metadata": {
             "profile_id": resolved_profile_id,
-            "system_prompt_id": str(profile.get("system_prompt_id") or ""),
-            "default_prompt_id": str(profile.get("default_prompt_id") or ""),
-            "policy": {
-                "tool_allowlist": _string_list(policy.get("tool_allowlist")),
-                "api_route_allowlist": _string_list(policy.get("api_route_allowlist")),
-                "enforce_api_route_allowlist": bool(policy.get("enforce_api_route_allowlist", False)),
-            },
+            "profile_revision": str(plan.profile_revision),
+            "plan_hash": str(plan.plan_hash),
+            "authority": "verified-v4-activation",
         },
     }
     nodes = [profile_node]
     edges: List[Dict[str, Any]] = []
-    for category, prefix, edge_kind in (
-        ("tools", "tool", "selects"),
-        ("webhooks", "webhook", "receives_from"),
-        ("api_routes", "api", "allows_api"),
-        ("prompts", "prompt", "uses_prompt"),
-        ("frontend", "frontend", "uses_frontend"),
-    ):
-        for item in list_or_empty(selected.get(category)):
-            item_id = str(item or "").strip()
-            if not item_id:
-                continue
-            node_id = f"{prefix}:{item_id}"
-            nodes.append({"id": node_id, "kind": prefix, "label": item_id, "ref": item_id, "metadata": {"selected": True}})
-            edges.append(_edge(profile_node["id"], node_id, edge_kind, {"selected": True}))
-    diagnostics: List[Dict[str, Any]] = []
-    if policy.get("api_route_allowlist") and not policy.get("enforce_api_route_allowlist"):
-        diagnostics.append(
-            {
-                "level": "info",
-                "code": "api_route_allowlist_not_enforced",
-                "message": "API routes are selected, but enforce_api_route_allowlist=false, so this is documentation and preview only.",
-            }
-        )
+    for pack_id in plan.effective_pack_set:
+        node_id = f"pack:{pack_id}"
+        nodes.append({"id": node_id, "kind": "pack", "label": pack_id, "ref": pack_id, "metadata": {"effective": True}})
+        edges.append(_edge(profile_node["id"], node_id, "activates", {"verified": True}))
     normalized_selected = {
-        "tools": _string_list(selected.get("tools")),
-        "webhooks": _string_list(selected.get("webhooks")),
-        "api_routes": _string_list(selected.get("api_routes")),
-        "prompts": _string_list(selected.get("prompts")),
-        "frontend": _string_list(selected.get("frontend")),
-        "flows": _string_list(selected.get("flows")),
-        "nodes": _string_list(selected.get("nodes")),
+        "packs": list(plan.effective_pack_set),
+        "providers": [provider.provider_instance_id for provider in plan.providers],
     }
     return {
         "nodes": nodes,
         "edges": edges,
-        "diagnostics": diagnostics,
+        "diagnostics": [],
         "selected": normalized_selected,
         "profile_runtime": {
             "profile_id": resolved_profile_id,
             "found": True,
-            "name": str(profile.get("name") or resolved_profile_id),
+            "name": resolved_profile_id,
+            "profile_revision": str(plan.profile_revision),
+            "plan_hash": str(plan.plan_hash),
             "selected": normalized_selected,
-            "policy": {
-                "tool_allowlist": _string_list(policy.get("tool_allowlist")),
-                "api_route_allowlist": _string_list(policy.get("api_route_allowlist")),
-                "enforce_api_route_allowlist": bool(policy.get("enforce_api_route_allowlist", False)),
-            },
-            "system_prompt_id": str(profile.get("system_prompt_id") or ""),
-            "default_prompt_id": str(profile.get("default_prompt_id") or ""),
+            "authority": "verified-v4-activation",
         },
     }
 

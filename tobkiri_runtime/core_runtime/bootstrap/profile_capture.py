@@ -162,9 +162,9 @@ def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
 
     pointer = (
         runtime_user_data_root(base_dir)
-        / "profiles"
+        / "workspaces"
         / "defaults"
-        / "v4"
+        / "activation"
         / "active.json"
     )
     return pointer.is_file()
@@ -208,7 +208,7 @@ def capture_default_profile(
     activate it.  Restart only reloads the digest-bound activation envelope.
     """
     user_data = runtime_user_data_root(base_dir)
-    state_root = user_data / "profiles" / "defaults" / "v4"
+    state_root = user_data / "workspaces" / "defaults" / "activation"
     active_pointer = state_root / "active.json"
     if active_pointer.is_file():
         if confirmation is not None:

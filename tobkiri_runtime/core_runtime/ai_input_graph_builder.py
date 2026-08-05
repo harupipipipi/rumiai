@@ -20,7 +20,6 @@ from .ai_input_segments import (
     collect_prompt_segments,
     collect_tool_schema_segments,
 )
-from .profile_runtime_selection import apply_profile_graph_selection
 from .profile_workspace import ProfileWorkspaceManager
 
 
@@ -34,7 +33,9 @@ def build_ai_input_graph_response(
     request_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     del startup_catalog, ecosystem_dir
-    normalized_profile = apply_profile_graph_selection(profile)
+    # The caller must pass a projection of the verified v4 activation.  Do not
+    # reinterpret mutable Profile graph/YAML data into runtime permissions.
+    normalized_profile = copy.deepcopy(profile)
     profile_id = str(normalized_profile.get("profile_id") or "").strip()
     raw_metadata = normalized_profile.get("metadata")
     metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}

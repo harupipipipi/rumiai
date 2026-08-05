@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
 
-from core_runtime.profile_graph_models import normalize_profile_graph_selected
-from core_runtime.profile_workspace import ProfileWorkspaceManager
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
@@ -565,21 +563,10 @@ class FrontendRegistry:
         return self._dedupe_by_key(bindings, "part_id")
 
     def _profile_frontend_selection(self, profile_id: str | None) -> set[str]:
-        candidate = str(profile_id or "").strip()
-        if not candidate:
-            return set()
-        try:
-            profile = ProfileWorkspaceManager().load_profile_yaml(candidate)
-        except Exception:
-            return set()
-        metadata = _validated_dict(profile.get("metadata") if isinstance(profile, dict) else None)
-        selected = normalize_profile_graph_selected(metadata.get("selected"))
-        selected_frontend = selected.get("frontend")
-        return {
-            item_id
-            for item_id in (selected_frontend if isinstance(selected_frontend, list) else [])
-            if isinstance(item_id, str) and item_id.strip()
-        }
+        # Frontend attachment is resolved by v4 Shell/contract bindings.  The
+        # removed Profile YAML graph cannot filter the active Shell.
+        del profile_id
+        return set()
 
     def _filter_shell(self, shell: dict[str, Any], selected_frontend_ids: set[str]) -> dict[str, Any]:
         if not selected_frontend_ids:

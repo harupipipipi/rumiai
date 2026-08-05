@@ -34,7 +34,7 @@ def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
     session = capture_pack_control_session()
-    state_path = user_data / "profiles" / "defaults" / "v4" / "active.json"
+    state_path = user_data / "workspaces" / "defaults" / "activation" / "active.json"
     yield session, state_path, user_data
 
 
@@ -185,7 +185,7 @@ def test_missing_profile_and_symlinked_state_fail_closed(
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
     capture_pack_control_session()
-    pointer = user_data / "profiles" / "defaults" / "v4" / "active.json"
+    pointer = user_data / "workspaces" / "defaults" / "activation" / "active.json"
     pointer.unlink()
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")

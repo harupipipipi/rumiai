@@ -440,23 +440,15 @@ class DefaultsHttpServer:
 
     def _active_profile_policy(self):
         try:
-            from core_runtime.profile_paths import active_profile_id
-            from core_runtime.profile_workspace import ProfileWorkspaceManager
+            from core_runtime.resolved_profile_scope import persisted_resolved_profile
         except Exception:
             return None, {}
-        profile_id = str(active_profile_id() or "").strip()
-        if not profile_id:
+        plan = persisted_resolved_profile()
+        if plan is None:
             return None, {}
-        try:
-            profile = ProfileWorkspaceManager().load_profile_yaml(profile_id)
-        except Exception:
-            return profile_id, {}
-        policy = (
-            profile.get("policy")
-            if isinstance(profile, dict) and isinstance(profile.get("policy"), dict)
-            else {}
-        )
-        return profile_id, policy
+        # Route authority is enforced by v4 contract routing/Authority Kernel;
+        # mutable Profile YAML policy is deliberately not consulted here.
+        return str(plan.profile_id), {}
 
     def _route_allowed_by_active_profile(self, method, pattern):
         profile_id, policy = self._active_profile_policy()

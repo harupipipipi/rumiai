@@ -8,7 +8,6 @@ from typing import Any
 from .ai_input_models import PromptSegment, ToolSchemaSegment
 from .ai_input_token_estimator import estimate_json_tokens, estimate_tokens
 from .pack_trust import is_pack_trusted
-from .profile_graph_models import normalize_profile_graph_selected
 from .profile_workspace import ProfileWorkspaceManager, profile_workspace_payload
 
 _DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
@@ -230,10 +229,7 @@ def collect_policy_segment(profile: dict[str, Any]) -> PromptSegment:
 
 def _profile_prompt_ids(profile: dict[str, Any]) -> list[str]:
     metadata = _dict_value(profile.get("metadata"))
-    selected = normalize_profile_graph_selected(metadata.get("selected"))
-    selected_prompts = _list_value(selected.get("prompts"))
     candidates: list[Any] = [
-        *selected_prompts,
         profile.get("system_prompt_id"),
         profile.get("default_prompt_id"),
         metadata.get("system_prompt_id"),

@@ -679,10 +679,9 @@ def test_prepare_chat_run_propagates_conversation_workspace_to_tool_context(tmp_
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_path, monkeypatch):
+def test_prepare_chat_run_ignores_conversation_legacy_profile_policy(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
-    from domain.tool.schema_adapter import max_tool_calls
 
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(
@@ -695,10 +694,9 @@ def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_
         {},
     )
 
-    assert prepared.request_context.get("profile_id") == "defaultspack.mimo_coding_company"
-    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert prepared.tool_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert max_tool_calls(prepared.tool_context) == 18
+    assert prepared.request_context.get("profile_id") == "defaults"
+    assert prepared.request_context.get("ignored_requested_profile_id") == "defaultspack.mimo_coding_company"
+    assert "profile_policy" not in prepared.request_context
     ChatStore._instance = None
 
 
@@ -808,7 +806,7 @@ def test_approval_probe_restores_canonical_module_aliases() -> None:
     assert contract_adapter.approval is approval
 
 
-def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):
+def test_prepare_chat_run_does_not_merge_legacy_workspace_profile(tmp_path, monkeypatch):
     from domain.chat.run_request import _profile_snapshot, prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -837,11 +835,11 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
         {},
     )
 
-    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert "coding_file_read" in prepared.request_context.get("profile_policy", {}).get("tool_allowlist", [])
+    assert prepared.request_context.get("profile_id") == "defaults"
+    assert "profile_policy" not in prepared.request_context
     tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
-    assert "artifact_export" not in tool_names
+    assert "artifact_export" in tool_names
     _profile_snapshot.cache_clear()
     ChatStore._instance = None
 
@@ -897,7 +895,7 @@ def test_prepare_chat_run_marks_selected_terminal_unattached_when_profile_exclud
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_path, monkeypatch):
+def test_prepare_chat_run_does_not_trust_runtime_yaml_as_profile_authority(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -944,21 +942,15 @@ def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_pa
         {"runtime_profile": runtime_profile},
     )
 
-    assert prepared.tool_context["agent_id"] == "client_manager"
-    assert prepared.tool_context["runtime_profile"]["defaultspack"]["agents"]["client_manager"]["tools"] == [
-        "coding_file_read",
-        "coding_terminal_exec",
-        "coding_file_write",
-    ]
-    assert "unselected_requested_tools" not in prepared.tool_context
+    assert prepared.tool_context["agent_id"] == "agent"
+    assert prepared.tool_context["runtime_profile"]["profile_id"] == "defaults"
+    assert {
+        item["tool_name"] for item in prepared.tool_context["unselected_requested_tools"]
+    } == {"coding_terminal_exec"}
     assert _external_provider_tool_names(prepared) == {
         "coding_file_read",
-        "coding_terminal_exec",
         "coding_file_write",
     }
-    assert {"coding_file_read", "coding_terminal_exec", "coding_file_write"}.issubset(
-        prepared.connected_tool_names
-    )
     ChatStore._instance = None
 
 
@@ -994,11 +986,13 @@ def test_prepare_chat_run_infers_raw_tool_mentions_as_turn_tools(tmp_path, monke
 
     assert prepared.input_data["tools"] == ["coding_terminal_exec"]
     assert prepared.tool_context["requested_tool_ids"] == ["coding_terminal_exec"]
-    assert prepared.tool_context["agent_id"] == "client_manager"
-    assert "unselected_requested_tools" not in prepared.tool_context
+    assert prepared.tool_context["agent_id"] == "agent"
+    assert [
+        item["tool_name"] for item in prepared.tool_context["unselected_requested_tools"]
+    ] == ["coding_terminal_exec"]
     assert not prepared.request_context.get("user_requested_computer_use")
-    assert _external_provider_tool_names(prepared) == {"coding_terminal_exec"}
-    assert "coding_terminal_exec" in prepared.connected_tool_names
+    assert _external_provider_tool_names(prepared) == set()
+    assert "coding_terminal_exec" not in prepared.connected_tool_names
     ChatStore._instance = None
 
 

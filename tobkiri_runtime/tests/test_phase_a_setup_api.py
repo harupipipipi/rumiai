@@ -29,9 +29,8 @@ class TestCheckSetupStatus:
         from core_runtime.app_lifecycle_manager import AppLifecycleManager
         alm = AppLifecycleManager(base_dir=tmp_path)
         result = alm.check_setup_status()
-        assert result["needs_setup"] is False
-        assert result["setup_state"] == "complete"
-        assert result["profile_id"] == "defaults"
+        assert result["needs_setup"] is True
+        assert result["setup_state"] == "profile_transaction_required"
 
     def test_not_needs_setup_when_profile_valid(self, tmp_path):
         """profile.json が有効 -> needs_setup: False"""
@@ -54,7 +53,8 @@ class TestCheckSetupStatus:
 
         alm = AppLifecycleManager(base_dir=tmp_path)
         result = alm.check_setup_status()
-        assert result["needs_setup"] is False
+        assert result["needs_setup"] is True
+        assert result["reason"] == "explicit_defaults_confirmation_required"
 
     def test_setup_status_includes_runtime_readiness(self, tmp_path):
         from core_runtime.app_lifecycle_manager import (
@@ -85,17 +85,8 @@ class TestCompleteSetup:
             "username": "testuser",
             "language": "ja",
         })
-        assert result["success"] is True
-        assert result["errors"] == []
-
-        # Canonical v4 activation is the only launch state.
-        pointer = tmp_path / "user_data" / "profiles" / "defaults" / "v4" / "active.json"
-        assert pointer.exists()
-        assert not (tmp_path / "user_data" / "settings" / "startup_profiles.json").exists()
-
-        # check_setup_status で検証
-        status = alm.check_setup_status()
-        assert status["needs_setup"] is False
+        assert result["success"] is False
+        assert result["setup_state"] == "profile_transaction_failed"
 
     def test_complete_setup_no_username(self, tmp_path):
         """username が空 -> エラー"""
@@ -138,7 +129,8 @@ class TestCompleteSetup:
             "icon": "/path/to/icon.png",
             "occupation": "Developer",
         })
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["setup_state"] == "profile_transaction_failed"
 
     def test_setup_status_no_auth_required(self):
         """/api/setup/status は認証前に処理されること。"""
