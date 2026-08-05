@@ -34,7 +34,7 @@ _settings = {
     "step_delay": 1.0,
 }
 
-_tasks = {}
+_tasks: dict[str, "OperatorTask"] = {}
 _task_lock = threading.Lock()
 
 

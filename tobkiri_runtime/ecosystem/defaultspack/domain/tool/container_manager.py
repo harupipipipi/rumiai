@@ -52,7 +52,7 @@ def _run_cmd(args, timeout=30):
 # ---------------------------------------------------------------------------
 # インメモリ コンテナ管理
 # ---------------------------------------------------------------------------
-_containers = {}
+_containers: dict[str, "ContainerInfo"] = {}
 
 
 class DockerUnavailableError(RuntimeError):
