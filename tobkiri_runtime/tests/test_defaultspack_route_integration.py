@@ -557,9 +557,14 @@ def test_authority_test_request_endpoint_is_disabled_by_default(monkeypatch):
 
 
 def test_authority_test_request_endpoint_rejects_legacy_authority_probe(monkeypatch):
+    import core_runtime.host_contract as host_contract
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
-    monkeypatch.setenv("RUMI_AUTHORITY_TEST_ENDPOINT", "1")
+    monkeypatch.setattr(
+        host_contract,
+        "host_contract_value",
+        lambda key: "1" if key == "authority_test_endpoint" else "",
+    )
     server = DefaultsHttpServer(facade=None)
 
     result = server._handle_authority_test_request(
@@ -574,7 +579,47 @@ def test_authority_test_request_endpoint_rejects_legacy_authority_probe(monkeypa
     )
 
     assert result["status"] == "error"
-    assert result["error"]["code"] == "AUTHORITY_TEST_DISABLED"
+    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
+    assert "legacy authority workflow is unavailable" in result["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "request_data", "path_params"),
+    [
+        ("_handle_authority_requests", {"status": "pending"}, {}),
+        ("_handle_authority_request", {}, {"request_id": "auth-1"}),
+        (
+            "_handle_authority_approve",
+            {"scope": "once"},
+            {"request_id": "auth-1"},
+        ),
+        (
+            "_handle_authority_challenge",
+            {"decision": "approve"},
+            {"request_id": "auth-1"},
+        ),
+        (
+            "_handle_authority_deny",
+            {"reason": "denied"},
+            {"request_id": "auth-1"},
+        ),
+    ],
+)
+def test_retired_authority_compatibility_handlers_fail_closed(
+    handler_name: str,
+    request_data: dict[str, Any],
+    path_params: dict[str, str],
+) -> None:
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer(facade=None)
+    handler = getattr(server, handler_name)
+
+    result = handler(request_data, path_params)
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
+    assert "legacy authority workflow is unavailable" in result["error"]["message"]
 
 
 def test_authority_test_request_route_is_not_registered():

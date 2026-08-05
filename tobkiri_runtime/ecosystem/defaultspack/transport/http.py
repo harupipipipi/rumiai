@@ -19,7 +19,7 @@ import threading
 import http.server
 import urllib.parse
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NoReturn
 
 from core_runtime.api.safe_headers import (
     RESERVED_REQUEST_CONTEXT_KEYS,
@@ -46,6 +46,14 @@ from transport.registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _removed_authority_boundary() -> NoReturn:
+    """Enter the retired authority boundary, which always fails closed."""
+    from core_runtime.legacy_runtime_removed import removed_authority_service
+
+    removed_authority_service()
+    raise RuntimeError("retired authority boundary unexpectedly returned")
 
 
 def _mapping_or_empty(value: Any) -> dict[str, Any]:
@@ -1122,61 +1130,18 @@ class DefaultsHttpServer:
         return response
 
     def _handle_authority_requests(self, request_data, path_params):
-        del path_params
+        del request_data, path_params
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            debug_binding = None
-            if request_data.get("debug_session_id"):
-                debug_binding = {
-                    key: request_data.get(key)
-                    for key in (
-                        "debug_session_id",
-                        "lease_epoch",
-                        "debug_run_id",
-                        "workspace_identity_digest",
-                        "pack_id",
-                        "profile_id",
-                    )
-                }
-            return ok(
-                removed_authority_service().list_requests(
-                    str(request_data.get("status") or "all"),
-                    actor_principal=request_data.get("_authenticated_principal"),
-                    **({"debug_binding": debug_binding} if debug_binding else {}),
-                )
-            )
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
     def _handle_authority_request(self, request_data, path_params):
-        request_id = str((path_params or {}).get("request_id") or "").strip()
+        del request_data, path_params
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            debug_binding = None
-            if request_data.get("debug_session_id"):
-                debug_binding = {
-                    key: request_data.get(key)
-                    for key in (
-                        "debug_session_id",
-                        "lease_epoch",
-                        "debug_run_id",
-                        "workspace_identity_digest",
-                        "pack_id",
-                        "profile_id",
-                    )
-                }
-            result = removed_authority_service().get_request(
-                request_id,
-                actor_principal=request_data.get("_authenticated_principal"),
-                **({"debug_binding": debug_binding} if debug_binding else {}),
-            )
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
-        if not result.get("success"):
-            return self._authority_http_error(result, "AUTHORITY_NOT_FOUND")
-        return ok(result.get("request"))
 
     def _handle_authority_test_request(self, request_data, path_params):
         del path_params
@@ -1191,66 +1156,8 @@ class DefaultsHttpServer:
             response["_http_status"] = 404
             return response
 
-        def clean_string(key, fallback):
-            value = str(request_data.get(key) or fallback).strip()
-            return value or fallback
-
-        resource = {
-            "kind": "model",
-            "provider_id": clean_string("provider_id", "openai"),
-            "api_id": clean_string("api_id", "authority-window-smoke"),
-            "model_id": clean_string("model_id", "gpt-5.4-test"),
-            "stream": bool(request_data.get("stream", True)),
-        }
-        for key in (
-            "model_ref",
-            "pack_id",
-            "app_display_name",
-            "provider_display_name",
-            "model_display_name",
-            "credential_label",
-            "endpoint_url",
-            "endpoint_path",
-            "domain",
-            "transport",
-            "provider_transport",
-            "provider_kind",
-        ):
-            value = str(request_data.get(key) or "").strip()
-            if value:
-                resource[key] = value
-        if request_data.get("port") is not None:
-            try:
-                resource["port"] = int(request_data.get("port"))
-            except (TypeError, ValueError):
-                pass
-        if request_data.get("input_tokens") is not None:
-            try:
-                resource["input_tokens"] = max(0, int(request_data.get("input_tokens")))
-            except (TypeError, ValueError):
-                pass
-
-        profile_id = clean_string("profile_id", "authority-test")
-        node_id = clean_string("node_id", "approval-window")
-        conversation_id = str(request_data.get("conversation_id") or "").strip() or None
-        reason = str(request_data.get("reason") or "Authority approval window smoke test").strip()
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            decision = removed_authority_service().check(
-                principal_id="",
-                permission_id="model.invoke",
-                resource=resource,
-                reason=reason,
-                conversation_id=conversation_id,
-                profile_id=profile_id,
-                node_id=node_id,
-            )
-            data = decision.to_dict()
-            data["approval_url"] = (
-                f"/approval?request_id={decision.request_id}" if decision.request_id else None
-            )
-            return ok(data)
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
@@ -1288,96 +1195,25 @@ class DefaultsHttpServer:
         )
 
     def _handle_authority_approve(self, request_data, path_params):
-        request_id = str((path_params or {}).get("request_id") or "").strip()
-        config = (
-            request_data.get("config") if isinstance(request_data.get("config"), dict) else None
-        )
-        ui_operator = (
-            request_data.get("ui_operator")
-            if isinstance(request_data.get("ui_operator"), dict)
-            else None
-        )
-        related_permissions = request_data.get("related_permissions")
-        if not isinstance(related_permissions, list):
-            related_permissions = []
-        approval_kwargs = {
-            "scope": str(request_data.get("scope") or "once"),
-            "config": config,
-            "expires_in_seconds": request_data.get("expires_in_seconds"),
-            "ui_operator": ui_operator,
-        }
-        if isinstance(request_data.get("debug_cli_operator"), dict):
-            approval_kwargs["debug_cli_operator"] = request_data["debug_cli_operator"]
-            approval_kwargs["expected_digest"] = str(request_data.get("expected_digest") or "")
-        if isinstance(request_data.get("attestation"), dict):
-            approval_kwargs["attestation"] = request_data.get("attestation")
-        if related_permissions:
-            approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
+        del request_data, path_params
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            result = removed_authority_service().approve_request(
-                request_id,
-                actor_principal=request_data.get("_authenticated_principal"),
-                **approval_kwargs,
-            )
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
-        if not result.get("success"):
-            return self._authority_http_error(result)
-        return ok(result)
 
     def _handle_authority_challenge(self, request_data, path_params):
-        request_id = str((path_params or {}).get("request_id") or "").strip()
+        del request_data, path_params
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            result = removed_authority_service().create_approval_challenge(
-                request_id,
-                decision=str(request_data.get("decision") or "approve"),
-                scope=str(request_data.get("scope") or "once"),
-                expires_in_seconds=request_data.get("expires_in_seconds"),
-                actor_principal=request_data.get("_authenticated_principal"),
-            )
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
-        if not result.get("success"):
-            return self._authority_http_error(result)
-        return ok(result)
 
     def _handle_authority_deny(self, request_data, path_params):
-        request_id = str((path_params or {}).get("request_id") or "").strip()
-        ui_operator = (
-            request_data.get("ui_operator")
-            if isinstance(request_data.get("ui_operator"), dict)
-            else None
-        )
+        del request_data, path_params
         try:
-            from core_runtime.legacy_runtime_removed import removed_authority_service
-
-            result = removed_authority_service().deny_request(
-                request_id,
-                reason=str(request_data.get("reason") or ""),
-                persist=bool(request_data.get("persist") or request_data.get("remember")),
-                ui_operator=ui_operator,
-                debug_cli_operator=(
-                    request_data.get("debug_cli_operator")
-                    if isinstance(request_data.get("debug_cli_operator"), dict)
-                    else None
-                ),
-                expected_digest=str(request_data.get("expected_digest") or ""),
-                actor_principal=request_data.get("_authenticated_principal"),
-                **(
-                    {"attestation": request_data.get("attestation")}
-                    if isinstance(request_data.get("attestation"), dict)
-                    else {}
-                ),
-            )
+            _removed_authority_boundary()
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
-        if not result.get("success"):
-            return self._authority_http_error(result)
-        return ok(result)
 
     def _handle_health(self, request_data, path_params):
         return ok(
