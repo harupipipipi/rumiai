@@ -17,6 +17,7 @@ RETIRED_MODULES = {
     "capability_executor.py",
     "capability_graph_compiler.py",
     "capability_graph_loader.py",
+    "capability_graph_handlers.py",
     "component_lifecycle.py",
     "control_panel_handlers.py",
     "ecosystem_nodes.py",
@@ -27,8 +28,14 @@ RETIRED_MODULES = {
     "kernel_core.py",
     "kernel_handlers_system.py",
     "permission_manager.py",
+    "profile_graph_builder.py",
     "profile_loader.py",
+    "profile_models.py",
+    "profile_node_registry.py",
+    "node_state.py",
+    "port_standards.py",
     "startup_capability_bridge.py",
+    "startup_profiles.py",
 }
 
 
