@@ -73,7 +73,7 @@
       "owner": "runtime.tauri.application.default",
       "contract_reference": "runtime.tauri.application.v1",
       "provider_id": "runtime.tauri.application.default",
-      "source_kind": "v3_contract",
+      "source_kind": "canonical_v4_contract",
       "effect_ceiling": []
     }
   ],
@@ -88,7 +88,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:cfc892c80c522c4d859204081d6734edefa03df6ab98277a93d3fa0ac3fd198e",
+    "source_identity": "sha256:da6bd445e78568ca44b29478e9b54a088089762aa5e9758b5037e6c2d67f9b7e",
     "artifact_set_digest": "sha256:3046f56a6d3f616e347bcaada4e2cdc90e55cf20a539648a1d3fd14b7bd491fe",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }

@@ -39,6 +39,8 @@ class BackendStatus:
     conformance_only: bool = True
     satisfied_gates: frozenset[str] = frozenset()
     unavailable_reason: str | None = None
+    enforces_platform: bool = False
+    requires_platform_attestation: bool = False
 
     @property
     def ready_for_production(self) -> bool:
@@ -92,7 +94,9 @@ class BackendRegistry:
         if backend is None:
             raise BackendUnavailableError("pinned backend is not installed")
         status = backend.status
-        if status.platform != f"{binding.variant.os}-{binding.variant.architecture}":
+        if status.enforces_platform and status.platform != (
+            f"{binding.variant.os}-{binding.variant.architecture}"
+        ):
             raise BackendUnavailableError("backend platform does not match pinned variant")
         if status.execution_kind is not binding.variant.execution_kind:
             raise BackendUnavailableError("backend execution kind mismatch")

@@ -188,7 +188,7 @@ def test_historical_v1_migrates_without_silent_authority_expansion(
         clock=fixture.harness.clock,
     )
 
-    assert _schema_version(fixture.path) == "2"
+    assert _schema_version(fixture.path) == "3"
     assert "request_id" in _lease_columns(fixture.path)
     assert migrated.security_epoch == 1
     assert migrated.grant_usage(fixture.harness.grant.grant_id) == (0, 1)

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from tobkiri_host.errors import HostCoreError
+
 from .pack_boundary import load_pack_catalog, resolve_pack_root
 from .paths import USER_DATA_DIR
 
@@ -35,8 +37,10 @@ PACK_CONTROL_OPERATIONS = frozenset(
 _CANDIDATE_TTL_SECONDS = 120.0
 
 
-class PackControlDenied(RuntimeError):
+class PackControlDenied(HostCoreError):
     """A Pack control request failed its captured authority boundary."""
+
+    code = "pack_control_denied"
 
 
 @dataclass(frozen=True)
@@ -337,7 +341,11 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
         "profile_id": resolved["profile_id"],
         "workspace_id": resolved["profile_id"],
         "base_pack": resolved["base"]["pack_id"],
-        "packs": [str(item["pack_id"]) for item in resolved["packs"]],
+        "packs": [
+            str(item["pack_id"])
+            for item in resolved["packs"]
+            if item.get("role") != "application"
+        ],
     }
     _safe_identity(profile.get("profile_id"), "Profile ID")
     _safe_identity(

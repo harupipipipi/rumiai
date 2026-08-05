@@ -33,7 +33,6 @@ from .errors import (
 )
 from .models import (
     EffectClass,
-    ExecutionKind,
     InvocationFrame,
     OpaqueAuthorityRef,
     RequestContext,
@@ -384,7 +383,7 @@ class RequestBroker:
             or not evidence.authenticated_channel
             or not evidence.nonce_fresh
         )
-        if backend.status.execution_kind is ExecutionKind.PACK_VM:
+        if backend.status.requires_platform_attestation:
             mismatch = mismatch or (
                 evidence.platform != backend.status.platform
                 or evidence.isolation_profile

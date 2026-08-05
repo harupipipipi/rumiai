@@ -73,7 +73,7 @@
       "owner": "dev.tauri.toolchain.default",
       "contract_reference": "dev.tauri.toolchain.v1",
       "provider_id": "dev.tauri.toolchain.default",
-      "source_kind": "v3_contract",
+      "source_kind": "canonical_v4_contract",
       "effect_ceiling": []
     }
   ],
@@ -88,7 +88,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:7552ea347e7d7e884ee84b1f80750abfb8bc0aae6fab4a07d31de264a1cc562e",
+    "source_identity": "sha256:ed63fe9314ef8da188093bdc61d067e4ad44484e93577d5b882bfa67e2d63114",
     "artifact_set_digest": "sha256:e19f5bc57ad14078a6df58890859a0712b798415ed320c9bb269efeeacec223f",
     "contract_catalog_digest": "sha256:29b7531b0c085b4f6b9cb3bcd1fe08480b3927b9ee6640c3a2297587c9f53bbc"
   }

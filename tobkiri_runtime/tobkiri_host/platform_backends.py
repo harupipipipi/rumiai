@@ -149,6 +149,8 @@ class ProductionIsolationBackend:
             conformance_only=not ready,
             satisfied_gates=REQUIRED_PRODUCTION_GATES if ready else frozenset(),
             unavailable_reason=reason,
+            enforces_platform=True,
+            requires_platform_attestation=True,
         )
 
     def materialize(

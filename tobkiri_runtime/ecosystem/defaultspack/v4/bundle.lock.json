@@ -14,7 +14,7 @@
     {
       "path": "packs/dev.tauri.toolchain.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:bd2bedbc46e4f7010df6e5ae3824184db94603d23e282c4e9960947933d05585"
+      "digest": "sha256:25753127532c8caadb1b5fce16fe605a62f6cf29a280033831b70e1a5cbb3d97"
     },
     {
       "path": "packs/rumi-file-inspect.pack.v4.json",
@@ -34,7 +34,7 @@
     {
       "path": "packs/runtime.tauri.application.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:1d6327d10b6081b091e501dcd7f058fe15bde95733aa069b2d968b5a11c9e271"
+      "digest": "sha256:d75c399f62cce73156cb7d4c02559343ee0f5db6976c1ff50602e61428a448ac"
     },
     {
       "path": "packs/shell.cli.default.pack.v4.json",
