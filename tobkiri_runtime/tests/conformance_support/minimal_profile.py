@@ -16,10 +16,10 @@ from typing import Any, Mapping
 from core_runtime.authority.v4 import AuthorityScope, FunctionPrincipal
 from tobkiri_protocol.canonical import canonical_digest
 
-from ..backends import BackendStatus
-from ..contracts import OperationRoute, ResolvedOperationBinding
-from ..effects import EffectDisposition, ProviderOutcome
-from ..models import (
+from tobkiri_host.backends import BackendStatus
+from tobkiri_host.contracts import OperationRoute, ResolvedOperationBinding
+from tobkiri_host.effects import EffectDisposition, ProviderOutcome
+from tobkiri_host.models import (
     ArtifactVariant,
     ContractOperation,
     ExecutionKind,
@@ -30,8 +30,8 @@ from ..models import (
     RequestContext,
     RuntimeEvidence,
 )
-from ..composition import AuthorityCeilings, HostV4Composition
-from ..broker import RequestEnvelope
+from tobkiri_host.composition import AuthorityCeilings, HostV4Composition
+from tobkiri_host.broker import RequestEnvelope
 
 MINIMAL_PROFILE_ID = "conformance.minimal"
 MINIMAL_BASE_ID = "conformance.minimal.base"
@@ -66,7 +66,7 @@ MINIMAL_SHELL_DEFINITION_DIGEST = _digest("shell-definition")
 MINIMAL_CONTRACT_REVISION_DIGEST = _digest("echo-contract")
 MINIMAL_BACKEND_DIGEST = _digest("conformance-backend")
 MINIMAL_PACK_ROOT = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / "fixtures"
     / "conformance_minimal_echo_pack"
 )
@@ -316,7 +316,7 @@ def minimal_profile() -> MinimalProfile:
         "authority_references": [authority_reference],
         "profile_authority_snapshot_digest": MINIMAL_PROFILE_AUTHORITY_DIGEST,
         "provenance": _provenance(
-            "tobkiri_host/conformance/minimal_profile.py",
+            "tests/conformance_support/minimal_profile.py",
             _digest("minimal-profile-source"),
         ),
     }

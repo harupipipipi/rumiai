@@ -1712,6 +1712,7 @@ def test_double_authority_is_zero_by_production_reachability() -> None:
 def test_retired_setup_functions_and_conformance_pack_are_not_production_packs() -> None:
     assert not (RUNTIME / "bootstrap.py").exists()
     assert not (RUNTIME / "rumi_setup").exists()
+    assert not (RUNTIME / "tobkiri_host" / "conformance").exists()
     lifecycle_source = (
         RUNTIME / "core_runtime" / "app_lifecycle_manager.py"
     ).read_text(encoding="utf-8")
@@ -1728,8 +1729,7 @@ def test_retired_setup_functions_and_conformance_pack_are_not_production_packs()
     assert not (ECOSYSTEM / "conformance_minimal_echo_pack").exists()
     assert (
         RUNTIME
-        / "tobkiri_host"
-        / "conformance"
+        / "tests"
         / "fixtures"
         / "conformance_minimal_echo_pack"
         / "pack.v4.json"

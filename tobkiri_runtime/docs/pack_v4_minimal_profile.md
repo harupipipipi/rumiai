@@ -1,6 +1,6 @@
 # Pack v4 minimal Profile
 
-`tobkiri_host.conformance.minimal_profile` is the smallest independent Profile
+`tests.conformance_support.minimal_profile` is the smallest independent Profile
 fixture for validating the v4 execution spine before Defaults Profile integration.
 
 It contains only:

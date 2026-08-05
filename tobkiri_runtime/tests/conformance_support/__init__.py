@@ -1,4 +1,4 @@
-"""Small, Defaults-independent Pack v4 conformance fixtures."""
+"""Test-only, Defaults-independent Pack v4 conformance fixtures."""
 
 from .minimal_profile import (
     MINIMAL_BACKEND_ID,

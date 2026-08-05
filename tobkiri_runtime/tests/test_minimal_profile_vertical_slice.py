@@ -11,7 +11,7 @@ from tobkiri_host.admission import AdmissionEstimate, QueueScope, ResourceReserv
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.broker import AdmissionTicket, RequestBroker
 from tobkiri_host.composition import HostV4Composition
-from tobkiri_host.conformance import (
+from tests.conformance_support import (
     MINIMAL_CONTRACT_ID,
     MINIMAL_OPERATION_ID,
     MinimalConformanceBackend,

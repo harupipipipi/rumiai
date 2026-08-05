@@ -5,12 +5,12 @@
   "artifacts": [
     {
       "path": "pack.v4.json",
-      "digest": "sha256:73e997c090af8edda28cbfdcd291bc2bd564d4df96079cfda81dc648746a603d",
+      "digest": "sha256:e0515041ed7a1ffaba3745c0e1fa48b02e659feb60022dfa35d415f2cd96605f",
       "role": "canonical_manifest"
     },
     {
       "path": "contracts.v4.json",
-      "digest": "sha256:bb9add47f59e77d7d0f1d097f2183d21947f77268ff7c4f542482d12de9c4756",
+      "digest": "sha256:907400751ac76752899e89a825dcfe76c69eeb355f948d1c823d185ccff21733",
       "role": "contract_catalog"
     },
     {
@@ -22,6 +22,6 @@
   "artifact_set_digest": "sha256:6d513be7f7a46769266b36dc4d02ab837b07a8baf73a549ff3d965a3ac8c9bd3",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:3f8e3d3f76c723bbd3383b8d72c630f324cbfc94f518fb5fae6da3fcc2a5cd05"
+    "signed_digest": "sha256:f220d224d569ea98e402795c98183e971864d5ce5555267560934fbda3014ae0"
   }
 }
