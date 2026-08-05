@@ -22,7 +22,7 @@ class ContractToolCatalog:
         try:
             snapshot = _invoke("list", {})
         except GlobalContractUnavailable:
-            return _v4_scoped_registry().list_tools(filter_dict)
+            return []
         definitions = (
             snapshot.get("definitions") if isinstance(snapshot, Mapping) else []
         )
@@ -45,7 +45,7 @@ class ContractToolCatalog:
         try:
             value = _invoke("resolve", {"tool_id": tool_name})
         except GlobalContractUnavailable:
-            return _v4_scoped_registry().get(tool_name)
+            return None
         definition = value.get("definition") if isinstance(value, Mapping) else None
         return _legacy_shape(definition) if isinstance(definition, Mapping) else None
 
@@ -95,10 +95,3 @@ def _legacy_shape(value: Mapping[str, Any]) -> dict[str, Any]:
             "source_adapter_id": value.get("source_adapter_id"),
         },
     }
-
-
-def _v4_scoped_registry():
-    """Temporary in-process adapter limited to the verified v4 effective set."""
-    from domain.tool.registry import ToolRegistry
-
-    return ToolRegistry()

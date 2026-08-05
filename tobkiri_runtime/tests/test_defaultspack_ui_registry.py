@@ -118,6 +118,24 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             with patch("domain.frontend.registry.AIClient") as mock_client, patch(
                 "domain.frontend.registry.selected_extension_pack_ids",
                 return_value={"defaultspack"},
+            ), patch(
+                "domain.tool.catalog_contract_client._invoke",
+                return_value={
+                    "definitions": [
+                        {
+                            "tool_id": "contract-tool",
+                            "display_name": "Contract Tool",
+                            "description": "A v4 contract tool.",
+                            "input_schema": {"type": "object", "properties": {}},
+                            "execution": {},
+                            "risk": "low",
+                            "policy_tags": [],
+                            "aliases": [],
+                            "widget": {},
+                            "authority": "service.invoke",
+                        }
+                    ]
+                },
             ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 registry = FrontendRegistry(pack_root=pack_root)
@@ -133,68 +151,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         parts = {part["id"]: part for part in catalog["parts"]}
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
 
-        self.assertIn("web_search", sidebar_ids)
-        self.assertIn("todo", sidebar_ids)
-        self.assertIn("subagent", sidebar_ids)
-        self.assertIn("browser_use", sidebar_ids)
-        self.assertIn("computer_use", sidebar_ids)
-        computer_use_item = next(
-            item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use"
-        )
-        self.assertEqual(computer_use_item["label"], "Computer Use")
-        self.assertEqual(computer_use_item["panel"]["title"], "Computer Use")
-        browser_use_item = next(
-            item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use"
-        )
-        browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
-        self.assertEqual(browser_use_field_ids, {"default_target", "mode", "safety", "quality"})
-        self.assertNotIn("url", browser_use_field_ids)
-        self.assertNotIn("x", browser_use_field_ids)
-        self.assertIn(
-            "Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"])
-        )
-        browser_companion_item = next(
-            item for item in catalog["sidebar"]["items"] if item["id"] == "browser_companion"
-        )
-        browser_companion_fields = {
-            field["id"]: field for field in browser_companion_item["panel"]["fields"]
-        }
-        browser_companion_actions = {
-            action["id"]: action
-            for action in browser_companion_item["panel"].get("actions", [])
-        }
-        self.assertEqual(
-            browser_companion_fields["browser_companion_setup_guide"]["type"], "readonly"
-        )
-        self.assertEqual(browser_companion_fields["extension_folder"]["type"], "readonly")
-        self.assertEqual(browser_companion_fields["default_server_url"]["type"], "readonly")
-        self.assertIn(
-            "bridge.pairing",
-            browser_companion_fields["browser_companion_setup_guide"]["default"],
-        )
-        self.assertEqual(
-            browser_companion_actions["browser_companion.session"]["endpoint"],
-            "/api/tools/browser-companion/session",
-        )
-        web_search_item = next(
-            item for item in catalog["sidebar"]["items"] if item["id"] == "web_search"
-        )
-        web_search_field_ids = {field["id"] for field in web_search_item["panel"]["fields"]}
-        self.assertEqual(
-            web_search_field_ids, {"default_result_limit", "freshness_window", "safe_search"}
-        )
-        self.assertNotIn("query", web_search_field_ids)
-        for item in catalog["sidebar"]["items"]:
-            if item.get("category") != "tool":
-                continue
-            fields = item.get("panel", {}).get("fields", [])
-            field_ids = {field["id"] for field in fields if isinstance(field, dict)}
-            runtime_args = set()
-            for note in item.get("panel", {}).get("notes", []):
-                if isinstance(note, str) and note.startswith("Runtime arguments: "):
-                    raw_names = note.removeprefix("Runtime arguments: ").rstrip(".")
-                    runtime_args = {name.strip() for name in raw_names.split(",") if name.strip()}
-            self.assertFalse(field_ids & runtime_args)
+        self.assertIn("contract-tool", sidebar_ids)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
         self.assertIn("system_info", section_ids)
