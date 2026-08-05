@@ -8,5 +8,6 @@ from domain.frontend_settings_store import defaultspack_frontend_settings_path
 
 
 def frontend_settings_path(pack_root: Path | None = None) -> Path:
-    root = Path(pack_root) if pack_root is not None else Path(__file__).resolve().parent.parent
-    return defaultspack_frontend_settings_path(root)
+    return defaultspack_frontend_settings_path(
+        Path(pack_root) if pack_root is not None else None
+    )

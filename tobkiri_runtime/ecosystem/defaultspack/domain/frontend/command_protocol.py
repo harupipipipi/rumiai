@@ -150,9 +150,10 @@ class CommandProtocolRegistry:
         offline_queue: OfflineOperationQueue | None = None,
     ) -> None:
         self.pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self._settings_owner = pack_root if pack_root is not None else None
         self.legacy = SlashCommandRegistry(self.pack_root)
         self.operations = CommandOperationRegistry(self.legacy, self.pack_root)
-        settings_path = defaultspack_frontend_settings_path(self.pack_root)
+        settings_path = defaultspack_frontend_settings_path(self._settings_owner)
         self._event_store = event_store
         self._offline_queue = offline_queue
         self._event_store_path = settings_path.with_name(
@@ -1472,7 +1473,7 @@ class CommandProtocolRegistry:
 
     def _registered_settings_commands(self) -> list[dict[str, Any]]:
         settings = FrontendSettingsStore(
-            defaultspack_frontend_settings_path(self.pack_root)
+            defaultspack_frontend_settings_path(self._settings_owner)
         ).read()
         commands_section = settings.get("commands") if isinstance(settings.get("commands"), dict) else {}
         records = commands_section.get("registered_slash_commands") if isinstance(commands_section, dict) else []

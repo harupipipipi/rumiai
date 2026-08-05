@@ -10,8 +10,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -1764,25 +1762,20 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["models"]["google_api_key"], "")
         self.assertTrue(values["models"]["google_api_key_configured"])
 
-    def test_fallback_http_routes_inject_method_for_block_handlers(self):
+    def test_fallback_http_routes_reject_unallowlisted_legacy_block_handlers(self):
         from transport.registry import HttpRouteSpec, build_http_routes_from_specs
 
-        class FakeServer:
-            payload = None
-
-            def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
-                self.payload = request_data
-                return {"block_module": block_module, "path_params": path_params, "inject": inject}
-
-        server = FakeServer()
-        routes = build_http_routes_from_specs(
-            server,
-            [HttpRouteSpec("POST", "/api/ai/provider-key", block_module="blocks.ai.provider_key")],
-        )
-        result = routes[0][2]({"provider_id": "openrouter"}, {})
-
-        self.assertEqual(result["block_module"], "blocks.ai.provider_key")
-        self.assertEqual(server.payload["_method"], "POST")
+        with self.assertRaisesRegex(ValueError, "not allowlisted"):
+            build_http_routes_from_specs(
+                object(),
+                [
+                    HttpRouteSpec(
+                        "POST",
+                        "/api/ai/provider-key",
+                        block_module="blocks.ai.provider_key",
+                    )
+                ],
+            )
 
     def test_fallback_http_routes_include_tools_list(self):
         from transport.registry import build_fallback_http_routes
@@ -2038,64 +2031,44 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 
-    def test_ui_routes_registered_for_kernel_and_fallback(self):
-        from blocks.ui.setup import run as setup_ui_routes
-        from transport.registry import build_fallback_http_routes
+    def test_ui_routes_use_v4_qualified_operations_from_captured_host(self):
+        from urllib.parse import quote
 
-        class FakeInterfaceRegistry:
-            def __init__(self):
-                self.routes = []
+        from core_runtime.frontend_contract_routes import resolve_contract_route
 
-            def register(self, key, value, meta=None):
-                if key == "io.http.route":
-                    self.routes.append(value)
+        _assert_v4_ui_boundary()
 
-        registry = FakeInterfaceRegistry()
-        result = setup_ui_routes({"interface_registry": registry})
-        registered_patterns = {route["pattern"] for route in registry.routes}
+        class CapturedHost:
+            _api_route_exact = {
+                ("GET", "/api/ui/catalog"): {},
+                ("GET", "/api/ui/settings"): {},
+                ("PUT", "/api/ui/settings"): {},
+                ("GET", "/api/ui/commands"): {},
+                ("POST", "/api/ui/commands/execute"): {},
+                ("POST", "/api/ui/client-events"): {},
+                ("GET", "/api/ui/conversations/{id}/preview"): {},
+            }
+            _api_route_patterns = ()
 
-        class FakeServer:
-            def __getattr__(self, name):
-                if str(name).startswith("_handle_authority_"):
-                    return lambda *_args, **_kwargs: {"status": "ok"}
-                raise AttributeError(name)
-
-            def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
-                return {"module_name": module_name}
-
-            def _handle_health(self, request_data, path_params):
-                return {}
-
-            def _handle_context_info(self, request_data, path_params):
-                return {}
-
-            def _handle_desktop_system_info(self, request_data, path_params):
-                return {}
-
-            def _handle_chat_redirect(self, request_data, path_params):
-                return {}
-
-            def _handle_static(self, request_data, path_params):
-                return {}
-
-            def _handle_static_file(self, request_data, path_params):
-                return {}
-
-        fallback_patterns = {
-            compiled.pattern for _, compiled, _, _, _ in build_fallback_http_routes(FakeServer())
-        }
-
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("/api/ui/catalog", registered_patterns)
-        self.assertIn("/api/ui/settings", registered_patterns)
-        self.assertIn("/api/ui/commands", registered_patterns)
-        self.assertIn("/api/ui/commands/execute", registered_patterns)
-        self.assertIn("/api/ui/client-events", registered_patterns)
-        self.assertIn("/api/ui/conversations/{id}/preview", registered_patterns)
-        self.assertTrue(any("api/ui/catalog" in pattern for pattern in fallback_patterns))
-        self.assertTrue(any("api/ui/commands" in pattern for pattern in fallback_patterns))
-        self.assertTrue(any("api/ui/client-events" in pattern for pattern in fallback_patterns))
-        self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
+        route_operations = (
+            ("GET", "/api/ui/catalog"),
+            ("GET", "/api/ui/settings"),
+            ("PUT", "/api/ui/settings"),
+            ("GET", "/api/ui/commands"),
+            ("POST", "/api/ui/commands/execute"),
+            ("POST", "/api/ui/client-events"),
+            ("GET", "/api/ui/conversations/{id}/preview"),
+        )
+        for method, route in route_operations:
+            qualified_operation = (
+                "/api/contracts/defaultspack/"
+                + quote(f"{method} {route}", safe="")
+            )
+            resolved = resolve_contract_route(
+                CapturedHost(), method, qualified_operation
+            )
+            self.assertEqual(resolved.method, method)
+            self.assertEqual(resolved.path, route)
 
     def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
         from domain.frontend.command_registry import SlashCommandRegistry

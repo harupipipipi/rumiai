@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import re
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -343,7 +342,7 @@ class AIClient:
     def _settings_path(self):
         from domain.frontend_settings_store import defaultspack_frontend_settings_path
 
-        return defaultspack_frontend_settings_path(Path(__file__).resolve().parents[2])
+        return defaultspack_frontend_settings_path(None)
 
     def _api_routes(self):
         data = self._settings_data()

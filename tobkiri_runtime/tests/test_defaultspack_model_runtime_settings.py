@@ -94,15 +94,22 @@ def test_model_runtime_settings_cache_reuses_resolution_and_invalidates_on_updat
     assert calls == 2
 
 
-def test_model_runtime_settings_cache_invalidates_on_provider_environment_change(
+def test_model_runtime_settings_cache_invalidates_on_credential_store_change(
     tmp_path, monkeypatch
 ):
+    from domain.ai_client.api_key_store import set_provider_api_key
+
     service = ModelRuntimeSettingsService(tmp_path)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     assert service.get_settings()["google_api_key_configured"] is False
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-only-key")
+    result = set_provider_api_key(
+        "google",
+        "test-only-key",
+        pack_root=tmp_path,
+    )
+    assert result["success"] is True
 
     refreshed = ModelRuntimeSettingsService(tmp_path).get_settings()
 

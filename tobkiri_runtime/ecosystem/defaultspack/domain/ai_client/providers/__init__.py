@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -13,6 +12,7 @@ from ..api_key_store import (
     load_provider_api_keys_into_env,
     provider_has_api_key,
     provider_named_api_keys,
+    provider_secret_keys,
     read_provider_api_key,
 )
 from ..provider_program import (
@@ -2010,7 +2010,11 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
     # must not implicitly enable the global account inventory or another
     # region, whose endpoint and trust record are independently selected.
     if "MIMO_API_KEY" in api_envs and provider_id != "xiaomi-token-plan-sgp":
-        return False
+        # A regional provider may advertise the shared legacy name for
+        # compatibility, but only its own credential key may enable it.
+        direct_keys = set(provider_secret_keys(provider_id)) - {"MIMO_API_KEY"}
+        if not direct_keys:
+            return False
     if provider_has_oauth_connection(provider_id):
         return True
     if provider_has_api_key(provider_id):

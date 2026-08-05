@@ -67,7 +67,8 @@ class FrontendRegistry:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
-        self._settings_path = defaultspack_frontend_settings_path(self._pack_root)
+        settings_owner = pack_root if pack_root is not None else None
+        self._settings_path = defaultspack_frontend_settings_path(settings_owner)
         self._settings_store = FrontendSettingsStore(self._settings_path)
 
     def build_catalog(

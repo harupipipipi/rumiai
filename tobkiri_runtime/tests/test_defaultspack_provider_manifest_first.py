@@ -62,18 +62,29 @@ def _write_openai_compatible_extension(root: Path) -> Path:
     return root
 
 
-def test_openai_compatible_provider_can_be_added_by_manifest_without_a_static_model_snapshot(monkeypatch, tmp_path):
+def test_openai_compatible_provider_can_be_added_by_manifest_without_a_static_model_snapshot(
+    monkeypatch,
+    tmp_path,
+    configured_cloud_provider,
+):
     extension_root = _write_openai_compatible_extension(tmp_path / "extensions")
     monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extension_root))
-    monkeypatch.setenv("ACME_API_KEY", "test-key")
 
     from domain.extensions.runtime import get_extension_registry
+    from domain.ai_client.api_key_store import set_provider_api_key
     from domain.ai_client.providers import (
         detect_available_providers,
         get_all_known_models,
         get_provider_catalog_map,
     )
 
+    result = set_provider_api_key(
+        "acme",
+        "test-key",
+        api_id="default",
+        name="Default",
+    )
+    assert result["success"] is True
     get_extension_registry(force_reload=True)
     catalog = get_provider_catalog_map()
     models = {item["id"]: item for item in get_all_known_models("acme")}
@@ -82,7 +93,7 @@ def test_openai_compatible_provider_can_be_added_by_manifest_without_a_static_mo
     assert catalog["acme"]["metadata"]["catalog_source"] == "extension_manifest"
     assert catalog["acme"]["metadata"]["adapter"] == "openai_compatible"
     assert catalog["acme"]["availability"]["supports_invoke"] is True
-    assert catalog["acme"]["availability"]["configuration_source"] == "ACME_API_KEY"
+    assert catalog["acme"]["availability"]["configuration_source"] == "defaultspack_secret"
     # The extension can declare its protocol, but account-visible models are
     # loaded from the endpoint at runtime rather than from models/*.json.
     assert models == {}

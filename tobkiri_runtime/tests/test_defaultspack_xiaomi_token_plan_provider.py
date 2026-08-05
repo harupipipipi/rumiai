@@ -160,20 +160,14 @@ def test_xiaomi_token_plan_translates_thinking_level_to_xiaomi_thinking_payload(
     assert disabled["extra_body"]["thinking"]["type"] == "disabled"
 
 
-def test_xiaomi_token_plan_generic_key_registers_sgp_only(monkeypatch):
+def test_xiaomi_token_plan_credential_registers_sgp_only(
+    monkeypatch,
+    configured_cloud_provider,
+):
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers import detect_available_providers
 
-    for env_name in (
-        "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
-        "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
-        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
-        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
-        "MIMO_API_KEY",
-    ):
-        monkeypatch.delenv(env_name, raising=False)
-    monkeypatch.setenv("MIMO_API_KEY", "test-token")
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS", "1")
+    configured_cloud_provider("xiaomi-token-plan-sgp", "test-token")
     monkeypatch.setattr(AIClient, "_instance", None)
 
     token_plan_providers = {

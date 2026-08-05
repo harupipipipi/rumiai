@@ -102,7 +102,8 @@ class ModelRuntimeSettingsService:
 
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
-        self._settings_path = defaultspack_frontend_settings_path(self._pack_root)
+        settings_owner = pack_root if pack_root is not None else None
+        self._settings_path = defaultspack_frontend_settings_path(settings_owner)
         self._settings_store = FrontendSettingsStore(self._settings_path)
 
     def get_settings(self) -> dict[str, Any]:

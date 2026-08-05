@@ -34,7 +34,7 @@ class FrontendSettingsIdempotencyConflict(RuntimeError):
     """Raised when an idempotency key is reused for a different mutation."""
 
 
-def defaultspack_frontend_settings_path(pack_root: Path) -> Path:
+def defaultspack_frontend_settings_path(pack_root: Path | None = None) -> Path:
     """Return the durable settings path for a Defaultspack installation.
 
     Managed desktop packs are unpacked into a replaceable application bundle.
@@ -44,6 +44,9 @@ def defaultspack_frontend_settings_path(pack_root: Path) -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
     if override:
         return Path(override).expanduser()
+    if pack_root is not None:
+        return Path(pack_root).expanduser() / "user_data" / "shared" / "frontend_settings.json"
+
     user_data = os.environ.get("RUMI_USER_DATA", "").strip()
     if user_data:
         return (
@@ -52,7 +55,12 @@ def defaultspack_frontend_settings_path(pack_root: Path) -> Path:
             / "shared"
             / "frontend_settings.json"
         )
-    return pack_root / "user_data" / "shared" / "frontend_settings.json"
+    return (
+        Path(__file__).resolve().parents[1]
+        / "user_data"
+        / "shared"
+        / "frontend_settings.json"
+    )
 
 
 class FrontendSettingsCorruptError(ValueError):

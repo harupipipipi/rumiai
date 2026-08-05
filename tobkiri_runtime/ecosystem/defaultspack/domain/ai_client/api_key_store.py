@@ -436,12 +436,16 @@ def _refresh_provider_env(provider_id: str, *, pack_root: Path | None = None) ->
 
 
 def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> bool:
+    provider_id = str(provider_id or "").strip()
     keys = provider_secret_keys(provider_id)
+    if provider_id != "xiaomi-token-plan-sgp":
+        # The unqualified MiMo key belongs only to the explicitly selected
+        # SGP token-plan connection; it must not enable another region.
+        keys = [key for key in keys if key != "MIMO_API_KEY"]
     for key in keys:
         secret_path = _secrets_dir(pack_root) / f"{key}.json"
         if secret_path.exists() and _get_store(pack_root).has_secret(key):
             return True
-    provider_id = str(provider_id or "").strip()
     for item in provider_named_api_keys(provider_id, pack_root=pack_root):
         if item.get("configured"):
             return True
