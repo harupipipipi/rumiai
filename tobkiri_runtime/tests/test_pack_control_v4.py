@@ -24,35 +24,17 @@ import core_runtime.pack_control_v4 as pack_control
 from tobkiri_host.runtime import install_dispatch_session
 
 
-TARGET_PACK = "rumi_file_inspect_pack"
+TARGET_PACK = "rumi_git_read_pack"
 
 
 @pytest.fixture
 def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Capture one isolated default Profile and exact approval store."""
+    """Capture one isolated canonical Defaults Profile and approval store."""
     user_data = tmp_path / "user-data"
-    state_path = user_data / "settings" / "startup_profiles.json"
-    state_path.parent.mkdir(parents=True)
-    state_path.write_text(
-        json.dumps(
-            {
-                "active_profile_id": "profile-a",
-                "profiles": [
-                    {
-                        "version": 3,
-                        "profile_id": "profile-a",
-                        "workspace_id": "workspace-a",
-                        "base_pack": "defaultspack",
-                        "packs": ["defaultspack"],
-                        "permissions": {"authorized_pack_ids": ["defaultspack"]},
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
     session = capture_pack_control_session()
+    state_path = user_data / "profiles" / "defaults" / "v4" / "active.json"
     yield session, state_path, user_data
 
 
@@ -96,13 +78,14 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
         {"pack_id": TARGET_PACK, "candidate_id": candidate["candidate_id"]},
     )
     assert approved["approved"] is True
-    assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"]
+    with pytest.raises(PackControlDenied, match="immutable"):
+        _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})
 
     restarted = capture_pack_control_session()
     status = _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})
     assert status["installed"] is True
     assert status["approved"] is True
-    assert status["enabled"] is True
+    assert status["enabled"] is False
 
 
 def test_approval_is_session_bound_one_shot_and_not_implicit(captured_session) -> None:
@@ -148,7 +131,7 @@ def test_cross_workspace_stale_profile_and_tampered_install_fail_closed(
             {"workspace_id": "workspace-b"},
         )
     _invoke(session, "pack.install", {"pack_id": TARGET_PACK})
-    control_path = user_data / "pack_control" / "profile-a.v4.json"
+    control_path = user_data / "pack_control" / "defaults.v4.json"
     control = json.loads(control_path.read_text(encoding="utf-8"))
     artifact_digest = control["installed"][TARGET_PACK]["artifact_digest"]
     control["installed"][TARGET_PACK]["artifact_digest"] = "sha256:" + "0" * 64
@@ -159,12 +142,12 @@ def test_cross_workspace_stale_profile_and_tampered_install_fail_closed(
     control_path.write_text(json.dumps(control), encoding="utf-8")
 
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["profiles"][0]["name"] = "externally changed"
+    state["envelope_digest"] = "sha256:" + "0" * 64
     state_path.write_text(json.dumps(state), encoding="utf-8")
-    with pytest.raises(PackControlDenied, match="stale"):
+    with pytest.raises(PackControlDenied, match="missing|invalid"):
         _invoke(session, "catalog.read")
-    reloaded = _invoke(session, "profile.reload")
-    assert reloaded["count"] == 141
+    with pytest.raises(PackControlDenied, match="missing|invalid"):
+        _invoke(session, "profile.reload")
 
 
 def test_tampered_approval_and_symlinked_pack_fail_closed(
@@ -177,7 +160,7 @@ def test_tampered_approval_and_symlinked_pack_fail_closed(
         user_data
         / "pack_control"
         / "approvals"
-        / "profile-a"
+        / "defaults"
         / f"{TARGET_PACK}.json"
     )
     approval = json.loads(approval_path.read_text(encoding="utf-8"))
@@ -205,14 +188,14 @@ def test_missing_profile_and_symlinked_state_fail_closed(
 ) -> None:
     """No session is reconstructed from missing or redirected Profile state."""
     user_data = tmp_path / "missing"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
-    with pytest.raises(PackControlDenied, match="missing"):
-        capture_pack_control_session()
-    settings = user_data / "settings"
-    settings.mkdir(parents=True)
+    capture_pack_control_session()
+    pointer = user_data / "profiles" / "defaults" / "v4" / "active.json"
+    pointer.unlink()
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")
-    (settings / "startup_profiles.json").symlink_to(outside)
+    pointer.symlink_to(outside)
     with pytest.raises(PackControlDenied, match="missing"):
         capture_pack_control_session()
 
@@ -222,27 +205,11 @@ def test_profile_identity_traversal_fails_before_control_state_access(
 ) -> None:
     """Profile persistence cannot escape the Authority-owned control root."""
     user_data = tmp_path / "user-data"
-    state_path = user_data / "settings" / "startup_profiles.json"
-    state_path.parent.mkdir(parents=True)
-    state_path.write_text(
-        json.dumps(
-            {
-                "active_profile_id": "../escaped",
-                "profiles": [
-                    {
-                        "profile_id": "../escaped",
-                        "workspace_id": "workspace-a",
-                        "base_pack": "defaultspack",
-                        "packs": ["defaultspack"],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(pack_control, "USER_DATA_DIR", user_data)
-    with pytest.raises(PackControlDenied, match="Profile ID is invalid"):
-        capture_pack_control_session()
+    session = capture_pack_control_session()
+    with pytest.raises(PackControlDenied, match="profile_id"):
+        _invoke(session, "catalog.read", {"profile_id": "../escaped"})
 
 
 def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
@@ -344,14 +311,16 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
                 "candidate_id": candidate["candidate_id"],
             },
         )
-        dispatch("pack.enable", {"pack_id": TARGET_PACK})
+        with pytest.raises(urllib.error.HTTPError) as conflict:
+            dispatch("pack.enable", {"pack_id": TARGET_PACK})
+        assert conflict.value.code == 409
         assert dispatch("runtime.restart")["restart_requested"] is True
         install_dispatch_session(get_container(), capture_pack_control_session())
         restarted_status = dispatch(
             "pack.status",
             {"pack_id": TARGET_PACK},
         )
-        assert restarted_status["enabled"] is True
+        assert restarted_status["enabled"] is False
         assert restarted_status["approved"] is True
         assert all(path != "/api/panel/packs" for path in paths)
         assert not any(path.startswith("/api/panel/packs/") for path in paths)

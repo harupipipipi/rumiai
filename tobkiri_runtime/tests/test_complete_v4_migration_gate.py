@@ -1,6 +1,6 @@
 """Non-negotiable, current-tree gates for the complete Tobkiri v4 migration.
 
-The inventory is deliberately finite: only the three canonical artifacts in
+The inventory is deliberately finite: only the four canonical artifacts in
 each direct ``ecosystem`` Pack directory are counted.  Source checks use
 Python ASTs or comment/string-stripped Rust call tokens so schemas, type
 declarations, tests, Playwright, development helpers, and display text do not
@@ -33,6 +33,7 @@ PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
     "pack.v4.json": "pack",
     "contracts.v4.json": "pack_contract_catalog",
+    "executables.v4.json": "executable_catalog",
 }
 SOURCE_SUFFIXES = {".py", ".rs"}
 IGNORED_PARTS = {
@@ -57,6 +58,9 @@ IGNORED_PARTS = {
 # still-reachable legacy authority cannot disappear merely because another
 # module has a v4-looking name.
 PYTHON_ENTRY_ROOTS = (
+    RUNTIME / "app.py",
+    RUNTIME / "core_runtime" / "bootstrap" / "runtime.py",
+    RUNTIME / "core_runtime" / "bootstrap" / "profile_capture.py",
     RUNTIME / "tobkiri" / "__main__.py",
     RUNTIME / "tobkiri" / "cli_shell.py",
     RUNTIME / "tobkiri_host" / "runtime.py",
@@ -221,7 +225,7 @@ def _v4_profile_artifacts() -> list[Path]:
 
 
 def _v4_artifact_findings() -> list[dict[str, Any]]:
-    """Validate the exact 141 x 3 direct artifact set and cross-file pins."""
+    """Validate and compile the exact 141 x 4 direct artifact set."""
     findings: list[dict[str, Any]] = []
     for pack_dir in _production_pack_dirs():
         values: dict[str, Mapping[str, Any]] = {}
@@ -279,6 +283,19 @@ def _v4_artifact_findings() -> list[dict[str, Any]]:
         integrity = manifest.get("integrity", {})
         if integrity.get("contract_catalog_digest") != _sha256(pack_dir / "contracts.v4.json"):
             findings.append(_finding(pack_dir / "pack.v4.json", 1, "contract_catalog_digest_mismatch"))
+        try:
+            from tobkiri_host.artifact_compiler import compile_pack_root
+
+            compile_pack_root(pack_dir)
+        except Exception as exc:
+            findings.append(
+                _finding(
+                    pack_dir / "executables.v4.json",
+                    1,
+                    "production_compiler_rejected_pack",
+                    error=f"{type(exc).__name__}: {exc}"[:240],
+                )
+            )
     return findings
 
 
@@ -1450,10 +1467,10 @@ def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
 
 
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
-    """The exact direct artifact set is 141 Packs x 3 files."""
+    """The exact direct artifact set is 141 Packs x 4 compiler inputs."""
     assert len(_production_pack_dirs()) == EXPECTED_PRODUCTION_PACK_COUNT
     assert len(_v4_pack_artifacts()) == EXPECTED_PRODUCTION_PACK_COUNT
-    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 423
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 564
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
 
 
@@ -1591,4 +1608,4 @@ def test_current_sha_green_evidence_reports_no_findings() -> None:
     assert report["gate"]["status"] == "GREEN"
     assert report["gate"]["clean"] is True
     assert report["pack_inventory"]["production_pack_directories"] == 141
-    assert report["pack_inventory"]["v4_artifact_files"] == 423
+    assert report["pack_inventory"]["v4_artifact_files"] == 564

@@ -24,13 +24,14 @@ if str(_CORE_SETUP_DIR) not in sys.path:
 class TestCheckSetupStatus:
     """AppLifecycleManager.check_setup_status() のテスト"""
 
-    def test_needs_setup_when_no_profile(self, tmp_path):
-        """profile.json が無い -> needs_setup: True"""
+    def test_clean_home_runs_canonical_profile_transaction(self, tmp_path):
+        """A clean home is bootstrapped without a legacy setup Profile."""
         from core_runtime.app_lifecycle_manager import AppLifecycleManager
         alm = AppLifecycleManager(base_dir=tmp_path)
         result = alm.check_setup_status()
-        assert result["needs_setup"] is True
-        assert "reason" in result
+        assert result["needs_setup"] is False
+        assert result["setup_state"] == "complete"
+        assert result["profile_id"] == "defaults"
 
     def test_not_needs_setup_when_profile_valid(self, tmp_path):
         """profile.json が有効 -> needs_setup: False"""
@@ -87,9 +88,10 @@ class TestCompleteSetup:
         assert result["success"] is True
         assert result["errors"] == []
 
-        # profile.json が作成されたことを確認
-        profile_path = tmp_path / "user_data" / "settings" / "profile.json"
-        assert profile_path.exists()
+        # Canonical v4 activation is the only launch state.
+        pointer = tmp_path / "user_data" / "profiles" / "defaults" / "v4" / "active.json"
+        assert pointer.exists()
+        assert not (tmp_path / "user_data" / "settings" / "startup_profiles.json").exists()
 
         # check_setup_status で検証
         status = alm.check_setup_status()
