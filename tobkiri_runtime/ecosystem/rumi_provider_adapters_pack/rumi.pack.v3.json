@@ -131,7 +131,7 @@
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:aa26628078ae9c67323a8dc60486c906c49ed09a4569ccf807f511181fc8da95",
+      "artifact_hash": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471",
       "contract_id": "rumi.service.ai.provider.generate.v1",
       "id": "provider-generate",
       "loader": "python",
@@ -139,7 +139,7 @@
       "symbol": "create_generate_operation"
     },
     {
-      "artifact_hash": "sha256:aa26628078ae9c67323a8dc60486c906c49ed09a4569ccf807f511181fc8da95",
+      "artifact_hash": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471",
       "contract_id": "rumi.service.ai.provider.stream.v1",
       "id": "provider-stream",
       "loader": "python",
@@ -147,7 +147,7 @@
       "symbol": "create_stream_operation"
     },
     {
-      "artifact_hash": "sha256:aa26628078ae9c67323a8dc60486c906c49ed09a4569ccf807f511181fc8da95",
+      "artifact_hash": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471",
       "contract_id": "rumi.service.ai.provider.embedding.v1",
       "id": "provider-embedding",
       "loader": "python",
@@ -155,7 +155,7 @@
       "symbol": "create_embedding_operation"
     },
     {
-      "artifact_hash": "sha256:aa26628078ae9c67323a8dc60486c906c49ed09a4569ccf807f511181fc8da95",
+      "artifact_hash": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471",
       "contract_id": "rumi.service.ai.provider.image.v1",
       "id": "provider-image",
       "loader": "python",
@@ -188,9 +188,9 @@
           "authoritative_owner": true,
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:4d4e8ab2ab0c92d5c28e24e1197bf27812b0dc9c7d178df9f1eb9257197021a1",
+            "artifact_digest": "sha256:28d34020623f81eb72bf388879c3420e2565f93a70776f502fc60485b04b2045",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:6636cac3ed19002df7d4253303ae34e34b98441190f40fdd76c59bbe7da67d96"
+            "source_identity": "sha256:427c69098ad74722ad920c2b910086fd4c2599d72a877f14bc581db58c17a274"
           },
           "integrity": {
             "artifact_manifest": "artifact-manifest.json"
@@ -209,7 +209,7 @@
         "pack_identity": "rumi:ecosystem/rumi_provider_adapters_pack",
         "provenance": {
           "build_identity": "rumi_provider_adapters_pack:1.0.0",
-          "content_hash": "sha256:78e417b296ad11cbc89bdabcd32378a58c1282336c0e9b87ae588c3d33d83b2a",
+          "content_hash": "sha256:34cfa39e5276d53c88c74c7cc826a90bbcb224202ef803df644145c4e512affe",
           "signature": null,
           "trust_class": "local"
         },
@@ -284,7 +284,7 @@
   ],
   "provenance": {
     "build_identity": "rumi_provider_adapters_pack:1.0.0",
-    "content_hash": "sha256:78e417b296ad11cbc89bdabcd32378a58c1282336c0e9b87ae588c3d33d83b2a",
+    "content_hash": "sha256:34cfa39e5276d53c88c74c7cc826a90bbcb224202ef803df644145c4e512affe",
     "signature": null,
     "trust_class": "local"
   },

@@ -258,6 +258,7 @@ def _normalize_artifact_index(
             if token not in expected:
                 raise SystemExit(f"artifact hash field is not writable: {index_path}")
             expected = expected.replace(token, replacement_token, 1)
+            item["sha256"] = replacement
     if referenced:
         expected = json.dumps(
             payload, ensure_ascii=False, indent=2, sort_keys=True

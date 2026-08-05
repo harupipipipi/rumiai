@@ -242,6 +242,18 @@ def _source_evidence(pack_root: Path, paths: Iterable[Path]) -> list[dict[str, s
     ]
 
 
+def _entrypoint_implementation_digest(entrypoint: Mapping[str, Any]) -> str | None:
+    """Hash executable entrypoint bytes instead of trusting a v3 projection."""
+    module = str(entrypoint.get("module") or "").strip()
+    if not module:
+        declared = str(entrypoint.get("artifact_hash") or "").strip()
+        return declared or None
+    candidate = ROOT.joinpath(*module.split(".")).with_suffix(".py")
+    if not candidate.is_file():
+        raise PackV4MigrationError(f"v3 entrypoint module is missing: {candidate}")
+    return _file_digest(candidate)
+
+
 def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
     legacy_path = pack_root / "ecosystem.json"
     v3_path = pack_root / "rumi.pack.v3.json"
@@ -284,7 +296,7 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
             {
                 "id": _canonical_id(f"{pack_root.name}.{item['id']}"),
                 "entrypoint_id": str(item["id"]),
-                "implementation_digest": item.get("artifact_hash"),
+                "implementation_digest": _entrypoint_implementation_digest(item),
             }
             for item in operation_sources
         ]

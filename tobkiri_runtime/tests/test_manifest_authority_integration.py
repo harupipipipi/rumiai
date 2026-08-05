@@ -183,6 +183,50 @@ def test_v3_artifact_sidecar_generator_refreshes_hash_without_projection_rebind(
     assert artifact_index.read_bytes() == first
 
 
+def test_referenced_artifact_sidecar_persists_refreshed_hash(
+    tmp_path: Path,
+) -> None:
+    """Referenced indexes must write the same digest used for provenance."""
+    pack_root = tmp_path / "referenced_pack"
+    runtime = pack_root / "runtime"
+    runtime.mkdir(parents=True)
+    source = runtime / "adapter.py"
+    source.write_text("VALUE = 'current'\n", encoding="utf-8")
+    artifact_index = pack_root / "artifact-manifest.json"
+    artifact_index.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "path": "runtime/adapter.py",
+                        "sha256": "sha256:" + "0" * 64,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ecosystem = {
+        "metadata": {
+            "integrity": {"artifact_manifest": "artifact-manifest.json"}
+        }
+    }
+
+    index_hash = _normalize_artifact_index(
+        pack_root,
+        ecosystem,
+        check=False,
+    )
+    payload = json.loads(artifact_index.read_text(encoding="utf-8"))
+    expected = "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
+
+    assert payload["artifacts"][0]["sha256"] == expected
+    assert index_hash == "sha256:" + hashlib.sha256(
+        artifact_index.read_bytes()
+    ).hexdigest()
+    assert _normalize_artifact_index(pack_root, ecosystem, check=True) == index_hash
+
+
 def test_removed_registry_rejects_runtime_discovery(tmp_path: Path) -> None:
     """Pack v4 runtime must refuse the removed filesystem registry path."""
     with pytest.raises(LegacyRegistryUnavailable, match="removed"):

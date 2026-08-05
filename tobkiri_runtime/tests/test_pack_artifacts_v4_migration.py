@@ -12,6 +12,8 @@ from scripts.migrate_pack_artifacts_v4 import (
     CATALOG,
     EXCLUDED_PACKS,
     PackV4MigrationError,
+    _file_digest,
+    _import_record,
     _migration_source_view,
     _render_record,
     _validate_catalog_payload,
@@ -92,6 +94,41 @@ def test_migration_source_view_excludes_generated_projection_envelopes(
 
     assert _migration_source_view(ecosystem) == legacy_view
     assert _migration_source_view(v3) == v3_view
+
+
+def test_v3_import_hashes_entrypoint_bytes_not_stale_projection_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runtime edit must update v4 authority before v3 projection repair."""
+    source_root = CATALOG.parents[1] / "ecosystem" / "rumi_provider_adapters_pack"
+    pack_root = tmp_path / source_root.name
+    pack_root.mkdir()
+    for name in ("ecosystem.json", "rumi.pack.v3.json"):
+        payload = json.loads((source_root / name).read_text(encoding="utf-8"))
+        if name == "rumi.pack.v3.json":
+            for entrypoint in payload["entrypoints"]:
+                entrypoint["artifact_hash"] = "sha256:" + "0" * 64
+        (pack_root / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "scripts.migrate_pack_artifacts_v4._runtime_artifacts",
+        lambda _pack_root: [],
+    )
+    monkeypatch.setattr(
+        "scripts.migrate_pack_artifacts_v4._source_evidence",
+        lambda _pack_root, _paths: [],
+    )
+
+    record = _import_record(pack_root, "v3-authoritative")
+    expected = _file_digest(source_root / "runtime" / "adapter.py")
+    imported = {
+        operation["implementation_digest"]
+        for contract in record["provided_contracts"]
+        for operation in contract["operations"]
+    }
+
+    assert imported == {expected}
 
 
 def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
