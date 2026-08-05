@@ -1,0 +1,76 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:a50732700ee6a0d8ad267f5a434e3dba3a979994fc18bade70c20de127409541",
+  "pack_id": "rumi_ide_bridge_service_pack",
+  "source_identity": "sha256:fa06e619a6556cda462c511fc699663a632e0978f31ca7f27d032b80c26b8acb",
+  "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-pack-v4",
+      "execution_domain_profile": "sandbox.default.v1",
+      "execution_kind": "pack_vm",
+      "function_id": "rumi_ide_bridge_service_pack.ide-bridge.control",
+      "implementation_digest": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
+      "implementation_path": "runtime/sessions.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.action.ide.session.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "read",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_ide_bridge_service_pack.ide-control",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:bc8cfc837b579283a8ef34b7d5afc3622b7d237fc2f7fd7db55e8e70955ee66e",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "rumi_ide_bridge_service_pack.ide-bridge.control.python"
+    },
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-pack-v4",
+      "execution_domain_profile": "sandbox.default.v1",
+      "execution_kind": "pack_vm",
+      "function_id": "rumi_ide_bridge_service_pack.ide-bridge.observe",
+      "implementation_digest": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
+      "implementation_path": "runtime/sessions.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.resource.ide.session.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "read",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_ide_bridge_service_pack.ide-observe",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:2ccd5548eb1feeafb2d612f83280f65e5dce7c7848aadb082e847e471a3904b2",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "rumi_ide_bridge_service_pack.ide-bridge.observe.python"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:f3436200f7164a76e1daa5d5366e1ba202b76ae45cb56f80c178e3b4b4643578",
+  "pack_id": "rumi_context_runtime_pack",
+  "source_identity": "sha256:8a5c6aad5195cfbcd28b3cb7e975f2c0565f140dc2c505ec89789f5a0617dff7",
+  "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-host-v4",
+      "execution_domain_profile": "host.extension.default.v1",
+      "execution_kind": "host_extension",
+      "function_id": "rumi_context_runtime_pack.context-runtime.materialize",
+      "implementation_digest": "sha256:0f5cf7acdb2419c0f921b100506eee87acd21681a4f7ae88814a999a97deea33",
+      "implementation_path": "runtime/materializer.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.service.context.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_context_runtime_pack.context-materialize",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:e374f1e6b5cbad00d493833207731b40af2c2af7ea20d4004ef86dcd60172275",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "rumi_context_runtime_pack.context-runtime.materialize.python"
+    }
+  ]
+}

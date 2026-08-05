@@ -1,0 +1,7 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:a0d8f29da7567953455494d6c8e30bee2389ea8320a52f5771a8fef2ce0f675b",
+  "pack_id": "rumi_evidence_dossier_pack",
+  "source_identity": "sha256:ecf5f2acdf798f6deb7fa3aba1091c2160a596abb0b00495507281d9696da199",
+  "variants": []
+}

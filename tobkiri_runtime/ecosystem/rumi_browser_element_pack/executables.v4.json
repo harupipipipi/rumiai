@@ -1,0 +1,7 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:7e2bacef669390649edaaf270c9718b0f90336cb9e6c2dc6a0290212a6171856",
+  "pack_id": "rumi_browser_element_pack",
+  "source_identity": "sha256:558f0c5c1f47fdd2b14f9203d8d925b6c16f75c458fd0d2439872025e2641dac",
+  "variants": []
+}

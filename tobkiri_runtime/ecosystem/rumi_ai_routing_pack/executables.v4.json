@@ -1,0 +1,42 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:35cf8205fd1a3fc5117cc3420e14ed74d40fca398ae1e60152e6417c5cf8bb88",
+  "pack_id": "rumi_ai_routing_pack",
+  "source_identity": "sha256:edfb01f2473560a2dc85401a4711e470b14d44c894d1cc24953e66fed6f1bed1",
+  "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-host-v4",
+      "execution_domain_profile": "host.extension.default.v1",
+      "execution_kind": "host_extension",
+      "function_id": "rumi_ai_routing_pack.ai-routing.default",
+      "implementation_digest": "sha256:3cf865a705af10d35702981ec38e8f838320a31530096dedd570df2218d2b220",
+      "implementation_path": "runtime/router.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.service.ai.route.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_ai_routing_pack.ai-route",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:dd2ace27064ee3b156703c9544a50731f664c11c77b563c23be1c784ddc28bfe",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "rumi_ai_routing_pack.ai-routing.default.python"
+    }
+  ]
+}
