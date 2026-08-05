@@ -466,7 +466,7 @@ fn presentation_catalog_path(config: &AppConfig) -> PathBuf {
         .join("presentation_catalog.json")
 }
 
-fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
+pub(crate) fn load_catalog(config: &AppConfig) -> AnyResult<PresentationCatalog> {
     let path = presentation_catalog_path(config);
     let raw = fs::read_to_string(&path).with_context(|| {
         format!(
@@ -1412,7 +1412,7 @@ fn read_selection(
     }
 }
 
-fn catalog_revision(catalog: &PresentationCatalog) -> AnyResult<String> {
+pub(crate) fn catalog_revision(catalog: &PresentationCatalog) -> AnyResult<String> {
     let mut normalized = catalog.clone();
     normalized.generated_at = 0;
     for shell in &mut normalized.shell_providers {

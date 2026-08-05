@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
+use serde_json::json;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -52,6 +53,9 @@ pub(crate) struct DefaultspackDesktopMetadata {
     app_working_dir: PathBuf,
     env_vars: Vec<(String, String)>,
     port: u16,
+    profile_id: String,
+    profile_digest: String,
+    catalog_revision: String,
 }
 
 impl DefaultspackDesktopMetadata {
@@ -475,10 +479,6 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         }
         Err(e) => {
             error!("launch_defaultspack_desktop_impl: failed to read defaultspack metadata: {e:#}");
-            info!(
-                "launch_defaultspack_desktop_impl: ecosystem_json path={}",
-                config.defaultspack_ecosystem_json().display()
-            );
             return Err(e);
         }
     };
@@ -585,8 +585,48 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         }
     }
     manager.register_launcher_owned_listener(&metadata, listener.pid, listener.command)?;
+    if let Err(error) = write_guardian_ready_audit(config, &metadata) {
+        manager
+            .stop()
+            .context("failed to stop an unaudited Defaultspack guardian")?;
+        return Err(error);
+    }
 
     defaultspack_window_url_with_local_auth(metadata.port, &api_token)
+}
+
+fn write_guardian_ready_audit(
+    config: &AppConfig,
+    metadata: &DefaultspackDesktopMetadata,
+) -> AnyResult<()> {
+    crate::host_audit::write_audit_log(
+        &config.host_broker_audit_log_path(),
+        &crate::host_audit::HostAuditEntry {
+            audit_id: format!(
+                "defaultspack-guardian-ready-{}-{}",
+                crate::host_audit::now_epoch_seconds(),
+                std::process::id()
+            ),
+            ts: crate::host_audit::now_epoch_seconds(),
+            function_id: "launcher.defaultspack.guardian.prepare".to_string(),
+            profile_id: Some(metadata.profile_id.clone()),
+            pack_id: Some("defaultspack".to_string()),
+            conversation_id: None,
+            allowed: true,
+            result_ok: true,
+            approval_token_present: None,
+            approval_result: None,
+            args_summary: json!({
+                "authority": "pack-v4-profile-lock",
+                "catalog_revision": metadata.catalog_revision,
+                "profile_digest": metadata.profile_digest,
+                "health": "ready",
+                "local_auth": "verified",
+                "guardian": "registered",
+            }),
+        },
+    )
+    .context("failed to durably audit Defaultspack guardian readiness")
 }
 
 #[cfg(unix)]
@@ -695,18 +735,9 @@ fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
 fn read_defaultspack_desktop_metadata(
     config: &AppConfig,
 ) -> AnyResult<DefaultspackDesktopMetadata> {
-    let ecosystem_path = config.defaultspack_ecosystem_json();
-    if !ecosystem_path.exists() {
-        bail!(
-            "defaultspack ecosystem.json not found at {}",
-            ecosystem_path.display()
-        );
-    }
-    let pack_root = ecosystem_path
-        .parent()
-        .context("defaultspack ecosystem.json has no parent directory")?;
+    let authority = crate::defaultspack_authority::resolve(config)?;
     let command = "python defaultspack/desktop_app.py".to_string();
-    let app_working_dir = pack_root.to_path_buf();
+    let app_working_dir = authority.pack_root;
     let mut env_vars = vec![
         (
             "DEFAULTS_HTTP_PORT".into(),
@@ -740,6 +771,9 @@ fn read_defaultspack_desktop_metadata(
         app_working_dir,
         env_vars,
         port,
+        profile_id: authority.profile_id,
+        profile_digest: authority.profile_digest,
+        catalog_revision: authority.catalog_revision,
     })
 }
 
@@ -995,6 +1029,8 @@ fn viewer_host_broker_connection_env_value(config: &AppConfig) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
 
     fn test_config(root: &Path) -> AppConfig {
         let user_data_dir = root.join("app-data").join("user_data");
@@ -1159,6 +1195,9 @@ mod tests {
             app_working_dir: PathBuf::from("/tmp/rumi/defaultspack"),
             env_vars: vec![],
             port: DEFAULTSPACK_DEFAULT_PORT,
+            profile_id: "defaults".into(),
+            profile_digest: "sha256:test".into(),
+            catalog_revision: "sha256:test".into(),
         };
         let owned = PortListener {
             pid: 101,
@@ -1184,6 +1223,9 @@ mod tests {
             ),
             env_vars: vec![],
             port: DEFAULTSPACK_DEFAULT_PORT,
+            profile_id: "defaults".into(),
+            profile_digest: "sha256:test".into(),
+            catalog_revision: "sha256:test".into(),
         };
         let prior_bundle = PortListener {
             pid: 303,
@@ -1310,5 +1352,60 @@ mod tests {
             defaultspack_auth_probe_url(DEFAULTSPACK_DEFAULT_PORT),
             "http://127.0.0.1:8766/api/integrations/secrets"
         );
+    }
+
+    #[test]
+    fn guardian_readiness_requires_health_and_authenticated_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for expected in ["GET /api/health ", "GET /api/integrations/secrets "] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                let length = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..length]);
+                assert!(request.starts_with(expected));
+                if expected.contains("integrations/secrets") {
+                    assert!(request
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer local-token"));
+                }
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                    .unwrap();
+            }
+        });
+        let client = defaultspack_health_client().unwrap();
+
+        assert!(check_defaultspack_http_ready(&client, port, "local-token"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn guardian_ready_audit_is_durable_and_profile_bound() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-guardian-ready-audit-{}",
+            std::process::id()
+        ));
+        let config = test_config(&root);
+        let metadata = DefaultspackDesktopMetadata {
+            command: "python defaultspack/desktop_app.py".into(),
+            app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
+            env_vars: Vec::new(),
+            port: DEFAULTSPACK_DEFAULT_PORT,
+            profile_id: "defaults".into(),
+            profile_digest: format!("sha256:{}", "1".repeat(64)),
+            catalog_revision: format!("sha256:{}", "2".repeat(64)),
+        };
+
+        write_guardian_ready_audit(&config, &metadata).unwrap();
+
+        let audit = fs::read_to_string(config.host_broker_audit_log_path()).unwrap();
+        assert!(audit.contains("launcher.defaultspack.guardian.prepare"));
+        assert!(audit.contains("\"health\":\"ready\""));
+        assert!(audit.contains("\"local_auth\":\"verified\""));
+        assert!(audit.contains("\"guardian\":\"registered\""));
+        assert!(audit.contains("\"profile_id\":\"defaults\""));
+        fs::remove_dir_all(root).unwrap();
     }
 }

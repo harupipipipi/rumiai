@@ -5,6 +5,7 @@
 mod app_data_migration;
 mod config;
 mod debug_approval;
+mod defaultspack_authority;
 mod defaultspack_manager;
 mod desktop_system_info;
 mod health_check;
